@@ -1,0 +1,1007 @@
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useApp } from '../context/AppContext';
+import {
+  FileCode,
+  Send,
+  RotateCcw,
+  CheckCircle2,
+  AlertCircle,
+  Copy,
+  Check,
+  X,
+  Type,
+  Palette,
+  Stamp,
+  Sliders,
+  Smartphone,
+  Monitor,
+  Sparkles,
+  ShieldAlert,
+  Maximize2,
+  Minimize2,
+  ZoomIn,
+  ZoomOut,
+  ArrowUp,
+  ArrowDown,
+  Eye,
+  Code2,
+  Download,
+  Layers,
+  Sparkle,
+} from 'lucide-react';
+import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../utils/templateCompiler';
+
+export const AdvisoryTemplateView: React.FC = () => {
+  const {
+    advisoryTemplate,
+    templateCustomization,
+    updateTemplateCustomization,
+    sendTestEmail,
+    saveTemplate,
+  } = useApp();
+
+  const [testEmail, setTestEmail] = useState('');
+  const [showTestModal, setShowTestModal] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [saveToast, setSaveToast] = useState(false);
+  const [previewDevice, setPreviewDevice] = useState<'desktop' | 'mobile'>('desktop');
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+
+  // Enterprise Live Rendering & Scroll Management
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [iframeHeight, setIframeHeight] = useState<number>(880);
+  const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
+  const [zoomLevel, setZoomLevel] = useState<number>(100);
+  const [viewFormat, setViewFormat] = useState<'preview' | 'html'>('preview');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [copiedHtml, setCopiedHtml] = useState(false);
+
+  // Active customization tool tab
+  const [toolTab, setToolTab] = useState<'typography' | 'colors' | 'stamps' | 'tokens'>('colors');
+
+  // Dynamically sync iframe height to eliminate internal scrollbars and scroll trapping
+  const syncIframeHeight = useCallback(() => {
+    try {
+      const iframe = iframeRef.current;
+      if (!iframe) return;
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (doc) {
+        const h = Math.max(
+          doc.documentElement.scrollHeight,
+          doc.body.scrollHeight,
+          doc.documentElement.offsetHeight,
+          doc.body.offsetHeight
+        );
+        if (h > 200) {
+          setIframeHeight(h + 24);
+        }
+      }
+    } catch {
+      // fallback
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(syncIframeHeight, 100);
+    return () => clearTimeout(timer);
+  }, [templateCustomization, previewDevice, advisoryTemplate, syncIframeHeight]);
+
+  const scrollToIframeTop = () => {
+    try {
+      iframeRef.current?.contentWindow?.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch {}
+  };
+
+  const scrollToIframeBottom = () => {
+    try {
+      iframeRef.current?.contentWindow?.scrollTo({ top: 99999, behavior: 'smooth' });
+    } catch {}
+  };
+
+  const handleDownloadHtml = () => {
+    const blob = new Blob([getRenderedHtml()], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `security-advisory-template-${new Date().toISOString().split('T')[0]}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopyRawHtml = () => {
+    navigator.clipboard.writeText(getRenderedHtml());
+    setCopiedHtml(true);
+    setTimeout(() => setCopiedHtml(false), 2000);
+  };
+
+  // Substitute variables into the live template for rendering
+  const getRenderedHtml = () => {
+    return advisoryTemplate
+      .replace(/{{severity}}/g, 'CRITICAL')
+      .replace(/{{advisory_id}}/g, 'ADV-2026-0842')
+      .replace(/{{advisory_title}}/g, 'Microsoft Windows RDLicsvr Remote Code Execution (MadLicence)')
+      .replace(/{{dispatch_date}}/g, new Date().toUTCString())
+      .replace(/{{executive_summary}}/g, 'An unauthenticated remote code execution vulnerability exists in the Windows Remote Desktop Licensing Service. Attackers can gain SYSTEM privileges without credentials. Monitored product Windows Server 2022 is affected.')
+      .replace(/{{cve_ids}}/g, 'CVE-2024-38077 (CVSS 9.8)')
+      .replace(/{{affected_systems}}/g, 'DC-CORP-PDC01 (Active Directory Root Controller)')
+      .replace(/{{remediation_steps}}/g, '1. Stop-Service -Name TermServLicensing -Force\n2. Set-Service -Name TermServLicensing -StartupType Disabled\n3. Deploy Cumulative Update KB5040437')
+      .replace(/{{vendor_link}}/g, 'https://msrc.microsoft.com/update-guide/vulnerability/CVE-2024-38077');
+  };
+
+  const handleSave = async () => {
+    if (!await saveTemplate()) return;
+    setSaveToast(true);
+    setTimeout(() => setSaveToast(false), 2500);
+  };
+
+  const handleReset = () => {
+    setShowResetConfirm(true);
+  };
+
+  const confirmReset = () => {
+    updateTemplateCustomization(DEFAULT_TEMPLATE_CUSTOMIZATION);
+    setShowResetConfirm(false);
+  };
+
+  const handleSendTest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await sendTestEmail(testEmail);
+    setTestResult(res);
+    if (res.success) {
+      setTimeout(() => {
+        setShowTestModal(false);
+        setTestResult(null);
+      }, 1500);
+    }
+  };
+
+  const handleCopyToken = (token: string) => {
+    navigator.clipboard.writeText(token);
+    setCopiedToken(token);
+    setTimeout(() => setCopiedToken(null), 1800);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight flex items-center gap-2">
+            <FileCode className="w-5 h-5 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
+            HTML Template Studio
+          </h1>
+          <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
+            Visual template editor. Changes to typography, background colors, accents, and stamps render live and apply to all future automated security notifications.
+          </p>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={handleReset}
+            className="text-xs px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-200 light:hover:bg-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-medium transition flex items-center space-x-1"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Reset Default</span>
+          </button>
+          <button
+            onClick={() => {
+              setTestResult(null);
+              setShowTestModal(true);
+            }}
+            className="text-xs px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-200 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-semibold transition flex items-center space-x-1.5"
+          >
+            <Send className="w-3.5 h-3.5" />
+            <span>Send Test Email</span>
+          </button>
+          <button
+            onClick={handleSave}
+            className="text-xs px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition shadow-sm"
+          >
+            {saveToast ? 'Applied to All Notifications!' : 'Save & Apply to Notifications'}
+          </button>
+        </div>
+      </div>
+
+      {/* Live Controls Toolbar (Direct Customization) */}
+      <div className="bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 shadow-sm space-y-4 transition-colors">
+        {/* Tool Sub-Tabs */}
+        <div className="flex items-center justify-between border-b border-zinc-800 dark:border-zinc-800 light:border-zinc-200 pb-3">
+          <div className="flex items-center space-x-1 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 p-1 rounded-xl">
+            <button
+              onClick={() => setToolTab('colors')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
+                toolTab === 'colors'
+                  ? 'bg-zinc-800 text-zinc-100 dark:bg-zinc-800 dark:text-zinc-100 light:bg-white light:text-zinc-900 shadow-sm font-semibold'
+                  : 'text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'
+              }`}
+            >
+              <Palette className="w-3.5 h-3.5" />
+              <span>Background &amp; Colors</span>
+            </button>
+
+            <button
+              onClick={() => setToolTab('typography')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
+                toolTab === 'typography'
+                  ? 'bg-zinc-800 text-zinc-100 dark:bg-zinc-800 dark:text-zinc-100 light:bg-white light:text-zinc-900 shadow-sm font-semibold'
+                  : 'text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'
+              }`}
+            >
+              <Type className="w-3.5 h-3.5" />
+              <span>Font Style &amp; Typography</span>
+            </button>
+
+            <button
+              onClick={() => setToolTab('stamps')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
+                toolTab === 'stamps'
+                  ? 'bg-zinc-800 text-zinc-100 dark:bg-zinc-800 dark:text-zinc-100 light:bg-white light:text-zinc-900 shadow-sm font-semibold'
+                  : 'text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'
+              }`}
+            >
+              <Stamp className="w-3.5 h-3.5" />
+              <span>Drawing Objects &amp; Stamps</span>
+            </button>
+
+            <button
+              onClick={() => setToolTab('tokens')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
+                toolTab === 'tokens'
+                  ? 'bg-zinc-800 text-zinc-100 dark:bg-zinc-800 dark:text-zinc-100 light:bg-white light:text-zinc-900 shadow-sm font-semibold'
+                  : 'text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'
+              }`}
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>Dynamic Tokens</span>
+            </button>
+          </div>
+
+          {/* Device Preview Switcher */}
+          <div className="flex items-center space-x-1 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 p-1 rounded-xl">
+            <button
+              onClick={() => setPreviewDevice('desktop')}
+              className={`p-1.5 rounded-lg transition ${
+                previewDevice === 'desktop'
+                  ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+              title="Desktop View (680px)"
+            >
+              <Monitor className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setPreviewDevice('mobile')}
+              className={`p-1.5 rounded-lg transition ${
+                previewDevice === 'mobile'
+                  ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+              title="Mobile Client View (390px)"
+            >
+              <Smartphone className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Tab 1: Colors & Backgrounds */}
+        {toolTab === 'colors' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+            <div>
+              <label className="block text-zinc-400 font-mono mb-1.5">Canvas Background</label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="color"
+                  value={templateCustomization.canvasBg}
+                  onChange={e => updateTemplateCustomization({ canvasBg: e.target.value })}
+                  className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
+                />
+                <input
+                  type="text"
+                  value={templateCustomization.canvasBg}
+                  onChange={e => updateTemplateCustomization({ canvasBg: e.target.value })}
+                  className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-mono text-xs flex-1"
+                />
+              </div>
+              <div className="flex gap-1.5 mt-2">
+                {['#09090b', '#0b0f19', '#18181b', '#f8fafc'].map(c => (
+                  <button
+                    key={c}
+                    onClick={() => updateTemplateCustomization({ canvasBg: c })}
+                    className="w-5 h-5 rounded-md border border-zinc-700"
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-zinc-400 font-mono mb-1.5">Card Background</label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="color"
+                  value={templateCustomization.cardBg}
+                  onChange={e => updateTemplateCustomization({ cardBg: e.target.value })}
+                  className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
+                />
+                <input
+                  type="text"
+                  value={templateCustomization.cardBg}
+                  onChange={e => updateTemplateCustomization({ cardBg: e.target.value })}
+                  className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-mono text-xs flex-1"
+                />
+              </div>
+              <div className="flex gap-1.5 mt-2">
+                {['#18181b', '#1e293b', '#27272a', '#ffffff'].map(c => (
+                  <button
+                    key={c}
+                    onClick={() => updateTemplateCustomization({ cardBg: c })}
+                    className="w-5 h-5 rounded-md border border-zinc-700"
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-zinc-400 font-mono mb-1.5">Header Banner Bg</label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="color"
+                  value={templateCustomization.headerBg}
+                  onChange={e => updateTemplateCustomization({ headerBg: e.target.value })}
+                  className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
+                />
+                <input
+                  type="text"
+                  value={templateCustomization.headerBg}
+                  onChange={e => updateTemplateCustomization({ headerBg: e.target.value })}
+                  className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-mono text-xs flex-1"
+                />
+              </div>
+              <div className="flex gap-1.5 mt-2">
+                {['#1e293b', '#09090b', '#312e81', '#450a0a'].map(c => (
+                  <button
+                    key={c}
+                    onClick={() => updateTemplateCustomization({ headerBg: c })}
+                    className="w-5 h-5 rounded-md border border-zinc-700"
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-zinc-400 font-mono mb-1.5">Accent &amp; Link Color</label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="color"
+                  value={templateCustomization.accentColor}
+                  onChange={e => updateTemplateCustomization({ accentColor: e.target.value })}
+                  className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
+                />
+                <input
+                  type="text"
+                  value={templateCustomization.accentColor}
+                  onChange={e => updateTemplateCustomization({ accentColor: e.target.value })}
+                  className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-mono text-xs flex-1"
+                />
+              </div>
+              <div className="flex gap-1.5 mt-2">
+                {['#3b82f6', '#10b981', '#8b5cf6', '#ef4444'].map(c => (
+                  <button
+                    key={c}
+                    onClick={() => updateTemplateCustomization({ accentColor: c })}
+                    className="w-5 h-5 rounded-md border border-zinc-700"
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Typography */}
+        {toolTab === 'typography' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+            <div>
+              <label className="block text-zinc-400 font-mono mb-1.5">Font Style / Family</label>
+              <select
+                value={templateCustomization.fontFamily}
+                onChange={e =>
+                  updateTemplateCustomization({
+                    fontFamily: e.target.value as any,
+                  })
+                }
+                className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-3 py-2 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-medium"
+              >
+                <option value="sans">Plus Jakarta Sans / Modern</option>
+                <option value="mono">JetBrains Mono / Technical</option>
+                <option value="serif">Georgia / Editorial Serif</option>
+                <option value="system">System Clean / Native</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-zinc-400 font-mono mb-1.5">Heading Font Color</label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="color"
+                  value={templateCustomization.headingColor}
+                  onChange={e => updateTemplateCustomization({ headingColor: e.target.value })}
+                  className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
+                />
+                <input
+                  type="text"
+                  value={templateCustomization.headingColor}
+                  onChange={e => updateTemplateCustomization({ headingColor: e.target.value })}
+                  className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 font-mono text-xs flex-1"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-zinc-400 font-mono mb-1.5">Body Font Color</label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="color"
+                  value={templateCustomization.fontColor}
+                  onChange={e => updateTemplateCustomization({ fontColor: e.target.value })}
+                  className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
+                />
+                <input
+                  type="text"
+                  value={templateCustomization.fontColor}
+                  onChange={e => updateTemplateCustomization({ fontColor: e.target.value })}
+                  className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 font-mono text-xs flex-1"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-zinc-400 font-mono mb-1.5">Border Style &amp; Radius</label>
+              <div className="flex items-center space-x-2">
+                <select
+                  value={templateCustomization.borderStyle}
+                  onChange={e => updateTemplateCustomization({ borderStyle: e.target.value as any })}
+                  className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2 py-1.5 text-zinc-200 text-xs flex-1"
+                >
+                  <option value="solid">Solid Border</option>
+                  <option value="dashed">Dashed Border</option>
+                  <option value="none">No Border</option>
+                </select>
+                <select
+                  value={templateCustomization.borderRadius}
+                  onChange={e => updateTemplateCustomization({ borderRadius: e.target.value })}
+                  className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2 py-1.5 text-zinc-200 text-xs"
+                >
+                  <option value="0px">Sharp (0px)</option>
+                  <option value="8px">Round (8px)</option>
+                  <option value="12px">Pill (12px)</option>
+                  <option value="20px">Curved (20px)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: Drawing Objects & Stamps */}
+        {toolTab === 'stamps' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-zinc-400 font-mono">Security Stamp Object</label>
+                <input
+                  type="checkbox"
+                  checked={templateCustomization.showStamp}
+                  onChange={e => updateTemplateCustomization({ showStamp: e.target.checked })}
+                  className="rounded border-zinc-700 text-zinc-200"
+                />
+              </div>
+              <input
+                type="text"
+                value={templateCustomization.badgeStampText}
+                onChange={e => updateTemplateCustomization({ badgeStampText: e.target.value })}
+                placeholder="e.g. OFFICIAL SECURITY BULLETIN"
+                disabled={!templateCustomization.showStamp}
+                className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-3 py-2 text-zinc-200 disabled:opacity-40 font-mono text-xs"
+              />
+              <div className="flex items-center space-x-1.5 mt-2">
+                <span className="text-[11px] text-zinc-500 font-mono">Presets:</span>
+                {['CONFIDENTIAL', 'URGENT ACTION', 'OFFICIAL BULLETIN', 'CSAF VEX'].map(t => (
+                  <button
+                    key={t}
+                    onClick={() => updateTemplateCustomization({ badgeStampText: t })}
+                    className="px-2 py-0.5 rounded bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 text-[10px] font-mono hover:bg-zinc-700"
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-zinc-400 font-mono mb-1.5">Stamp Color</label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="color"
+                  value={templateCustomization.badgeStampColor}
+                  onChange={e => updateTemplateCustomization({ badgeStampColor: e.target.value })}
+                  disabled={!templateCustomization.showStamp}
+                  className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0 disabled:opacity-40"
+                />
+                <input
+                  type="text"
+                  value={templateCustomization.badgeStampColor}
+                  onChange={e => updateTemplateCustomization({ badgeStampColor: e.target.value })}
+                  disabled={!templateCustomization.showStamp}
+                  className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 font-mono text-xs flex-1 disabled:opacity-40"
+                />
+              </div>
+              <div className="flex gap-1.5 mt-2">
+                {['#ef4444', '#f59e0b', '#10b981', '#6366f1'].map(c => (
+                  <button
+                    key={c}
+                    onClick={() => updateTemplateCustomization({ badgeStampColor: c })}
+                    className="w-5 h-5 rounded-md border border-zinc-700"
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-zinc-400 font-mono">Classification Banner</label>
+                <input
+                  type="checkbox"
+                  checked={templateCustomization.showClassificationBanner}
+                  onChange={e => updateTemplateCustomization({ showClassificationBanner: e.target.checked })}
+                  className="rounded border-zinc-700 text-zinc-200"
+                />
+              </div>
+              <input
+                type="text"
+                value={templateCustomization.classificationText}
+                onChange={e => updateTemplateCustomization({ classificationText: e.target.value })}
+                disabled={!templateCustomization.showClassificationBanner}
+                className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-3 py-2 text-zinc-200 disabled:opacity-40 font-mono text-xs"
+              />
+              <span className="text-[10px] text-zinc-500 font-mono block mt-1">
+                Rendered across the top edge of email notices
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 4: Dynamic Tokens */}
+        {toolTab === 'tokens' && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-zinc-500 font-mono text-[11px] font-medium">Click to Copy:</span>
+            {[
+              '{{advisory_id}}',
+              '{{advisory_title}}',
+              '{{severity}}',
+              '{{dispatch_date}}',
+              '{{executive_summary}}',
+              '{{cve_ids}}',
+              '{{affected_systems}}',
+              '{{remediation_steps}}',
+              '{{vendor_link}}',
+            ].map(token => (
+              <button
+                key={token}
+                onClick={() => handleCopyToken(token)}
+                className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 px-2.5 py-1 rounded-lg text-[11px] font-mono hover:border-zinc-600 transition flex items-center space-x-1"
+                title="Click to copy token"
+              >
+                <span>{token}</span>
+                {copiedToken === token && <Check className="w-3 h-3 text-emerald-400" />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* RENDERED CLIENT PREVIEW: RENAMED TO "HTML template" WITH ENTERPRISE SCROLL ENGINE */}
+      <div className="bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm space-y-4 transition-colors">
+        {/* Studio Control Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 pb-3.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex items-center space-x-2">
+              <FileCode className="w-4 h-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
+              <h2 className="text-xs font-bold text-zinc-200 dark:text-zinc-200 light:text-zinc-800 uppercase tracking-wider font-mono">
+                HTML Template
+              </h2>
+            </div>
+
+            {/* Live Indicator */}
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/40 text-emerald-300 border border-emerald-800/60 flex items-center space-x-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Live Rendering Active</span>
+            </span>
+
+            {/* Format Switcher: Visual Preview vs HTML Source */}
+            <div className="flex items-center space-x-1 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 p-0.5 rounded-xl ml-2">
+              <button
+                type="button"
+                onClick={() => setViewFormat('preview')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
+                  viewFormat === 'preview'
+                    ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>Visual Canvas</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewFormat('html')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
+                  viewFormat === 'html'
+                    ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Code2 className="w-3.5 h-3.5" />
+                <span>HTML Code</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Right Toolbar: Scroll Mode, Zoom, Export & Fullscreen */}
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {/* Scroll Engine Mode */}
+            <div className="flex items-center space-x-1 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 p-0.5 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setScrollMode('fit')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-mono transition ${
+                  scrollMode === 'fit'
+                    ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm font-semibold'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title="Auto-Fit Full Height: Automatically expands iframe height to eliminate inner scrollbars and scroll trapping."
+              >
+                Auto-Fit Flow
+              </button>
+              <button
+                type="button"
+                onClick={() => setScrollMode('contained')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-mono transition ${
+                  scrollMode === 'contained'
+                    ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm font-semibold'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title="Contained Viewport: Fixed 640px height with device frame and quick scroll controls."
+              >
+                Fixed Viewport
+              </button>
+            </div>
+
+            {/* Zoom Controls */}
+            <div className="flex items-center space-x-1 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 p-0.5 rounded-xl font-mono text-[11px]">
+              <button
+                type="button"
+                onClick={() => setZoomLevel(prev => Math.max(65, prev - 10))}
+                className="p-1 text-zinc-400 hover:text-zinc-200"
+                title="Zoom Out"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <span className="px-1 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 min-w-[34px] text-center">
+                {zoomLevel}%
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoomLevel(prev => Math.min(130, prev + 10))}
+                className="p-1 text-zinc-400 hover:text-zinc-200"
+                title="Zoom In"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+              {zoomLevel !== 100 && (
+                <button
+                  type="button"
+                  onClick={() => setZoomLevel(100)}
+                  className="text-[10px] text-zinc-500 hover:text-zinc-300 px-1 border-l border-zinc-800"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+
+            {/* Actions: Copy HTML, Download, Fullscreen */}
+            <button
+              type="button"
+              onClick={handleCopyRawHtml}
+              className="p-1.5 rounded-xl bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 hover:bg-zinc-800 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 transition"
+              title="Copy Rendered HTML Code"
+            >
+              {copiedHtml ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadHtml}
+              className="p-1.5 rounded-xl bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 hover:bg-zinc-800 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 transition"
+              title="Download Advisory HTML File"
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsFullscreen(true)}
+              className="p-1.5 rounded-xl bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 hover:bg-zinc-800 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 transition"
+              title="Fullscreen Template Studio"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* View Mode 1: Compiled HTML Code Inspector */}
+        {viewFormat === 'html' ? (
+          <div className="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden shadow-inner">
+            <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900/80 border-b border-zinc-800 text-xs font-mono text-zinc-400">
+              <span className="flex items-center space-x-2">
+                <Code2 className="w-3.5 h-3.5 text-zinc-400" />
+                <span>Compiled Bulletin HTML (Production Ready)</span>
+              </span>
+              <span>{getRenderedHtml().length} characters</span>
+            </div>
+            <pre className="p-4 text-xs font-mono text-zinc-300 overflow-x-auto max-h-[640px] leading-relaxed selection:bg-zinc-800">
+              <code>{getRenderedHtml()}</code>
+            </pre>
+          </div>
+        ) : (
+          /* View Mode 2: Visual Client Canvas with Enterprise Chrome & Non-Trapping Scrolling */
+          <div className="w-full flex justify-center py-6 px-2 bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 rounded-2xl border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-300 overflow-x-auto relative">
+            {/* Device Container Frame */}
+            <div
+              className={`transition-all duration-300 shadow-2xl relative ${
+                previewDevice === 'desktop'
+                  ? 'w-[720px] max-w-full rounded-2xl border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 overflow-hidden bg-zinc-900'
+                  : 'w-[410px] max-w-full rounded-[38px] p-2.5 bg-zinc-900 border-4 border-zinc-700 shadow-2xl'
+              }`}
+              style={{
+                transform: zoomLevel !== 100 ? `scale(${zoomLevel / 100})` : undefined,
+                transformOrigin: 'top center',
+              }}
+            >
+              {/* Desktop Browser Chrome */}
+              {previewDevice === 'desktop' && (
+                <div className="bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-200 border-b border-zinc-800 dark:border-zinc-800 light:border-zinc-300 px-4 py-2.5 flex items-center justify-between text-xs font-mono">
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500/80 inline-block" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80 inline-block" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block" />
+                  </div>
+                  <div className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-white text-zinc-400 dark:text-zinc-400 light:text-zinc-600 px-3 py-1 rounded-lg text-[11px] truncate max-w-md border border-zinc-800/60 dark:border-zinc-800/60 light:border-zinc-300">
+                    https://mail.enterprise.org/advisories/ADV-2026-0842.html
+                  </div>
+                  <div className="text-[10px] text-zinc-500">680px Canvas</div>
+                </div>
+              )}
+
+              {/* Mobile Phone Chrome */}
+              {previewDevice === 'mobile' && (
+                <div className="relative rounded-[32px] overflow-hidden bg-zinc-950 border border-zinc-800">
+                  {/* Speaker Notch & Status Bar */}
+                  <div className="bg-zinc-950 text-zinc-400 px-6 pt-2 pb-1.5 flex items-center justify-between text-[11px] font-mono border-b border-zinc-800/40">
+                    <span>9:41</span>
+                    <div className="w-18 h-3.5 bg-zinc-800 rounded-full" />
+                    <div className="flex items-center space-x-1">
+                      <span>5G</span>
+                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* The Iframe Itself with Scroll-Trap Elimination */}
+              <div
+                className={`relative bg-zinc-950 ${
+                  scrollMode === 'contained' ? 'overflow-y-auto max-h-[640px]' : ''
+                }`}
+              >
+                <iframe
+                  ref={iframeRef}
+                  title="HTML Template Preview"
+                  srcDoc={getRenderedHtml()}
+                  onLoad={syncIframeHeight}
+                  scrolling={scrollMode === 'fit' ? 'no' : 'auto'}
+                  style={{
+                    height: scrollMode === 'fit' ? `${iframeHeight}px` : '640px',
+                    width: '100%',
+                    display: 'block',
+                    border: 'none',
+                    backgroundColor: templateCustomization.canvasBg || '#09090b',
+                  }}
+                  className="w-full transition-all duration-150"
+                  sandbox="allow-same-origin"
+                />
+
+                {/* Floating Navigation Controls in Contained Viewport Mode */}
+                {scrollMode === 'contained' && (
+                  <div className="absolute bottom-4 right-4 flex flex-col space-y-1.5 z-10">
+                    <button
+                      type="button"
+                      onClick={scrollToIframeTop}
+                      className="p-2 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border border-zinc-700/80 shadow-lg backdrop-blur-sm transition"
+                      title="Scroll to Top of Email"
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={scrollToIframeBottom}
+                      className="p-2 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border border-zinc-700/80 shadow-lg backdrop-blur-sm transition"
+                      title="Scroll to Bottom of Email"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Fullscreen Template Studio Modal */}
+      {isFullscreen && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950/95 backdrop-blur-md p-4 sm:p-6 overflow-hidden">
+          <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
+            <div className="flex items-center space-x-2">
+              <FileCode className="w-5 h-5 text-zinc-300" />
+              <h2 className="text-sm font-bold text-zinc-100 font-mono">
+                HTML Template Studio — Fullscreen Inspection
+              </h2>
+            </div>
+            <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-1 bg-zinc-900 border border-zinc-800 p-0.5 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setPreviewDevice('desktop')}
+                  className={`p-1.5 rounded-lg text-xs ${previewDevice === 'desktop' ? 'bg-zinc-800 text-white' : 'text-zinc-400'}`}
+                >
+                  <Monitor className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewDevice('mobile')}
+                  className={`p-1.5 rounded-lg text-xs ${previewDevice === 'mobile' ? 'bg-zinc-800 text-white' : 'text-zinc-400'}`}
+                >
+                  <Smartphone className="w-4 h-4" />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsFullscreen(false)}
+                className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition"
+              >
+                <Minimize2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto flex justify-center py-6">
+            <div
+              className={`transition-all duration-300 shadow-2xl rounded-2xl overflow-hidden border border-zinc-800 ${
+                previewDevice === 'desktop' ? 'w-[720px]' : 'w-[400px]'
+              }`}
+            >
+              <iframe
+                title="Fullscreen Preview"
+                srcDoc={getRenderedHtml()}
+                className="w-full min-h-[900px] border-none bg-zinc-950"
+                sandbox="allow-same-origin"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send Test Email Modal */}
+      {showTestModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+            <button
+              onClick={() => setShowTestModal(false)}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h2 className="text-base font-bold text-zinc-100 mb-1 flex items-center gap-2">
+              <Send className="w-4 h-4 text-zinc-300" />
+              Send Test Notification
+            </h2>
+            <p className="text-xs text-zinc-400 mb-4">
+              Sends an email with the customized HTML template to verify rendering across client mailboxes.
+            </p>
+
+            {testResult && (
+              <div
+                className={`p-3 rounded-xl text-xs mb-3 flex items-center gap-2 ${
+                  testResult.success
+                    ? 'bg-zinc-950 border border-emerald-800 text-emerald-300'
+                    : 'bg-zinc-950 border border-zinc-700 text-zinc-300'
+                }`}
+              >
+                {testResult.success ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-zinc-400 shrink-0" />
+                )}
+                <span>{testResult.message}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSendTest} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-zinc-400 mb-1 font-mono">
+                  Destination Email Address *
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={testEmail}
+                  onChange={e => setTestEmail(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono focus:border-zinc-600 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-3 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setShowTestModal(false)}
+                  className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 font-semibold"
+                >
+                  Send Test
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Confirmation Modal */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+            <h3 className="text-sm font-bold text-zinc-100 mb-2">Reset Template Customization?</h3>
+            <p className="text-xs text-zinc-400 leading-relaxed mb-6">
+              This will restore the typography, colors, stamps, and layout to the factory enterprise security preset.
+            </p>
+            <div className="flex justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setShowResetConfirm(false)}
+                className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmReset}
+                className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
+              >
+                Reset to Default
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

@@ -1,0 +1,57 @@
+# VulnStream Enterprise
+
+Vulnerability inventory correlation and advisory delivery with a React interface, a Node.js API/worker, PostgreSQL persistence, server-side operator accounts, and Docker deployment. Runtime data starts empty. No sample telemetry or simulated delivery is used.
+
+## Deploy
+
+Requires Docker Compose, a public hostname pointing to the host, ports 80/443 available, and outbound access to configured feeds and SMTP. The included Caddy proxy obtains HTTPS certificates. PostgreSQL and the application are not published directly.
+
+1. Copy `.env.example` to `.env.production` and restrict it with `chmod 600 .env.production`.
+2. Set `APP_HOST`, two different random hexadecimal database passwords, and a random 32-byte base64 `ENCRYPTION_KEY`. Generation commands are in the example. Retain the encryption key in your secret manager: losing it makes saved feed/webhook credentials unrecoverable.
+3. Configure SMTP and add any custom feed/webhook hostname to `EGRESS_ALLOWED_HOSTS`. Only public HTTPS endpoints on port 443 are supported. Secrets belong in credential fields, not feed URLs.
+4. Run:
+
+```sh
+docker compose --env-file .env.production up -d --build
+# Enter an initial administrator password without putting it in shell history:
+read -r -s -p 'Administrator password: ' operator_password
+printf '\n'
+printf '%s' "$operator_password" | docker compose --env-file .env.production exec -T app node server-dist/create-user.js admin ADMIN
+unset operator_password
+```
+
+Open `https://YOUR_APP_HOST`, sign in, add inventory and feed configuration, and run a pipeline. Scheduling and automatic dispatch are disabled initially; enable them only after checking correlations and channel configuration. Configure recipients before enabling automatic dispatch. Additional operators can be created by an administrator in Settings. There is no default account or password.
+
+The migration job owns schema changes. The runtime database role has no DDL privileges and cannot update/delete audit records. Existing database volumes do not rerun initialization: changing an environment password alone does not rotate the database role password.
+
+## Supported behavior
+
+- NVD API ingestion, CISA KEV enrichment, FIRST EPSS enrichment, and schema-validated normalized JSON feeds. RSS, STIX and CSAF adapters are not implemented and cannot be selected.
+- CPE/PURL inventory matching with version exclusions. Unknown versions or complex NVD applicability require review and are not automatically dispatched. Unsigned VEX cannot suppress findings.
+- Durable PostgreSQL outbox with retries and recovery. SMTP acceptance and webhook HTTP acceptance are recorded as `ACCEPTED`; this is not proof of inbox delivery. Delivery is at least once. Stable email Message-ID and webhook idempotency keys support recipient-side deduplication.
+- ADMIN manages accounts/configuration, OPERATOR manages inventory/findings and pipeline runs, VIEWER reads. Opaque server sessions, CSRF/origin checks, password hashing, persistent login throttling and encrypted channel secrets protect the API.
+- Health reports actual database/process/worker measurements. External NTP and mail inbox delivery are not inferred.
+
+## Develop and validate
+
+Node.js 22.12+ and PostgreSQL 17 are used for validation. Set `DATABASE_URL`, `APP_ORIGIN=http://127.0.0.1:8080`, and a generated `ENCRYPTION_KEY` in the process environment; environment files are not loaded implicitly. For the built application:
+
+```sh
+npm ci
+npm run lint
+npm run build
+npm run operator:create -- admin ADMIN # reads password from standard input
+npm start
+```
+
+Development mode applies migrations automatically. Production requires the migration job. `npm run dev:server` runs the API watcher; `npm run dev` runs Vite on loopback port 3000 (set APP_ORIGIN to the Vite origin for that workflow).
+
+```sh
+npm test
+TEST_DATABASE_URL=postgresql://USER:PASSWORD@HOST/TEST_DB npm run test:integration
+npm audit
+```
+
+Without `TEST_DATABASE_URL`, `npm test` explicitly skips the database suite; this is not full validation. The integration command requires the variable. Tests create and remove a uniquely named schema in the supplied test database. Use a dedicated test database with schema-creation privileges. External transports are mocked; tests do not send messages to real recipients.
+
+See [OPERATIONS.md](OPERATIONS.md) for backups, restore, monitoring and release procedures, and [AUDIT.md](AUDIT.md) for verification scope and limitations.

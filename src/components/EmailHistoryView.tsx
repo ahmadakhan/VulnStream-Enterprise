@@ -1,0 +1,168 @@
+import React, { useState } from 'react';
+import { useApp } from '../context/AppContext';
+import {
+  Mail,
+  RotateCw,
+  CheckCircle2,
+  Clock,
+  Search,
+  ShieldCheck,
+} from 'lucide-react';
+import { Pagination } from './Pagination';
+
+export const EmailHistoryView: React.FC = () => {
+  const { emailLogs, retryEmailDelivery } = useApp();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const filteredLogs = emailLogs.filter(log =>
+    log.recipientEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    log.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    log.advisoryId.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const paginatedLogs = filteredLogs.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
+
+  const handleRetry = async (logId: string) => {
+    setRetryingId(logId);
+    await retryEmailDelivery(logId);
+    setRetryingId(null);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight flex items-center gap-2">
+            <Mail className="w-5 h-5 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
+            Automated Notification Delivery Log
+          </h1>
+          <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
+            Provider acceptance is not confirmation of inbox delivery. Notification attempts with retry schedules (1m / 2m / 4m / 8m / 16m).
+          </p>
+        </div>
+
+        <div className="flex items-center space-x-2 text-xs font-mono bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-3 py-1.5 rounded-xl shadow-sm">
+          <ShieldCheck className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-400 light:text-zinc-600" />
+          <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700">SMTP transport</span>
+        </div>
+      </div>
+
+      {/* Search Bar */}
+      <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm transition-colors">
+        <div className="relative w-full sm:w-80">
+          <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
+          <input
+            type="text"
+            placeholder="Search logs by recipient, subject, or advisory..."
+            value={searchTerm}
+            onChange={e => {
+              setSearchTerm(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 placeholder-zinc-500 focus:outline-none focus:border-zinc-600 transition"
+          />
+        </div>
+
+        <div className="text-xs font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+          Total Dispatches: <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{emailLogs.length}</strong>
+        </div>
+      </div>
+
+      {/* Email History Table */}
+      <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
+              <tr>
+                <th className="py-3 px-4">Recipient Email</th>
+                <th className="py-3 px-4">Subject &amp; Advisory</th>
+                <th className="py-3 px-4">Provider</th>
+                <th className="py-3 px-4">Delivery Status</th>
+                <th className="py-3 px-4">Dispatched Timestamp</th>
+                <th className="py-3 px-4 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
+              {paginatedLogs.map(log => {
+                const isDelivered = log.status === 'DELIVERED';
+
+                return (
+                  <tr
+                    key={log.id}
+                    className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition"
+                  >
+                    {/* Recipient */}
+                    <td className="py-3 px-4 font-mono font-medium text-zinc-100 dark:text-zinc-100 light:text-zinc-900">
+                      {log.recipientEmail}
+                    </td>
+
+                    {/* Subject & Advisory */}
+                    <td className="py-3 px-4">
+                      <div className="font-medium text-zinc-200 dark:text-zinc-200 light:text-zinc-800 line-clamp-1 max-w-sm">
+                        {log.subject}
+                      </div>
+                      <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mt-0.5">
+                        Ref: {log.advisoryId}
+                      </div>
+                    </td>
+
+                    {/* Provider */}
+                    <td className="py-3 px-4 font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px]">
+                      {log.provider}
+                    </td>
+
+                    {/* Status */}
+                    <td className="py-3 px-4 font-mono">
+                      <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300">
+                        {isDelivered && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+                        <span>{log.status}</span>
+                      </span>
+                    </td>
+
+                    {/* Timestamp */}
+                    <td className="py-3 px-4 font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px]">
+                      {log.sentAt ? new Date(log.sentAt).toLocaleString() : 'Not accepted yet'}
+                    </td>
+
+                    {/* Actions */}
+                    <td className="py-3 px-4 text-right">
+                      {log.status === 'FAILED' && (
+                        <button
+                          onClick={() => handleRetry(log.id)}
+                          disabled={retryingId === log.id}
+                          className="px-2.5 py-1 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 dark:hover:bg-zinc-700 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 text-xs font-medium inline-flex items-center space-x-1 transition"
+                        >
+                          <RotateCw className={`w-3 h-3 ${retryingId === log.id ? 'animate-spin' : ''}`} />
+                          <span>Retry</span>
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        <Pagination
+          currentPage={currentPage}
+          totalItems={filteredLogs.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          pageSizeOptions={[10, 25, 50]}
+        />
+      </div>
+    </div>
+  );
+};

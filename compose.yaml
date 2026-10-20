@@ -1,0 +1,76 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vulnstream
+      POSTGRES_USER: vulnstream_migrator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong migration database password}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Set a strong runtime database password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/init-db.sh:/docker-entrypoint-initdb.d/01-runtime-role.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U vulnstream_migrator -d vulnstream]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+  migrate:
+    build: .
+    command: [node, server-dist/migrate.js]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://vulnstream_migrator:${POSTGRES_PASSWORD:?Set migration password}@db:5432/vulnstream
+      GRANT_RUNTIME_ROLE: 'true'
+    networks: [backend]
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      DATABASE_URL: postgresql://vulnstream_app:${APP_DB_PASSWORD:?Set runtime password}@db:5432/vulnstream
+      APP_ORIGIN: https://${APP_HOST:?Set public hostname}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set a base64 32-byte encryption key}
+      EGRESS_ALLOWED_HOSTS: ${EGRESS_ALLOWED_HOSTS:-services.nvd.nist.gov,www.cisa.gov,api.first.org}
+      TRUST_PROXY: ${TRUST_PROXY:-loopback,linklocal,uniquelocal}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      WORKER_ENABLED: 'true'
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 35s
+    networks: [backend, egress]
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [app]
+    environment:
+      APP_HOST: ${APP_HOST:?Set public hostname}
+    ports: ['80:80', '443:443']
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [backend, egress]
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
+networks:
+  backend:
+    internal: true
+  egress:
