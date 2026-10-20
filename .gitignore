@@ -10,3 +10,5 @@ coverage/
 server-dist/
 secrets/
 .env.production
+
+backups/

@@ -213,6 +213,7 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
     });
     await t.test('validation rejects malformed data and unsupported feed adapters', async () => {
       assert.equal((await command('asset.import', [null])).status, 400);
+      assert.equal((await command('feed.save', { url: 'http://127.0.0.1' })).status, 400);
       const bad = await command('settings.save', {
         ssrfProtection: { blockPrivateIps: false, blockLoopback: true, allowRedirects: false },
       });
@@ -247,6 +248,18 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       assert.equal(decrypt(saved.authSecretKey, key, `feed:${saved.id}`), 'fixture-secret');
       const snapshot = (await admin.get('/api/state')).body;
       assert.equal(snapshot.feeds[0].authSecretKey, undefined);
+      const edit = {
+        name: saved.name,
+        type: saved.type,
+        url: saved.url + '-changed',
+        authType: saved.authType,
+        rateLimitPerMin: 10,
+        enabled: false,
+      };
+      assert.equal((await command('feed.save', edit, saved.id)).status, 200);
+      assert.equal((await get<any>(pool, 'feeds', saved.id)).authSecretKey, '');
+      assert.equal((await command('feed.save', { ...edit, authSecretKey: 'fixture-secret' }, saved.id)).status, 200);
+
       assert.equal((await supertest(createApp(pool, config, requester)).get('/ready')).status, 200);
     });
     await t.test(

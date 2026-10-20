@@ -1,7 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { WatchListItem, NormalizedCVE } from '../types';
-import { generateCPE23, parseCPE23, matchesWatchlistItem, matchVendorWithAliases, matchProductWithAliases } from '../utils/cpeMatcher';
+import {
+  generateCPE23,
+  parseCPE23,
+  matchesWatchlistItem,
+  matchVendorWithAliases,
+  matchProductWithAliases,
+} from '../utils/cpeMatcher';
 import {
   ENTERPRISE_VENDOR_CATALOG,
   getCatalogProductsForVendor,
@@ -31,6 +37,7 @@ import {
   Package,
   Cpu,
 } from 'lucide-react';
+import { runVulnerabilityPipeline } from '../engine/pipelineEngine';
 import { Pagination } from './Pagination';
 
 export const WatchListView: React.FC = () => {
@@ -41,6 +48,7 @@ export const WatchListView: React.FC = () => {
     deleteWatchlistItem,
     bulkImportWatchlist,
     cveData,
+    settings,
   } = useApp();
 
   // Primary view mode: Inventory vs Simulator Lab
@@ -74,12 +82,12 @@ export const WatchListView: React.FC = () => {
   // -------------------------------------------------------------
   // Simulator State
   // -------------------------------------------------------------
+  const [simPart, setSimPart] = useState<'a' | 'o' | 'h'>('a');
   const [simVendor, setSimVendor] = useState('paloaltonetworks');
   const [simProduct, setSimProduct] = useState('pan-os');
   const [simVersion, setSimVersion] = useState('10.2.3');
-  const [simHw, setSimHw] = useState<'any' | 'x86_64' | 'aarch64'>('any');
+  const [simHw, setSimHw] = useState('any');
   const [simPurl, setSimPurl] = useState('');
-  const [simVexStatus, setSimVexStatus] = useState<'none' | 'not_affected' | 'affected'>('none');
   const [simResults, setSimResults] = useState<{
     testedAt: string;
     matchedCves: Array<{
@@ -112,7 +120,7 @@ export const WatchListView: React.FC = () => {
 
     if (selectedProductIds.length > 0) {
       for (const prodId of selectedProductIds) {
-        const catProd = catalogProducts.find(p => p.normalizedId === prodId);
+        const catProd = catalogProducts.find((p) => p.normalizedId === prodId);
         const prodName = catProd ? catProd.normalizedId : prodId;
         const part = catProd ? catProd.part : cpePart;
         const cpe = buildStrictCpe23(part, v, prodName, versionInput, targetHwInput);
@@ -132,24 +140,29 @@ export const WatchListView: React.FC = () => {
     }
 
     return list;
-  }, [vendorInput, selectedProductIds, customProductInput, cpePart, versionInput, targetHwInput, catalogProducts]);
+  }, [
+    vendorInput,
+    selectedProductIds,
+    customProductInput,
+    cpePart,
+    versionInput,
+    targetHwInput,
+    catalogProducts,
+  ]);
 
-  const filteredAssets = watchlist.filter(item => {
+  const filteredAssets = watchlist.filter((item) => {
     const matchesSearch =
       item.assetTag.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.vendor.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.product.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.ownerGroup.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.cpes.some(c => c.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (item.purls && item.purls.some(p => p.toLowerCase().includes(searchTerm.toLowerCase())));
+      item.cpes.some((c) => c.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (item.purls && item.purls.some((p) => p.toLowerCase().includes(searchTerm.toLowerCase())));
 
     return matchesSearch;
   });
 
-  const paginatedAssets = filteredAssets.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
+  const paginatedAssets = filteredAssets.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleOpenAdd = () => {
     setVendorInput('');
@@ -183,9 +196,9 @@ export const WatchListView: React.FC = () => {
   };
 
   const toggleSelectProduct = (prod: CatalogProduct) => {
-    setSelectedProductIds(prev => {
+    setSelectedProductIds((prev) => {
       if (prev.includes(prod.normalizedId)) {
-        return prev.filter(id => id !== prod.normalizedId);
+        return prev.filter((id) => id !== prod.normalizedId);
       } else {
         return [...prev, prod.normalizedId];
       }
@@ -203,7 +216,7 @@ export const WatchListView: React.FC = () => {
 
     const purlList = purlInput
       .split('\n')
-      .map(s => s.trim())
+      .map((s) => s.trim())
       .filter(Boolean);
 
     // If editing existing single item
@@ -231,7 +244,7 @@ export const WatchListView: React.FC = () => {
 
     // Add selected catalog products
     for (const prodId of selectedProductIds) {
-      const catProd = catalogProducts.find(p => p.normalizedId === prodId);
+      const catProd = catalogProducts.find((p) => p.normalizedId === prodId);
       if (catProd) {
         productsToCreate.push({ name: catProd.name, normalizedId: catProd.normalizedId, part: catProd.part });
       } else {
@@ -243,7 +256,10 @@ export const WatchListView: React.FC = () => {
     if (customProductInput.trim()) {
       productsToCreate.push({
         name: customProductInput.trim(),
-        normalizedId: customProductInput.trim().toLowerCase().replace(/[\s-]+/g, '_'),
+        normalizedId: customProductInput
+          .trim()
+          .toLowerCase()
+          .replace(/[\s-]+/g, '_'),
         part: cpePart,
       });
     }
@@ -261,7 +277,9 @@ export const WatchListView: React.FC = () => {
     const newItems = productsToCreate.map((p, idx) => {
       const cpe = buildStrictCpe23(p.part, vendorInput.trim(), p.normalizedId, versionInput, targetHwInput);
       const tagSuffix = productsToCreate.length > 1 ? `-${idx + 1}` : '';
-      const baseTag = assetTagInput.trim() || `${vendorInput.toUpperCase().slice(0, 4)}-${p.normalizedId.toUpperCase().slice(0, 6)}`;
+      const baseTag =
+        assetTagInput.trim() ||
+        `${vendorInput.toUpperCase().slice(0, 4)}-${p.normalizedId.toUpperCase().slice(0, 6)}`;
 
       return {
         vendor: vendorInput.trim(),
@@ -292,9 +310,10 @@ export const WatchListView: React.FC = () => {
           return;
         }
 
-        const generatedCpe = item.cpes && item.cpes.length > 0
-          ? item.cpes
-          : [generateCPE23('a', item.vendor, item.product, item.version || '*')];
+        const generatedCpe =
+          item.cpes && item.cpes.length > 0
+            ? item.cpes
+            : [generateCPE23('a', item.vendor, item.product, item.version || '*')];
 
         validItems.push({
           vendor: item.vendor.trim(),
@@ -311,7 +330,10 @@ export const WatchListView: React.FC = () => {
 
       if (validItems.length > 0) {
         const result = await bulkImportWatchlist(validItems);
-        if (result.errors.length) { setBulkFeedback(result); return; }
+        if (result.errors.length) {
+          setBulkFeedback(result);
+          return;
+        }
       }
 
       setBulkFeedback({
@@ -338,7 +360,10 @@ export const WatchListView: React.FC = () => {
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(watchlist, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `monitored-products-${new Date().toISOString().split('T')[0]}.json`);
+    downloadAnchor.setAttribute(
+      'download',
+      `monitored-products-${new Date().toISOString().split('T')[0]}.json`,
+    );
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -346,7 +371,7 @@ export const WatchListView: React.FC = () => {
 
   // Run Simulator Engine
   const runSimulation = () => {
-    const generatedCpe = generateCPE23('a', simVendor, simProduct, simVersion, simHw);
+    const generatedCpe = generateCPE23(simPart, simVendor, simProduct, simVersion, simHw === 'any' ? '*' : simHw);
     const simulatedWatchItem: WatchListItem = {
       id: 'sim-test-01',
       vendor: simVendor,
@@ -361,49 +386,19 @@ export const WatchListView: React.FC = () => {
       createdAt: new Date().toISOString(),
     };
 
-    const matchedCves: Array<any> = [];
-
-    cveData.forEach(cve => {
-      const matchRes = matchesWatchlistItem(
-        simulatedWatchItem.cpes,
-        simulatedWatchItem.vendor,
-        simulatedWatchItem.product,
-        cve.cpeMatches,
-        cve.title,
-        cve.description,
-        cve.versionRange,
-        simulatedWatchItem.purls,
-        cve.purls,
-        simulatedWatchItem.targetHw
-      );
-
-      if (matchRes.matched) {
-        let isSuppressed = false;
-        let suppressionReason = '';
-
-        if (simVexStatus === 'not_affected' || cve.vex?.status === 'not_affected') {
-          isSuppressed = true;
-          suppressionReason = cve.vex?.justification || 'CSAF 2.0 VEX declared component not affected in deployment';
-        }
-
-        let autoAction = 'IMMEDIATE_NOTIFICATION (Slack + Email)';
-        if (cve.cisaKev.isKev) {
-          autoAction = 'CRITICAL DISPATCH (Zero-Touch Emergency Page)';
-        } else if (cve.cvss.score >= 9.0) {
-          autoAction = 'HIGH-PRIORITY DISPATCH (Security Advisory)';
-        }
-
-        matchedCves.push({
-          cve,
-          method: matchRes.method,
-          confidence: matchRes.confidence || 90,
-          evidence: matchRes.evidence,
-          autoAction,
-          suppressed: isSuppressed,
-          suppressionReason,
-        });
-      }
+    const correlation = runVulnerabilityPipeline([], cveData, [simulatedWatchItem], [], [], {
+      ...settings,
+      scopeHours: 0,
     });
+    const matchedCves = correlation.newFindings.map((finding) => ({
+      cve: finding.cve,
+      method: finding.matchingMethod,
+      confidence: finding.notificationStatus === 'REVIEW_REQUIRED' ? 0 : 100,
+      evidence: finding.matchingEvidence,
+      autoAction: finding.notificationStatus === 'REVIEW_REQUIRED' ? 'REVIEW_REQUIRED' : 'MATCH_CONFIRMED',
+      suppressed: false,
+      suppressionReason: '',
+    }));
 
     setSimResults({
       testedAt: new Date().toLocaleTimeString(),
@@ -411,56 +406,11 @@ export const WatchListView: React.FC = () => {
       totalScanned: cveData.length,
       ruleSummary: {
         cpeGenerated: generatedCpe,
-        aliasExpanded: true,
+        aliasExpanded: false,
         intervalEvaluated: true,
         architectureFiltered: simHw !== 'any',
       },
     });
-  };
-
-  const loadPreset = (preset: 'paloalto' | 'apache' | 'fortinet' | 'cisco' | 'log4j') => {
-    switch (preset) {
-      case 'paloalto':
-        setSimVendor('paloaltonetworks');
-        setSimProduct('pan-os');
-        setSimVersion('10.2.3');
-        setSimHw('any');
-        setSimPurl('');
-        setSimVexStatus('none');
-        break;
-      case 'apache':
-        setSimVendor('apache');
-        setSimProduct('http_server');
-        setSimVersion('2.4.49');
-        setSimHw('x86_64');
-        setSimPurl('');
-        setSimVexStatus('none');
-        break;
-      case 'fortinet':
-        setSimVendor('fortinet');
-        setSimProduct('fortios');
-        setSimVersion('7.2.4');
-        setSimHw('any');
-        setSimPurl('');
-        setSimVexStatus('none');
-        break;
-      case 'cisco':
-        setSimVendor('cisco');
-        setSimProduct('ios_xe');
-        setSimVersion('17.9.4');
-        setSimHw('any');
-        setSimPurl('');
-        setSimVexStatus('none');
-        break;
-      case 'log4j':
-        setSimVendor('apache');
-        setSimProduct('log4j');
-        setSimVersion('2.14.1');
-        setSimHw('any');
-        setSimPurl('pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1');
-        setSimVexStatus('none');
-        break;
-    }
   };
 
   return (
@@ -473,7 +423,8 @@ export const WatchListView: React.FC = () => {
             Monitored Product Inventory &amp; Matching Engine
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Enterprise products tracked with automated strict CPE 2.3 expressions and supply-chain PURLs. All assets are protected with uniform autonomous detection.
+            Enterprise products tracked with automated strict CPE 2.3 expressions and supply-chain PURLs. All
+            assets are protected with uniform autonomous detection.
           </p>
         </div>
 
@@ -508,6 +459,69 @@ export const WatchListView: React.FC = () => {
       </div>
 
       {/* VIEW 1: Monitored Products Table */}
+      {viewMode === 'simulator' && (
+        <section className="rounded-xl border border-zinc-700 p-5 space-y-4">
+          <h2 className="text-lg font-semibold">Matching Simulator</h2>
+          <p className="text-sm text-zinc-400">
+            Uses the same correlation engine as the server against the current threat cache, across all dates.
+            This preview does not save findings or send notifications.
+          </p>
+          <form
+            className="grid gap-3 md:grid-cols-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              runSimulation();
+            }}
+          >
+            <label className="text-sm">CPE part<select className="block w-full border border-zinc-600 rounded p-2 mt-1" value={simPart} onChange={e => setSimPart(e.target.value as 'a' | 'o' | 'h')}><option value="a">Application</option><option value="o">Operating system</option><option value="h">Hardware</option></select></label>
+            {(
+              [
+                ['Vendor', simVendor, setSimVendor],
+                ['Product', simProduct, setSimProduct],
+                ['Installed version', simVersion, setSimVersion],
+                ['Architecture', simHw, setSimHw],
+                ['Package URL (optional)', simPurl, setSimPurl],
+              ] as const
+            ).map(([label, value, setter]) => (
+              <label key={label} className="text-sm">
+                {label}
+                <input
+                  className="block w-full border border-zinc-600 rounded p-2 mt-1"
+                  value={value}
+                  onChange={(e) => setter(e.target.value)}
+                  required={label !== 'Package URL (optional)'}
+                />
+              </label>
+            ))}
+            <button type="submit" className="rounded bg-blue-600 px-4 py-2 self-end">
+              Check matches
+            </button>
+          </form>
+          {simResults && (
+            <div className="space-y-3" aria-live="polite">
+              <p>
+                {simResults.matchedCves.length} matches from {simResults.totalScanned} cached vulnerabilities
+              </p>
+              <code className="block break-all text-xs">{simResults.ruleSummary.cpeGenerated}</code>
+              {simResults.matchedCves.length === 0 && (
+                <p>No matching vulnerabilities in the current cache.</p>
+              )}
+              {simResults.matchedCves.map((result) => (
+                <article key={result.cve.cveId} className="border border-zinc-700 rounded p-3">
+                  <h3 className="font-semibold">
+                    {result.cve.cveId} — {result.cve.title}
+                  </h3>
+                  <p>
+                    {result.autoAction} · {result.method}
+                  </p>
+                  <p className="text-sm text-zinc-400">{result.evidence}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       {viewMode === 'inventory' && (
         <div className="space-y-4">
           {/* Action and Search Toolbar */}
@@ -519,7 +533,7 @@ export const WatchListView: React.FC = () => {
                 type="text"
                 placeholder="Search products by tag, vendor, product, or CPE..."
                 value={searchTerm}
-                onChange={e => {
+                onChange={(e) => {
                   setSearchTerm(e.target.value);
                   setCurrentPage(1);
                 }}
@@ -577,7 +591,7 @@ export const WatchListView: React.FC = () => {
                       </td>
                     </tr>
                   ) : (
-                    paginatedAssets.map(asset => (
+                    paginatedAssets.map((asset) => (
                       <tr
                         key={asset.id}
                         className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition"
@@ -595,7 +609,10 @@ export const WatchListView: React.FC = () => {
                         {/* Vendor & Product */}
                         <td className="py-3 px-4">
                           <div className="font-medium text-zinc-200 dark:text-zinc-200 light:text-zinc-800">
-                            {asset.vendor} / <span className="text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold">{asset.product}</span>
+                            {asset.vendor} /{' '}
+                            <span className="text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold">
+                              {asset.product}
+                            </span>
                           </div>
                           <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
                             Registered: {new Date(asset.createdAt).toLocaleDateString()}
@@ -628,7 +645,7 @@ export const WatchListView: React.FC = () => {
                         {/* Arch / Context */}
                         <td className="py-3 px-4 font-mono text-[11px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
                           <span className="bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 px-2 py-0.5 rounded">
-                            {asset.targetHw || 'x86_64'}
+                            {asset.targetHw || 'Unknown'}
                           </span>
                         </td>
 
@@ -641,7 +658,13 @@ export const WatchListView: React.FC = () => {
                         <td className="py-3 px-4">
                           <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950/40 text-emerald-300 border border-emerald-800/60 font-mono">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            <span>Continuous Match</span>
+                            <span>
+                              {asset.active
+                                ? settings.schedulerEnabled
+                                  ? 'Scheduled matching'
+                                  : 'Manual matching'
+                                : 'Inactive'}
+                            </span>
                           </span>
                         </td>
 
@@ -700,31 +723,36 @@ export const WatchListView: React.FC = () => {
               {editingItem ? 'Edit Monitored Product' : 'Register Monitored Products'}
             </h2>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
-              Enter a vendor to automatically view its catalog products. Select multiple products or enter custom ones — Strict CPE 2.3 expressions generate live automatically.
+              Enter a vendor to automatically view its catalog products. Select multiple products or enter
+              custom ones — Strict CPE 2.3 expressions generate live automatically.
             </p>
 
             <form onSubmit={handleSaveProduct} className="space-y-4 text-xs">
               {/* Asset Tag & Custodian Group */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Asset Tag / Host Prefix *</label>
+                  <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                    Asset Tag / Host Prefix *
+                  </label>
                   <input
                     type="text"
                     required
                     placeholder="e.g. CORP-APP-01"
                     value={assetTagInput}
-                    onChange={e => setAssetTagInput(e.target.value)}
+                    onChange={(e) => setAssetTagInput(e.target.value)}
                     className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Custodian Group *</label>
+                  <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                    Custodian Group *
+                  </label>
                   <input
                     type="text"
                     required
                     placeholder="e.g. SecOps-Core"
                     value={ownerGroupInput}
-                    onChange={e => setOwnerGroupInput(e.target.value)}
+                    onChange={(e) => setOwnerGroupInput(e.target.value)}
                     className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                   />
                 </div>
@@ -740,14 +768,26 @@ export const WatchListView: React.FC = () => {
                   required
                   placeholder="e.g. Microsoft, Cisco, Fortinet, VMware, Palo Alto, Apache, Red Hat..."
                   value={vendorInput}
-                  onChange={e => setVendorInput(e.target.value)}
+                  onChange={(e) => setVendorInput(e.target.value)}
                   className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-medium focus:border-zinc-600 focus:outline-none"
                 />
 
                 {/* Popular Vendor Shortcuts */}
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   <span className="text-[10px] text-zinc-500 font-mono self-center mr-1">Quick Select:</span>
-                  {['Microsoft', 'Cisco', 'Fortinet', 'VMware', 'Palo Alto Networks', 'Apache', 'Red Hat', 'Oracle', 'Google', 'F5', 'Linux Foundation'].map(v => (
+                  {[
+                    'Microsoft',
+                    'Cisco',
+                    'Fortinet',
+                    'VMware',
+                    'Palo Alto Networks',
+                    'Apache',
+                    'Red Hat',
+                    'Oracle',
+                    'Google',
+                    'F5',
+                    'Linux Foundation',
+                  ].map((v) => (
                     <button
                       key={v}
                       type="button"
@@ -774,7 +814,7 @@ export const WatchListView: React.FC = () => {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                    {catalogProducts.map(prod => {
+                    {catalogProducts.map((prod) => {
                       const isSelected = selectedProductIds.includes(prod.normalizedId);
                       return (
                         <div
@@ -819,7 +859,7 @@ export const WatchListView: React.FC = () => {
                   type="text"
                   placeholder="e.g. pan-os, custom-gateway, http_server"
                   value={customProductInput}
-                  onChange={e => setCustomProductInput(e.target.value)}
+                  onChange={(e) => setCustomProductInput(e.target.value)}
                   className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                 />
               </div>
@@ -827,10 +867,12 @@ export const WatchListView: React.FC = () => {
               {/* CPE Attributes (Part, Version, Target HW) */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">CPE Part</label>
+                  <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                    CPE Part
+                  </label>
                   <select
                     value={cpePart}
-                    onChange={e => setCpePart(e.target.value as any)}
+                    onChange={(e) => setCpePart(e.target.value as any)}
                     className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                   >
                     <option value="a">Application (a)</option>
@@ -839,22 +881,26 @@ export const WatchListView: React.FC = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Installed Version</label>
+                  <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                    Installed Version
+                  </label>
                   <input
                     type="text"
                     placeholder="* or exact e.g. 10.2.3"
                     value={versionInput}
-                    onChange={e => setVersionInput(e.target.value)}
+                    onChange={(e) => setVersionInput(e.target.value)}
                     className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Target Arch</label>
+                  <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                    Target Arch
+                  </label>
                   <input
                     type="text"
                     placeholder="* or x86_64, aarch64"
                     value={targetHwInput}
-                    onChange={e => setTargetHwInput(e.target.value)}
+                    onChange={(e) => setTargetHwInput(e.target.value)}
                     className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
                   />
                 </div>
@@ -880,7 +926,9 @@ export const WatchListView: React.FC = () => {
                     >
                       <div className="truncate mr-2">
                         <span className="text-[10px] text-zinc-500 mr-1.5">[{item.product}]</span>
-                        <span className="text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold">{item.cpe}</span>
+                        <span className="text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold">
+                          {item.cpe}
+                        </span>
                       </div>
                       <span className="text-[9px] font-mono uppercase bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-400 px-1.5 py-0.2 rounded shrink-0">
                         {item.part}
@@ -899,19 +947,21 @@ export const WatchListView: React.FC = () => {
                   rows={2}
                   placeholder="e.g. pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"
                   value={purlInput}
-                  onChange={e => setPurlInput(e.target.value)}
+                  onChange={(e) => setPurlInput(e.target.value)}
                   className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 font-mono text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                 />
               </div>
 
               {/* Operational Notes */}
               <div>
-                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Deployment Notes</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                  Deployment Notes
+                </label>
                 <input
                   type="text"
                   placeholder="e.g. Core production infrastructure; continuous zero-human matching"
                   value={notesInput}
-                  onChange={e => setNotesInput(e.target.value)}
+                  onChange={(e) => setNotesInput(e.target.value)}
                   className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                 />
               </div>
@@ -930,7 +980,11 @@ export const WatchListView: React.FC = () => {
                   disabled={!vendorInput.trim()}
                   className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition disabled:opacity-50 shadow-sm"
                 >
-                  {editingItem ? 'Save Changes' : selectedProductIds.length > 1 ? `Register All (${selectedProductIds.length}) Products` : 'Register Product'}
+                  {editingItem
+                    ? 'Save Changes'
+                    : selectedProductIds.length > 1
+                      ? `Register All (${selectedProductIds.length}) Products`
+                      : 'Register Product'}
                 </button>
               </div>
             </form>
@@ -957,7 +1011,8 @@ export const WatchListView: React.FC = () => {
               Bulk Product Asset Import (JSON)
             </h2>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
-              Import up to 1,000 product records. Provide vendor, product, assetTag, and optional CPE 2.3 expressions.
+              Import up to 1,000 product records. Provide vendor, product, assetTag, and optional CPE 2.3
+              expressions.
             </p>
 
             {bulkFeedback && (
@@ -983,7 +1038,7 @@ export const WatchListView: React.FC = () => {
             <textarea
               rows={8}
               value={bulkJsonText}
-              onChange={e => setBulkJsonText(e.target.value)}
+              onChange={(e) => setBulkJsonText(e.target.value)}
               placeholder={`[\n  {\n    "vendor": "microsoft",\n    "product": "windows_server_2022",\n    "assetTag": "DC-PDC01",\n    "ownerGroup": "SecOps-Core"\n  }\n]`}
               className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-3 font-mono text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none leading-relaxed"
             />
@@ -1014,9 +1069,13 @@ export const WatchListView: React.FC = () => {
       {deletingAsset && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
           <div className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
-            <h3 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-2">Remove Monitored Product?</h3>
+            <h3 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-2">
+              Remove Monitored Product?
+            </h3>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 leading-relaxed mb-6">
-              Are you sure you want to remove <strong>{deletingAsset.assetTag}</strong> ({deletingAsset.vendor} {deletingAsset.product})? Autonomous correlation and alerting for this product will cease immediately.
+              Are you sure you want to remove <strong>{deletingAsset.assetTag}</strong> (
+              {deletingAsset.vendor} {deletingAsset.product})? Autonomous correlation and alerting for this
+              product will cease immediately.
             </p>
             <div className="flex justify-end space-x-2">
               <button

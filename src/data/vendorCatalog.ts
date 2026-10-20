@@ -256,8 +256,8 @@ export function buildStrictCpe23(
   version: string = '*',
   targetHw: string = '*'
 ): string {
-  const normVendor = (vendor || 'any').toLowerCase().trim().replace(/[\s-]+/g, '_');
-  const normProduct = (product || 'any').toLowerCase().trim().replace(/[\s-]+/g, '_');
+  const normVendor = (vendor || 'any').toLowerCase().trim().replace(/\s+/g, '_');
+  const normProduct = (product || 'any').toLowerCase().trim().replace(/\s+/g, '_');
   const normVersion = (version || '*').trim();
   const normHw = (targetHw && targetHw !== '*' ? targetHw.trim() : '*');
 

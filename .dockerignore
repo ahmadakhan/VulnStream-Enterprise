@@ -8,3 +8,6 @@ coverage
 audit-verification.png
 *.log
 secrets
+
+production-verification.png
+backups

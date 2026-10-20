@@ -90,16 +90,34 @@ export function runVulnerabilityPipeline(
       if (known.has(key)) continue;
       let matched = '',
         confirmed = false;
-      const criteria =
-        cve.cpeMatchDetails || cve.cpeMatches.map((criteria) => ({ criteria, range: cve.versionRange }));
+      const criteria = cve.cpeMatchDetails?.length
+        ? cve.cpeMatchDetails
+        : cve.cpeMatches.map((criteria) => ({ criteria, range: cve.versionRange }));
       for (const a of asset.cpes)
         for (const v of criteria) {
           if (matchCPE(a, v.criteria, v.range).matched) {
             matched = v.criteria;
-            const version = parseCPE23(a).version;
+            const parsedAsset = parseCPE23(a),
+              parsedTarget = parseCPE23(v.criteria);
+            const version = parsedAsset.version;
+            const knownContext = (
+              [
+                'part',
+                'vendor',
+                'product',
+                'update',
+                'edition',
+                'language',
+                'swEdition',
+                'targetSw',
+                'targetHw',
+                'other',
+              ] as const
+            ).every((field) => parsedTarget[field] === '*' || parsedAsset[field] !== '*');
             confirmed =
               confirmed ||
-              (!['*', '-', ''].includes(version) &&
+              (knownContext &&
+                !['*', '-', ''].includes(version) &&
                 (!v.range ||
                   (Object.values(v.range).every(
                     (bound) =>
@@ -120,10 +138,17 @@ export function runVulnerabilityPipeline(
             version = at > base.indexOf('/') + 1 ? base.slice(at + 1) : '';
           if (
             matchPurl(a, v) &&
-            (!cve.versionRange || (version && isVersionInNvdRange(version, cve.versionRange).inRange))
+            (!cve.versionRange || !version || isVersionInNvdRange(version, cve.versionRange).inRange)
           ) {
             matched = v;
-            confirmed = confirmed || !!version;
+            const supported = (value: string) =>
+              /^[0-9]+(?:\.[0-9]+)*(?:-(?:h|p|patch|hotfix|sp|u|update|build|fix)[0-9]+)?$/.test(value);
+            confirmed =
+              confirmed ||
+              (!!version &&
+                (!cve.versionRange ||
+                  (supported(version) &&
+                    Object.values(cve.versionRange).every((bound) => !bound || supported(bound)))));
           }
         }
       if (!matched) continue;

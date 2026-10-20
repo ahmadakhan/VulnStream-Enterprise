@@ -71,7 +71,7 @@ export const AdvisoryTemplateView: React.FC = () => {
           doc.documentElement.scrollHeight,
           doc.body.scrollHeight,
           doc.documentElement.offsetHeight,
-          doc.body.offsetHeight
+          doc.body.offsetHeight,
         );
         if (h > 200) {
           setIframeHeight(h + 24);
@@ -117,22 +117,27 @@ export const AdvisoryTemplateView: React.FC = () => {
     setTimeout(() => setCopiedHtml(false), 2000);
   };
 
-  // Substitute variables into the live template for rendering
-  const getRenderedHtml = () => {
-    return advisoryTemplate
-      .replace(/{{severity}}/g, 'CRITICAL')
-      .replace(/{{advisory_id}}/g, 'ADV-2026-0842')
-      .replace(/{{advisory_title}}/g, 'Microsoft Windows RDLicsvr Remote Code Execution (MadLicence)')
+  // Preview-only examples; never substitute an unverified real remediation command.
+  const getRenderedHtml = () =>
+    advisoryTemplate
+      .replace(/{{severity}}/g, 'HIGH')
+      .replace(/{{advisory_id}}/g, 'PREVIEW-EXAMPLE')
+      .replace(/{{advisory_title}}/g, 'Example advisory — template preview only')
       .replace(/{{dispatch_date}}/g, new Date().toUTCString())
-      .replace(/{{executive_summary}}/g, 'An unauthenticated remote code execution vulnerability exists in the Windows Remote Desktop Licensing Service. Attackers can gain SYSTEM privileges without credentials. Monitored product Windows Server 2022 is affected.')
-      .replace(/{{cve_ids}}/g, 'CVE-2024-38077 (CVSS 9.8)')
-      .replace(/{{affected_systems}}/g, 'DC-CORP-PDC01 (Active Directory Root Controller)')
-      .replace(/{{remediation_steps}}/g, '1. Stop-Service -Name TermServLicensing -Force\n2. Set-Service -Name TermServLicensing -StartupType Disabled\n3. Deploy Cumulative Update KB5040437')
-      .replace(/{{vendor_link}}/g, 'https://msrc.microsoft.com/update-guide/vulnerability/CVE-2024-38077');
-  };
+      .replace(
+        /{{executive_summary}}/g,
+        'Example content for checking layout. This is not a vulnerability assessment or a delivery record.',
+      )
+      .replace(/{{cve_ids}}/g, 'Example CVE identifier')
+      .replace(/{{affected_systems}}/g, 'Example inventory asset')
+      .replace(
+        /{{remediation_steps}}/g,
+        'Review the applicable vendor advisory and test remediation through your change process.',
+      )
+      .replace(/{{vendor_link}}/g, 'https://example.com');
 
   const handleSave = async () => {
-    if (!await saveTemplate()) return;
+    if (!(await saveTemplate())) return;
     setSaveToast(true);
     setTimeout(() => setSaveToast(false), 2500);
   };
@@ -174,7 +179,8 @@ export const AdvisoryTemplateView: React.FC = () => {
             HTML Template Studio
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Visual template editor. Changes to typography, background colors, accents, and stamps render live and apply to all future automated security notifications.
+            Visual template editor. Changes to typography, background colors, accents, and stamps render live
+            and apply to all future automated security notifications.
           </p>
         </div>
 
@@ -295,18 +301,18 @@ export const AdvisoryTemplateView: React.FC = () => {
                 <input
                   type="color"
                   value={templateCustomization.canvasBg}
-                  onChange={e => updateTemplateCustomization({ canvasBg: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ canvasBg: e.target.value })}
                   className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
                 />
                 <input
                   type="text"
                   value={templateCustomization.canvasBg}
-                  onChange={e => updateTemplateCustomization({ canvasBg: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ canvasBg: e.target.value })}
                   className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-mono text-xs flex-1"
                 />
               </div>
               <div className="flex gap-1.5 mt-2">
-                {['#09090b', '#0b0f19', '#18181b', '#f8fafc'].map(c => (
+                {['#09090b', '#0b0f19', '#18181b', '#f8fafc'].map((c) => (
                   <button
                     key={c}
                     onClick={() => updateTemplateCustomization({ canvasBg: c })}
@@ -323,18 +329,18 @@ export const AdvisoryTemplateView: React.FC = () => {
                 <input
                   type="color"
                   value={templateCustomization.cardBg}
-                  onChange={e => updateTemplateCustomization({ cardBg: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ cardBg: e.target.value })}
                   className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
                 />
                 <input
                   type="text"
                   value={templateCustomization.cardBg}
-                  onChange={e => updateTemplateCustomization({ cardBg: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ cardBg: e.target.value })}
                   className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-mono text-xs flex-1"
                 />
               </div>
               <div className="flex gap-1.5 mt-2">
-                {['#18181b', '#1e293b', '#27272a', '#ffffff'].map(c => (
+                {['#18181b', '#1e293b', '#27272a', '#ffffff'].map((c) => (
                   <button
                     key={c}
                     onClick={() => updateTemplateCustomization({ cardBg: c })}
@@ -351,18 +357,18 @@ export const AdvisoryTemplateView: React.FC = () => {
                 <input
                   type="color"
                   value={templateCustomization.headerBg}
-                  onChange={e => updateTemplateCustomization({ headerBg: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ headerBg: e.target.value })}
                   className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
                 />
                 <input
                   type="text"
                   value={templateCustomization.headerBg}
-                  onChange={e => updateTemplateCustomization({ headerBg: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ headerBg: e.target.value })}
                   className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-mono text-xs flex-1"
                 />
               </div>
               <div className="flex gap-1.5 mt-2">
-                {['#1e293b', '#09090b', '#312e81', '#450a0a'].map(c => (
+                {['#1e293b', '#09090b', '#312e81', '#450a0a'].map((c) => (
                   <button
                     key={c}
                     onClick={() => updateTemplateCustomization({ headerBg: c })}
@@ -379,18 +385,18 @@ export const AdvisoryTemplateView: React.FC = () => {
                 <input
                   type="color"
                   value={templateCustomization.accentColor}
-                  onChange={e => updateTemplateCustomization({ accentColor: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ accentColor: e.target.value })}
                   className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
                 />
                 <input
                   type="text"
                   value={templateCustomization.accentColor}
-                  onChange={e => updateTemplateCustomization({ accentColor: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ accentColor: e.target.value })}
                   className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-mono text-xs flex-1"
                 />
               </div>
               <div className="flex gap-1.5 mt-2">
-                {['#3b82f6', '#10b981', '#8b5cf6', '#ef4444'].map(c => (
+                {['#3b82f6', '#10b981', '#8b5cf6', '#ef4444'].map((c) => (
                   <button
                     key={c}
                     onClick={() => updateTemplateCustomization({ accentColor: c })}
@@ -410,7 +416,7 @@ export const AdvisoryTemplateView: React.FC = () => {
               <label className="block text-zinc-400 font-mono mb-1.5">Font Style / Family</label>
               <select
                 value={templateCustomization.fontFamily}
-                onChange={e =>
+                onChange={(e) =>
                   updateTemplateCustomization({
                     fontFamily: e.target.value as any,
                   })
@@ -430,13 +436,13 @@ export const AdvisoryTemplateView: React.FC = () => {
                 <input
                   type="color"
                   value={templateCustomization.headingColor}
-                  onChange={e => updateTemplateCustomization({ headingColor: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ headingColor: e.target.value })}
                   className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
                 />
                 <input
                   type="text"
                   value={templateCustomization.headingColor}
-                  onChange={e => updateTemplateCustomization({ headingColor: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ headingColor: e.target.value })}
                   className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 font-mono text-xs flex-1"
                 />
               </div>
@@ -448,13 +454,13 @@ export const AdvisoryTemplateView: React.FC = () => {
                 <input
                   type="color"
                   value={templateCustomization.fontColor}
-                  onChange={e => updateTemplateCustomization({ fontColor: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ fontColor: e.target.value })}
                   className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0"
                 />
                 <input
                   type="text"
                   value={templateCustomization.fontColor}
-                  onChange={e => updateTemplateCustomization({ fontColor: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ fontColor: e.target.value })}
                   className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 font-mono text-xs flex-1"
                 />
               </div>
@@ -465,7 +471,7 @@ export const AdvisoryTemplateView: React.FC = () => {
               <div className="flex items-center space-x-2">
                 <select
                   value={templateCustomization.borderStyle}
-                  onChange={e => updateTemplateCustomization({ borderStyle: e.target.value as any })}
+                  onChange={(e) => updateTemplateCustomization({ borderStyle: e.target.value as any })}
                   className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2 py-1.5 text-zinc-200 text-xs flex-1"
                 >
                   <option value="solid">Solid Border</option>
@@ -474,7 +480,7 @@ export const AdvisoryTemplateView: React.FC = () => {
                 </select>
                 <select
                   value={templateCustomization.borderRadius}
-                  onChange={e => updateTemplateCustomization({ borderRadius: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ borderRadius: e.target.value })}
                   className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2 py-1.5 text-zinc-200 text-xs"
                 >
                   <option value="0px">Sharp (0px)</option>
@@ -496,21 +502,21 @@ export const AdvisoryTemplateView: React.FC = () => {
                 <input
                   type="checkbox"
                   checked={templateCustomization.showStamp}
-                  onChange={e => updateTemplateCustomization({ showStamp: e.target.checked })}
+                  onChange={(e) => updateTemplateCustomization({ showStamp: e.target.checked })}
                   className="rounded border-zinc-700 text-zinc-200"
                 />
               </div>
               <input
                 type="text"
                 value={templateCustomization.badgeStampText}
-                onChange={e => updateTemplateCustomization({ badgeStampText: e.target.value })}
+                onChange={(e) => updateTemplateCustomization({ badgeStampText: e.target.value })}
                 placeholder="e.g. OFFICIAL SECURITY BULLETIN"
                 disabled={!templateCustomization.showStamp}
                 className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-3 py-2 text-zinc-200 disabled:opacity-40 font-mono text-xs"
               />
               <div className="flex items-center space-x-1.5 mt-2">
                 <span className="text-[11px] text-zinc-500 font-mono">Presets:</span>
-                {['CONFIDENTIAL', 'URGENT ACTION', 'OFFICIAL BULLETIN', 'CSAF VEX'].map(t => (
+                {['CONFIDENTIAL', 'URGENT ACTION', 'OFFICIAL BULLETIN', 'CSAF VEX'].map((t) => (
                   <button
                     key={t}
                     onClick={() => updateTemplateCustomization({ badgeStampText: t })}
@@ -528,20 +534,20 @@ export const AdvisoryTemplateView: React.FC = () => {
                 <input
                   type="color"
                   value={templateCustomization.badgeStampColor}
-                  onChange={e => updateTemplateCustomization({ badgeStampColor: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ badgeStampColor: e.target.value })}
                   disabled={!templateCustomization.showStamp}
                   className="w-8 h-8 rounded-lg cursor-pointer bg-transparent border-0 disabled:opacity-40"
                 />
                 <input
                   type="text"
                   value={templateCustomization.badgeStampColor}
-                  onChange={e => updateTemplateCustomization({ badgeStampColor: e.target.value })}
+                  onChange={(e) => updateTemplateCustomization({ badgeStampColor: e.target.value })}
                   disabled={!templateCustomization.showStamp}
                   className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-2.5 py-1 text-zinc-200 font-mono text-xs flex-1 disabled:opacity-40"
                 />
               </div>
               <div className="flex gap-1.5 mt-2">
-                {['#ef4444', '#f59e0b', '#10b981', '#6366f1'].map(c => (
+                {['#ef4444', '#f59e0b', '#10b981', '#6366f1'].map((c) => (
                   <button
                     key={c}
                     onClick={() => updateTemplateCustomization({ badgeStampColor: c })}
@@ -558,14 +564,16 @@ export const AdvisoryTemplateView: React.FC = () => {
                 <input
                   type="checkbox"
                   checked={templateCustomization.showClassificationBanner}
-                  onChange={e => updateTemplateCustomization({ showClassificationBanner: e.target.checked })}
+                  onChange={(e) =>
+                    updateTemplateCustomization({ showClassificationBanner: e.target.checked })
+                  }
                   className="rounded border-zinc-700 text-zinc-200"
                 />
               </div>
               <input
                 type="text"
                 value={templateCustomization.classificationText}
-                onChange={e => updateTemplateCustomization({ classificationText: e.target.value })}
+                onChange={(e) => updateTemplateCustomization({ classificationText: e.target.value })}
                 disabled={!templateCustomization.showClassificationBanner}
                 className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg px-3 py-2 text-zinc-200 disabled:opacity-40 font-mono text-xs"
               />
@@ -590,7 +598,7 @@ export const AdvisoryTemplateView: React.FC = () => {
               '{{affected_systems}}',
               '{{remediation_steps}}',
               '{{vendor_link}}',
-            ].map(token => (
+            ].map((token) => (
               <button
                 key={token}
                 onClick={() => handleCopyToken(token)}
@@ -686,7 +694,7 @@ export const AdvisoryTemplateView: React.FC = () => {
             <div className="flex items-center space-x-1 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 p-0.5 rounded-xl font-mono text-[11px]">
               <button
                 type="button"
-                onClick={() => setZoomLevel(prev => Math.max(65, prev - 10))}
+                onClick={() => setZoomLevel((prev) => Math.max(65, prev - 10))}
                 className="p-1 text-zinc-400 hover:text-zinc-200"
                 title="Zoom Out"
               >
@@ -697,7 +705,7 @@ export const AdvisoryTemplateView: React.FC = () => {
               </span>
               <button
                 type="button"
-                onClick={() => setZoomLevel(prev => Math.min(130, prev + 10))}
+                onClick={() => setZoomLevel((prev) => Math.min(130, prev + 10))}
                 className="p-1 text-zinc-400 hover:text-zinc-200"
                 title="Zoom In"
               >
@@ -721,7 +729,11 @@ export const AdvisoryTemplateView: React.FC = () => {
               className="p-1.5 rounded-xl bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 hover:bg-zinc-800 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 transition"
               title="Copy Rendered HTML Code"
             >
-              {copiedHtml ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              {copiedHtml ? (
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
             </button>
             <button
               type="button"
@@ -943,14 +955,12 @@ export const AdvisoryTemplateView: React.FC = () => {
 
             <form onSubmit={handleSendTest} className="space-y-4 text-xs">
               <div>
-                <label className="block text-zinc-400 mb-1 font-mono">
-                  Destination Email Address *
-                </label>
+                <label className="block text-zinc-400 mb-1 font-mono">Destination Email Address *</label>
                 <input
                   type="email"
                   required
                   value={testEmail}
-                  onChange={e => setTestEmail(e.target.value)}
+                  onChange={(e) => setTestEmail(e.target.value)}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono focus:border-zinc-600 focus:outline-none"
                 />
               </div>
@@ -981,7 +991,8 @@ export const AdvisoryTemplateView: React.FC = () => {
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
             <h3 className="text-sm font-bold text-zinc-100 mb-2">Reset Template Customization?</h3>
             <p className="text-xs text-zinc-400 leading-relaxed mb-6">
-              This will restore the typography, colors, stamps, and layout to the factory enterprise security preset.
+              This will restore the typography, colors, stamps, and layout to the factory enterprise security
+              preset.
             </p>
             <div className="flex justify-end space-x-2">
               <button

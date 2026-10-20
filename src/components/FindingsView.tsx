@@ -21,13 +21,7 @@ import {
 import { Pagination } from './Pagination';
 
 export const FindingsView: React.FC = () => {
-  const {
-    findings,
-    selectedFinding,
-    setSelectedFinding,
-    updateFindingStatus,
-    resendNotification,
-  } = useApp();
+  const { findings, selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification } = useApp();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState('ALL');
@@ -44,25 +38,20 @@ export const FindingsView: React.FC = () => {
   const [resendModalOpen, setResendModalOpen] = useState(false);
   const [resendReason, setResendReason] = useState('');
 
-  const filteredFindings = findings.filter(f => {
+  const filteredFindings = findings.filter((f) => {
     const matchesSearch =
       f.cveId.toLowerCase().includes(searchTerm.toLowerCase()) ||
       f.matchedAssetName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       f.cve.title.toLowerCase().includes(searchTerm.toLowerCase());
 
-    const matchesSeverity =
-      severityFilter === 'ALL' || f.cve.cvss.severity === severityFilter;
+    const matchesSeverity = severityFilter === 'ALL' || f.cve.cvss.severity === severityFilter;
 
-    const matchesStatus =
-      statusFilter === 'ALL' || f.status === statusFilter;
+    const matchesStatus = statusFilter === 'ALL' || f.status === statusFilter;
 
     return matchesSearch && matchesSeverity && matchesStatus;
   });
 
-  const paginatedFindings = filteredFindings.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
+  const paginatedFindings = filteredFindings.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -76,9 +65,9 @@ export const FindingsView: React.FC = () => {
     setStatusModalOpen(true);
   };
 
-  const handleConfirmStatusChange = () => {
+  const handleConfirmStatusChange = async () => {
     if (selectedFinding) {
-      updateFindingStatus(selectedFinding.id, targetStatus, statusNote);
+      if (!(await updateFindingStatus(selectedFinding.id, targetStatus, statusNote))) return;
       setSelectedFinding({
         ...selectedFinding,
         status: targetStatus,
@@ -87,9 +76,9 @@ export const FindingsView: React.FC = () => {
     setStatusModalOpen(false);
   };
 
-  const handleConfirmResend = () => {
+  const handleConfirmResend = async () => {
     if (selectedFinding && resendReason.trim()) {
-      resendNotification(selectedFinding.cveId, resendReason);
+      if (!(await resendNotification(selectedFinding.cveId, resendReason))) return;
       setResendModalOpen(false);
       setResendReason('');
     }
@@ -105,7 +94,8 @@ export const FindingsView: React.FC = () => {
             Product Vulnerability Tracker
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Correlated vulnerabilities matching monitored products with uniform enterprise protection. Notifications are dispatched autonomously upon detection.
+            Correlated vulnerabilities matching monitored products with uniform enterprise protection.
+            Notifications are dispatched autonomously upon detection.
           </p>
         </div>
       </div>
@@ -118,7 +108,7 @@ export const FindingsView: React.FC = () => {
             type="text"
             placeholder="Search by CVE, product, or title..."
             value={searchTerm}
-            onChange={e => {
+            onChange={(e) => {
               setSearchTerm(e.target.value);
               setCurrentPage(1);
             }}
@@ -132,7 +122,7 @@ export const FindingsView: React.FC = () => {
             <span>Status:</span>
             <select
               value={statusFilter}
-              onChange={e => {
+              onChange={(e) => {
                 setStatusFilter(e.target.value);
                 setCurrentPage(1);
               }}
@@ -152,7 +142,7 @@ export const FindingsView: React.FC = () => {
             <span>Severity:</span>
             <select
               value={severityFilter}
-              onChange={e => {
+              onChange={(e) => {
                 setSeverityFilter(e.target.value);
                 setCurrentPage(1);
               }}
@@ -193,7 +183,7 @@ export const FindingsView: React.FC = () => {
                       </td>
                     </tr>
                   ) : (
-                    paginatedFindings.map(finding => {
+                    paginatedFindings.map((finding) => {
                       const isSelected = selectedFinding?.id === finding.id;
                       const isKev = finding.cve.cisaKev.isKev;
 
@@ -240,15 +230,13 @@ export const FindingsView: React.FC = () => {
                                   finding.cve.cvss.score >= 9.0
                                     ? 'text-rose-400'
                                     : finding.cve.cvss.score >= 7.0
-                                    ? 'text-amber-400'
-                                    : 'text-zinc-300 dark:text-zinc-300 light:text-zinc-800'
+                                      ? 'text-amber-400'
+                                      : 'text-zinc-300 dark:text-zinc-300 light:text-zinc-800'
                                 }`}
                               >
                                 {finding.cve.cvss.score.toFixed(1)}
                               </span>
-                              <span className="text-[10px] text-zinc-500">
-                                {finding.cve.cvss.severity}
-                              </span>
+                              <span className="text-[10px] text-zinc-500">{finding.cve.cvss.severity}</span>
                             </div>
                             <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-500">
                               EPSS: {(finding.cve.epss.score * 100).toFixed(1)}%
@@ -262,8 +250,8 @@ export const FindingsView: React.FC = () => {
                                 finding.exploitRisk === 'CISA_KEV_EXPLOITED'
                                   ? 'bg-amber-950/40 text-amber-300 border-amber-800/80 font-semibold'
                                   : finding.exploitRisk === 'WEAPONIZED_EXPLOIT'
-                                  ? 'bg-rose-950/40 text-rose-300 border-rose-800/80 font-semibold'
-                                  : 'bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border-zinc-700 dark:border-zinc-700 light:border-zinc-300'
+                                    ? 'bg-rose-950/40 text-rose-300 border-rose-800/80 font-semibold'
+                                    : 'bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border-zinc-700 dark:border-zinc-700 light:border-zinc-300'
                               }`}
                             >
                               {finding.exploitRisk.replace(/_/g, ' ')}
@@ -280,7 +268,10 @@ export const FindingsView: React.FC = () => {
                             </div>
                             {finding.autoDispatchedAt && (
                               <div className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
-                                {new Date(finding.autoDispatchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                {new Date(finding.autoDispatchedAt).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
                               </div>
                             )}
                           </td>
@@ -288,7 +279,7 @@ export const FindingsView: React.FC = () => {
                           {/* Details */}
                           <td className="py-3 px-3.5 text-right">
                             <button
-                              onClick={e => {
+                              onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedFinding(finding);
                               }}
@@ -350,7 +341,7 @@ export const FindingsView: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <select
                 value={selectedFinding.status}
-                onChange={e => handleOpenStatusChange(e.target.value as FindingStatus)}
+                onChange={(e) => handleOpenStatusChange(e.target.value as FindingStatus)}
                 className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-700/80 dark:border-zinc-700/80 light:border-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 text-xs rounded-xl px-2.5 py-1.5 font-medium focus:outline-none"
               >
                 <option value="MONITORED">Status: Monitored</option>
@@ -373,27 +364,41 @@ export const FindingsView: React.FC = () => {
             {/* Matched Product Details & Matching Evidence */}
             <div className="bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-xl p-3 text-xs space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono text-[10px] uppercase">Monitored Product Asset</span>
+                <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono text-[10px] uppercase">
+                  Monitored Product Asset
+                </span>
                 <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-200 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-800">
                   {selectedFinding.matchingMethod || 'STRICT_CPE'}
                 </span>
               </div>
-              <div className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900 font-semibold">{selectedFinding.matchedAssetName}</div>
+              <div className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900 font-semibold">
+                {selectedFinding.matchedAssetName}
+              </div>
               <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono text-[10px] break-all">
                 CPE: {selectedFinding.matchedCpe}
               </div>
               {selectedFinding.matchingEvidence && (
                 <div className="pt-2 border-t border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-[11px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono flex items-start gap-1.5">
-                  <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-800 font-semibold shrink-0">Evidence:</span>
-                  <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700">{selectedFinding.matchingEvidence}</span>
+                  <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-800 font-semibold shrink-0">
+                    Evidence:
+                  </span>
+                  <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
+                    {selectedFinding.matchingEvidence}
+                  </span>
                 </div>
               )}
               {selectedFinding.cve.vex && (
                 <div className="text-[10px] font-mono bg-zinc-900/90 dark:bg-zinc-900/90 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 p-2 rounded text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-                  <span className="text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-semibold">CSAF 2.0 VEX Status: </span>
-                  <span className="uppercase text-zinc-300 dark:text-zinc-300 light:text-zinc-700">{selectedFinding.cve.vex.status}</span>
+                  <span className="text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-semibold">
+                    CSAF 2.0 VEX Status:{' '}
+                  </span>
+                  <span className="uppercase text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
+                    {selectedFinding.cve.vex.status}
+                  </span>
                   {selectedFinding.cve.vex.justification && (
-                    <div className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-0.5">• {selectedFinding.cve.vex.justification}</div>
+                    <div className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-0.5">
+                      • {selectedFinding.cve.vex.justification}
+                    </div>
                   )}
                 </div>
               )}
@@ -402,7 +407,9 @@ export const FindingsView: React.FC = () => {
             {/* Vendor Advisory link */}
             <div className="flex items-center justify-between text-xs bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 p-3 rounded-xl">
               <div>
-                <div className="font-semibold text-zinc-200 dark:text-zinc-200 light:text-zinc-900">Vendor Advisory Reference</div>
+                <div className="font-semibold text-zinc-200 dark:text-zinc-200 light:text-zinc-900">
+                  Vendor Advisory Reference
+                </div>
                 <div className="text-[11px] text-zinc-500 font-mono">
                   Ref: {selectedFinding.cve.remediation.vendorAdvisoryRef}
                 </div>
@@ -471,9 +478,12 @@ export const FindingsView: React.FC = () => {
                     <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 mt-1.5 shrink-0" />
                     <div>
                       <div className="text-zinc-300 dark:text-zinc-300 light:text-zinc-800 font-medium">
-                        {event.action} • <span className="text-zinc-500 font-mono text-[10px]">{event.system}</span>
+                        {event.action} •{' '}
+                        <span className="text-zinc-500 font-mono text-[10px]">{event.system}</span>
                       </div>
-                      <div className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px]">{event.details}</div>
+                      <div className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px]">
+                        {event.details}
+                      </div>
                       <div className="text-zinc-500 font-mono text-[10px]">
                         {new Date(event.timestamp).toLocaleString()}
                       </div>
@@ -503,19 +513,23 @@ export const FindingsView: React.FC = () => {
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Target Status</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                  Target Status
+                </label>
                 <div className="p-2 rounded-xl bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-900 font-mono font-semibold">
                   {targetStatus}
                 </div>
               </div>
 
               <div>
-                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Audit Note</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                  Audit Note
+                </label>
                 <textarea
                   rows={3}
                   placeholder="e.g. Verified vendor patch rollout in maintenance window."
                   value={statusNote}
-                  onChange={e => setStatusNote(e.target.value)}
+                  onChange={(e) => setStatusNote(e.target.value)}
                   className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                 />
               </div>
@@ -566,7 +580,7 @@ export const FindingsView: React.FC = () => {
               required
               placeholder="e.g. Critical patch update released by vendor."
               value={resendReason}
-              onChange={e => setResendReason(e.target.value)}
+              onChange={(e) => setResendReason(e.target.value)}
               className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:outline-none focus:border-zinc-600"
             />
 

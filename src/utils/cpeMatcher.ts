@@ -7,7 +7,7 @@ import { NvdVersionRange, isVersionInNvdRange } from './versionComparator';
 
 export interface ParsedCPE {
   prefix: string; // cpe:2.3
-  part: string;   // a, o, h
+  part: string; // a, o, h
   vendor: string;
   product: string;
   version: string;
@@ -34,7 +34,11 @@ export function parseCPE23(cpeString: string): ParsedCPE {
 
   const tokens = splitCpeTokens(trimmed.slice(8));
 
-  if (tokens.length !== 11 || !['a', 'o', 'h', '*', '-'].includes(tokens[0]) || tokens.some(token => !token || /(?<!\\)(?:\\\\)*\\$/.test(token))) {
+  if (
+    tokens.length !== 11 ||
+    !['a', 'o', 'h', '*', '-'].includes(tokens[0]) ||
+    tokens.some((token) => !token || /(?<!\\)(?:\\\\)*\\$/.test(token))
+  ) {
     return createEmptyCPE(trimmed, false);
   }
 
@@ -103,10 +107,10 @@ function matchComponent(assetAttr: string, vulnAttr: string): boolean {
   if (assetAttr === '*' || vulnAttr === '*') return true;
   if (assetAttr === '-' && vulnAttr === '-') return true;
   if (assetAttr === '-' || vulnAttr === '-') return false;
-  
+
   const a = assetAttr.replace(/\\/g, '').toLowerCase();
   const v = vulnAttr.replace(/\\/g, '').toLowerCase();
-  
+
   return a === v;
 }
 
@@ -116,7 +120,7 @@ function matchComponent(assetAttr: string, vulnAttr: string): boolean {
 export function matchCPE(
   assetCpeStr: string,
   vulnCpeStr: string,
-  versionRange?: NvdVersionRange
+  versionRange?: NvdVersionRange,
 ): { matched: boolean; reason?: string } {
   const asset = parseCPE23(assetCpeStr);
   const vuln = parseCPE23(vulnCpeStr);
@@ -128,13 +132,13 @@ export function matchCPE(
   // Part match (application, os, hardware)
   if (!matchComponent(asset.part, vuln.part)) return { matched: false, reason: 'Part mismatch' };
 
-  // Vendor match with alias resolution
-  if (!matchVendorWithAliases(asset.vendor, vuln.vendor)) {
+  // Structured identifiers require exact components; aliases are only for catalog search.
+  if (!matchComponent(asset.vendor, vuln.vendor)) {
     return { matched: false, reason: `Vendor mismatch (${asset.vendor} vs ${vuln.vendor})` };
   }
 
-  // Product match with alias resolution
-  if (!matchProductWithAliases(asset.product, vuln.product)) {
+  // Do not equate separate products through marketing aliases.
+  if (!matchComponent(asset.product, vuln.product)) {
     return { matched: false, reason: `Product mismatch (${asset.product} vs ${vuln.product})` };
   }
 
@@ -153,14 +157,21 @@ export function matchCPE(
   }
 
   // Version matching: If explicit NVD version interval provided, evaluate interval
-  if (versionRange && (versionRange.versionStartIncluding || versionRange.versionStartExcluding || versionRange.versionEndExcluding || versionRange.versionEndIncluding)) {
+  if (
+    versionRange &&
+    (versionRange.versionStartIncluding ||
+      versionRange.versionStartExcluding ||
+      versionRange.versionEndExcluding ||
+      versionRange.versionEndIncluding)
+  ) {
     const rangeCheck = isVersionInNvdRange(asset.version, versionRange);
     if (!rangeCheck.inRange) {
       return { matched: false, reason: rangeCheck.reason };
     }
   } else {
     // Standard component matching
-    if (!matchComponent(asset.version, vuln.version)) return { matched: false, reason: 'Version token mismatch' };
+    if (!matchComponent(asset.version, vuln.version))
+      return { matched: false, reason: 'Version token mismatch' };
   }
 
   return { matched: true };
@@ -208,7 +219,7 @@ export function matchVendorWithAliases(assetVendor: string, vulnVendor: string):
 
   // Check aliases
   for (const [canonical, aliases] of Object.entries(VENDOR_ALIASES)) {
-    const group = [canonical, ...aliases].map(s => s.replace(/[^a-z0-9]/g, ''));
+    const group = [canonical, ...aliases].map((s) => s.replace(/[^a-z0-9]/g, ''));
     if (group.includes(a) && group.includes(v)) return true;
   }
 
@@ -224,7 +235,7 @@ export function matchProductWithAliases(assetProduct: string, vulnProduct: strin
   if (a === v) return true;
 
   for (const [canonical, aliases] of Object.entries(PRODUCT_ALIASES)) {
-    const group = [canonical, ...aliases].map(s => s.replace(/[^a-z0-9]/g, ''));
+    const group = [canonical, ...aliases].map((s) => s.replace(/[^a-z0-9]/g, ''));
     if (group.includes(a) && group.includes(v)) return true;
   }
 
@@ -241,17 +252,34 @@ export function matchPurl(assetPurl: string, vulnPurl: string): boolean {
     const match = /^pkg:([a-z][a-z0-9.+-]*)\/([^?#]+)(\?[^#]*)?(#.*)?$/.exec(value.trim());
     if (!match) return null;
     const at = match[2].lastIndexOf('@');
-    return { identity: `${match[1]}/${at > 0 ? match[2].slice(0, at) : match[2]}`,
-      version: at > 0 ? match[2].slice(at + 1) : '', qualifiers: match[3] || '', subpath: match[4] || '' };
+    return {
+      identity: `${match[1]}/${at > 0 ? match[2].slice(0, at) : match[2]}`,
+      version: at > 0 ? match[2].slice(at + 1) : '',
+      qualifiers: match[3] || '',
+      subpath: match[4] || '',
+    };
   };
-  const a = parse(assetPurl), v = parse(vulnPurl);
-  return !!a && !!v && a.identity === v.identity && (!v.version || a.version === v.version)
-    && a.qualifiers === v.qualifiers && a.subpath === v.subpath;
+  const a = parse(assetPurl),
+    v = parse(vulnPurl);
+  return (
+    !!a &&
+    !!v &&
+    a.identity === v.identity &&
+    (!v.version || a.version === v.version) &&
+    a.qualifiers === v.qualifiers &&
+    a.subpath === v.subpath
+  );
 }
 
 export interface MatchResult {
   matched: boolean;
-  method: 'STRICT_CPE_INTERVAL' | 'STRICT_CPE' | 'PURL_EXACT' | 'VENDOR_PRODUCT_ALIAS' | 'VENDOR_PRODUCT_FALLBACK' | 'NONE';
+  method:
+    | 'STRICT_CPE_INTERVAL'
+    | 'STRICT_CPE'
+    | 'PURL_EXACT'
+    | 'VENDOR_PRODUCT_ALIAS'
+    | 'VENDOR_PRODUCT_FALLBACK'
+    | 'NONE';
   matchedCpe?: string;
   confidence: number; // 0 to 100
   evidence: string;
@@ -273,7 +301,7 @@ export function matchesWatchlistItem(
   assetPurls?: string[],
   vulnPurls?: string[],
   assetTargetHw?: string,
-  vulnTargetHw?: string
+  vulnTargetHw?: string,
 ): MatchResult {
   // 1. Architecture De-noising check
   if (assetTargetHw && vulnTargetHw && assetTargetHw !== '*' && vulnTargetHw !== '*') {
@@ -295,7 +323,10 @@ export function matchesWatchlistItem(
       for (const vp of vulnPurls) {
         const packageVersion = ap.split(/[?#]/)[0].split('@').pop();
         const hasVersion = ap.split(/[?#]/)[0].lastIndexOf('@') > ap.indexOf('/') + 1;
-        if (matchPurl(ap, vp) && (!versionRange || (hasVersion && isVersionInNvdRange(packageVersion!, versionRange).inRange))) {
+        if (
+          matchPurl(ap, vp) &&
+          (!versionRange || (hasVersion && isVersionInNvdRange(packageVersion!, versionRange).inRange))
+        ) {
           return {
             matched: true,
             method: 'PURL_EXACT',
@@ -328,7 +359,12 @@ export function matchesWatchlistItem(
 
   // Structured identifiers are authoritative; do not undo exclusions with text heuristics.
   if ((assetCpes.length && vulnCpeMatches.length) || (assetPurls?.length && vulnPurls?.length)) {
-    return { matched: false, method: 'NONE', confidence: 0, evidence: 'Structured identifiers did not match' };
+    return {
+      matched: false,
+      method: 'NONE',
+      confidence: 0,
+      evidence: 'Structured identifiers did not match',
+    };
   }
 
   // 4. Vendor / Product Alias Resolution
@@ -373,11 +409,11 @@ export function generateCPE23(
   vendor: string,
   product: string,
   version: string = '*',
-  targetHw: string = '*'
+  targetHw: string = '*',
 ): string {
   const cleanPart = part || 'a';
-  const cleanVendor = (vendor || 'any').toLowerCase().replace(/[^a-z0-9_]/g, '_');
-  const cleanProduct = (product || 'any').toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  const cleanVendor = (vendor || 'any').toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '_');
+  const cleanProduct = (product || 'any').toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '_');
   const cleanVersion = version && version !== '*' ? version.trim() : '*';
   const cleanHw = targetHw && targetHw !== '*' ? targetHw.trim() : '*';
 

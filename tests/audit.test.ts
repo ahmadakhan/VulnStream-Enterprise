@@ -1,4 +1,6 @@
-import type { NormalizedCVE } from '../src/types';
+import { generateCPE23 } from '../src/utils/cpeMatcher';
+import { buildStrictCpe23 } from '../src/data/vendorCatalog';
+import type { NormalizedCVE, WatchListItem } from '../src/types';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
@@ -62,7 +64,7 @@ function fixture() {
     purls: undefined,
     vex: undefined,
   };
-  const asset = {
+  const asset: WatchListItem = {
     ...structuredClone(INITIAL_WATCHLIST[0]),
     id: 'asset-test',
     vendor: 'vendor',
@@ -184,4 +186,55 @@ test('PURL cannot bypass an explicit version exclusion', () => {
     ).matched,
     false,
   );
+});
+
+test('unsupported package version ordering requires review before dispatch', () => {
+  const { cve, asset, settings } = fixture();
+  asset.cpes = [];
+  asset.purls = ['pkg:npm/widget@1.0-beta'];
+  cve.cpeMatches = [];
+  cve.purls = ['pkg:npm/widget'];
+  cve.versionRange = { versionEndExcluding: '2.0' };
+  const result = runVulnerabilityPipeline([], [cve], [asset], [], [], settings);
+  assert.equal(result.newFindings.length, 1);
+  assert.equal(result.newFindings[0].notificationStatus, 'REVIEW_REQUIRED');
+});
+
+test('strict CPE does not equate different products through marketing aliases', () => {
+  assert.equal(
+    matchCPE(
+      'cpe:2.3:a:paloaltonetworks:globalprotect:6.0:*:*:*:*:*:*:*',
+      'cpe:2.3:a:paloaltonetworks:pan_os:*:*:*:*:*:*:*:*',
+    ).matched,
+    false,
+  );
+});
+test('empty per-CPE details fall back to supplied CPE matches', () => {
+  const { cve, asset, settings } = fixture();
+  cve.cpeMatchDetails = [];
+  assert.equal(runVulnerabilityPipeline([], [cve], [asset], [], [], settings).newFindings.length, 1);
+});
+test('package without installed version produces a review finding for a ranged vulnerability', () => {
+  const { cve, asset, settings } = fixture();
+  asset.cpes = [];
+  asset.purls = ['pkg:npm/widget'];
+  cve.cpeMatches = [];
+  cve.purls = ['pkg:npm/widget'];
+  cve.versionRange = { versionEndExcluding: '2.0' };
+  const result = runVulnerabilityPipeline([], [cve], [asset], [], [], settings);
+  assert.equal(result.newFindings.length, 1);
+  assert.equal(result.newFindings[0].notificationStatus, 'REVIEW_REQUIRED');
+});
+test('unknown architecture cannot confirm an architecture-specific vulnerability', () => {
+  const { cve, asset, settings } = fixture();
+  cve.cpeMatches = ['cpe:2.3:a:vendor:widget:*:*:*:*:*:*:arm64:*'];
+  const result = runVulnerabilityPipeline([], [cve], [asset], [], [], settings);
+  assert.equal(result.newFindings.length, 1);
+  assert.equal(result.newFindings[0].notificationStatus, 'REVIEW_REQUIRED');
+});
+
+test('inventory CPE builders preserve hyphens in canonical product identifiers', () => {
+  for (const build of [generateCPE23, buildStrictCpe23]) {
+    assert.equal(parseCPE23(build('o','paloaltonetworks','pan-os','10.2.3')).product,'pan-os');
+  }
 });
