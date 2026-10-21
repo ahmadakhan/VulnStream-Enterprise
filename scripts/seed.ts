@@ -12,7 +12,13 @@ const encryptFeedKey = (feed: (typeof INITIAL_FEEDS)[number]) =>
 try {
   await transaction(pool, async (db) => {
     for (const feed of INITIAL_FEEDS) {
-      await put(db, 'feeds', feed.id, { ...feed, authSecretKey: encryptFeedKey(feed) });
+      await put(db, 'feeds', feed.id, {
+        ...feed,
+        authSecretKey: encryptFeedKey(feed),
+        healthStatus: 'UNTESTED' as const,
+        ssrfValidated: true,
+        latencyMs: 0,
+      });
     }
 
     for (const item of INITIAL_WATCHLIST) {
