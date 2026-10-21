@@ -241,7 +241,12 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         headers.Authorization = `${feed.authType === 'BASIC' ? 'Basic' : 'Bearer'} ${feed.authType === 'BASIC' ? Buffer.from(secret).toString('base64') : secret}`;
       let response: ResponseData;
       try {
-        response = await request(feed.url, { headers });
+        const testUrl = new URL(feed.url);
+        if (feed.type === 'NVD_API') testUrl.searchParams.set('resultsPerPage', '1');
+        const requestOptions = feed.type === 'NVD_API'
+          ? { headers, timeoutMs: 25000, socketTimeoutMs: 20000, maxResponseBytes: 256 * 1024 }
+          : { headers };
+        response = await request(testUrl.href, requestOptions);
         const latency = Math.round(performance.now() - start);
         await transaction(pool, async (db) => {
           const current = await get<ThreatFeed>(db, 'feeds', feed.id);

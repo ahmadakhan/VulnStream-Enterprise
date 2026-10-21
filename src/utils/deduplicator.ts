@@ -3,7 +3,43 @@
  * Enforces canonical CVE-YYYY-NNNN+ format and O(1) tracking.
  */
 
+import type { NormalizedCVE } from '../types';
+
 const CVE_REGEX = /^CVE-\d{4}-\d{4,}$/i;
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object')
+    return `{${Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, v]) => `${JSON.stringify(key)}:${stableJson(v)}`).join(',')}}`;
+  return JSON.stringify(value) ?? 'null';
+}
+
+/** Select a complete source revision; never combine applicability ranges from unrelated revisions. */
+export function mergeCveRecords(records: NormalizedCVE[]): Map<string, NormalizedCVE> {
+  const merged = new Map<string, NormalizedCVE>();
+  const applicability = (cve: NormalizedCVE) => stableJson({
+    cpes: [...cve.cpeMatches].sort(),
+    details: cve.cpeMatchDetails?.map(stableJson).sort(),
+    range: cve.versionRange, purls: cve.purls ? [...cve.purls].sort() : undefined,
+  });
+  const content = ({ sourceFeeds: _sources, applicabilityRequiresReview: _review, ...cve }: NormalizedCVE) => stableJson(cve);
+  for (const raw of records) {
+    const cveId = normalizeCveId(raw.cveId);
+    if (!cveId) continue;
+    const candidate = { ...raw, cveId };
+    const old = merged.get(cveId);
+    if (!old) { merged.set(cveId, candidate); continue; }
+    const delta = Date.parse(candidate.modifiedDate) - Date.parse(old.modifiedDate);
+    const winner = delta > 0 || (delta === 0 && content(candidate) > content(old)) ? candidate : old;
+    merged.set(cveId, {
+      ...winner,
+      sourceFeeds: [...new Set([...old.sourceFeeds, ...candidate.sourceFeeds])].sort(),
+      applicabilityRequiresReview: winner.applicabilityRequiresReview ||
+        (delta === 0 && (old.applicabilityRequiresReview || candidate.applicabilityRequiresReview || applicability(old) !== applicability(candidate))),
+    });
+  }
+  return merged;
+}
 
 /**
  * Normalizes any CVE string into canonical uppercase, trimmed format.

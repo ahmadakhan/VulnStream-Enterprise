@@ -11,7 +11,7 @@ import type {
   EmailDeliveryLog,
   AuditLog,
 } from '../types';
-import { normalizeCveId, isWithinTimelineScope } from '../utils/deduplicator';
+import { normalizeCveId, isWithinTimelineScope, mergeCveRecords } from '../utils/deduplicator';
 import { matchesWatchlistItem } from '../utils/cpeMatcher';
 import ipaddr from 'ipaddr.js';
 export interface PipelineRunResult {
@@ -68,16 +68,10 @@ export function runVulnerabilityPipeline(
   const started = new Date(),
     known = new Set(existing.map((f) => `${normalizeCveId(f.cveId)}:${f.matchedAssetId}`));
   const newFindings: Finding[] = [];
-  let duplicates = 0,
-    processed = 0;
-  const latest = new Map<string, NormalizedCVE>();
-  for (const raw of corpus) {
-    const id = normalizeCveId(raw.cveId);
-    if (!id) continue;
-    const previous = latest.get(id);
-    if (previous) duplicates++;
-    if (!previous || Date.parse(raw.modifiedDate) > Date.parse(previous.modifiedDate)) latest.set(id, raw);
-  }
+  let processed = 0;
+  const latest = mergeCveRecords(corpus);
+  const duplicates = corpus.filter((cve) => normalizeCveId(cve.cveId)).length - latest.size;
+  const activeAssets = watchlist.filter((asset) => asset.active);
   for (const raw of latest.values()) {
     const canonical = normalizeCveId(raw.cveId);
     if (
@@ -87,7 +81,7 @@ export function runVulnerabilityPipeline(
       continue;
     processed++;
     const cve = { ...raw, cveId: canonical };
-    for (const asset of watchlist.filter((a) => a.active)) {
+    for (const asset of activeAssets) {
       const key = `${canonical}:${asset.id}`;
       if (known.has(key) && !includeExistingCandidates) continue;
       const applicabilitySets = cve.cpeMatchDetails?.length
@@ -111,7 +105,8 @@ export function runVulnerabilityPipeline(
             asset.targetHw,
           ),
         )
-        .find((match) => match.matched);
+        .filter((match) => match.matched)
+        .sort((a, b) => b.confidence - a.confidence)[0];
       if (!result?.matched) continue;
       if (cve.applicabilityRequiresReview || result.applicabilityRequiresReview) result.confidence = 0;
       const confirmed = result.confidence >= 90;

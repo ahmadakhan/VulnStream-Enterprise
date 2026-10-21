@@ -38,9 +38,20 @@ export interface ResponseData {
   body: string;
   headers: Record<string, string | string[] | undefined>;
 }
+export interface RequestOptions {
+  method?: 'GET' | 'POST';
+  headers?: Record<string, string>;
+  body?: string;
+  /** Maximum duration for the request, including response-body transfer. */
+  timeoutMs?: number;
+  /** Maximum period without socket activity. */
+  socketTimeoutMs?: number;
+  /** Maximum accepted response body size. */
+  maxResponseBytes?: number;
+}
 export type Requester = (
   url: string,
-  options?: { method?: 'GET' | 'POST'; headers?: Record<string, string>; body?: string },
+  options?: RequestOptions,
 ) => Promise<ResponseData>;
 export function createRequester(config: Config): Requester {
   const allowlist = config.EGRESS_ALLOWED_HOSTS.split(',')
@@ -59,16 +70,17 @@ export function createRequester(config: Config): Requester {
           lookup: ((_host: string, opts: any, cb: any) =>
             opts?.all ? cb(null, [selected]) : cb(null, selected.address, selected.family)) as any,
           agent: false,
-          timeout: 15000,
+          timeout: options.socketTimeoutMs ?? 15000,
           maxHeaderSize: 16384,
         },
         (response) => {
           let bytes = 0;
           const chunks: Buffer[] = [];
+          const maxResponseBytes = options.maxResponseBytes ?? 8 * 1024 * 1024;
           response.on('data', (chunk: Buffer) => {
             bytes += chunk.length;
-            if (bytes > 8 * 1024 * 1024) {
-              response.destroy(new Error('Response exceeds 8 MiB limit'));
+            if (bytes > maxResponseBytes) {
+              response.destroy(new Error(`Response exceeds configured ${maxResponseBytes}-byte limit`));
               return;
             }
             chunks.push(chunk);
@@ -84,7 +96,10 @@ export function createRequester(config: Config): Requester {
           });
         },
       );
-      const deadline = setTimeout(() => request.destroy(new Error('Outbound request timed out')), 20000);
+      const deadline = setTimeout(
+        () => request.destroy(new Error('Outbound request timed out')),
+        options.timeoutMs ?? 20000,
+      );
       request.on('close', () => clearTimeout(deadline));
       request.on('timeout', () => request.destroy(new Error('Outbound request timed out')));
       request.on('error', reject);

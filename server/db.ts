@@ -60,19 +60,21 @@ export async function put(db: Db, kind: string, id: string, data: unknown) {
   );
 }
 export async function putMany(db: Db, kind: string, items: { id: string; data: unknown }[]) {
-  if (!items.length) return;
-  const values: unknown[] = [];
-  const params: string[] = [];
-  let idx = 1;
-  for (const item of items) {
-    params.push(`($${idx},$${idx + 1},$${idx + 2})`);
-    values.push(kind, item.id, JSON.stringify(item.data));
-    idx += 3;
+  // PostgreSQL permits at most 65,535 bind parameters. Bound statement size as
+  // well, and coalesce repeated IDs so a batch never updates one row twice.
+  const unique = [...new Map(items.map((item) => [item.id, item])).values()];
+  for (let offset = 0; offset < unique.length; offset += 1000) {
+    const values: unknown[] = [];
+    const params = unique.slice(offset, offset + 1000).map((item, index) => {
+      values.push(kind, item.id, JSON.stringify(item.data));
+      const first = index * 3 + 1;
+      return `($${first},$${first + 1},$${first + 2})`;
+    });
+    await db.query(
+      `INSERT INTO records(kind,id,data) VALUES${params.join(',')} ON CONFLICT(kind,id) DO UPDATE SET data=EXCLUDED.data,updated_at=now() WHERE records.data IS DISTINCT FROM EXCLUDED.data`,
+      values,
+    );
   }
-  await db.query(
-    `INSERT INTO records(kind,id,data) VALUES${params.join(',')} ON CONFLICT(kind,id) DO UPDATE SET data=EXCLUDED.data,updated_at=now()`,
-    values,
-  );
 }
 export async function get<T>(db: Db, kind: string, id: string): Promise<T | undefined> {
   return (await db.query('SELECT data FROM records WHERE kind=$1 AND id=$2', [kind, id])).rows[0]?.data;

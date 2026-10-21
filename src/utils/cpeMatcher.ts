@@ -307,6 +307,10 @@ export function matchesWatchlistItem(
   assetTargetHw?: string,
   vulnTargetHw?: string,
 ): MatchResult {
+  let bestMatch: MatchResult | undefined;
+  const retain = (candidate: MatchResult) => {
+    if (!bestMatch || candidate.confidence > bestMatch.confidence) bestMatch = candidate;
+  };
   // 1. Architecture De-noising check
   if (assetTargetHw && vulnTargetHw && assetTargetHw !== '*' && vulnTargetHw !== '*') {
     const hwA = assetTargetHw.toLowerCase();
@@ -331,22 +335,23 @@ export function matchesWatchlistItem(
         if (versionRange && hasVersion && !isVersionInNvdRange(packageVersion!, versionRange).inRange)
           continue;
         if (versionRange) {
-          return {
+          retain({
             matched: true,
             method: 'PURL_EXACT',
             confidence: hasVersion && canCompareRange(packageVersion!, versionRange) ? 95 : 70,
             matchedCpe: ap,
             evidence: `Matched package dependency via PURL: ${vp} (95% confidence)`,
             applicabilityRequiresReview: !hasVersion || !canCompareRange(packageVersion!, versionRange),
-          };
+          });
+          continue;
         }
-        return {
+        retain({
           matched: true,
           method: 'PURL_EXACT',
           confidence: 95,
           matchedCpe: ap,
           evidence: `Matched package dependency via PURL: ${vp} (95% confidence)`,
-        };
+        });
       }
     }
   }
@@ -363,11 +368,14 @@ export function matchesWatchlistItem(
           rangeHasBounds &&
           (!asset.version || asset.version === '*' || !canCompareRange(asset.version, versionRange!)),
         );
-        const architectureNeedsReview = Boolean(
-          asset.isValid && vuln.isValid && vuln.targetHw !== '*' && asset.targetHw === '*',
-        );
-        const requiresReview = rangeNeedsReview || architectureNeedsReview;
-        return {
+        // An unknown inventory component cannot prove a constrained criterion,
+        // including explicit versions, editions, target OS, language or updates.
+        const contextNeedsReview = ([
+          'part', 'vendor', 'product', 'version', 'update', 'edition', 'language',
+          'swEdition', 'targetSw', 'targetHw', 'other',
+        ] as const).some((field) => asset[field] === '*' && vuln[field] !== '*');
+        const requiresReview = rangeNeedsReview || contextNeedsReview;
+        retain({
           matched: true,
           method: versionRange ? 'STRICT_CPE_INTERVAL' : 'STRICT_CPE',
           confidence: requiresReview ? 70 : versionRange ? 100 : 90,
@@ -378,10 +386,12 @@ export function matchesWatchlistItem(
               : `Matched strict CPE 2.3 component tokens + verified in version interval [< ${versionRange.versionEndExcluding || versionRange.versionEndIncluding}] (100% confidence)`
             : `Matched strict CPE 2.3 component tokens (90% confidence)`,
           applicabilityRequiresReview: requiresReview,
-        };
+        });
       }
     }
   }
+
+  if (bestMatch) return bestMatch;
 
   // Structured identifiers are authoritative; do not undo exclusions with text heuristics.
   if ((assetCpes.length && vulnCpeMatches.length) || (assetPurls?.length && vulnPurls?.length)) {

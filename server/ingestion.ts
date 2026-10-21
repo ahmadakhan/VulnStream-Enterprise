@@ -1,5 +1,5 @@
 import type { ThreatFeed, NormalizedCVE } from '../src/types';
-import type { Requester } from './network';
+import type { Requester, RequestOptions, ResponseData } from './network';
 import { cveSchema } from './validation';
 import { decrypt } from './secrets';
 import type { Config } from './config';
@@ -104,13 +104,47 @@ export async function ingestFeed(
     else
       headers.Authorization = `${feed.authType === 'BASIC' ? 'Basic' : 'Bearer'} ${feed.authType === 'BASIC' ? Buffer.from(secret).toString('base64') : secret}`;
   }
-  const json = async (url: string, conditional = true): Promise<{ data: any; etag: string | undefined }> => {
+  const json = async (
+    url: string,
+    conditional = true,
+    requestOptions: Omit<RequestOptions, 'headers'> = {},
+    retryTransient = false,
+  ): Promise<{ data: any; etag: string | undefined }> => {
     if (conditional && feed.etag) headers['If-None-Match'] = feed.etag;
-    const response = await request(url, { headers });
+    let response: ResponseData;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        response = await request(url, { headers, ...requestOptions });
+      } catch (error) {
+        const timedOut = error instanceof Error && /timed out|timeout/i.test(error.message);
+        if (!retryTransient || !timedOut || attempt >= 2) throw error;
+        await sleep(2000 * (attempt + 1));
+        continue;
+      }
+      const retryableStatus = [429, 502, 503, 504].includes(response.status);
+      if (!retryTransient || !retryableStatus || attempt >= 2) break;
+      const retryAfter = response.headers['retry-after'];
+      const retryAfterValue = Array.isArray(retryAfter) ? retryAfter[0] : retryAfter;
+      const retryAfterSeconds = retryAfterValue ? Number(retryAfterValue) : NaN;
+      const retryAfterDate = retryAfterValue ? Date.parse(retryAfterValue) : NaN;
+      const retryDelay = Number.isFinite(retryAfterSeconds)
+        ? retryAfterSeconds * 1000
+        : Number.isFinite(retryAfterDate)
+          ? retryAfterDate - Date.now()
+          : response.status === 429
+            ? 30000
+            : 2000 * (attempt + 1);
+      await sleep(Math.min(60000, Math.max(1000, retryDelay)));
+    }
     if (response.status === 304) {
       return { data: null, etag: feed.etag };
     }
-    if (response.status !== 200) throw new Error(`Feed returned HTTP ${response.status}`);
+    if (response.status !== 200)
+      throw new Error(
+        response.status === 429
+          ? 'NVD rate limit reached after retries; wait and run the pipeline again'
+          : `Feed returned HTTP ${response.status}`,
+      );
     const etag = response.headers.etag as string | undefined;
     try {
       return { data: JSON.parse(response.body), etag };
@@ -131,7 +165,12 @@ export async function ingestFeed(
       url.searchParams.set('resultsPerPage', '1000');
       // Each page has a distinct URL and the time window moves on every run;
       // a single feed-level ETag cannot safely validate this paginated query.
-      const { data } = await json(url.href, false);
+      const { data } = await json(
+        url.href,
+        false,
+        { timeoutMs: 60000, socketTimeoutMs: 30000, maxResponseBytes: 16 * 1024 * 1024 },
+        true,
+      );
       if (!data) return { cves: [], count: 0, notModified: true };
       const page = data;
       if (
