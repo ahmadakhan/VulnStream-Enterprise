@@ -165,6 +165,14 @@ export async function ingestFeed(
   targetCveIds: string[] = [],
   onNvdProgress?: (progress: { offset: number; total: number; records: number }) => Promise<void> | void,
 ): Promise<IngestResult> {
+  const upstreamRequest = request;
+  request = (url, options = {}) => upstreamRequest(url, {
+    ...options,
+    ...(feed.requestTimeoutSeconds === undefined ? {} : {
+      timeoutMs: feed.requestTimeoutSeconds * 1000,
+      socketTimeoutMs: feed.requestTimeoutSeconds * 1000,
+    }),
+  });
   const headers: Record<string, string> = {};
   const nvdInterval = Math.max(60000 / feed.rateLimitPerMin, feed.authType === 'API_KEY' ? 700 : 6500);
   if (feed.authType !== 'NONE') {

@@ -39,6 +39,8 @@ export const ThreatFeedsView: React.FC = () => {
     url: '',
     authType: 'NONE' as FeedAuthType,
     authSecretKey: '',
+    requestTimeoutSeconds: 60,
+    recoveryDelayMinutes: 5,
     rateLimitPerMin: 60,
     enabled: true,
   });
@@ -83,7 +85,9 @@ export const ThreatFeedsView: React.FC = () => {
       url: 'https://',
       authType: 'NONE',
       authSecretKey: '',
-      rateLimitPerMin: 60,
+      requestTimeoutSeconds: 60,
+    recoveryDelayMinutes: 5,
+    rateLimitPerMin: 60,
       enabled: true,
     });
     setEditingFeed(null);
@@ -98,6 +102,8 @@ export const ThreatFeedsView: React.FC = () => {
       url: feed.url,
       authType: feed.authType,
       authSecretKey: feed.authSecretKey || '',
+      requestTimeoutSeconds: feed.requestTimeoutSeconds ?? 60,
+      recoveryDelayMinutes: feed.recoveryDelayMinutes ?? 5,
       rateLimitPerMin: feed.rateLimitPerMin,
       enabled: feed.enabled,
     });
@@ -118,6 +124,8 @@ export const ThreatFeedsView: React.FC = () => {
         url: formData.url,
         authType: formData.authType,
         authSecretKey: formData.authSecretKey || undefined,
+        requestTimeoutSeconds: formData.requestTimeoutSeconds,
+        recoveryDelayMinutes: formData.recoveryDelayMinutes,
         rateLimitPerMin: formData.rateLimitPerMin,
         enabled: formData.enabled,
       });
@@ -133,6 +141,8 @@ export const ThreatFeedsView: React.FC = () => {
         url: formData.url,
         authType: formData.authType,
         authSecretKey: formData.authSecretKey || undefined,
+        requestTimeoutSeconds: formData.requestTimeoutSeconds,
+        recoveryDelayMinutes: formData.recoveryDelayMinutes,
         rateLimitPerMin: formData.rateLimitPerMin,
         enabled: formData.enabled,
         vendorSeed: false,
@@ -298,6 +308,11 @@ export const ThreatFeedsView: React.FC = () => {
                             ({feed.latencyMs}ms)
                           </span>
                         </div>
+                        {feed.enabled && feed.healthStatus === 'DOWN' && feed.circuitOpenUntil && (
+                          <div className="text-[10px] text-amber-400 mt-1">
+                            Automatic retry after {new Date(feed.circuitOpenUntil).toLocaleString()}
+                          </div>
+                        )}
                         {feed.healthStatus !== 'HEALTHY' && feed.errorLog && (
                           <div className="text-[10px] text-red-400 mt-0.5 max-w-xs truncate" title={feed.errorLog}>
                             {feed.errorLog}
@@ -435,6 +450,22 @@ export const ThreatFeedsView: React.FC = () => {
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono focus:border-zinc-600 focus:outline-none"
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="feed-timeout" className="block text-zinc-400 mb-1 font-mono">Request timeout (seconds)</label>
+                  <input id="feed-timeout" type="number" required min={5} max={120} value={formData.requestTimeoutSeconds}
+                    onChange={e => setFormData({ ...formData, requestTimeoutSeconds: Number(e.target.value) })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100" />
+                </div>
+                <div>
+                  <label htmlFor="feed-recovery" className="block text-zinc-400 mb-1 font-mono">Recovery delay (minutes)</label>
+                  <input id="feed-recovery" type="number" required min={1} max={60} value={formData.recoveryDelayMinutes}
+                    onChange={e => setFormData({ ...formData, recoveryDelayMinutes: Number(e.target.value) })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100" />
+                </div>
+                <p className="col-span-2 text-xs text-zinc-500">Failed sources retry automatically after this delay, doubling on repeated failures up to 60 minutes.</p>
               </div>
 
               <div>

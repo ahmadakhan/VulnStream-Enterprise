@@ -34,7 +34,7 @@ export function matchIntelligence(articles: IntelligenceArticle[], inventory: Wa
       const references = article.cveIds.length ? article.cveIds : [null];
       for (const cveId of references) {
         const finding = cveId ? current.get(`${cveId}:${asset.id}`) : undefined;
-        if (finding && ['RESOLVED','FALSE_POSITIVE'].includes(finding.status)) continue;
+        if (finding && ['RESOLVED','FALSE_POSITIVE','PATCH_APPLIED'].includes(finding.status)) continue;
         // News cannot override a structured exclusion (for example, an installed patched version).
         if (cveId && authoritative.has(cveId) && !finding) continue;
         if (!finding && !(vendorMentioned && productMentioned)) continue;

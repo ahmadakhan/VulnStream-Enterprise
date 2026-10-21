@@ -25,7 +25,7 @@ const querySchema = z.object({
   level: z.enum(['INFO', 'WARNING', 'ERROR']).optional(),
   runId: z.uuid().optional(),
   q: z.string().trim().max(200).optional(),
-  before: z.string().regex(/^\d{1,19}$/).optional(),
+  before: z.string().regex(/^\d{1,19}$/).refine(value => BigInt(value) <= 9223372036854775807n, 'Cursor is out of range').optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 export async function readEvents(db: Db, input: unknown): Promise<{ events: OperationalEvent[]; nextCursor: string | null }> {

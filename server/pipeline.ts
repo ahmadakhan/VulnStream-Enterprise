@@ -1,3 +1,5 @@
+import { writeEvent } from './events';
+import { mergeArticles, matchIntelligence } from '../src/utils/intelligenceMatcher';
 import type pg from 'pg';
 import { randomUUID, createHash } from 'node:crypto';
 import { get, list, put, putMany, transaction, appendAudit, state } from './db';
@@ -15,6 +17,7 @@ import { mergeCveRecords, normalizeCveId } from '../src/utils/deduplicator';
 import { reconcileFindings } from '../src/engine/reconcileFindings';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { ingestFeed } from './ingestion';
+import { recoveryDue, recoveryAt } from './feedRecovery';
 import type { Requester } from './network';
 import type { Config } from './config';
 import { queueAdvisory } from './delivery';
@@ -60,6 +63,7 @@ export async function queueRun(
       logs: [],
     };
     await put(db, 'executions', execution.id, execution);
+    await writeEvent(db, { category:'PIPELINE', code:'pipeline.queued', message:'Pipeline queued', runId:execution.id });
     await appendAudit(db, 'Pipeline queued', `Execution ${execution.id}`, actor, 'PIPELINE');
     return execution;
   });
@@ -81,6 +85,7 @@ export async function stopRun(pool: pg.Pool, id: string, actor: string): Promise
     }
     run.logs.push('Operator requested stop');
     await put(db, 'executions', id, run);
+    await writeEvent(db, { category:'PIPELINE', code:'pipeline.stop_requested', message:'Operator requested pipeline stop', runId:id });
     await appendAudit(db, 'Pipeline stop requested', `Execution ${id}`, actor, 'PIPELINE');
     return run;
   });
@@ -136,8 +141,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
       const last = (await pool.query('SELECT last_run FROM scheduler_state WHERE id=1')).rows[0]?.last_run;
       if (
-        settings.schedulerEnabled &&
-        (!last || Date.now() - new Date(last).getTime() >= settings.schedulerIntervalMinutes * 60000)
+        (await list<ThreatFeed>(pool, 'feeds')).some((feed) => recoveryDue(feed)) ||
+        (settings.schedulerEnabled &&
+        (!last || Date.now() - new Date(last).getTime() >= settings.schedulerIntervalMinutes * 60000))
       )
         execution = await queueRun(pool, undefined, 'scheduler');
     }
@@ -177,6 +183,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       await checkpoint(db);
       await put(db, 'executions', execution!.id, execution);
       await db.query('UPDATE scheduler_state SET last_run=now() WHERE id=1');
+      await writeEvent(db, {category:'PIPELINE', level:execution.status === 'FAILED' ? 'ERROR' : 'INFO', code:'pipeline.finished', message:`Pipeline ${execution.status.toLowerCase()}`, runId:execution.id, context:{stats:execution.stats}});
     });
     const feeds = (await list<ThreatFeed>(pool, 'feeds')).filter((f) => f.enabled);
     let succeeded = 0,
@@ -193,7 +200,6 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           const feed = sources[i];
           await checkpoint();
           if (
-            (feed.consecutiveFailures || 0) >= 5 &&
             feed.circuitOpenUntil &&
             Date.parse(feed.circuitOpenUntil) > Date.now()
           ) {
@@ -253,11 +259,11 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             }
             feedUpdates.push({
               ...feed,
-              healthStatus: 'HEALTHY',
+              healthStatus: result.warnings?.length ? 'DEGRADED' : 'HEALTHY',
               lastSync: new Date().toISOString(),
               latencyMs: Date.now() - start,
               itemCountLastRun: result.notModified ? feed.itemCountLastRun : result.count,
-              errorLog: null,
+              errorLog: result.warnings?.join('; ') || null,
               ssrfValidated: true,
               etag: result.etag,
               consecutiveFailures: 0,
@@ -273,12 +279,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
               latencyMs: Date.now() - start,
               errorLog: message,
               consecutiveFailures,
-              circuitOpenUntil:
-                consecutiveFailures >= 5
-                  ? new Date(
-                      Date.now() + Math.min(3600000, 60000 * 2 ** Math.min(6, consecutiveFailures - 5)),
-                    ).toISOString()
-                  : null,
+              circuitOpenUntil: recoveryAt(feed, consecutiveFailures),
             });
             execution!.logs.push(`Feed ${feed.id}: ${message}`);
           }
@@ -392,7 +393,13 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           } satisfies KevSnapshot);
         }
       }
+      for (const update of feedUpdates) await writeEvent(db, { category:'FEED',
+        level:update.healthStatus === 'DOWN' ? 'ERROR' : update.healthStatus === 'DEGRADED' ? 'WARNING' : 'INFO',
+        code:'feed.ingestion', message:`${update.name}: ${update.healthStatus}`, runId:execution!.id,
+        context:{ feedId:update.id, count:update.itemCountLastRun, latencyMs:update.latencyMs } });
       const snapshot = await state(db);
+      const articles = mergeArticles([...snapshot.intelligenceArticles, ...acceptedResults.flatMap(result => result.articles || [])]);
+      await putMany(db, 'intelligenceArticles', articles.map(data => ({id:data.id,data})));
       const byId = mergeCveRecords([
         ...snapshot.cveData,
         ...acceptedResults.filter((result) => !result.notModified).flatMap((result) => result.cves),
@@ -496,6 +503,12 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         'findings',
         reconciled.map((f) => ({ id: f.id, data: f })),
       );
+      const intelligenceMatches = matchIntelligence(articles, snapshot.watchlist, reconciled, [...byId.values()]);
+      await putMany(db, 'intelligenceMatches', intelligenceMatches.map(data => ({id:data.id,data})));
+      await db.query("DELETE FROM records WHERE kind='intelligenceMatches' AND NOT (id=ANY($1::text[]))", [intelligenceMatches.map(item => item.id)]);
+      await writeEvent(db, {category:'MATCHING', code:'matching.completed', message:'Structured applicability and news evidence correlation completed', runId:execution!.id,
+        context:{ findings:correlated.newFindings.length, articles:articles.length, evidenceMatches:intelligenceMatches.length,
+          reviewRequired:intelligenceMatches.filter(item => item.status === 'REVIEW_REQUIRED').length }});
       const queueStarted = Date.now();
       let notificationsQueued = 0,
         advisoriesQueued = 0;
@@ -592,6 +605,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       execution.stats.advisoriesQueued = advisoriesQueued;
       await put(db, 'executions', execution.id, execution);
       await db.query('UPDATE scheduler_state SET last_run=now() WHERE id=1');
+      await writeEvent(db, {category:'PIPELINE', level:execution.status === 'FAILED' ? 'ERROR' : 'INFO', code:'pipeline.finished', message:`Pipeline ${execution.status.toLowerCase()}`, runId:execution.id, context:{stats:execution.stats}});
       await appendAudit(
         db,
         execution.status === 'FAILED' ? 'Pipeline failed' : 'Pipeline completed',
@@ -618,6 +632,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           endTime: new Date().toISOString(),
           logs: [...execution!.logs, e instanceof Error ? e.message : 'Worker failed'],
         });
+        await writeEvent(db, {category:e instanceof PipelineStopped ? 'PIPELINE' : 'ISSUE', level:e instanceof PipelineStopped ? 'INFO' : 'ERROR', code:e instanceof PipelineStopped ? 'pipeline.cancelled' : 'pipeline.failed', message:e instanceof PipelineStopped ? 'Pipeline stopped by operator' : 'Pipeline failed; inspect execution details', runId:execution!.id});
         await appendAudit(
           db,
           e instanceof PipelineStopped ? 'Pipeline stopped' : 'Pipeline failed',

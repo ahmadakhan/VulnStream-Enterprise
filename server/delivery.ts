@@ -1,3 +1,4 @@
+import { writeEvent } from './events';
 import type pg from 'pg';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state';
@@ -463,6 +464,7 @@ export async function deliverNext(
           });
       }
     }
+    await writeEvent(db, {category:job.channel === 'email' ? 'EMAIL' : 'EVENT', level:error ? 'WARNING' : 'INFO', code:error ? 'delivery.attempt_failed' : 'delivery.accepted', message:error ? 'Delivery attempt failed; retry policy applied' : 'Transport accepted delivery', context:{jobId:job.id, channel:job.channel, attempt:job.attempts, advisoryId:job.advisory_id}});
     await appendAudit(
       db,
       error ? 'Delivery attempt failed' : 'Delivery accepted',

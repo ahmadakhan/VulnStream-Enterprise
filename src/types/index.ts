@@ -196,6 +196,8 @@ export interface ThreatFeed {
   authType: FeedAuthType;
   authSecretKey?: string;
   rateLimitPerMin: number;
+  requestTimeoutSeconds?: number;
+  recoveryDelayMinutes?: number;
   enabled: boolean;
   healthStatus: 'HEALTHY' | 'DEGRADED' | 'DOWN' | 'UNTESTED';
   lastSync: string | null;
