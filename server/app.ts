@@ -246,18 +246,41 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       if (['BEARER', 'BASIC'].includes(feed.authType))
         headers.Authorization = `${feed.authType === 'BASIC' ? 'Basic' : 'Bearer'} ${feed.authType === 'BASIC' ? Buffer.from(secret).toString('base64') : secret}`;
       let response: ResponseData;
-      const latency = Math.round(performance.now() - start);
       try {
         response = await request(feed.url, { headers });
+        const latency = Math.round(performance.now() - start);
+        await transaction(pool, async (db) => {
+          const current = await get<ThreatFeed>(db, 'feeds', feed.id);
+          if (current)
+            await put(db, 'feeds', feed.id, {
+              ...current,
+              healthStatus: response.status >= 200 && response.status < 300 ? 'HEALTHY' : 'DOWN',
+              latencyMs: latency,
+              errorLog: response.status >= 200 && response.status < 300 ? null : `HTTP ${response.status}`,
+            });
+          await appendAudit(
+            db,
+            'Feed connectivity tested',
+            `${feed.id}; HTTP ${response.status}`,
+            req.operator!.username,
+            'FEED',
+          );
+        });
+        res.json({
+          success: response.status >= 200 && response.status < 300,
+          latency,
+          error: response.status >= 200 && response.status < 300 ? undefined : `HTTP ${response.status}`,
+        });
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Connection failed';
+        const latency = Math.round(performance.now() - start);
         await transaction(pool, async (db) => {
           const current = await get<ThreatFeed>(db, 'feeds', feed.id);
           if (current)
             await put(db, 'feeds', feed.id, {
               ...current,
               healthStatus: 'DOWN',
-              latencyMs: Math.round(performance.now() - start),
+              latencyMs: latency,
               errorLog: message,
             });
           await appendAudit(
@@ -269,27 +292,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           );
         });
         res.json({ success: false, latency, error: message });
-        return;
       }
-      const success = response.status >= 200 && response.status < 300;
-      await transaction(pool, async (db) => {
-        const current = await get<ThreatFeed>(db, 'feeds', feed.id);
-        if (current)
-          await put(db, 'feeds', feed.id, {
-            ...current,
-            healthStatus: success ? 'HEALTHY' : 'DOWN',
-            latencyMs: latency,
-            errorLog: success ? null : `HTTP ${response.status}`,
-          });
-        await appendAudit(
-          db,
-          'Feed connectivity tested',
-          `${feed.id}; HTTP ${response.status}`,
-          req.operator!.username,
-          'FEED',
-        );
-      });
-      res.json({ success, latency, error: success ? undefined : `HTTP ${response.status}` });
     }),
   );
   app.post(
