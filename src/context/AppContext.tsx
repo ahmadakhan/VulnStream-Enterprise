@@ -49,7 +49,7 @@ function useApplication() {
       const data = await response
         .json()
         .catch(() => ({ error: `Server returned an empty or non-JSON response (HTTP ${response.status})` }));
-      if (!response.ok) {
+      if (!response.ok || data.error) {
         if (response.status === 401) {
           setSession(null);
           setSnapshot(emptyState());
