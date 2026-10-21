@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
     "dev:server": "tsx watch server/main.ts",
+    "seed": "tsx scripts/seed.ts",
     "build:client": "vite build",
     "build:server": "node scripts/build-server.mjs",
     "start": "node server-dist/main.js",
