@@ -21,7 +21,9 @@ export const ThreatDataView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [kevFilter, setKevFilter] = useState<'ALL' | 'KEV_ONLY'>('ALL');
   const [epssFilter, setEpssFilter] = useState<'ALL' | 'HIGH_EPSS'>('ALL');
-  const [dateFilter, setDateFilter] = useState<'ALL' | 'SCOPE_24H' | 'RECENT_MODIFIED' | 'RECENT_PUBLISHED'>('ALL');
+  const [dateFilter, setDateFilter] = useState<'ALL' | 'SCOPE_24H' | 'RECENT_MODIFIED' | 'RECENT_PUBLISHED'>(
+    'ALL',
+  );
   const [sortBy, setSortBy] = useState<'score' | 'published' | 'modified'>('modified');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [inspectCve, setInspectCve] = useState<NormalizedCVE | null>(null);
@@ -35,27 +37,27 @@ export const ThreatDataView: React.FC = () => {
   const scopeMillis = (settings.scopeHours || 24) * 60 * 60 * 1000;
 
   const filteredCves = cveData
-    .filter(cve => {
+    .filter((cve) => {
       const matchesSearch =
         cve.cveId.toLowerCase().includes(searchTerm.toLowerCase()) ||
         cve.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        cve.sourceFeeds.some(s => s.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        cve.cpeMatches.some(c => c.toLowerCase().includes(searchTerm.toLowerCase()));
+        cve.sourceFeeds.some((s) => s.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        cve.cpeMatches.some((c) => c.toLowerCase().includes(searchTerm.toLowerCase()));
 
       const matchesKev = kevFilter === 'ALL' || cve.cisaKev.isKev;
-      const matchesEpss = epssFilter === 'ALL' || cve.epss.score >= 0.40;
+      const matchesEpss = epssFilter === 'ALL' || cve.epss.score >= 0.4;
 
       const pubTime = new Date(cve.publishedDate).getTime();
       const modTime = new Date(cve.modifiedDate).getTime();
 
       let matchesDate = true;
       if (dateFilter === 'SCOPE_24H') {
-        const inScope = (now - pubTime <= scopeMillis) || (now - modTime <= scopeMillis);
+        const inScope = now - pubTime <= scopeMillis || now - modTime <= scopeMillis;
         matchesDate = inScope;
       } else if (dateFilter === 'RECENT_MODIFIED') {
-        matchesDate = (now - modTime <= 7 * 24 * 60 * 60 * 1000);
+        matchesDate = now - modTime <= 7 * 24 * 60 * 60 * 1000;
       } else if (dateFilter === 'RECENT_PUBLISHED') {
-        matchesDate = (now - pubTime <= 7 * 24 * 60 * 60 * 1000);
+        matchesDate = now - pubTime <= 7 * 24 * 60 * 60 * 1000;
       }
 
       return matchesSearch && matchesKev && matchesEpss && matchesDate;
@@ -72,10 +74,7 @@ export const ThreatDataView: React.FC = () => {
       return sortOrder === 'desc' ? comparison : -comparison;
     });
 
-  const paginatedCves = filteredCves.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
+  const paginatedCves = filteredCves.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleCopyJson = () => {
     if (inspectCve) {
@@ -87,7 +86,7 @@ export const ThreatDataView: React.FC = () => {
 
   const toggleSort = (col: 'score' | 'published' | 'modified') => {
     if (sortBy === col) {
-      setSortOrder(prev => (prev === 'desc' ? 'asc' : 'desc'));
+      setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'));
     } else {
       setSortBy(col);
       setSortOrder('desc');
@@ -105,7 +104,9 @@ export const ThreatDataView: React.FC = () => {
             Threat Intelligence Feed Cache
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Normalized CVE cache unified from NVD CVSS, FIRST.org EPSS scores, CISA KEV catalogs, and vendor threat streams. CVEs are correlated by both <strong>published date</strong> and <strong>last modified date</strong>.
+            Normalized CVE cache unified from NVD CVSS, FIRST.org EPSS scores, CISA KEV catalogs, and vendor
+            threat streams. CVEs are correlated by both <strong>published date</strong> and{' '}
+            <strong>last modified date</strong>.
           </p>
         </div>
 
@@ -123,7 +124,7 @@ export const ThreatDataView: React.FC = () => {
             type="text"
             placeholder="Search normalized cache by CVE, title, or CPE..."
             value={searchTerm}
-            onChange={e => {
+            onChange={(e) => {
               setSearchTerm(e.target.value);
               setCurrentPage(1);
             }}
@@ -137,7 +138,7 @@ export const ThreatDataView: React.FC = () => {
             <Calendar className="w-3.5 h-3.5 text-zinc-400" />
             <select
               value={dateFilter}
-              onChange={e => {
+              onChange={(e) => {
                 setDateFilter(e.target.value as any);
                 setCurrentPage(1);
               }}
@@ -153,7 +154,7 @@ export const ThreatDataView: React.FC = () => {
           {/* CISA KEV Filter */}
           <button
             onClick={() => {
-              setKevFilter(k => (k === 'ALL' ? 'KEV_ONLY' : 'ALL'));
+              setKevFilter((k) => (k === 'ALL' ? 'KEV_ONLY' : 'ALL'));
               setCurrentPage(1);
             }}
             className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center space-x-1.5 transition border ${
@@ -169,7 +170,7 @@ export const ThreatDataView: React.FC = () => {
           {/* EPSS Filter */}
           <button
             onClick={() => {
-              setEpssFilter(e => (e === 'ALL' ? 'HIGH_EPSS' : 'ALL'));
+              setEpssFilter((e) => (e === 'ALL' ? 'HIGH_EPSS' : 'ALL'));
               setCurrentPage(1);
             }}
             className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center space-x-1.5 transition border ${
@@ -224,11 +225,11 @@ export const ThreatDataView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
-              {paginatedCves.map(cve => {
+              {paginatedCves.map((cve) => {
                 const pubTime = new Date(cve.publishedDate).getTime();
                 const modTime = new Date(cve.modifiedDate).getTime();
-                const pubInScope = (now - pubTime) <= scopeMillis;
-                const modInScope = (now - modTime) <= scopeMillis;
+                const pubInScope = now - pubTime <= scopeMillis;
+                const modInScope = now - modTime <= scopeMillis;
 
                 return (
                   <tr
@@ -257,7 +258,7 @@ export const ThreatDataView: React.FC = () => {
                     <td className="py-3 px-4 font-mono">
                       <div className="flex items-center space-x-1.5">
                         <span className="font-bold text-sm text-zinc-200 dark:text-zinc-200 light:text-zinc-900">
-                          {cve.cvss.score.toFixed(1)}
+                          {cve.cvss.version === 'UNKNOWN' ? 'Unscored' : cve.cvss.score.toFixed(1)}
                         </span>
                         <span className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
                           ({cve.cvss.severity})
@@ -276,9 +277,7 @@ export const ThreatDataView: React.FC = () => {
                       <div className="text-zinc-300 dark:text-zinc-300 light:text-zinc-800 font-medium">
                         {(cve.epss.score * 100).toFixed(2)}%
                       </div>
-                      <div className="text-[10px] text-zinc-500">
-                        {cve.epss.percentile}th Pct
-                      </div>
+                      <div className="text-[10px] text-zinc-500">{cve.epss.percentile}th Pct</div>
                     </td>
 
                     {/* Published Date */}
@@ -293,7 +292,10 @@ export const ThreatDataView: React.FC = () => {
                         )}
                       </div>
                       <div className="text-[10px] text-zinc-500">
-                        {new Date(cve.publishedDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {new Date(cve.publishedDate).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
                       </div>
                     </td>
 
@@ -309,7 +311,10 @@ export const ThreatDataView: React.FC = () => {
                         )}
                       </div>
                       <div className="text-[10px] text-zinc-500">
-                        {new Date(cve.modifiedDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {new Date(cve.modifiedDate).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
                       </div>
                     </td>
 
@@ -382,7 +387,11 @@ export const ThreatDataView: React.FC = () => {
                 onClick={handleCopyJson}
                 className="text-xs bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 px-2.5 py-1 rounded-xl border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 flex items-center space-x-1"
               >
-                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {copied ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
                 <span>{copied ? 'Copied' : 'Copy JSON'}</span>
               </button>
             </div>

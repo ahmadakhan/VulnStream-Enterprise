@@ -190,7 +190,7 @@ export async function deliverNext(
       throw new Error('Queued advisory no longer exists');
     }
     if (advisory) {
-      const invalid: string[] = [], valid: string[] = [];
+      const invalid: string[] = [];
       for (const id of advisory.findingIds) {
         const finding = await get<Finding>(pool, 'findings', id);
         const [asset, cve] = finding
@@ -210,17 +210,14 @@ export async function deliverNext(
           match?.notificationStatus !== 'QUEUED_FOR_DISPATCH'
         ) {
           invalid.push(id);
-        } else {
-          valid.push(id);
         }
       }
-      // Only permanently fail if ALL findings became stale — otherwise the
-      // remaining valid findings still need to reach recipients.
-      if (invalid.length === advisory.findingIds.length) {
+      // The queued payload contains the complete advisory. Sending it after any
+      // finding becomes stale would disclose or act on invalidated inventory.
+      // Fail the bundle so the next pipeline can rebuild it from current matches.
+      if (invalid.length) {
         permanent = true;
-        throw new Error(
-          'All advisory findings are no longer applicable; review current inventory',
-        );
+        throw new Error('Some advisory findings are no longer applicable; rebuild from current inventory');
       }
     }
     if (job.channel === 'email') {

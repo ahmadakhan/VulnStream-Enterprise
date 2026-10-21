@@ -146,6 +146,11 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         const cve = vulnerability();
         await save('cveData', cve.cveId, cve);
         await save('watchlist', 'asset', asset());
+        await save('watchlist', 'asset-2', {
+          ...asset(),
+          id: 'asset-2',
+          assetTag: 'TEST-SECOND',
+        });
         await run();
         assert.equal(
           (await pool.query("SELECT count(*)::int AS count FROM outbox WHERE status='QUEUED'")).rows[0].count,
@@ -186,6 +191,98 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         );
       },
     );
+    await t.test('feed circuit breaker cools down and allows a recovery probe', async () => {
+      await reset();
+      await save('feeds', 'cooling-feed', {
+        id: 'cooling-feed',
+        name: 'Cooling test feed',
+        type: 'JSON_SEARCH_API',
+        url: 'https://8.8.8.8/feed',
+        authType: 'NONE',
+        rateLimitPerMin: 60,
+        enabled: true,
+        healthStatus: 'DOWN',
+        lastSync: null,
+        latencyMs: 0,
+        vendorSeed: false,
+        itemCountLastRun: 0,
+        ssrfValidated: false,
+        consecutiveFailures: 5,
+        circuitOpenUntil: new Date(Date.now() + 60_000).toISOString(),
+      });
+      let calls = 0;
+      const probe = async () => {
+        calls++;
+        return { status: 200, body: '[]', headers: {} };
+      };
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, probe);
+      assert.equal(calls, 0);
+      assert.equal((await get<any>(pool, 'feeds', 'cooling-feed')).consecutiveFailures, 5);
+
+      await save('feeds', 'cooling-feed', {
+        ...(await get<any>(pool, 'feeds', 'cooling-feed')),
+        circuitOpenUntil: new Date(Date.now() - 1000).toISOString(),
+      });
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, probe);
+      const recovered = await get<any>(pool, 'feeds', 'cooling-feed');
+      assert.equal(calls, 1);
+      assert.equal(recovered.healthStatus, 'HEALTHY');
+      assert.equal(recovered.consecutiveFailures, 0);
+      assert.equal(recovered.circuitOpenUntil, null);
+    });
+    await t.test('complete KEV and EPSS snapshots clear stale enrichment', async () => {
+      await reset();
+      const cve = vulnerability();
+      cve.cisaKev = {
+        isKev: true,
+        dateAdded: '2026-01-01',
+        dueDate: '2026-02-01',
+        requiredAction: 'Patch now',
+      };
+      cve.epss = { score: 0.9, percentile: 0.99 };
+      await save('cveData', cve.cveId, cve);
+      await save('feeds', 'kev-feed', {
+        id: 'kev-feed',
+        name: 'KEV test',
+        type: 'CISA_KEV',
+        url: 'https://8.8.8.8/kev',
+        authType: 'NONE',
+        rateLimitPerMin: 60,
+        enabled: true,
+        healthStatus: 'UNTESTED',
+        lastSync: null,
+        latencyMs: 0,
+        vendorSeed: false,
+        itemCountLastRun: 0,
+        ssrfValidated: false,
+      });
+      await save('feeds', 'epss-feed', {
+        id: 'epss-feed',
+        name: 'EPSS test',
+        type: 'EPSS_API',
+        url: 'https://8.8.8.8/epss',
+        authType: 'NONE',
+        rateLimitPerMin: 60,
+        enabled: true,
+        healthStatus: 'UNTESTED',
+        lastSync: null,
+        latencyMs: 0,
+        vendorSeed: false,
+        itemCountLastRun: 0,
+        ssrfValidated: false,
+      });
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async (url) => ({
+        status: 200,
+        body: url.endsWith('/kev') ? '{"vulnerabilities":[]}' : '{"total":0,"data":[]}',
+        headers: {},
+      }));
+      const refreshed = await get<NormalizedCVE>(pool, 'cveData', cve.cveId);
+      assert.deepEqual(refreshed?.cisaKev, { isKev: false });
+      assert.deepEqual(refreshed?.epss, { score: 0, percentile: 0 });
+    });
   } finally {
     await pool.end();
     await base.query(`DROP SCHEMA ${schema} CASCADE`);

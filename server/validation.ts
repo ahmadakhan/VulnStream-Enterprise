@@ -123,10 +123,10 @@ export const cveSchema = z.object({
   publishedDate: z.iso.datetime({ offset: true }),
   modifiedDate: z.iso.datetime({ offset: true }),
   cvss: z.object({
-    version: z.enum(['3.1', '4.0', '2.0']),
+    version: z.enum(['3.1', '4.0', '2.0', 'UNKNOWN']),
     score: z.number().min(0).max(10),
     vector: z.string().max(300),
-    severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']),
+    severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN']),
   }),
   cwe: strings,
   cpeMatches: z.array(z.string().refine((s) => parseCPE23(s).isValid)).max(1000),

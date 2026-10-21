@@ -246,7 +246,9 @@ export const DashboardView: React.FC = () => {
                         </span>
                       )}
                       <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-800/80 dark:bg-zinc-800/80 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border border-zinc-700/60 dark:border-zinc-700/60 light:border-zinc-300">
-                        CVSS {finding.cve.cvss.score.toFixed(1)} ({finding.cve.cvss.severity})
+                        {finding.cve.cvss.version === 'UNKNOWN'
+                          ? 'CVSS not scored'
+                          : `CVSS ${finding.cve.cvss.score.toFixed(1)} (${finding.cve.cvss.severity})`}
                       </span>
                     </div>
                     <div className="text-xs text-zinc-300 dark:text-zinc-300 light:text-zinc-700 line-clamp-1">

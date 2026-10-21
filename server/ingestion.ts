@@ -22,8 +22,8 @@ export function normalizeNvd(item: any, feedId: string): NormalizedCVE | null {
     cve.metrics?.cvssMetricV31?.[0]?.cvssData ||
     cve.metrics?.cvssMetricV30?.[0]?.cvssData ||
     cve.metrics?.cvssMetricV2?.[0]?.cvssData;
-  // Missing risk information is not replaced with an invented score.
-  if (!metric) return null;
+  // Keep unscored CVEs for applicability matching. Score 0 is only a storage
+  // sentinel; UNKNOWN prevents it from being presented as a real CVSS score.
   let applicabilityRequiresReview = false;
   const details: NonNullable<NormalizedCVE['cpeMatchDetails']> = [];
   const walk = (node: any) => {
@@ -41,7 +41,7 @@ export function normalizeNvd(item: any, feedId: string): NormalizedCVE | null {
   };
   for (const config of cve.configurations || []) walk(config);
   const description = cve.descriptions?.find((d: any) => d.lang === 'en')?.value || cve.id;
-  const score = metric.baseScore;
+  const score = metric?.baseScore ?? 0;
   return cveSchema.parse({
     cveId: cve.id,
     title: description.slice(0, 500),
@@ -49,10 +49,24 @@ export function normalizeNvd(item: any, feedId: string): NormalizedCVE | null {
     publishedDate: iso(cve.published),
     modifiedDate: iso(cve.lastModified),
     cvss: {
-      version: metric.version === '4.0' ? '4.0' : metric.version === '2.0' ? '2.0' : '3.1',
+      version: !metric
+        ? 'UNKNOWN'
+        : metric.version === '4.0'
+          ? '4.0'
+          : metric.version === '2.0'
+            ? '2.0'
+            : '3.1',
       score,
-      vector: metric.vectorString || '',
-      severity: score >= 9 ? 'CRITICAL' : score >= 7 ? 'HIGH' : score >= 4 ? 'MEDIUM' : 'LOW',
+      vector: metric?.vectorString || '',
+      severity: !metric
+        ? 'UNKNOWN'
+        : score >= 9
+          ? 'CRITICAL'
+          : score >= 7
+            ? 'HIGH'
+            : score >= 4
+              ? 'MEDIUM'
+              : 'LOW',
     },
     cwe: (cve.weaknesses || [])
       .flatMap((w: any) => (w.description || []).filter((d: any) => d.lang === 'en').map((d: any) => d.value))
@@ -90,8 +104,8 @@ export async function ingestFeed(
     else
       headers.Authorization = `${feed.authType === 'BASIC' ? 'Basic' : 'Bearer'} ${feed.authType === 'BASIC' ? Buffer.from(secret).toString('base64') : secret}`;
   }
-  const json = async (url: string): Promise<{ data: any; etag: string | undefined }> => {
-    if (feed.etag) headers['If-None-Match'] = feed.etag;
+  const json = async (url: string, conditional = true): Promise<{ data: any; etag: string | undefined }> => {
+    if (conditional && feed.etag) headers['If-None-Match'] = feed.etag;
     const response = await request(url, { headers });
     if (response.status === 304) {
       return { data: null, etag: feed.etag };
@@ -109,18 +123,18 @@ export async function ingestFeed(
       start = new Date(end.getTime() - Math.min(scopeHours, 2880) * 3600000);
     const cves: NormalizedCVE[] = [];
     let rawCount = 0;
-    let etag: string | undefined;
     for (let offset = 0; ;) {
       const url = new URL(feed.url);
       url.searchParams.set('lastModStartDate', start.toISOString());
       url.searchParams.set('lastModEndDate', end.toISOString());
       url.searchParams.set('startIndex', String(offset));
       url.searchParams.set('resultsPerPage', '1000');
-        const { data, etag: newEtag } = await json(url.href);
-        if (!etag) etag = newEtag;
-        if (!data) return { cves: [], count: 0, notModified: true, etag };
-       const page = data;
-       if (
+      // Each page has a distinct URL and the time window moves on every run;
+      // a single feed-level ETag cannot safely validate this paginated query.
+      const { data } = await json(url.href, false);
+      if (!data) return { cves: [], count: 0, notModified: true };
+      const page = data;
+      if (
         !Array.isArray(page.vulnerabilities) ||
         !Number.isInteger(page.totalResults) ||
         page.totalResults < 0 ||
@@ -138,7 +152,7 @@ export async function ingestFeed(
       if (!page.vulnerabilities.length) throw new Error('NVD pagination stopped before completion');
       await sleep(Math.max(60000 / feed.rateLimitPerMin, feed.authType === 'NONE' ? 6500 : 700));
     }
-    return { cves, count: rawCount, etag };
+    return { cves, count: rawCount };
   }
   if (feed.type === 'CISA_KEV') {
     const { data: rawData, etag } = await json(feed.url);
@@ -179,41 +193,44 @@ export async function ingestFeed(
   if (feed.type === 'EPSS_API') {
     const epss: Record<string, NormalizedCVE['epss']> = {};
     let count = 0;
-    let etag: string | undefined;
     for (let offset = 0; ;) {
       const url = new URL(feed.url);
       url.searchParams.set('offset', String(offset));
       url.searchParams.set('limit', '10000');
-       const { data: page, etag: newEtag } = await json(url.href);
-      if (!etag) etag = newEtag;
-       if (!page) return { cves: [], epss, count, notModified: true, etag };
-       const rows = z
-         .array(
-           z.object({
-             cve: z.string(),
-             epss: z.coerce.number().min(0).max(1),
-             percentile: z.coerce.number().min(0).max(1),
-           }),
-         )
-         .max(10000)
-         .parse(page.data);
-       const total = Number(page.total);
-       if (!Number.isInteger(total) || total < 0 || total > 500000) throw new Error('Invalid EPSS total');
-       for (const row of rows) epss[row.cve] = { score: row.epss, percentile: row.percentile };
-       count += rows.length;
-       offset += rows.length;
-       if (offset >= total) break;
-       if (!rows.length) throw new Error('EPSS pagination stopped before completion');
-       await sleep(60000 / feed.rateLimitPerMin);
-     }
-     return { cves: [], epss, count, etag };
+      // EPSS is paginated, so a feed-level ETag could validate the wrong page.
+      const { data: page } = await json(url.href, false);
+      if (!page) return { cves: [], epss, count, notModified: true };
+      const rows = z
+        .array(
+          z.object({
+            cve: z.string(),
+            epss: z.coerce.number().min(0).max(1),
+            percentile: z.coerce.number().min(0).max(1),
+          }),
+        )
+        .max(10000)
+        .parse(page.data);
+      const total = Number(page.total);
+      if (!Number.isInteger(total) || total < 0 || total > 500000) throw new Error('Invalid EPSS total');
+      for (const row of rows) epss[row.cve] = { score: row.epss, percentile: row.percentile };
+      count += rows.length;
+      offset += rows.length;
+      if (offset >= total) break;
+      if (!rows.length) throw new Error('EPSS pagination stopped before completion');
+      await sleep(60000 / feed.rateLimitPerMin);
+    }
+    return { cves: [], epss, count };
   }
   if (feed.type === 'JSON_SEARCH_API') {
-       const { data, etag } = await json(feed.url);
-       if (!data) return { cves: [], count: 0, notModified: true, etag };
-       const cves = z.array(cveSchema).max(10000).parse(data);
-       // Generic feeds may assert VEX, but unsigned claims cannot suppress alerts.
-       return { cves: cves.map((c) => ({ ...c, vex: undefined, sourceFeeds: [feed.id] })), count: cves.length, etag };
+    const { data, etag } = await json(feed.url);
+    if (!data) return { cves: [], count: 0, notModified: true, etag };
+    const cves = z.array(cveSchema).max(10000).parse(data);
+    // Generic feeds may assert VEX, but unsigned claims cannot suppress alerts.
+    return {
+      cves: cves.map((c) => ({ ...c, vex: undefined, sourceFeeds: [feed.id] })),
+      count: cves.length,
+      etag,
+    };
   }
   throw new Error(`Unsupported feed adapter: ${feed.type}`);
 }

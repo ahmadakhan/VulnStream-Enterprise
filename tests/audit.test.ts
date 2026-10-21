@@ -250,6 +250,16 @@ test('unsupported vendor version ordering creates a review candidate rather than
   assert.equal(findings.length, 1);
   assert.equal(findings[0].notificationStatus, 'REVIEW_REQUIRED');
 });
+test('NVD per-CPE version bounds are applied independently during correlation', () => {
+  const { cve, asset, settings } = fixture();
+  cve.versionRange = undefined;
+  cve.cpeMatches = [cpe('*')];
+  cve.cpeMatchDetails = [{ criteria: cpe('*'), range: { versionEndExcluding: '2.0' } }];
+  asset.cpes = [cpe('1.9')];
+  assert.equal(runVulnerabilityPipeline([], [cve], [asset], [], [], settings).newFindings.length, 1);
+  asset.cpes = [cpe('2.0')];
+  assert.equal(runVulnerabilityPipeline([], [cve], [asset], [], [], settings).newFindings.length, 0);
+});
 test('in-run duplicates use the latest modified CVE rather than input order', () => {
   const { cve, asset, settings } = fixture();
   cve.modifiedDate = '2020-01-01T00:00:00Z';

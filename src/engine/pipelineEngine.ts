@@ -90,22 +90,29 @@ export function runVulnerabilityPipeline(
     for (const asset of watchlist.filter((a) => a.active)) {
       const key = `${canonical}:${asset.id}`;
       if (known.has(key) && !includeExistingCandidates) continue;
-      const vulnCpeMatches = cve.cpeMatchDetails?.length
-        ? cve.cpeMatchDetails.map((c) => c.criteria)
-        : cve.cpeMatches;
-      const result = matchesWatchlistItem(
-        asset.cpes,
-        asset.vendor,
-        asset.product,
-        vulnCpeMatches,
-        cve.title,
-        cve.description,
-        cve.versionRange,
-        asset.purls,
-        cve.purls,
-        asset.targetHw,
-      );
-      if (!result.matched) continue;
+      const applicabilitySets = cve.cpeMatchDetails?.length
+        ? cve.cpeMatchDetails.map(({ criteria, range }) => ({
+            cpes: [criteria],
+            range: range || cve.versionRange,
+          }))
+        : [{ cpes: cve.cpeMatches, range: cve.versionRange }];
+      const result = applicabilitySets
+        .map(({ cpes, range }) =>
+          matchesWatchlistItem(
+            asset.cpes,
+            asset.vendor,
+            asset.product,
+            cpes,
+            cve.title,
+            cve.description,
+            range,
+            asset.purls,
+            cve.purls,
+            asset.targetHw,
+          ),
+        )
+        .find((match) => match.matched);
+      if (!result?.matched) continue;
       if (cve.applicabilityRequiresReview || result.applicabilityRequiresReview) result.confidence = 0;
       const confirmed = result.confidence >= 90;
       const evidence = confirmed

@@ -1,6 +1,6 @@
 import { NvdVersionRange } from '../utils/versionComparator';
 
-export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
 
 export type ExposureLevel = 'INTERNET_FACING' | 'INTERNAL_CRITICAL' | 'DMZ' | 'WORKSTATION' | 'CLOUD_INFRA';
 
@@ -31,7 +31,7 @@ export type FeedType = (typeof FEED_TYPES)[number];
 export type FeedAuthType = 'NONE' | 'API_KEY' | 'BEARER' | 'BASIC';
 
 export interface CVSSData {
-  version: '3.1' | '4.0' | '2.0';
+  version: '3.1' | '4.0' | '2.0' | 'UNKNOWN';
   score: number;
   vector: string;
   severity: Severity;
@@ -160,6 +160,7 @@ export interface ThreatFeed {
   ssrfValidated: boolean;
   etag?: string;
   consecutiveFailures?: number;
+  circuitOpenUntil?: string | null;
 }
 
 export interface Advisory {
@@ -172,7 +173,7 @@ export interface Advisory {
   deliveryStatus: 'ACCEPTED' | 'DELIVERED' | 'PENDING' | 'FAILED' | 'RETRYING' | 'DRAFT';
   recipientCount: number;
   executiveSummary: string;
-   remediationInstructions: string;
+  remediationInstructions: string;
   affectedSystems: string[];
   isDigestBatch?: boolean;
   vendorLink?: string;

@@ -9,6 +9,7 @@ import { loadConfig } from '../server/config';
 import { decrypt, encrypt, passwordHash, checkPassword } from '../server/secrets';
 import { publicAddress, resolvePublic, type Requester } from '../server/network';
 import { normalizeNvd } from '../server/ingestion';
+import { ingestFeed } from '../server/ingestion';
 import { processPipeline, queueRun } from '../server/pipeline';
 import { deliverNext } from '../server/delivery';
 import { verifyAuditChain } from '../src/utils/cryptoChain';
@@ -122,6 +123,59 @@ test('NVD normalization preserves per-CPE ranges and does not flatten AND condit
   input.cve.configurations[0].nodes[0].operator = 'AND';
   assert.equal(normalizeNvd(input, 'source')?.applicabilityRequiresReview, true);
   assert.equal(normalizeNvd(input, 'source')?.cpeMatches.length, 1);
+});
+test('unscored NVD vulnerabilities remain matchable without inventing a severity', () => {
+  const input = {
+    cve: {
+      id: 'CVE-2026-12345',
+      vulnStatus: 'Analyzed',
+      published: '2026-10-20T01:00:00Z',
+      lastModified: '2026-10-20T01:00:00Z',
+      descriptions: [{ lang: 'en', value: 'Unscored vulnerability' }],
+      metrics: {},
+      configurations: [{ nodes: [{ operator: 'OR', cpeMatch: [{ vulnerable: true, criteria: cpe('*') }] }] }],
+    },
+  };
+  const normalized = normalizeNvd(input, 'nvd');
+  assert.equal(normalized?.cvss.version, 'UNKNOWN');
+  assert.equal(normalized?.cvss.severity, 'UNKNOWN');
+  assert.equal(normalized?.cvss.score, 0);
+  assert.equal(normalized?.cpeMatches.length, 1);
+});
+test('NVD pagination does not send a feed-level ETag across changing page URLs', async () => {
+  const headers: Record<string, string>[] = [];
+  const feed = {
+    id: 'nvd',
+    name: 'NVD',
+    type: 'NVD_API' as const,
+    url: 'https://services.nvd.nist.gov/rest/json/cves/2.0',
+    authType: 'NONE' as const,
+    authSecretKey: '',
+    rateLimitPerMin: 10,
+    enabled: true,
+    healthStatus: 'UNTESTED' as const,
+    lastSync: null,
+    latencyMs: 0,
+    vendorSeed: true,
+    itemCountLastRun: 0,
+    ssrfValidated: false,
+    etag: 'stale-page-etag',
+  };
+  await ingestFeed(
+    feed,
+    24,
+    async (_url, options) => {
+      headers.push(options?.headers || {});
+      return {
+        status: 200,
+        body: JSON.stringify({ vulnerabilities: [], totalResults: 0, startIndex: 0 }),
+        headers: {},
+      };
+    },
+    config,
+  );
+  assert.equal(headers.length, 1);
+  assert.equal(headers[0]['If-None-Match'], undefined);
 });
 
 test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !database }, async (t) => {

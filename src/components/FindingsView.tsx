@@ -153,6 +153,7 @@ export const FindingsView: React.FC = () => {
               <option value="HIGH">High (7.0 - 8.9)</option>
               <option value="MEDIUM">Medium (4.0 - 6.9)</option>
               <option value="LOW">Low</option>
+              <option value="UNKNOWN">Unscored</option>
             </select>
           </div>
         </div>
@@ -234,7 +235,9 @@ export const FindingsView: React.FC = () => {
                                       : 'text-zinc-300 dark:text-zinc-300 light:text-zinc-800'
                                 }`}
                               >
-                                {finding.cve.cvss.score.toFixed(1)}
+                                {finding.cve.cvss.version === 'UNKNOWN'
+                                  ? '—'
+                                  : finding.cve.cvss.score.toFixed(1)}
                               </span>
                               <span className="text-[10px] text-zinc-500">{finding.cve.cvss.severity}</span>
                             </div>

@@ -39,11 +39,7 @@ export interface CommandResult {
  * route and the seeding script — goes through here, so validation and encryption
  * cannot be bypassed by a second code path.
  */
-export async function applyCommand(
-  db: Db,
-  config: Config,
-  request: CommandRequest,
-): Promise<CommandResult> {
+export async function applyCommand(db: Db, config: Config, request: CommandRequest): Promise<CommandResult> {
   const { action, id, data, actor, ipAddress = '' } = request;
   const now = new Date().toISOString(),
     newId = id || randomUUID();
@@ -55,38 +51,50 @@ export async function applyCommand(
   if (action === 'feed.save') {
     const input = feedSchema.parse(data),
       old = await checkExisting('feeds');
+    const sameSource = old?.url === input.url && old?.type === input.type && old?.authType === input.authType;
     await put(db, 'feeds', newId, {
       ...old,
       ...input,
       id: newId,
-      authSecretKey: input.authSecretKey
-        ? encrypt(input.authSecretKey, config.ENCRYPTION_KEY, `feed:${newId}`)
-        : (old?.url === input.url && old?.authType === input.authType ? old?.authSecretKey : '') || '',
-       healthStatus: 'UNTESTED',
-       lastSync: old?.lastSync || null,
-       latencyMs: 0,
-       itemCountLastRun: old?.itemCountLastRun || 0,
-       ssrfValidated: false,
-       etag: old?.etag,
-       consecutiveFailures: old?.consecutiveFailures,
+      authSecretKey:
+        input.authType === 'NONE'
+          ? ''
+          : input.authSecretKey
+            ? encrypt(input.authSecretKey, config.ENCRYPTION_KEY, `feed:${newId}`)
+            : (sameSource ? old?.authSecretKey : '') || '',
+      healthStatus: 'UNTESTED',
+      lastSync: old?.lastSync || null,
+      latencyMs: 0,
+      itemCountLastRun: old?.itemCountLastRun || 0,
+      ssrfValidated: false,
+      etag: sameSource ? old?.etag : undefined,
+      consecutiveFailures: sameSource ? old?.consecutiveFailures : 0,
+      circuitOpenUntil: sameSource ? old?.circuitOpenUntil : null,
     });
   } else if (action === 'feed.import') {
     const input = feedImportSchema.parse(data);
     for (const feed of input) {
       const old = await get<any>(db, 'feeds', feed.id);
+      const sameSource = old?.url === feed.url && old?.type === feed.type && old?.authType === feed.authType;
       await put(db, 'feeds', feed.id, {
         ...old,
         ...feed,
         id: feed.id,
-        authSecretKey: feed.authSecretKey
-          ? encrypt(feed.authSecretKey, config.ENCRYPTION_KEY, `feed:${feed.id}`)
-          : old?.authSecretKey || '',
+        authSecretKey:
+          feed.authType === 'NONE'
+            ? ''
+            : feed.authSecretKey
+              ? encrypt(feed.authSecretKey, config.ENCRYPTION_KEY, `feed:${feed.id}`)
+              : (sameSource ? old?.authSecretKey : '') || '',
         healthStatus: 'UNTESTED',
         lastSync: feed.lastSync ?? old?.lastSync ?? null,
         latencyMs: feed.latencyMs ?? 0,
         itemCountLastRun: feed.itemCountLastRun ?? 0,
         ssrfValidated: false,
         vendorSeed: feed.vendorSeed ?? old?.vendorSeed ?? false,
+        etag: sameSource ? (feed.etag ?? old?.etag) : undefined,
+        consecutiveFailures: sameSource ? (old?.consecutiveFailures ?? 0) : 0,
+        circuitOpenUntil: sameSource ? (old?.circuitOpenUntil ?? null) : null,
       });
     }
     await appendAudit(db, 'Feeds imported', `${input.length} feeds`, actor, 'FEED', 'INFO', ipAddress);
@@ -195,14 +203,14 @@ export async function applyCommand(
         [entity === 'asset' ? 'active' : 'enabled']: !old[entity === 'asset' ? 'active' : 'enabled'],
       });
   } else throw new HttpError(400, 'Unknown command');
-   await appendAudit(
-     db,
-     action,
-     `Record ${id || newId}`,
-     actor,
-     action.startsWith('asset') ? 'WATCHLIST' : 'SECURITY',
-     'INFO',
-     ipAddress,
-   );
+  await appendAudit(
+    db,
+    action,
+    `Record ${id || newId}`,
+    actor,
+    action.startsWith('asset') ? 'WATCHLIST' : 'SECURITY',
+    'INFO',
+    ipAddress,
+  );
   return { success: true };
 }

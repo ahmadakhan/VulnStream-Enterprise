@@ -123,7 +123,11 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       while (nextIndex < feeds.length) {
         const i = nextIndex++;
         const feed = feeds[i];
-        if ((feed.consecutiveFailures || 0) >= 5) {
+        if (
+          (feed.consecutiveFailures || 0) >= 5 &&
+          feed.circuitOpenUntil &&
+          Date.parse(feed.circuitOpenUntil) > Date.now()
+        ) {
           execution!.logs.push(
             `Feed ${feed.id}: skipped (circuit open, ${feed.consecutiveFailures} consecutive failures)`,
           );
@@ -145,15 +149,23 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             ssrfValidated: true,
             etag: result.etag || feed.etag,
             consecutiveFailures: 0,
+            circuitOpenUntil: null,
           });
         } catch (e) {
           const message = e instanceof Error ? e.message : 'Ingestion failed';
+          const consecutiveFailures = (feed.consecutiveFailures || 0) + 1;
           feedUpdates.push({
             ...feed,
             healthStatus: 'DOWN',
             latencyMs: Date.now() - start,
             errorLog: message,
-            consecutiveFailures: (feed.consecutiveFailures || 0) + 1,
+            consecutiveFailures,
+            circuitOpenUntil:
+              consecutiveFailures >= 5
+                ? new Date(
+                    Date.now() + Math.min(3600000, 60000 * 2 ** Math.min(6, consecutiveFailures - 5)),
+                  ).toISOString()
+                : null,
           });
           execution!.logs.push(`Feed ${feed.id}: ${message}`);
         }
@@ -176,6 +188,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             ssrfValidated: feed.ssrfValidated,
             etag: feed.etag,
             consecutiveFailures: feed.consecutiveFailures,
+            circuitOpenUntil: feed.circuitOpenUntil,
           });
       }
       if (feeds.length && !succeeded) {
@@ -204,10 +217,19 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             });
         }
       }
+      const kevReports = results.filter((result) => result.kev && !result.notModified);
+      const epssReports = results.filter((result) => result.epss && !result.notModified);
       for (const cve of byId.values()) {
-        for (const result of results) {
-          if (result.kev && result.kev[cve.cveId]) cve.cisaKev = result.kev[cve.cveId];
-          if (result.epss?.[cve.cveId]) cve.epss = result.epss[cve.cveId];
+        if (kevReports.length) {
+          cve.cisaKev = kevReports.map((result) => result.kev![cve.cveId]).find((entry) => entry?.isKev) || {
+            isKev: false,
+          };
+        }
+        if (epssReports.length) {
+          cve.epss = epssReports.map((result) => result.epss![cve.cveId]).find(Boolean) || {
+            score: 0,
+            percentile: 0,
+          };
         }
       }
       await putMany(
@@ -260,13 +282,13 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status),
       );
       if (settings.autoDispatchEnabled && pending.length) {
-        const rank = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+        const rank = ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
         const advisory: Advisory = {
           id: settings.advisoryPrefix + randomUUID(),
           title: `Vulnerability notice: ${Array.from(new Set(pending.map((f) => f.cveId))).join(', ')}`,
           severity: pending.reduce(
             (s, f) => (rank.indexOf(f.cve.cvss.severity) > rank.indexOf(s) ? f.cve.cvss.severity : s),
-            'LOW' as Advisory['severity'],
+            'UNKNOWN' as Advisory['severity'],
           ),
           cveIds: Array.from(new Set(pending.map((f) => f.cveId))),
           findingIds: pending.map((f) => f.id),
