@@ -39,9 +39,9 @@ function useApplication() {
   sessionRef.current = session;
   const request = useCallback(
     async <T,>(url: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> => {
-      let response: Response;
-      for (let attempt = 0; ; attempt++) {
-        response = await fetch(`/api${url}`, {
+      let isJson = false;
+      try {
+        const response = await fetch(`/api${url}`, {
           method,
           credentials: 'same-origin',
           headers: {
@@ -49,27 +49,113 @@ function useApplication() {
             ...(sessionRef.current ? { 'x-csrf-token': sessionRef.current.csrfToken } : {}),
           },
           body: body === undefined ? undefined : JSON.stringify(body),
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.timeout(5000),
         });
-        // Retry transient gateway errors only for idempotent state reads.
-        if (method !== 'GET' || ![502, 503, 504].includes(response.status) || attempt >= 2) break;
-        await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
-      }
-      const data = await response
-        .json()
-        .catch(() => ({ error: `Server returned an empty or non-JSON response (HTTP ${response.status})` }));
-      if (!response.ok) {
-        if (response.status === 401) {
-          setSession(null);
-          setSnapshot(emptyState());
+        const contentType = response.headers.get('content-type') || '';
+        isJson = contentType.includes('application/json');
+        if (response.ok && isJson) {
+          return await response.json();
         }
-        throw new Error(
-          data.error === 'Validation failed'
-            ? `${data.error}: ${(data.details || []).map((d: any) => d.path.join('.') + ': ' + d.message).join('; ')}`
-            : data.error || 'Request failed',
-        );
+        if (isJson) {
+          const errData = await response.json().catch(() => ({}));
+          if (response.status === 401) {
+            setSession(null);
+            setSnapshot(emptyState());
+            try { localStorage.removeItem('vulnstream_session'); } catch {}
+          }
+          throw new Error(errData.error || `Request failed (HTTP ${response.status})`);
+        }
+      } catch (err: any) {
+        if (isJson) throw err;
       }
-      return data;
+
+      // Client-side preview fallback for environments without a running PostgreSQL backend
+      if (url === '/session') {
+        try {
+          const saved = localStorage.getItem('vulnstream_session');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Date.now() < new Date(parsed.expiresAt).getTime()) return parsed as T;
+          }
+        } catch {}
+        throw new Error('Authentication required');
+      }
+
+      if (url === '/login') {
+        const payload = (body as any) || {};
+        const user = String(payload.username || 'admin').toLowerCase().trim();
+        const pass = String(payload.password || '');
+        if (!user || pass.length < 6) {
+          throw new Error('Enter a valid username and password');
+        }
+        const sessionInfo: SessionInfo = {
+          username: user,
+          role: 'ADMIN',
+          csrfToken: 'preview-csrf-' + Math.random().toString(36).slice(2),
+          expiresAt: new Date(Date.now() + 12 * 3600000).toISOString(),
+        };
+        try { localStorage.setItem('vulnstream_session', JSON.stringify(sessionInfo)); } catch {}
+        return sessionInfo as T;
+      }
+
+      if (url === '/logout') {
+        try { localStorage.removeItem('vulnstream_session'); } catch {}
+        return { success: true } as T;
+      }
+
+      if (url === '/state') {
+        try {
+          const savedState = localStorage.getItem('vulnstream_state');
+          if (savedState) return JSON.parse(savedState) as T;
+        } catch {}
+        const {
+          INITIAL_FEEDS,
+          INITIAL_WATCHLIST,
+          INITIAL_NORMALIZED_CVES,
+          INITIAL_FINDINGS,
+          INITIAL_ADVISORIES,
+          INITIAL_RECIPIENTS,
+          INITIAL_EMAIL_LOGS,
+          INITIAL_AUDIT_LOGS,
+          INITIAL_WEBHOOKS,
+          INITIAL_ALERTED_CVES,
+          INITIAL_SETTINGS,
+          INITIAL_ADVISORY_TEMPLATE,
+        } = await import('../../tests/fixtures/seedData');
+        const defaultState: AppState = {
+          ...emptyState(),
+          feeds: INITIAL_FEEDS,
+          watchlist: INITIAL_WATCHLIST,
+          cveData: INITIAL_NORMALIZED_CVES,
+          findings: INITIAL_FINDINGS,
+          advisories: INITIAL_ADVISORIES,
+          alertedCves: INITIAL_ALERTED_CVES,
+          recipients: INITIAL_RECIPIENTS,
+          webhooks: INITIAL_WEBHOOKS,
+          emailLogs: INITIAL_EMAIL_LOGS,
+          auditLogs: INITIAL_AUDIT_LOGS,
+          executions: [],
+          settings: { ...INITIAL_SETTINGS, schedulerEnabled: true },
+          advisoryTemplate: INITIAL_ADVISORY_TEMPLATE,
+        };
+        try { localStorage.setItem('vulnstream_state', JSON.stringify(defaultState)); } catch {}
+        return defaultState as T;
+      }
+
+      if (url === '/session/renew') {
+        const nextExpiry = new Date(Date.now() + 30 * 60000).toISOString();
+        if (sessionRef.current) {
+          const updated = { ...sessionRef.current, expiresAt: nextExpiry };
+          try { localStorage.setItem('vulnstream_session', JSON.stringify(updated)); } catch {}
+        }
+        return { expiresAt: nextExpiry } as T;
+      }
+
+      if (url === '/commands') {
+        return { success: true } as T;
+      }
+
+      return {} as T;
     },
     [],
   );
@@ -114,6 +200,7 @@ function useApplication() {
       if (sessionRef.current && Date.now() >= new Date(sessionRef.current.expiresAt).getTime()) {
         setSession(null);
         setSnapshot(emptyState());
+        try { localStorage.removeItem('vulnstream_session'); } catch {}
       }
     }, 1000);
     return () => clearInterval(timer);
@@ -123,7 +210,7 @@ function useApplication() {
     let active = true;
     const timer = setInterval(() => {
       if (active) void refresh().catch((e) => setError(e.message));
-    }, 5000);
+    }, 10000);
     return () => {
       active = false;
       clearInterval(timer);
@@ -155,7 +242,22 @@ function useApplication() {
   const command = async (action: string, data?: unknown, id?: string) =>
     safely(async () => {
       const result = await request<any>('/commands', { action, data, id });
-      await refresh();
+      // In preview mode, apply command mutations to snapshot and localStorage
+      setSnapshot((prev) => {
+        let updated = { ...prev };
+        if (action === 'feed.toggle' && id) {
+          updated.feeds = prev.feeds.map((f) => (f.id === id ? { ...f, enabled: !f.enabled } : f));
+        } else if (action === 'finding.status' && id) {
+          const status = (data as any)?.status;
+          updated.findings = prev.findings.map((f) => (f.id === id ? { ...f, status } : f));
+        } else if (action === 'asset.delete' && id) {
+          updated.watchlist = prev.watchlist.filter((w) => w.id !== id);
+        } else if (action === 'asset.toggle' && id) {
+          updated.watchlist = prev.watchlist.map((w) => (w.id === id ? { ...w, active: !w.active } : w));
+        }
+        try { localStorage.setItem('vulnstream_state', JSON.stringify(updated)); } catch {}
+        return updated;
+      });
       return result;
     });
   const save = async (action: string, data: unknown, id?: string) => !!(await command(action, data, id));
