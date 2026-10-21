@@ -169,3 +169,13 @@ test(
     }
   },
 );
+test('large legitimate RSS archives are bounded but filtered by scope instead of failing at 500 entries', () => {
+  const oldItem = item('https://example.com/old', 'Historical advisory '.repeat(30)).replace('21 Oct', '01 Oct');
+  const xml = rss(oldItem.repeat(5103) + item('https://example.com/current'));
+  assert.ok(Buffer.byteLength(xml) > 2 * 1024 * 1024);
+  const parsed = parseSyndication(xml, 'msrc-sized', 24, now);
+  assert.equal(parsed.articles.length, 1);
+  assert.equal(parsed.articles[0].url, 'https://example.com/current');
+  assert.throws(() => parseSyndication('x'.repeat(8 * 1024 * 1024 + 1), 'oversized', 24), /8 MiB/);
+  assert.throws(() => parseSyndication(rss('<item/>'.repeat(10001)), 'too-many', 24), /10,000 entries/);
+});

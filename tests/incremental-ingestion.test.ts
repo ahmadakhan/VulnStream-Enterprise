@@ -104,3 +104,15 @@ test('EPSS reuses recent scores, queries newly matching CVEs, and refreshes on e
   assert.equal(calls, 3);
   assert.equal(refreshed.epssScope!.length, 2);
 });
+test('transient response resets retry without advancing a failed source checkpoint', async () => {
+  let calls = 0, waits = 0;
+  const result = await ingestFeed(feed('NVD_API'), 24, async () => {
+    calls++;
+    if (calls === 1) throw Object.assign(new Error('aborted'), { code: 'ECONNRESET' });
+    return response({ startIndex: 0, totalResults: 0, vulnerabilities: [] });
+  }, config, async () => { waits++; });
+  assert.equal(calls, 2);
+  assert.equal(waits, 1);
+  assert.ok(result.syncState!.cursor);
+  await assert.rejects(ingestFeed({ ...feed('NVD_API'), authType: 'API_KEY', authSecretKey: 'invalid-encrypted-data' }, 24, async () => { throw new Error('No network expected'); }, config, sleep), /re-enter the secret/);
+});

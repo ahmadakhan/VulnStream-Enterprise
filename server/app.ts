@@ -17,7 +17,7 @@ import { enqueue, queueAdvisory } from './delivery';
 import { advisoryEmail } from './advisoryEmail';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state';
 import { emailIsConfigured } from './emailProviders';
-import { parseSyndication } from './rss';
+import { parseSyndication, RSS_MAX_BYTES } from './rss';
 import { readEvents, writeEvent } from './events';
 import type { AppState } from '../shared/state';
 import type { AppSettings, ThreatFeed, WebhookEndpoint, Advisory, TemplateCustomization, EmailConfiguration } from '../src/types';
@@ -273,7 +273,9 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       if (!feed) throw new HttpError(404, 'Feed not found');
       const start = performance.now();
       const headers: Record<string, string> = feed.type === 'RSS_ATOM' ? {Accept:'application/rss+xml, application/atom+xml, application/xml, text/xml'} : {};
-      const secret = decrypt(feed.authSecretKey || '', config.ENCRYPTION_KEY, `feed:${feed.id}`);
+      let secret: string;
+      try { secret = decrypt(feed.authSecretKey || '', config.ENCRYPTION_KEY, `feed:${feed.id}`); }
+      catch { throw new HttpError(400, 'Stored feed credentials could not be decrypted; re-enter the secret or restore the original encryption key'); }
       if (feed.authType !== 'NONE' && !secret) throw new HttpError(400, 'Feed secret is missing');
       if (feed.authType === 'API_KEY') headers.apiKey = secret;
       if (['BEARER', 'BASIC'].includes(feed.authType))
@@ -287,7 +289,9 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
             ? { headers, timeoutMs: 25000, socketTimeoutMs: 20000, maxResponseBytes: 256 * 1024 }
             : feed.type === 'MITRE_CVE'
               ? { headers, timeoutMs: 60000, maxResponseBytes: 64 * 1024 * 1024 }
-              : { headers };
+              : feed.type === 'RSS_ATOM'
+                ? { headers, timeoutMs: 25000, maxResponseBytes: RSS_MAX_BYTES }
+                : { headers };
         response = await request(testUrl.href, requestOptions);
         if (feed.type === 'RSS_ATOM' && response.status === 200) parseSyndication(response.body, feed.id, 2880);
         const latency = Math.round(performance.now() - start);

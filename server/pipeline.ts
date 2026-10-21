@@ -274,7 +274,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             };
             const savedCursor = await get<FeedCursor>(pool, 'feedCursors', feed.id);
             const cursor = savedCursor?.fingerprint === sourceFingerprint(feed) ? savedCursor : undefined;
-            if (['NVD_API', 'OPENCVE_API', 'MITRE_CVE'].includes(feed.type)) {
+            if (['NVD_API', 'OPENCVE_API', 'MITRE_CVE', 'VULNCHECK_KEV'].includes(feed.type)) {
               const window = ingestionWindow(execution!.scopeHours, cursor);
               execution!.logs.push(`Feed ${feed.id}: ${window.incremental ? 'incremental' : 'initial bounded'} sync ${window.start.toISOString()} to ${window.end.toISOString()}`);
             }

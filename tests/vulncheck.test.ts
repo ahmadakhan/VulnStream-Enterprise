@@ -45,3 +45,15 @@ test('VulnCheck rejects malformed CVE records instead of committing partial expl
   await assert.rejects(ingestFeed(source, 24, async () => response({ data: [{ cve: ['CVE-2026-10001'] }, { cve: ['invalid'] }] }), config, sleep), /invalid CVE identifier/);
   await assert.rejects(ingestFeed(source, 24, async () => response({ data: [{ cve: 'CVE-2026-10001' }] }), config, sleep), /no CVE identifiers/);
 });
+test('VulnCheck requests bounded pages filtered from its committed change checkpoint', async () => {
+  const cursor = new Date(Date.now() - 3600000).toISOString();
+  const result = await ingestFeed(source, 2880, async raw => {
+    const url = new URL(raw);
+    assert.equal(url.searchParams.get('limit'), '100');
+    assert.equal(url.searchParams.get('lastModStartDate'), new Date(Date.parse(cursor) - 600000).toISOString().slice(0, 10));
+    assert.ok(url.searchParams.get('lastModEndDate'));
+    return response({ data: [], _meta: {} });
+  }, config, sleep, [], undefined, { cursor });
+  assert.ok(Date.parse(result.syncState!.cursor!) >= Date.parse(cursor));
+  await assert.rejects(ingestFeed(source, 24, async () => response({ data: Array.from({ length: 101 }, () => ({ cve: ['CVE-2026-10001'] })) }), config, sleep), /requested page size/);
+});

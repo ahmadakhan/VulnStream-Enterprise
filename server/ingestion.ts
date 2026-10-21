@@ -1,7 +1,7 @@
 import type { ThreatFeed, NormalizedCVE, IntelligenceArticle } from '../src/types';
 import { ingestMitre } from './mitre';
 import { ingestionWindow, recentRevisions, type IngestionState } from './ingestionState';
-import { parseSyndication } from './rss';
+import { parseSyndication, RSS_MAX_BYTES } from './rss';
 import type { Requester, RequestOptions, ResponseData } from './network';
 import { cveSchema } from './validation';
 import { decrypt } from './secrets';
@@ -180,7 +180,9 @@ export async function ingestFeed(
   const headers: Record<string, string> = {};
   const nvdInterval = Math.max(60000 / feed.rateLimitPerMin, feed.authType === 'API_KEY' ? 700 : 6500);
   if (feed.authType !== 'NONE') {
-    const secret = decrypt(feed.authSecretKey || '', config.ENCRYPTION_KEY, `feed:${feed.id}`);
+    let secret: string;
+    try { secret = decrypt(feed.authSecretKey || '', config.ENCRYPTION_KEY, `feed:${feed.id}`); }
+    catch { throw new Error('Stored feed credentials could not be decrypted; re-enter the secret or restore the original encryption key'); }
     if (!secret) throw new Error('Feed credentials are not configured');
     if (feed.authType === 'API_KEY') headers.apiKey = secret;
     else
@@ -198,8 +200,8 @@ export async function ingestFeed(
       try {
         response = await request(url, { headers, ...requestOptions });
       } catch (error) {
-        const timedOut = error instanceof Error && /timed out|timeout/i.test(error.message);
-        if (!retryTransient || !timedOut || attempt >= 2) throw error;
+        const transient = error instanceof Error && (/timed out|timeout|^aborted$|socket hang up|premature close/i.test(error.message) || ['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'UND_ERR_SOCKET'].includes((error as NodeJS.ErrnoException).code || ''));
+        if (!retryTransient || !transient || attempt >= 2) throw error;
         await sleep(Math.max(nvdInterval, 2000 * (attempt + 1)));
         continue;
       }
@@ -244,7 +246,7 @@ export async function ingestFeed(
   if (feed.type === 'MITRE_CVE') return ingestMitre(feed, scopeHours, request, sleep, syncState);
   if (feed.type === 'RSS_ATOM') {
     const response = await request(feed.url, { headers: { ...headers, accept:'application/rss+xml, application/atom+xml, application/xml, text/xml',
-      ...(feed.etag ? { 'If-None-Match':feed.etag } : {}) }, timeoutMs:25000, maxResponseBytes:2*1024*1024 });
+      ...(feed.etag ? { 'If-None-Match':feed.etag } : {}) }, timeoutMs:25000, maxResponseBytes:RSS_MAX_BYTES });
     if (response.status === 304 && feed.etag) return { cves:[], count:0, notModified:true, etag:feed.etag };
     if (response.status !== 200) throw new Error(`RSS/Atom source returned HTTP ${response.status}`);
     const result = parseSyndication(response.body, feed.id, scopeHours);
@@ -475,18 +477,22 @@ export async function ingestFeed(
     const url = new URL(feed.url);
     if (!url.pathname.replace(/\/$/, '').endsWith('/v3/index/vulncheck-kev'))
       throw new Error('VulnCheck endpoint must target /v3/index/vulncheck-kev');
+    const { start, end, hasMore } = ingestionWindow(scopeHours, syncState);
+    url.searchParams.set('lastModStartDate', start.toISOString().slice(0, 10));
+    url.searchParams.set('lastModEndDate', end.toISOString().slice(0, 10));
     const exploited: Record<string, true> = {};
     const seenCursors = new Set<string>();
     let cursor: string | undefined;
-    for (let pageNo = 0; pageNo < 100; pageNo++) {
+    for (let pageNo = 0; pageNo < 300; pageNo++) {
       const pageUrl = new URL(url);
       // Own pagination parameters; inherited start_cursor/page values can restart a session.
       for (const key of ['cursor', 'start_cursor', 'page']) pageUrl.searchParams.delete(key);
-      pageUrl.searchParams.set('limit', '300');
+      pageUrl.searchParams.set('limit', '100');
       if (cursor) pageUrl.searchParams.set('cursor', cursor);
       else pageUrl.searchParams.set('start_cursor', '');
       const { data: page } = await json(pageUrl.href, false, { timeoutMs: 30000, maxResponseBytes: 8 * 1024 * 1024 }, true);
       if (!page || !Array.isArray(page.data)) throw new Error('Invalid VulnCheck KEV response');
+      if (page.data.length > 100) throw new Error('VulnCheck KEV exceeded the requested page size');
       for (const row of page.data) {
         const record = row?.source || row;
         if (!Array.isArray(record?.cve)) throw new Error('VulnCheck KEV record has no CVE identifiers');
@@ -502,10 +508,10 @@ export async function ingestFeed(
       if (seenCursors.has(nextCursor)) throw new Error('VulnCheck KEV cursor did not advance or repeated a previous cursor');
       seenCursors.add(nextCursor);
       cursor = nextCursor;
-      if (pageNo === 99) throw new Error('VulnCheck KEV pagination exceeded 30,000 records');
+      if (pageNo === 299) throw new Error('VulnCheck KEV pagination exceeded 30,000 records');
       await sleep(Math.max(1000, 60000 / feed.rateLimitPerMin));
     }
-    return { cves: [], exploited, count: Object.keys(exploited).length };
+    return { cves: [], exploited, count: Object.keys(exploited).length, syncState: { cursor: end.toISOString(), hasMore } };
   }
   if (feed.type === 'JSON_SEARCH_API') {
     const { data, etag } = await json(feed.url);

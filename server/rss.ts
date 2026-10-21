@@ -2,6 +2,9 @@ import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { createHash } from 'node:crypto';
 import type { IntelligenceArticle } from '../src/types';
 
+export const RSS_MAX_BYTES = 8 * 1024 * 1024;
+export const RSS_MAX_ENTRIES = 10000;
+
 export function canonicalArticleUrl(value: string): string | null {
   try {
     const url = new URL(value);
@@ -45,7 +48,7 @@ export function parseSyndication(
   articles: IntelligenceArticle[];
   warnings: string[];
 } {
-  if (Buffer.byteLength(xml) > 2 * 1024 * 1024) throw new Error('RSS/Atom feed exceeds 2 MiB');
+  if (Buffer.byteLength(xml) > RSS_MAX_BYTES) throw new Error('RSS/Atom feed exceeds 8 MiB');
   if (/<!\s*(DOCTYPE|ENTITY)/i.test(xml))
     throw new Error('RSS/Atom document type and entity declarations are not permitted');
   if (XMLValidator.validate(xml) !== true) throw new Error('Feed is not valid XML');
@@ -64,7 +67,7 @@ export function parseSyndication(
     : parsed.rss
       ? array(parsed.rss.channel.item)
       : array(parsed['rdf:RDF'].item);
-  if (rows.length > 500) throw new Error('RSS/Atom feed exceeds 500 entries');
+  if (rows.length > RSS_MAX_ENTRIES) throw new Error('RSS/Atom feed exceeds 10,000 entries');
   const records = new Map<string, IntelligenceArticle>(),
     warnings: string[] = [];
   let invalid = 0;
