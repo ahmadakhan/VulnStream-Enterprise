@@ -105,6 +105,20 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       assert.equal(second[0].id, first[0].id);
       assert.equal((await get<any>(pool, 'feeds', 'mitre')).healthStatus, 'HEALTHY');
     });
+    await t.test('configured advisory prefix reaches queued email subjects and bodies automatically', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, advisoryPrefix: 'SECURITY-', autoDispatchEnabled: true });
+      await save('watchlist', 'asset', asset());
+      await save('cveData', vulnerability().cveId, vulnerability());
+      await save('recipients', 'rec', { id: 'rec', name: 'Test', email: 'test@example.invalid', enabled: true, subscriptionTier: 'ALL_SEVERITIES' });
+      await run();
+      const jobs = (await pool.query('SELECT payload,advisory_id FROM outbox')).rows;
+      assert.equal(jobs.length, 1);
+      assert.match(jobs[0].advisory_id, /^SECURITY-/);
+      assert.ok(jobs[0].payload.subject.startsWith(`[${jobs[0].advisory_id}] [HIGH]`));
+      assert.ok(jobs[0].payload.text.includes(`Advisory ID: ${jobs[0].advisory_id}`));
+      assert.ok(jobs[0].payload.html.includes(jobs[0].advisory_id));
+    });
     await t.test('timed out source recovers without the scheduler being enabled', async () => {
       await reset();
       await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: false, autoDispatchEnabled: false });

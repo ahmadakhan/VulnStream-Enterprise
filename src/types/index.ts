@@ -383,3 +383,24 @@ export interface AppSettings {
     fromEmail: string;
   };
 }
+
+export interface SystemHealth {
+  database: string;
+  databaseLatencyMs: number;
+  uptimeSeconds: number;
+  heapBytes: number;
+  workerEnabled: boolean;
+  workerHeartbeat: string | null;
+  workerStatus: 'DISABLED' | 'NOT_OBSERVED' | 'STALE' | 'HEALTHY';
+  heartbeatAgeSeconds: number | null;
+  deliveryQueue: { dueJobs: number; oldestDueCreatedAt: string | null; nextScheduledAttempt: string | null; expiredLeases: number };
+  lastScheduledRun: string | null;
+  backlog: { status: string; count: number }[];
+  emailProvider: string;
+  emailConfigured: boolean;
+  httpsRequired: boolean;
+  csrfEnforced: boolean;
+  ssrfEnforced: boolean;
+  ntp: string;
+  checkedAt: string;
+}

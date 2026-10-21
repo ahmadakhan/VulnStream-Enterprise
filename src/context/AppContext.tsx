@@ -13,6 +13,7 @@ import type {
   PipelineExecution,
   AuditLog,
   EmailConfiguration,
+  SystemHealth,
 } from '../types';
 import { compileCustomizedTemplate } from '../utils/templateCompiler';
 function useApplication() {
@@ -211,7 +212,7 @@ function useApplication() {
     updateUser: (id: string, data: { role: string; disabled: boolean }) =>
       safely(() => request(`/users/${encodeURIComponent(id)}`, data, 'PATCH')),
     fetchEvents: (query: string) => request<{events: import('../types').OperationalEvent[]; nextCursor:string|null}>(`/events?${query}`),
-    health: () => safely(() => request<any>('/health')),
+    health: () => safely(() => request<SystemHealth>('/health')),
     ntpSyncStatus: { synchronized: false, driftMs: 0, lastChecked: '' },
     toggleFeedEnabled: (id: string) => command('feed.toggle', undefined, id),
     addFeed: (

@@ -1,4 +1,5 @@
 import { writeEvent } from './events';
+import { advisoryEmail } from './advisoryEmail';
 import type pg from 'pg';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state';
@@ -175,9 +176,7 @@ export async function queueAdvisory(
     (r) => r.enabled && findings.length > 0 && findings.every((finding) => recipientAllows(r, finding)),
   );
   const payload = {
-    subject: `[${advisory.severity}] ${advisory.title}`,
-    text: `${advisory.title}\n\nSeverity: ${advisory.severity}\n\nCVE IDs:\n${advisory.cveIds.join('\n')}\n\n${advisory.executiveSummary}\n\nAffected systems:\n${advisory.affectedSystems.join('\n')}\n\n${advisory.remediationInstructions}${advisory.vendorLink ? `\n\nVendor advisory: ${advisory.vendorLink}` : ''}`,
-    html,
+    ...advisoryEmail(advisory, html),
     cveIds: advisory.cveIds,
     findingRevisions: Object.fromEntries(findings.map((finding) => [finding.id, findingRevision(finding)])),
     cveRevisions: Object.fromEntries(findings.map((finding) => [finding.cveId, revision(finding.cve)])),
