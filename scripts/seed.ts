@@ -34,25 +34,28 @@ try {
       actor: 'seed-script',
     });
 
-    for (const item of INITIAL_WATCHLIST) {
-      await applyCommand(db, config, {
-        action: 'asset.save',
+    // The watchlist is upserted by its stable fixture id so that repeated
+    // seeding refreshes existing rows instead of failing with "not found"
+    // or orphaning the findings that reference those asset ids.
+    await applyCommand(db, config, {
+      action: 'watchlist.import',
+      data: INITIAL_WATCHLIST.map((item) => ({
         id: item.id,
-        data: {
-          vendor: item.vendor,
-          product: item.product,
-          version: item.version,
-          cpes: item.cpes,
-          purls: item.purls,
-          targetHw: item.targetHw,
-          assetTag: item.assetTag,
-          ownerGroup: item.ownerGroup,
-          active: item.active,
-          notes: item.notes,
-        },
-        actor: 'seed-script',
-      });
-    }
+        vendor: item.vendor,
+        product: item.product,
+        version: item.version,
+        cpes: item.cpes,
+        purls: item.purls,
+        targetHw: item.targetHw,
+        assetTag: item.assetTag,
+        ownerGroup: item.ownerGroup,
+        active: item.active,
+        notes: item.notes,
+        exposure: item.exposure,
+        createdAt: item.createdAt,
+      })),
+      actor: 'seed-script',
+    });
   });
 
   console.log('Seed data applied: Threat Feed Sources and Monitored Product Inventory only.');

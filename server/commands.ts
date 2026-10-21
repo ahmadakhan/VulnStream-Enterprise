@@ -6,6 +6,7 @@ import {
   feedSchema,
   feedImportSchema,
   assetSchema,
+  watchlistImportSchema,
   recipientSchema,
   webhookSchema,
   cveSchema,
@@ -100,6 +101,26 @@ export async function applyCommand(
     }
     await appendAudit(db, 'Assets imported', `${input.length} assets`, actor, 'WATCHLIST', 'INFO', ipAddress);
     return { success: true, imported: input.length, errors: [] };
+  } else if (action === 'watchlist.import') {
+    const input = watchlistImportSchema.parse(data);
+    let imported = 0;
+    const errors: string[] = [];
+    for (const item of input) {
+      const old = await get<any>(db, 'watchlist', item.id);
+      // Upsert keeps the identifier and original creation time stable so that
+      // repeated seeding does not orphan findings that reference an asset id.
+      const merged = {
+        ...old,
+        ...item,
+        id: item.id,
+        createdAt: item.createdAt || old?.createdAt || now,
+        exposure: item.exposure ?? old?.exposure,
+      };
+      await put(db, 'watchlist', item.id, merged);
+      imported += 1;
+    }
+    await appendAudit(db, 'Watchlist imported', `${imported} assets`, actor, 'WATCHLIST', 'INFO', ipAddress);
+    return { success: true, imported, errors };
   } else if (action === 'recipient.save') {
     const input = recipientSchema.parse(data);
     await checkExisting('recipients');

@@ -12,8 +12,7 @@ import type {
   AuditLog,
 } from '../types';
 import { normalizeCveId, isWithinTimelineScope } from '../utils/deduplicator';
-import { matchCPE, matchPurl, parseCPE23 } from '../utils/cpeMatcher';
-import { isVersionInNvdRange, canCompareRange } from '../utils/versionComparator';
+import { matchesWatchlistItem } from '../utils/cpeMatcher';
 import ipaddr from 'ipaddr.js';
 export interface PipelineRunResult {
   execution: PipelineExecution;
@@ -90,56 +89,24 @@ export function runVulnerabilityPipeline(
     for (const asset of watchlist.filter((a) => a.active)) {
       const key = `${canonical}:${asset.id}`;
       if (known.has(key)) continue;
-      let matched = '',
-        confirmed = false;
-      const criteria = cve.cpeMatchDetails?.length
-        ? cve.cpeMatchDetails
-        : cve.cpeMatches.map((criteria) => ({ criteria, range: cve.versionRange }));
-      for (const a of asset.cpes)
-        for (const v of criteria) {
-          if (matchCPE(a, v.criteria, v.range).matched) {
-            matched = v.criteria;
-            const parsedAsset = parseCPE23(a),
-              parsedTarget = parseCPE23(v.criteria);
-            const version = parsedAsset.version;
-            const knownContext = (
-              [
-                'part',
-                'vendor',
-                'product',
-                'update',
-                'edition',
-                'language',
-                'swEdition',
-                'targetSw',
-                'targetHw',
-                'other',
-              ] as const
-            ).every((field) => parsedTarget[field] === '*' || parsedAsset[field] !== '*');
-            confirmed =
-              confirmed ||
-              (knownContext &&
-                !['*', '-', ''].includes(version) &&
-                (!v.range || canCompareRange(version, v.range)));
-          }
-        }
-      for (const a of asset.purls || [])
-        for (const v of cve.purls || []) {
-          const base = a.split(/[?#]/)[0],
-            at = base.lastIndexOf('@'),
-            version = at > base.indexOf('/') + 1 ? base.slice(at + 1) : '';
-          if (
-            matchPurl(a, v) &&
-            (!cve.versionRange || !version || isVersionInNvdRange(version, cve.versionRange).inRange)
-          ) {
-            matched = v;
-            confirmed =
-              confirmed || (!!version && (!cve.versionRange || canCompareRange(version, cve.versionRange)));
-          }
-        }
-      if (!matched) continue;
-      if (cve.applicabilityRequiresReview) confirmed = false;
-      // Unknown installed versions produce a reviewable finding, never an automatic notification.
+      const vulnCpeMatches = cve.cpeMatchDetails?.length
+        ? cve.cpeMatchDetails.map((c) => c.criteria)
+        : cve.cpeMatches;
+      const result = matchesWatchlistItem(
+        asset.cpes,
+        asset.vendor,
+        asset.product,
+        vulnCpeMatches,
+        cve.title,
+        cve.description,
+        cve.versionRange,
+        asset.purls,
+        cve.purls,
+        asset.targetHw,
+      );
+      if (!result.matched) continue;
+      if (cve.applicabilityRequiresReview) result.confidence = 0;
+      const confirmed = result.confidence >= 90;
       const evidence = confirmed
         ? 'Structured package/version correlation'
         : 'Product correlation; version or applicability requires review';
@@ -149,8 +116,8 @@ export function runVulnerabilityPipeline(
         cve,
         matchedAssetId: asset.id,
         matchedAssetName: `${asset.assetTag} (${asset.vendor} ${asset.product})`,
-        matchedCpe: matched,
-        matchingMethod: matched.startsWith('pkg:') ? 'PURL_EXACT' : 'STRICT_CPE',
+        matchedCpe: result.matchedCpe || '',
+        matchingMethod: result.method,
         matchingEvidence: evidence,
         exposure: asset.exposure,
         exploitRisk: determineExploitRisk(cve),

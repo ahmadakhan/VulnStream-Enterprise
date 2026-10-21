@@ -201,7 +201,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       const staleBundles = new Set<string>(
         (
           await db.query(
-            `SELECT advisory_id FROM outbox GROUP BY advisory_id HAVING bool_and(status='FAILED' AND COALESCE(error,'') LIKE 'Advisory applicability changed;%')`,
+             `SELECT advisory_id FROM outbox GROUP BY advisory_id HAVING bool_and(status='FAILED' AND COALESCE(error,'') LIKE '%no longer applicable%')`,
           )
         ).rows.map((row) => row.advisory_id),
       );
