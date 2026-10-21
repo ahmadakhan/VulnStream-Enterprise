@@ -209,15 +209,33 @@ main .fixed.inset-0.items-center > div {
 .light main [class~="border-zinc-800"], .light main [class~="border-zinc-700"] { border-color: var(--ui-divider); }
 .light main [class~="text-zinc-100"], .light main [class~="text-zinc-200"] { color: var(--ui-text); }
 .light main [class~="text-zinc-300"], .light main [class~="text-zinc-400"] { color: var(--ui-muted); }
-.light main [class~="text-zinc-500"] { color: #64748b; }
+.light main [class~="text-zinc-500"] { color: var(--ui-muted); }
 .light main :is(label, input, select, textarea) { color: var(--ui-text); }
-.light main :is(.text-emerald-300, .text-emerald-400, .text-emerald-500, .text-green-400) { color: #047857; }
-.light main :is(.text-amber-300, .text-amber-400, .text-yellow-400) { color: #92400e; }
-.light main :is(.text-rose-300, .text-rose-400, .text-red-300, .text-red-400) { color: #b91c3b; }
-.light main :is(.text-blue-300, .text-blue-400, .text-indigo-300, .text-indigo-400) { color: #3559bd; }
-.light main :is([class~="bg-emerald-950/40"], [class~="bg-emerald-500/10"], [class~="bg-emerald-900/30"]) { background-color: #ecfdf5; }
-.light main :is([class~="bg-amber-950/40"], [class~="bg-amber-500/10"], [class~="bg-amber-900/30"]) { background-color: #fffbeb; }
-.light main :is([class~="bg-red-950/40"], [class~="bg-rose-950/40"], [class~="bg-red-900/30"]) { background-color: #fff1f2; }
+/* Status labels use opaque, readable foregrounds on paired pale surfaces.
+   Include alpha utility variants: pale dark-mode text is not readable on white. */
+.light main :is(.text-emerald-300, .text-emerald-400, .text-emerald-500, .text-green-400,
+  [class~="text-emerald-400/90"], [class~="text-emerald-500/80"]) { color: #166534; }
+.light main :is(.text-amber-300, .text-amber-400, .text-amber-500, .text-yellow-400,
+  [class~="text-amber-400/90"], [class~="text-amber-500/80"]) { color: #854d0e; }
+.light main :is(.text-rose-300, .text-rose-400, .text-red-300, .text-red-400, .text-red-500) { color: #991b1b; }
+.light main :is(.text-blue-200, .text-blue-300, .text-blue-400, .text-blue-500, .text-indigo-300, .text-indigo-400) { color: #1e40af; }
+.light main :is(.text-orange-300, .text-orange-400) { color: #9a3412; }
+.light main :is(.text-sky-300, .text-sky-400) { color: #075985; }
+.light main :is(.text-purple-300, .text-purple-400, .text-violet-400) { color: #6b21a8; }
+.light main :is([class~="bg-emerald-950/40"], [class~="bg-emerald-950/50"], [class~="bg-emerald-500/10"], [class~="bg-emerald-900/30"]) { background-color: #ecfdf5; border-color: #a7d9bd; }
+.light main :is([class~="bg-amber-950/40"], [class~="bg-amber-500/10"], [class~="bg-amber-900/30"]) { background-color: #fffbeb; border-color: #e8cd91; }
+.light main :is([class~="bg-red-950/40"], [class~="bg-rose-950/40"], [class~="bg-red-500/10"], [class~="bg-red-900/30"]) { background-color: #fef2f2; border-color: #efb6b6; }
+.light main [class~="bg-orange-950/40"] { background-color: #fff7ed; border-color: #f3c69f; }
+.light main :is([class~="bg-blue-500/15"], [class~="bg-blue-500/5"]) { background-color: #eff6ff; border-color: #b8cef3; }
+/* Keep neutral status chips distinct from white cards and tables. */
+.light main [class~="bg-zinc-500/10"] { background-color: #edf2f8; border-color: #c8d3e3; }
+/* Legacy hover classes must not switch light-theme labels back to pale text. */
+.light main :is([class~="hover:text-zinc-100"], [class~="hover:text-zinc-200"], [class~="hover:text-zinc-300"]):hover { color: var(--ui-text); }
+.light main :is([class~="hover:bg-zinc-700"], [class~="hover:bg-zinc-800"]):hover { background-color: #e2e8f0; }
+.light main .group:hover [class~="group-hover:text-zinc-200"] { color: var(--ui-text); }
+.light main .group:hover [class~="group-hover:text-zinc-100"] { color: var(--ui-text); }
+.light main .group:hover :is([class~="group-hover:text-amber-300"], [class~="group-hover:text-amber-400"]) { color: #854d0e; }
+.light main .group:hover [class~="group-hover:text-emerald-400"] { color: #166534; }
 main table th { font-family: inherit; font-weight: 650; letter-spacing: .035em; }
 main table td { vertical-align: middle; }
 .feeds-table :is(th, td) { overflow-wrap: anywhere; }
@@ -267,6 +285,19 @@ button[class~="bg-blue-600"]:hover:not(:disabled) {
   background: linear-gradient(110deg, #5579e9, #687fe9);
   box-shadow: 0 6px 16px rgb(54 87 193 / 24%);
 }
+
+/* Preserve white text on filled actions, including hover and focus states. */
+.light button:is([class~="bg-zinc-100"], [class~="bg-blue-600"]) {
+  color: #fff;
+  background: linear-gradient(110deg, #3553b4, #4b5bc3);
+  border-color: #3553b4;
+}
+.light button:is([class~="bg-zinc-100"], [class~="bg-blue-600"]):hover:not(:disabled) {
+  color: #fff;
+  background: linear-gradient(110deg, #2c459b, #3e4da9);
+}
+.light .ui-primary { background: #3553b4; color: #fff; }
+.light .ui-primary:hover:not(:disabled) { background: #2c459b; }
 
 .login-screen {
   --login-bg: #09111f;
