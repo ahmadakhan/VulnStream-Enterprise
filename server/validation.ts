@@ -11,6 +11,16 @@ const httpsUrl = z
     const u = new URL(s);
     return u.protocol === 'https:' && !u.username && !u.password;
   }, 'HTTPS URL without embedded credentials required');
+const referenceUrl = z.union([
+  z.literal(''),
+  z
+    .url()
+    .max(2048)
+    .refine((value) => {
+      const url = new URL(value);
+      return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password;
+    }, 'HTTP(S) reference URL without embedded credentials required'),
+]);
 export const feedSchema = z.object({
   name: shortText,
   type: z.enum(FEED_TYPES),
@@ -115,6 +125,7 @@ export const rangeSchema = z.object({
 export const cveSchema = z.object({
   cveId: z
     .string()
+    .max(150)
     .trim()
     .toUpperCase()
     .regex(/^CVE-\d{4}-\d{4,}$/),
@@ -157,8 +168,8 @@ export const cveSchema = z.object({
   }),
   exploitStatus: z.enum(['Active Weaponized', 'POC Available', 'Reported In Wild', 'None']),
   remediation: z.object({
-    patchUrl: z.string().max(2048),
-    vendorAdvisoryRef: z.string().max(2048),
+    patchUrl: referenceUrl,
+    vendorAdvisoryRef: referenceUrl,
     immediateActions: strings,
     workarounds: strings,
     rollbackPlan: z.string().max(4000),

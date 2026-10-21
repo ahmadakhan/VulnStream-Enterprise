@@ -154,7 +154,7 @@ export const ThreatFeedsView: React.FC = () => {
             Configurable Threat Feed Ingestion Sources
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Pre-seeded with 16 vendor feeds plus NVD, CISA KEV, and EPSS. Autonomous scheduler polls active feeds without human intervention.
+            Configure NVD, CISA KEV, EPSS, or validated normalized JSON sources. The server scheduler polls enabled feeds when scheduling is enabled.
           </p>
         </div>
 

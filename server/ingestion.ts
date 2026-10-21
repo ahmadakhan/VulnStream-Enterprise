@@ -5,10 +5,15 @@ import { decrypt } from './secrets';
 import type { Config } from './config';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
+import { normalizeCveId } from '../src/utils/deduplicator';
 export interface IngestResult {
+  sourceId?: string;
   cves: NormalizedCVE[];
   kev?: Record<string, NormalizedCVE['cisaKev']>;
   epss?: Record<string, NormalizedCVE['epss']>;
+  /** A successful targeted EPSS response is authoritative only for these IDs. */
+  epssScope?: string[];
+  withdrawals?: { cveId: string; modifiedDate: string }[];
   count: number;
   etag?: string;
   notModified?: boolean;
@@ -16,7 +21,7 @@ export interface IngestResult {
 const iso = (s: string) => new Date(s).toISOString();
 export function normalizeNvd(item: any, feedId: string): NormalizedCVE | null {
   const cve = item.cve;
-  if (!cve || ['Rejected', 'Awaiting Analysis', 'Undergoing Analysis'].includes(cve.vulnStatus)) return null;
+  if (!cve || cve.vulnStatus === 'Rejected') return null;
   const metric =
     cve.metrics?.cvssMetricV40?.[0]?.cvssData ||
     cve.metrics?.cvssMetricV31?.[0]?.cvssData ||
@@ -24,7 +29,9 @@ export function normalizeNvd(item: any, feedId: string): NormalizedCVE | null {
     cve.metrics?.cvssMetricV2?.[0]?.cvssData;
   // Keep unscored CVEs for applicability matching. Score 0 is only a storage
   // sentinel; UNKNOWN prevents it from being presented as a real CVSS score.
-  let applicabilityRequiresReview = false;
+  let applicabilityRequiresReview = ['Received', 'Awaiting Analysis', 'Undergoing Analysis'].includes(
+    cve.vulnStatus,
+  );
   const details: NonNullable<NormalizedCVE['cpeMatchDetails']> = [];
   const walk = (node: any) => {
     // Complex AND / negated configurations cannot safely be flattened into an OR.
@@ -94,9 +101,11 @@ export async function ingestFeed(
   scopeHours: number,
   request: Requester,
   config: Config,
-  sleep = delay,
+  sleep: (ms: number) => Promise<unknown> = delay,
+  targetCveIds: string[] = [],
 ): Promise<IngestResult> {
   const headers: Record<string, string> = {};
+  const nvdInterval = Math.max(60000 / feed.rateLimitPerMin, feed.authType === 'API_KEY' ? 700 : 6500);
   if (feed.authType !== 'NONE') {
     const secret = decrypt(feed.authSecretKey || '', config.ENCRYPTION_KEY, `feed:${feed.id}`);
     if (!secret) throw new Error('Feed credentials are not configured');
@@ -118,7 +127,7 @@ export async function ingestFeed(
       } catch (error) {
         const timedOut = error instanceof Error && /timed out|timeout/i.test(error.message);
         if (!retryTransient || !timedOut || attempt >= 2) throw error;
-        await sleep(2000 * (attempt + 1));
+        await sleep(Math.max(nvdInterval, 2000 * (attempt + 1)));
         continue;
       }
       const retryableStatus = [429, 502, 503, 504].includes(response.status);
@@ -134,7 +143,13 @@ export async function ingestFeed(
           : response.status === 429
             ? 30000
             : 2000 * (attempt + 1);
-      await sleep(Math.min(60000, Math.max(1000, retryDelay)));
+      // Never retry earlier than the provider permits. Long cooldowns defer the
+      // source to a later run instead of occupying this worker indefinitely.
+      if (retryDelay > 60000)
+        throw new Error(
+          `NVD requested a ${Math.ceil(retryDelay / 1000)} second retry delay; defer to a later run`,
+        );
+      await sleep(Math.max(nvdInterval, retryDelay));
     }
     if (response.status === 304) {
       return { data: null, etag: feed.etag };
@@ -156,6 +171,7 @@ export async function ingestFeed(
     const end = new Date(),
       start = new Date(end.getTime() - Math.min(scopeHours, 2880) * 3600000);
     const cves: NormalizedCVE[] = [];
+    const withdrawals: NonNullable<IngestResult['withdrawals']> = [];
     let rawCount = 0;
     for (let offset = 0; ;) {
       const url = new URL(feed.url);
@@ -171,7 +187,7 @@ export async function ingestFeed(
         { timeoutMs: 60000, socketTimeoutMs: 30000, maxResponseBytes: 16 * 1024 * 1024 },
         true,
       );
-      if (!data) return { cves: [], count: 0, notModified: true };
+      if (!data) throw new Error('NVD returned an unexpected conditional response');
       const page = data;
       if (
         !Array.isArray(page.vulnerabilities) ||
@@ -182,6 +198,11 @@ export async function ingestFeed(
         throw new Error('Invalid NVD pagination response');
       if (page.totalResults > 50000) throw new Error('NVD window exceeds 50,000 records; reduce scope');
       for (const item of page.vulnerabilities) {
+        if (item.cve?.vulnStatus === 'Rejected') {
+          const cveId = normalizeCveId(item.cve.id);
+          if (cveId) withdrawals.push({ cveId, modifiedDate: iso(item.cve.lastModified) });
+          continue;
+        }
         const cve = normalizeNvd(item, feed.id);
         if (cve) cves.push(cve);
       }
@@ -189,9 +210,9 @@ export async function ingestFeed(
       offset += page.vulnerabilities.length;
       if (offset >= page.totalResults) break;
       if (!page.vulnerabilities.length) throw new Error('NVD pagination stopped before completion');
-      await sleep(Math.max(60000 / feed.rateLimitPerMin, feed.authType === 'NONE' ? 6500 : 700));
+      await sleep(nvdInterval);
     }
-    return { cves, count: rawCount };
+    return { cves, count: rawCount, withdrawals };
   }
   if (feed.type === 'CISA_KEV') {
     const { data: rawData, etag } = await json(feed.url);
@@ -231,34 +252,66 @@ export async function ingestFeed(
   }
   if (feed.type === 'EPSS_API') {
     const epss: Record<string, NormalizedCVE['epss']> = {};
-    let count = 0;
-    for (let offset = 0; ;) {
-      const url = new URL(feed.url);
-      url.searchParams.set('offset', String(offset));
-      url.searchParams.set('limit', '10000');
-      // EPSS is paginated, so a feed-level ETag could validate the wrong page.
-      const { data: page } = await json(url.href, false);
-      if (!page) return { cves: [], epss, count, notModified: true };
-      const rows = z
-        .array(
-          z.object({
-            cve: z.string(),
-            epss: z.coerce.number().min(0).max(1),
-            percentile: z.coerce.number().min(0).max(1),
-          }),
-        )
-        .max(10000)
-        .parse(page.data);
-      const total = Number(page.total);
-      if (!Number.isInteger(total) || total < 0 || total > 500000) throw new Error('Invalid EPSS total');
-      for (const row of rows) epss[row.cve] = { score: row.epss, percentile: row.percentile };
-      count += rows.length;
-      offset += rows.length;
-      if (offset >= total) break;
-      if (!rows.length) throw new Error('EPSS pagination stopped before completion');
-      await sleep(60000 / feed.rateLimitPerMin);
+    const scope = [...new Set(targetCveIds.map(normalizeCveId).filter((id): id is string => !!id))].sort();
+    const batches: string[][] = [];
+    for (const id of scope) {
+      if (id.length > 1900) throw new Error('CVE identifier exceeds EPSS request limit');
+      const batch = batches[batches.length - 1];
+      if (!batch || batch.length >= 100 || [...batch, id].join(',').length > 1900) batches.push([id]);
+      else batch.push(id);
     }
-    return { cves: [], epss, count };
+    let count = 0,
+      requests = 0;
+    for (const batch of batches) {
+      const seen = new Set<string>();
+      let expectedTotal: number | undefined;
+      for (let offset = 0; ;) {
+        if (requests++) await sleep(60000 / feed.rateLimitPerMin);
+        const url = new URL(feed.url);
+        // Do not inherit date/score filters: they could hide a requested score.
+        url.search = '';
+        url.searchParams.set('cve', batch.join(','));
+        url.searchParams.set('offset', String(offset));
+        url.searchParams.set('limit', '100');
+        const { data: page } = await json(url.href, false);
+        if (!page) throw new Error('EPSS returned an incomplete conditional response');
+        const rows = z
+          .array(
+            z.object({
+              cve: z
+                .string()
+                .transform((id) => normalizeCveId(id))
+                .refine((id) => !!id),
+              epss: z.coerce.number().min(0).max(1),
+              percentile: z.coerce.number().min(0).max(1),
+            }),
+          )
+          .max(100)
+          .parse(page.data);
+        const total = Number(page.total);
+        if (
+          !Number.isInteger(total) ||
+          total < 0 ||
+          total > batch.length ||
+          (expectedTotal !== undefined && total !== expectedTotal) ||
+          (page.offset !== undefined && Number(page.offset) !== offset)
+        )
+          throw new Error('Invalid EPSS pagination response');
+        expectedTotal = total;
+        for (const row of rows) {
+          if (!batch.includes(row.cve!) || seen.has(row.cve!))
+            throw new Error('EPSS returned an unexpected or duplicate CVE');
+          seen.add(row.cve!);
+          epss[row.cve!] = { score: row.epss, percentile: row.percentile };
+        }
+        count += rows.length;
+        offset += rows.length;
+        if (offset > total) throw new Error('EPSS response exceeds declared total');
+        if (offset === total) break;
+        if (!rows.length) throw new Error('EPSS pagination stopped before completion');
+      }
+    }
+    return { cves: [], epss, epssScope: scope, count };
   }
   if (feed.type === 'JSON_SEARCH_API') {
     const { data, etag } = await json(feed.url);

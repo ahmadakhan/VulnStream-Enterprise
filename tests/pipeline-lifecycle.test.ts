@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, randomBytes } from 'node:crypto';
-import { createPool, migrate, transaction, put, list, get } from '../server/db';
+import { createPool, migrate, transaction, put, putMany, list, get } from '../server/db';
 import { queueRun, processPipeline } from '../server/pipeline';
 import { deliverNext } from '../server/delivery';
 import { loadConfig } from '../server/config';
 import { DEFAULT_SETTINGS } from '../shared/state';
+import { applyCommand } from '../server/commands';
 import type { Finding, NormalizedCVE, WatchListItem } from '../src/types';
 const database = process.env.TEST_DATABASE_URL;
 const cpe = (version: string) => `cpe:2.3:a:example:widget:${version}:*:*:*:*:*:*:*`;
@@ -70,6 +71,24 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
   };
   try {
     await migrate(pool);
+    await t.test('large bulk writes stay below parameter limits and preserve unchanged rows', async () => {
+      await reset();
+      const rows = Array.from({ length: 22000 }, (_, id) => ({ id: String(id), data: { value: id } }));
+      await transaction(pool, (db) => putMany(db, 'bulk-test', [...rows, { id: '0', data: { value: -1 } }]));
+      assert.equal(
+        (await pool.query("SELECT count(*)::int AS n FROM records WHERE kind='bulk-test'")).rows[0].n,
+        22000,
+      );
+      assert.deepEqual(await get(pool, 'bulk-test', '0'), { value: -1 });
+      await pool.query("UPDATE records SET updated_at='2000-01-01' WHERE kind='bulk-test' AND id='0'");
+      await transaction(pool, (db) => putMany(db, 'bulk-test', [{ id: '0', data: { value: -1 } }]));
+      assert.equal(
+        (
+          await pool.query("SELECT updated_at FROM records WHERE kind='bulk-test' AND id='0'")
+        ).rows[0].updated_at.toISOString(),
+        '2000-01-01T00:00:00.000Z',
+      );
+    });
     await t.test('new inventory is matched against older cached CVEs', async () => {
       await reset();
       const cve = vulnerability();
@@ -78,6 +97,25 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       await save('watchlist', 'asset', asset());
       await run();
       assert.equal((await list(pool, 'findings')).length, 1);
+    });
+    await t.test('repeated bulk inventory imports preserve asset and finding identities', async () => {
+      await reset();
+      const { id: _id, createdAt: _created, ...item } = asset();
+      const importItems = () =>
+        transaction(pool, (db) =>
+          applyCommand(db, config, { action: 'asset.import', data: [item, item], actor: 'test' }),
+        );
+      assert.equal((await importItems()).imported, 1);
+      const first = (await list<WatchListItem>(pool, 'watchlist'))[0];
+      await save('cveData', vulnerability().cveId, vulnerability());
+      await run();
+      const finding = (await list<Finding>(pool, 'findings'))[0];
+      await importItems();
+      await run();
+      assert.equal((await list<WatchListItem>(pool, 'watchlist')).length, 1);
+      assert.equal((await list<WatchListItem>(pool, 'watchlist'))[0].id, first.id);
+      assert.equal((await list<Finding>(pool, 'findings')).length, 1);
+      assert.equal((await list<Finding>(pool, 'findings'))[0].id, finding.id);
     });
     await t.test('review findings promote after inventory correction and retain stable IDs', async () => {
       await reset();
@@ -243,6 +281,7 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       };
       cve.epss = { score: 0.9, percentile: 0.99 };
       await save('cveData', cve.cveId, cve);
+      await save('watchlist', 'asset', asset());
       await save('feeds', 'kev-feed', {
         id: 'kev-feed',
         name: 'KEV test',
@@ -282,6 +321,234 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       const refreshed = await get<NormalizedCVE>(pool, 'cveData', cve.cveId);
       assert.deepEqual(refreshed?.cisaKev, { isKev: false });
       assert.deepEqual(refreshed?.epss, { score: 0, percentile: 0 });
+    });
+    await t.test('same-run CVEs receive targeted EPSS enrichment before dispatch', async () => {
+      await reset();
+      await save('watchlist', 'asset', asset());
+      const baseFeed = {
+        name: 'Test',
+        authType: 'NONE',
+        rateLimitPerMin: 60,
+        enabled: true,
+        consecutiveFailures: 0,
+      };
+      await save('feeds', 'json', {
+        ...baseFeed,
+        id: 'json',
+        type: 'JSON_SEARCH_API',
+        url: 'https://8.8.8.8/cves',
+      });
+      await save('feeds', 'epss', { ...baseFeed, id: 'epss', type: 'EPSS_API', url: 'https://8.8.8.8/epss' });
+      const targeted: string[] = [];
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async (value) => {
+        const url = new URL(value);
+        if (url.pathname === '/cves')
+          return { status: 200, headers: {}, body: JSON.stringify([vulnerability()]) };
+        targeted.push(url.searchParams.get('cve')!);
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({
+            total: 1,
+            data: [{ cve: vulnerability().cveId, epss: '0.8', percentile: '0.95' }],
+          }),
+        };
+      });
+      assert.deepEqual(targeted, [vulnerability().cveId]);
+      assert.equal((await list<Finding>(pool, 'findings'))[0].cve.epss.score, 0.8);
+    });
+    await t.test(
+      'responses from sources changed during ingestion cannot overwrite health or cache',
+      async () => {
+        await reset();
+        const source = {
+          id: 'changed',
+          name: 'Test',
+          type: 'JSON_SEARCH_API',
+          url: 'https://8.8.8.8/old',
+          authType: 'NONE',
+          rateLimitPerMin: 60,
+          enabled: true,
+          healthStatus: 'UNTESTED',
+        };
+        await save('feeds', source.id, source);
+        await queueRun(pool, 24, 'test');
+        await processPipeline(pool, config, async () => {
+          await save('feeds', source.id, { ...source, url: 'https://8.8.8.8/new' });
+          return { status: 200, headers: {}, body: JSON.stringify([vulnerability()]) };
+        });
+        assert.equal((await list(pool, 'cveData')).length, 0);
+        assert.equal((await get<any>(pool, 'feeds', source.id)).healthStatus, 'UNTESTED');
+        assert.ok(
+          (await list<any>(pool, 'executions'))[0].logs.some((line: string) =>
+            line.includes('obsolete response ignored'),
+          ),
+        );
+      },
+    );
+    await t.test('notification bundles obey severity and KEV subscriptions without cross-talk', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
+      await save('watchlist', 'asset', asset());
+      const high = vulnerability(),
+        low = {
+          ...vulnerability(),
+          cveId: 'CVE-2026-98002',
+          cvss: { ...vulnerability().cvss, severity: 'LOW', score: 2 },
+        };
+      high.cisaKev = { isKev: true };
+      await save('cveData', high.cveId, high);
+      await save('cveData', low.cveId, low);
+      for (const tier of ['ALL_SEVERITIES', 'CRITICAL_HIGH_ONLY', 'CISA_KEV_ONLY'])
+        await save('recipients', tier, {
+          id: tier,
+          name: tier,
+          email: `${tier.toLowerCase()}@example.invalid`,
+          enabled: true,
+          subscriptionTier: tier,
+        });
+      await run();
+      const jobs = (await pool.query('SELECT target_id,payload FROM outbox')).rows;
+      assert.equal(jobs.length, 4);
+      for (const job of jobs.filter((job) => job.target_id !== 'ALL_SEVERITIES'))
+        assert.deepEqual(job.payload.cveIds, [high.cveId]);
+      while (await deliverNext(pool, config, request, async () => 'mock-accepted')) {
+        /* Drain only mock transports. */
+      }
+      await run();
+      assert.equal((await pool.query('SELECT count(*)::int AS n FROM outbox')).rows[0].n, 4);
+    });
+    await t.test('queued delivery rechecks changed recipient subscriptions', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
+      await save('watchlist', 'asset', asset());
+      await save('cveData', vulnerability().cveId, vulnerability());
+      const recipient = {
+        id: 'rec',
+        name: 'Test',
+        email: 'test@example.invalid',
+        enabled: true,
+        subscriptionTier: 'ALL_SEVERITIES',
+      };
+      await save('recipients', recipient.id, recipient);
+      await run();
+      await save('recipients', recipient.id, { ...recipient, subscriptionTier: 'CISA_KEV_ONLY' });
+      let transports = 0;
+      await deliverNext(pool, config, request, async () => {
+        transports++;
+        return 'must-not-send';
+      });
+      assert.equal(transports, 0);
+      assert.equal((await pool.query('SELECT status FROM outbox')).rows[0].status, 'FAILED');
+    });
+    await t.test(
+      'queued payloads cannot send stale CVE severity or remediation after an update',
+      async () => {
+        await reset();
+        await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
+        await save('watchlist', 'asset', asset());
+        const cve = vulnerability();
+        await save('cveData', cve.cveId, cve);
+        await save('recipients', 'rec', {
+          id: 'rec',
+          name: 'Test',
+          email: 'test@example.invalid',
+          enabled: true,
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        await run();
+        await save('cveData', cve.cveId, {
+          ...cve,
+          remediation: { ...cve.remediation, immediateActions: ['Updated vendor action'] },
+        });
+        let transports = 0;
+        await deliverNext(pool, config, request, async () => {
+          transports++;
+          return 'must-not-send';
+        });
+        assert.equal(transports, 0);
+        assert.equal((await pool.query('SELECT status FROM outbox')).rows[0].status, 'FAILED');
+        await run();
+        assert.equal(
+          (await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED'")).rows[0].n,
+          1,
+        );
+      },
+    );
+    await t.test(
+      'legacy queued payloads without revision evidence are rebuilt before transport',
+      async () => {
+        await reset();
+        await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
+        await save('watchlist', 'asset', asset());
+        await save('cveData', vulnerability().cveId, vulnerability());
+        await save('recipients', 'rec', {
+          id: 'rec',
+          name: 'Test',
+          email: 'test@example.invalid',
+          enabled: true,
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        await run();
+        await pool.query("UPDATE outbox SET payload=payload-'cveRevisions'");
+        let transports = 0;
+        await deliverNext(pool, config, request, async () => {
+          transports++;
+          return 'must-not-send';
+        });
+        assert.equal(transports, 0);
+        await run();
+        assert.equal(
+          (await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED'")).rows[0].n,
+          1,
+        );
+      },
+    );
+    await t.test('NVD withdrawals invalidate cached findings and block older feed resurrection', async () => {
+      await reset();
+      await save('watchlist', 'asset', asset());
+      const original = { ...vulnerability(), modifiedDate: '2026-01-01T00:00:00Z' };
+      await save('cveData', original.cveId, original);
+      await run();
+      const source = {
+        id: 'nvd',
+        name: 'NVD test',
+        type: 'NVD_API',
+        url: 'https://8.8.8.8/nvd',
+        authType: 'NONE',
+        rateLimitPerMin: 60,
+        enabled: true,
+      };
+      await save('feeds', source.id, source);
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async () => ({
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          totalResults: 1,
+          startIndex: 0,
+          vulnerabilities: [
+            { cve: { id: original.cveId, lastModified: '2026-02-01T00:00:00Z', vulnStatus: 'Rejected' } },
+          ],
+        }),
+      }));
+      assert.equal(await get(pool, 'cveData', original.cveId), undefined);
+      assert.equal((await list<Finding>(pool, 'findings'))[0].notificationStatus, 'NOT_APPLICABLE');
+      await assert.rejects(
+        transaction(pool, (db) =>
+          applyCommand(db, config, { action: 'cve.save', data: original, actor: 'test' }),
+        ),
+        /withdrawn/,
+      );
+      await save('feeds', source.id, { ...source, type: 'JSON_SEARCH_API' });
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async () => ({
+        status: 200,
+        headers: {},
+        body: JSON.stringify([original]),
+      }));
+      assert.equal(await get(pool, 'cveData', original.cveId), undefined);
     });
   } finally {
     await pool.end();

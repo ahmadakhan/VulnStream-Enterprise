@@ -2,7 +2,16 @@ import type pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { get, list, put, putMany, transaction, appendAudit, state } from './db';
 import { DEFAULT_SETTINGS } from '../shared/state';
-import type { AppSettings, PipelineExecution, ThreatFeed, Advisory, Finding } from '../src/types';
+import type {
+  AppSettings,
+  PipelineExecution,
+  ThreatFeed,
+  Advisory,
+  Finding,
+  NormalizedCVE,
+  WatchListItem,
+} from '../src/types';
+import { mergeCveRecords, normalizeCveId } from '../src/utils/deduplicator';
 import { reconcileFindings } from '../src/engine/reconcileFindings';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { ingestFeed } from './ingestion';
@@ -75,6 +84,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
   const lockedTransaction = <T>(fn: (db: pg.PoolClient) => Promise<T>) => transaction(pool, fn, lock);
   let locked = false,
     execution: PipelineExecution | undefined;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   try {
     locked = (await lock.query('SELECT pg_try_advisory_lock(800003) AS locked')).rows[0].locked;
     if (!locked) return false;
@@ -105,6 +115,18 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     if (!execution) return false;
     execution.status = 'RUNNING';
     execution.startTime = new Date().toISOString();
+    let heartbeatPending = false;
+    heartbeat = setInterval(() => {
+      if (heartbeatPending) return;
+      heartbeatPending = true;
+      void pool
+        .query('UPDATE scheduler_state SET heartbeat=now() WHERE id=1')
+        .catch(() => console.error(JSON.stringify({ level: 'error', event: 'pipeline-heartbeat' })))
+        .finally(() => {
+          heartbeatPending = false;
+        });
+    }, 15000);
+    heartbeat.unref();
     await lockedTransaction(async (db) => {
       await put(db, 'executions', execution!.id, execution);
       await db.query('UPDATE scheduler_state SET last_run=now() WHERE id=1');
@@ -114,70 +136,119 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       rawCount = 0;
     const results: Awaited<ReturnType<typeof ingestFeed>>[] = [];
     const feedUpdates: ThreatFeed[] = [];
-    // Ingest feeds concurrently with a bounded worker pool. Feeds hit different
-    // hostnames, so concurrency is safe for rate limits and dramatically reduces
-    // total ingestion time (NVD alone can take 5+ min sequentially).
-    const concurrency = Math.min(feeds.length, 6);
-    let nextIndex = 0;
-    const worker = async () => {
-      while (nextIndex < feeds.length) {
-        const i = nextIndex++;
-        const feed = feeds[i];
-        if (
-          (feed.consecutiveFailures || 0) >= 5 &&
-          feed.circuitOpenUntil &&
-          Date.parse(feed.circuitOpenUntil) > Date.now()
-        ) {
-          execution!.logs.push(
-            `Feed ${feed.id}: skipped (circuit open, ${feed.consecutiveFailures} consecutive failures)`,
-          );
-          continue;
+    // Bound cross-feed concurrency; each adapter also paces its own pages.
+    const ingestSources = async (sources: ThreatFeed[], targets: string[] = []) => {
+      const concurrency = Math.min(sources.length, 6);
+      let nextIndex = 0;
+      const worker = async () => {
+        while (nextIndex < sources.length) {
+          const i = nextIndex++;
+          const feed = sources[i];
+          if (
+            (feed.consecutiveFailures || 0) >= 5 &&
+            feed.circuitOpenUntil &&
+            Date.parse(feed.circuitOpenUntil) > Date.now()
+          ) {
+            execution!.logs.push(
+              `Feed ${feed.id}: skipped (circuit open, ${feed.consecutiveFailures} consecutive failures)`,
+            );
+            continue;
+          }
+          const start = Date.now();
+          try {
+            const result = await ingestFeed(feed, execution!.scopeHours, request, config, undefined, targets);
+            results.push({ ...result, sourceId: feed.id });
+            rawCount += result.notModified ? 0 : result.count;
+            succeeded++;
+            if (feed.type === 'EPSS_API' && targets.length === 0) {
+              execution!.logs.push(`Feed ${feed.id}: no applicable CVEs; EPSS network retrieval skipped`);
+              continue;
+            }
+            feedUpdates.push({
+              ...feed,
+              healthStatus: 'HEALTHY',
+              lastSync: new Date().toISOString(),
+              latencyMs: Date.now() - start,
+              itemCountLastRun: result.notModified ? feed.itemCountLastRun : result.count,
+              errorLog: null,
+              ssrfValidated: true,
+              etag: result.etag || feed.etag,
+              consecutiveFailures: 0,
+              circuitOpenUntil: null,
+            });
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Ingestion failed';
+            const consecutiveFailures = (feed.consecutiveFailures || 0) + 1;
+            feedUpdates.push({
+              ...feed,
+              healthStatus: 'DOWN',
+              latencyMs: Date.now() - start,
+              errorLog: message,
+              consecutiveFailures,
+              circuitOpenUntil:
+                consecutiveFailures >= 5
+                  ? new Date(
+                      Date.now() + Math.min(3600000, 60000 * 2 ** Math.min(6, consecutiveFailures - 5)),
+                    ).toISOString()
+                  : null,
+            });
+            execution!.logs.push(`Feed ${feed.id}: ${message}`);
+          }
+          await lock.query('SELECT 1');
         }
-        const start = Date.now();
-        try {
-          const result = await ingestFeed(feed, execution!.scopeHours, request, config);
-          results.push(result);
-          rawCount += result.notModified ? 0 : result.count;
-          succeeded++;
-          feedUpdates.push({
-            ...feed,
-            healthStatus: 'HEALTHY',
-            lastSync: new Date().toISOString(),
-            latencyMs: Date.now() - start,
-            itemCountLastRun: result.notModified ? feed.itemCountLastRun : result.count,
-            errorLog: null,
-            ssrfValidated: true,
-            etag: result.etag || feed.etag,
-            consecutiveFailures: 0,
-            circuitOpenUntil: null,
-          });
-        } catch (e) {
-          const message = e instanceof Error ? e.message : 'Ingestion failed';
-          const consecutiveFailures = (feed.consecutiveFailures || 0) + 1;
-          feedUpdates.push({
-            ...feed,
-            healthStatus: 'DOWN',
-            latencyMs: Date.now() - start,
-            errorLog: message,
-            consecutiveFailures,
-            circuitOpenUntil:
-              consecutiveFailures >= 5
-                ? new Date(
-                    Date.now() + Math.min(3600000, 60000 * 2 ** Math.min(6, consecutiveFailures - 5)),
-                  ).toISOString()
-                : null,
-          });
-          execution!.logs.push(`Feed ${feed.id}: ${message}`);
-        }
-        await lock.query('SELECT 1');
-      }
+      };
+      const workers = await Promise.allSettled(Array.from({ length: concurrency }, worker));
+      const failure = workers.find((result) => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
     };
-    await Promise.all(Array.from({ length: concurrency }, worker));
+    await ingestSources(feeds.filter((feed) => feed.type !== 'EPSS_API'));
+    const epssFeeds = feeds.filter((feed) => feed.type === 'EPSS_API');
+    if (epssFeeds.length) {
+      const [cached, inventory] = await Promise.all([
+        list<NormalizedCVE>(pool, 'cveData'),
+        list<WatchListItem>(pool, 'watchlist'),
+      ]);
+      // EPSS changes risk, not product applicability. Query only CVEs that can
+      // currently affect inventory, including uncertain matches awaiting review.
+      const candidates = runVulnerabilityPipeline(
+        [],
+        [...mergeCveRecords([...cached, ...results.flatMap((result) => result.cves)]).values()],
+        inventory,
+        [],
+        [],
+        { ...DEFAULT_SETTINGS, scopeHours: 0 },
+      ).newFindings;
+      await ingestSources(epssFeeds, [...new Set(candidates.map((finding) => finding.cveId))]);
+    }
+    results.sort((a, b) => (a.sourceId || '').localeCompare(b.sourceId || ''));
     const ingestionDuration = Date.now() - new Date(execution.startTime).getTime();
     await lockedTransaction(async (db) => {
+      const currentFeeds = new Map((await list<ThreatFeed>(db, 'feeds')).map((feed) => [feed.id, feed]));
+      const validSources = new Set(
+        feeds
+          .filter((feed) => {
+            const current = currentFeeds.get(feed.id);
+            return (
+              current?.enabled &&
+              current.url === feed.url &&
+              current.type === feed.type &&
+              current.authType === feed.authType &&
+              (current.authSecretKey || '') === (feed.authSecretKey || '')
+            );
+          })
+          .map((feed) => feed.id),
+      );
+      const acceptedResults = results.filter((result) => validSources.has(result.sourceId!));
+      succeeded = acceptedResults.length;
+      rawCount = acceptedResults.reduce((sum, result) => sum + (result.notModified ? 0 : result.count), 0);
+      for (const feed of feeds)
+        if (!validSources.has(feed.id))
+          execution!.logs.push(
+            `Feed ${feed.id}: configuration changed during ingestion; obsolete response ignored`,
+          );
       for (const feed of feedUpdates) {
-        const current = await get<ThreatFeed>(db, 'feeds', feed.id);
-        if (current)
+        const current = currentFeeds.get(feed.id);
+        if (current && validSources.has(feed.id))
           await put(db, 'feeds', feed.id, {
             ...current,
             healthStatus: feed.healthStatus,
@@ -203,30 +274,47 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         execution!.logs.push('All feeds failed; proceeding with cached CVE correlation');
       }
       const snapshot = await state(db);
-      const byId = new Map(snapshot.cveData.map((c) => [c.cveId, c]));
-      for (const result of results) {
-        if (result.notModified) continue;
-        for (const cve of result.cves) {
-          const old = byId.get(cve.cveId);
-          if (!old || new Date(cve.modifiedDate) >= new Date(old.modifiedDate))
-            byId.set(cve.cveId, {
-              ...cve,
-              epss: old?.epss || cve.epss,
-              cisaKev: old?.cisaKev || cve.cisaKev,
-              sourceFeeds: Array.from(new Set([...(old?.sourceFeeds || []), ...cve.sourceFeeds])),
-            });
+      const byId = mergeCveRecords([
+        ...snapshot.cveData,
+        ...acceptedResults.filter((result) => !result.notModified).flatMap((result) => result.cves),
+      ]);
+      type Withdrawal = { cveId: string; modifiedDate: string };
+      const withdrawals = new Map(
+        (await list<Withdrawal>(db, 'cveWithdrawals')).map((entry) => [entry.cveId, entry]),
+      );
+      for (const entry of acceptedResults.flatMap((result) => result.withdrawals || [])) {
+        const old = withdrawals.get(entry.cveId);
+        if (!old || Date.parse(entry.modifiedDate) > Date.parse(old.modifiedDate))
+          withdrawals.set(entry.cveId, entry);
+      }
+      await putMany(
+        db,
+        'cveWithdrawals',
+        [...withdrawals.values()].map((entry) => ({ id: entry.cveId, data: entry })),
+      );
+      for (const entry of withdrawals.values()) {
+        const cve = byId.get(entry.cveId);
+        if (cve && Date.parse(cve.modifiedDate) <= Date.parse(entry.modifiedDate)) byId.delete(entry.cveId);
+      }
+      for (const old of mergeCveRecords(snapshot.cveData).values()) {
+        const current = byId.get(normalizeCveId(old.cveId) || '');
+        if (current) {
+          current.epss = old.epss;
+          current.cisaKev = old.cisaKev;
         }
       }
-      const kevReports = results.filter((result) => result.kev && !result.notModified);
-      const epssReports = results.filter((result) => result.epss && !result.notModified);
+      const kevReports = acceptedResults.filter((result) => result.kev && !result.notModified);
+      const epssReports = acceptedResults.filter((result) => result.epss && !result.notModified);
+      const epssScopes = new Map(epssReports.map((result) => [result, new Set(result.epssScope)]));
       for (const cve of byId.values()) {
         if (kevReports.length) {
           cve.cisaKev = kevReports.map((result) => result.kev![cve.cveId]).find((entry) => entry?.isKev) || {
             isKev: false,
           };
         }
-        if (epssReports.length) {
-          cve.epss = epssReports.map((result) => result.epss![cve.cveId]).find(Boolean) || {
+        const scopedReports = epssReports.filter((result) => epssScopes.get(result)!.has(cve.cveId));
+        if (scopedReports.length) {
+          cve.epss = scopedReports.map((result) => result.epss![cve.cveId]).find(Boolean) || {
             score: 0,
             percentile: 0,
           };
@@ -237,6 +325,15 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         'cveData',
         [...byId.values()].map((cve) => ({ id: cve.cveId, data: cve })),
       );
+      const keys = await db.query("SELECT id FROM records WHERE kind='cveData'");
+      for (const { id } of keys.rows) {
+        const canonical = normalizeCveId(id);
+        if (
+          canonical &&
+          ((canonical !== id && byId.has(canonical)) || (withdrawals.has(canonical) && !byId.has(canonical)))
+        )
+          await db.query("DELETE FROM records WHERE kind='cveData' AND id=$1", [id]);
+      }
       // The run window limits network ingestion, not applicability of already cached CVEs.
       const settings = { ...snapshot.settings, scopeHours: 0 };
       const correlated = runVulnerabilityPipeline(
@@ -282,35 +379,50 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status),
       );
       if (settings.autoDispatchEnabled && pending.length) {
-        const rank = ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-        const advisory: Advisory = {
-          id: settings.advisoryPrefix + randomUUID(),
-          title: `Vulnerability notice: ${Array.from(new Set(pending.map((f) => f.cveId))).join(', ')}`,
-          severity: pending.reduce(
-            (s, f) => (rank.indexOf(f.cve.cvss.severity) > rank.indexOf(s) ? f.cve.cvss.severity : s),
-            'UNKNOWN' as Advisory['severity'],
-          ),
-          cveIds: Array.from(new Set(pending.map((f) => f.cveId))),
-          findingIds: pending.map((f) => f.id),
-          createdDate: new Date().toISOString(),
-          deliveryStatus: 'PENDING',
-          recipientCount: 0,
-          executiveSummary: `${pending.length} inventory correlations require investigation. Confirm applicability and consult the vendor before remediation.`,
-          remediationInstructions:
-            'Review vendor advisories and deploy tested remediation through your change process.',
-          vendorLink: pending[0].cve.remediation.vendorAdvisoryRef || pending[0].cve.remediation.patchUrl,
-          affectedSystems: Array.from(new Set(pending.map((f) => f.matchedAssetName))),
-        };
-        const count = await queueAdvisory(
-          db,
-          advisory,
-          pending,
-          renderAdvisory(snapshot.advisoryTemplate, advisory),
-        );
-        notificationsQueued = count;
-        advisoriesQueued = count ? 1 : 0;
-        if (count)
-          for (const f of pending) await put(db, 'findings', f.id, { ...f, advisoryId: advisory.id });
+        // A KEV-only or high-severity subscriber must never receive unrelated
+        // findings merely because one other item in a bundle passes its filter.
+        const groups = new Map<string, Finding[]>();
+        for (const finding of pending) {
+          const key = `${finding.cve.cvss.severity}:${finding.cve.cisaKev.isKev}`;
+          const group = groups.get(key) || [];
+          group.push(finding);
+          groups.set(key, group);
+        }
+        for (const group of groups.values()) {
+          for (let offset = 0; offset < group.length; offset += 200) {
+            const pending = group.slice(offset, offset + 200);
+            const cveIds = Array.from(new Set(pending.map((finding) => finding.cveId))).sort();
+            const rank = ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+            const advisory: Advisory = {
+              id: settings.advisoryPrefix + randomUUID(),
+              title: `Vulnerability notice: ${cveIds.slice(0, 3).join(', ')}${cveIds.length > 3 ? ` (+${cveIds.length - 3} more)` : ''}`,
+              severity: pending.reduce(
+                (s, f) => (rank.indexOf(f.cve.cvss.severity) > rank.indexOf(s) ? f.cve.cvss.severity : s),
+                'UNKNOWN' as Advisory['severity'],
+              ),
+              cveIds,
+              findingIds: pending.map((f) => f.id),
+              createdDate: new Date().toISOString(),
+              deliveryStatus: 'PENDING',
+              recipientCount: 0,
+              executiveSummary: `${pending.length} inventory correlations require investigation. Confirm applicability and consult the vendor before remediation.`,
+              remediationInstructions:
+                'Review vendor advisories and deploy tested remediation through your change process.',
+              vendorLink: pending[0].cve.remediation.vendorAdvisoryRef || pending[0].cve.remediation.patchUrl,
+              affectedSystems: Array.from(new Set(pending.map((f) => f.matchedAssetName))),
+            };
+            const count = await queueAdvisory(
+              db,
+              advisory,
+              pending,
+              renderAdvisory(snapshot.advisoryTemplate, advisory),
+            );
+            notificationsQueued += count;
+            advisoriesQueued += count ? 1 : 0;
+            if (count)
+              for (const f of pending) await put(db, 'findings', f.id, { ...f, advisoryId: advisory.id });
+          }
+        }
       }
       execution = {
         ...correlated.execution,
@@ -373,6 +485,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     else throw e;
     return true;
   } finally {
+    if (heartbeat) clearInterval(heartbeat);
     if (locked) await lock.query('SELECT pg_advisory_unlock(800003)').catch(() => {});
     lock.removeListener('error', onError);
     lock.release(connectionLost);

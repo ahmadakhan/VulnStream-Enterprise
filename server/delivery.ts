@@ -2,7 +2,8 @@ import type pg from 'pg';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { DEFAULT_SETTINGS } from '../shared/state';
 import type { WatchListItem, NormalizedCVE } from '../src/types';
-import { randomUUID, createHmac } from 'node:crypto';
+import { randomUUID, createHmac, createHash } from 'node:crypto';
+import { stableJson } from '../src/utils/deduplicator';
 import nodemailer from 'nodemailer';
 import type { Config } from './config';
 import { transaction, get, list, put, appendAudit } from './db';
@@ -24,11 +25,34 @@ export interface Job {
   channel: 'email' | 'webhook';
   target_id: string;
   advisory_id: string;
-  payload: { subject: string; text: string; html?: string; recipientEmail?: string; cveIds: string[] };
+  payload: {
+    subject: string;
+    text: string;
+    html?: string;
+    recipientEmail?: string;
+    cveIds: string[];
+    cveRevisions?: Record<string, string>;
+  };
   attempts: number;
   lock_token: string;
 }
 export type MailSender = (job: Job) => Promise<string>;
+const revision = (cve: NormalizedCVE) => createHash('sha256').update(stableJson(cve)).digest('hex');
+export function recipientAllows(recipient: EmailRecipient, finding: Finding): boolean {
+  return (
+    recipient.subscriptionTier === 'ALL_SEVERITIES' ||
+    (recipient.subscriptionTier === 'CRITICAL_HIGH_ONLY' &&
+      ['CRITICAL', 'HIGH'].includes(finding.cve.cvss.severity)) ||
+    (recipient.subscriptionTier === 'CISA_KEV_ONLY' && finding.cve.cisaKev.isKev)
+  );
+}
+export function webhookAllows(hook: WebhookEndpoint, finding: Finding): boolean {
+  return (
+    hook.events.includes('ALL') ||
+    (hook.events.includes('CRITICAL') && finding.cve.cvss.severity === 'CRITICAL') ||
+    (hook.events.includes('CISA_KEV') && finding.cve.cisaKev.isKev)
+  );
+}
 export function createMailSender(config: Config): MailSender {
   const transporter = config.SMTP_HOST
     ? nodemailer.createTransport({
@@ -117,20 +141,15 @@ export async function queueAdvisory(
 ) {
   const recipients = await list<EmailRecipient>(db, 'recipients'),
     hooks = await list<WebhookEndpoint>(db, 'webhooks');
-  const isKev = findings.some((f) => f.cve.cisaKev.isKev),
-    high = ['HIGH', 'CRITICAL'].includes(advisory.severity);
   const selected = recipients.filter(
-    (r) =>
-      r.enabled &&
-      (r.subscriptionTier === 'ALL_SEVERITIES' ||
-        (r.subscriptionTier === 'CRITICAL_HIGH_ONLY' && high) ||
-        (r.subscriptionTier === 'CISA_KEV_ONLY' && isKev)),
+    (r) => r.enabled && findings.length > 0 && findings.every((finding) => recipientAllows(r, finding)),
   );
   const payload = {
     subject: `[${advisory.severity}] ${advisory.title}`,
-    text: `${advisory.title}\n\n${advisory.executiveSummary}\n\nAffected systems:\n${advisory.affectedSystems.join('\n')}\n\n${advisory.remediationInstructions}`,
+    text: `${advisory.title}\n\nSeverity: ${advisory.severity}\n\nCVE IDs:\n${advisory.cveIds.join('\n')}\n\n${advisory.executiveSummary}\n\nAffected systems:\n${advisory.affectedSystems.join('\n')}\n\n${advisory.remediationInstructions}${advisory.vendorLink ? `\n\nVendor advisory: ${advisory.vendorLink}` : ''}`,
     html,
     cveIds: advisory.cveIds,
+    cveRevisions: Object.fromEntries(findings.map((finding) => [finding.cveId, revision(finding.cve)])),
   };
   let count = 0;
   for (const recipient of selected)
@@ -146,11 +165,7 @@ export async function queueAdvisory(
     )
       count++;
   for (const hook of hooks.filter(
-    (h) =>
-      h.enabled &&
-      (h.events.includes('ALL') ||
-        (h.events.includes('CRITICAL') && advisory.severity === 'CRITICAL') ||
-        (h.events.includes('CISA_KEV') && isKev)),
+    (h) => h.enabled && findings.length > 0 && findings.every((finding) => webhookAllows(h, finding)),
   ))
     if (await enqueue(db, 'webhook', hook.id, advisory.id, payload, `${dispatchKey}:webhook:${hook.id}`))
       count++;
@@ -185,27 +200,40 @@ export async function deliverNext(
       throw new Error('Delivery retry budget exhausted after worker recovery');
     }
     const advisory = await get<Advisory>(pool, 'advisories', job.advisory_id);
+    const currentFindings: Finding[] = [];
     if (!advisory && job.advisory_id !== 'TEST') {
       permanent = true;
       throw new Error('Queued advisory no longer exists');
+    }
+    if (advisory && advisory.cveIds.some((id) => !job.payload.cveRevisions?.[id])) {
+      permanent = true;
+      throw new Error(
+        'Advisory revision is no longer applicable; rebuild legacy queued payload from current intelligence',
+      );
     }
     if (advisory) {
       const invalid: string[] = [];
       for (const id of advisory.findingIds) {
         const finding = await get<Finding>(pool, 'findings', id);
-        const [asset, cve] = finding
+        const [asset, cve, withdrawal] = finding
           ? await Promise.all([
               get<WatchListItem>(pool, 'watchlist', finding.matchedAssetId),
               get<NormalizedCVE>(pool, 'cveData', finding.cveId),
+              get<{ modifiedDate: string }>(pool, 'cveWithdrawals', finding.cveId),
             ])
-          : [undefined, undefined];
+          : [undefined, undefined, undefined];
         const match =
           asset && cve
             ? runVulnerabilityPipeline([], [cve], [asset], [], [], { ...DEFAULT_SETTINGS, scopeHours: 0 })
                 .newFindings[0]
             : undefined;
+        if (match) currentFindings.push(match);
         if (
           !finding ||
+          (cve && withdrawal && Date.parse(cve.modifiedDate) <= Date.parse(withdrawal.modifiedDate)) ||
+          (cve &&
+            job.payload.cveRevisions?.[cve.cveId] &&
+            job.payload.cveRevisions[cve.cveId] !== revision(cve)) ||
           ['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(finding.status) ||
           match?.notificationStatus !== 'QUEUED_FOR_DISPATCH'
         ) {
@@ -227,6 +255,10 @@ export async function deliverNext(
           permanent = true;
           throw new Error('Recipient removed, changed, or disabled');
         }
+        if (advisory && !currentFindings.every((finding) => recipientAllows(rec, finding))) {
+          permanent = true;
+          throw new Error('Recipient subscription no longer permits all advisory findings');
+        }
       }
       providerId = await sendMail(job);
     } else {
@@ -234,6 +266,10 @@ export async function deliverNext(
       if (!hook?.enabled) {
         permanent = true;
         throw new Error('Webhook removed or disabled');
+      }
+      if (advisory && !currentFindings.every((finding) => webhookAllows(hook, finding))) {
+        permanent = true;
+        throw new Error('Webhook event subscription no longer permits all advisory findings');
       }
       const url = decrypt(hook.url, config.ENCRYPTION_KEY, `webhook-url:${hook.id}`),
         secret = decrypt(hook.secretToken, config.ENCRYPTION_KEY, `webhook:${hook.id}`);

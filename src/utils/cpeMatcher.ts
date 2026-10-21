@@ -370,10 +370,21 @@ export function matchesWatchlistItem(
         );
         // An unknown inventory component cannot prove a constrained criterion,
         // including explicit versions, editions, target OS, language or updates.
-        const contextNeedsReview = ([
-          'part', 'vendor', 'product', 'version', 'update', 'edition', 'language',
-          'swEdition', 'targetSw', 'targetHw', 'other',
-        ] as const).some((field) => asset[field] === '*' && vuln[field] !== '*');
+        const contextNeedsReview = (
+          [
+            'part',
+            'vendor',
+            'product',
+            'version',
+            'update',
+            'edition',
+            'language',
+            'swEdition',
+            'targetSw',
+            'targetHw',
+            'other',
+          ] as const
+        ).some((field) => asset[field] === '*' && vuln[field] !== '*');
         const requiresReview = rangeNeedsReview || contextNeedsReview;
         retain({
           matched: true,

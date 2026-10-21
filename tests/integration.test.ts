@@ -182,7 +182,9 @@ test('NVD uses bounded large-page requests and honors rate-limit retries', async
   );
   assert.equal(headers.length, 1);
   assert.equal(headers[0]['If-None-Match'], undefined);
-  assert.deepEqual(requestLimits, [{ timeoutMs: 60000, socketTimeoutMs: 30000, maxResponseBytes: 16 * 1024 * 1024 }]);
+  assert.deepEqual(requestLimits, [
+    { timeoutMs: 60000, socketTimeoutMs: 30000, maxResponseBytes: 16 * 1024 * 1024 },
+  ]);
 
   const retryDelays: number[] = [];
   let retryCalls = 0;
@@ -193,7 +195,11 @@ test('NVD uses bounded large-page requests and honors rate-limit retries', async
       retryCalls++;
       return retryCalls === 1
         ? { status: 429, body: '', headers: { 'retry-after': '2' } }
-        : { status: 200, body: JSON.stringify({ vulnerabilities: [], totalResults: 0, startIndex: 0 }), headers: {} };
+        : {
+            status: 200,
+            body: JSON.stringify({ vulnerabilities: [], totalResults: 0, startIndex: 0 }),
+            headers: {},
+          };
     },
     config,
     async <T = void>(ms = 0, value?: T): Promise<T> => {
@@ -202,7 +208,7 @@ test('NVD uses bounded large-page requests and honors rate-limit retries', async
     },
   );
   assert.equal(retryCalls, 2);
-  assert.deepEqual(retryDelays, [2000]);
+  assert.deepEqual(retryDelays, [6500]);
 
   const timeoutDelays: number[] = [];
   let timeoutCalls = 0;
@@ -212,7 +218,11 @@ test('NVD uses bounded large-page requests and honors rate-limit retries', async
     async () => {
       timeoutCalls++;
       if (timeoutCalls === 1) throw new Error('Outbound request timed out');
-      return { status: 200, body: JSON.stringify({ vulnerabilities: [], totalResults: 0, startIndex: 0 }), headers: {} };
+      return {
+        status: 200,
+        body: JSON.stringify({ vulnerabilities: [], totalResults: 0, startIndex: 0 }),
+        headers: {},
+      };
     },
     config,
     async <T = void>(ms = 0, value?: T): Promise<T> => {
@@ -221,7 +231,7 @@ test('NVD uses bounded large-page requests and honors rate-limit retries', async
     },
   );
   assert.equal(timeoutCalls, 2);
-  assert.deepEqual(timeoutDelays, [2000]);
+  assert.deepEqual(timeoutDelays, [6500]);
 });
 
 test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !database }, async (t) => {

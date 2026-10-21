@@ -105,12 +105,31 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     await put(db, 'watchlist', newId, { ...input, id: newId, createdAt: old?.createdAt || now });
   } else if (action === 'asset.import') {
     const input = z.array(assetSchema).min(1).max(1000).parse(data);
-    for (const item of input) {
-      const assetId = randomUUID();
-      await put(db, 'watchlist', assetId, { ...item, id: assetId, createdAt: now });
+    const identity = (item: z.infer<typeof assetSchema>) =>
+      JSON.stringify([
+        item.assetTag,
+        item.vendor.toLowerCase(),
+        item.product.toLowerCase(),
+        item.cpes.map((cpe) => cpe.trim().toLowerCase()).sort(),
+        [...(item.purls || [])].sort(),
+      ]);
+    const existing = new Map((await list<any>(db, 'watchlist')).map((item) => [identity(item), item]));
+    const unique = new Map(input.map((item) => [identity(item), item]));
+    for (const [key, item] of unique) {
+      const old = existing.get(key),
+        assetId = old?.id || randomUUID();
+      await put(db, 'watchlist', assetId, { ...old, ...item, id: assetId, createdAt: old?.createdAt || now });
     }
-    await appendAudit(db, 'Assets imported', `${input.length} assets`, actor, 'WATCHLIST', 'INFO', ipAddress);
-    return { success: true, imported: input.length, errors: [] };
+    await appendAudit(
+      db,
+      'Assets imported',
+      `${unique.size} unique assets upserted`,
+      actor,
+      'WATCHLIST',
+      'INFO',
+      ipAddress,
+    );
+    return { success: true, imported: unique.size, errors: [] };
   } else if (action === 'watchlist.import') {
     const input = watchlistImportSchema.parse(data);
     let imported = 0;
@@ -149,6 +168,9 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     });
   } else if (action === 'cve.save') {
     const input = cveSchema.parse(data);
+    const withdrawn = await get<{ modifiedDate: string }>(db, 'cveWithdrawals', input.cveId);
+    if (withdrawn && Date.parse(input.modifiedDate) <= Date.parse(withdrawn.modifiedDate))
+      throw new HttpError(409, 'CVE revision has been withdrawn; a newer authoritative revision is required');
     await put(db, 'cveData', input.cveId, {
       ...input,
       vex: undefined,

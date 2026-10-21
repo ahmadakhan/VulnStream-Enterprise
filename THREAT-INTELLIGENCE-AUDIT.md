@@ -1,5 +1,7 @@
 # Threat Intelligence Ecosystem Audit
 
+> Follow-up: [Current ecosystem audit and implemented fixes](ECOSYSTEM-AUDIT-2026-10-21.md) records subsequent code changes, live provider probes, and current verification. Outstanding items below are historical where the follow-up marks them fixed.
+
 **Reviewed:** 21 October 2026  
 **Scope:** feed adapters and seed configuration, ingestion/normalization, inventory correlation, delivery/outbox, CVE deduplication. This is a code and configuration audit; it does not claim that public providers were reachable from the deployment or that tenant-specific inventory is complete.
 
