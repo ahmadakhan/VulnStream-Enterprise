@@ -42,3 +42,7 @@ The snapshot architecture and serialized writes have not been load-tested for a 
 ## Follow-up page and watchlist verification
 
 The 21 October follow-up tested populated pages and a persisted CPE/PURL matrix, fixed additional matching and inventory UI defects, and passed 42 tests. See [PAGE-VERIFICATION.md](PAGE-VERIFICATION.md) for the precise cases, page coverage and limits.
+
+## Pipeline lifecycle follow-up
+
+The pipeline/matching follow-up added reconciliation, pre-send applicability checks, safe stale-bundle recovery and accurate execution phases. All 51 tests passed. See [PIPELINE-FIXES.md](PIPELINE-FIXES.md) for changes and verification evidence.

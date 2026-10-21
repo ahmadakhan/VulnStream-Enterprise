@@ -1,0 +1,20 @@
+# Pipeline and matching fixes — 21 October 2026
+
+## Corrected behavior
+
+- Every completed run reconciles active inventory against the entire cached CVE corpus. The selected time window controls feed ingestion; it no longer hides older cached vulnerabilities from newly registered assets.
+- Existing findings refresh their vulnerability data, enrichment, evidence and applicability while retaining their IDs, audit timeline, operator lifecycle decisions and delivery history.
+- Correcting an unknown version can promote a review finding to a confirmed match. Patching, disabling or removing inventory marks a retained finding `NOT_APPLICABLE`, rather than leaving it queued indefinitely. Returning inventory to an affected version re-evaluates it without creating a duplicate finding.
+- The delivery worker checks current asset/CVE applicability and operator lifecycle status before sending a queued advisory. A stale bundle fails without contacting the transport. If all jobs in that bundle failed this applicability check and none was accepted, a later pipeline may rebuild it from current matches. Accepted or partially accepted bundles are never automatically resent by this recovery path. Explicit provider retries remain at least once.
+- An explicit CPE version and its interval must both match. Unsupported vendor version ordering yields review candidates instead of treating an unreliable comparison as proof of exclusion. Duplicate CVEs within one correlation input use the latest modification date rather than arrival order.
+- Execution pages display the worker's persisted phases, actual durations and distinct queue counts. Queueing is not represented as transport acceptance. Reruns report current matches rather than claiming retained findings are newly discovered.
+
+## Verification
+
+Five database-backed lifecycle regressions failed before the fixes and passed afterward: old-cache/new-inventory matching, review promotion, patch/removal invalidation, refreshed CVE/enrichment and blocked stale delivery. The tests also cover stable IDs, preservation of operator decisions, safe bundle rebuilding and duplicate suppression after transport acceptance. Three additional matching regressions reproduce explicit-version/range conflicts, unsupported vendor ordering and duplicate arrival order.
+
+Final validation: **51 tests passed, zero failures, zero skips**, including the PostgreSQL suites. TypeScript checking and production client/server builds passed.
+
+A browser-queued run completed against an isolated PostgreSQL test database. It reconciled the patched fixture to `NOT_APPLICABLE`, retained four historical findings with three current matches, queued no duplicate deliveries, and displayed the three measured phases correctly. Screenshot: [pipeline-fix-verification.png](pipeline-fix-verification.png).
+
+No live provider messages were sent. Transport tests use injected acknowledgements. Applicability is checked immediately before transport; inventory changes after that check cannot retract an already submitted notification. Historical findings and accepted advisories remain retained for review.
