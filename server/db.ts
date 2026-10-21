@@ -123,6 +123,7 @@ export async function state(db: Db): Promise<AppState> {
       .filter(([, value]) => Array.isArray(value))
       .map(([kind]) => kind),
     'settings',
+    'emailConfig',
     'template',
   ];
   // Internal source snapshots and dispatch ledgers are not browser state.
@@ -134,6 +135,7 @@ export async function state(db: Db): Promise<AppState> {
     if (Array.isArray(snapshot[row.kind as keyof AppState]))
       (snapshot[row.kind as keyof AppState] as unknown[]).push(row.data);
     else if (row.kind === 'settings') snapshot.settings = row.data;
+    else if (row.kind === 'emailConfig') snapshot.emailConfig = row.data;
     else if (row.kind === 'template') Object.assign(snapshot, row.data);
   }
   snapshot.auditLogs = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 500')).rows.map(

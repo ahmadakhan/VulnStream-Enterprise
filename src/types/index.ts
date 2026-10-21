@@ -275,7 +275,7 @@ export interface EmailDeliveryLog {
   recipientEmail: string;
   advisoryId: string;
   subject: string;
-  provider: 'Mailgun' | 'SMTP_Relay' | 'Local_Mock';
+  provider: 'Mailgun' | 'Mailtrap' | 'SendGrid' | 'Postmark' | 'SMTP_Relay' | 'Local_Mock';
   status: 'QUEUED' | 'ACCEPTED' | 'DELIVERED' | 'BOUNCED' | 'RETRYING' | 'FAILED';
   attemptCount: number;
   retrySchedule: string[];
@@ -295,6 +295,22 @@ export interface AuditLog {
   ipAddress: string;
   prevHash: string;
   hash: string;
+}
+
+export const EMAIL_PROVIDERS = ['SMTP', 'MAILGUN', 'MAILTRAP', 'SENDGRID', 'POSTMARK'] as const;
+export type EmailProvider = (typeof EMAIL_PROVIDERS)[number];
+export interface EmailConfiguration {
+  provider: EmailProvider;
+  fromEmail: string;
+  fromName: string;
+  /** Encrypted in storage; always blank in browser state. */
+  apiKey: string;
+  hasApiKey?: boolean;
+  mailgunDomain: string;
+  mailgunRegion: 'US' | 'EU';
+  mailtrapMode: 'LIVE' | 'SANDBOX';
+  mailtrapInboxId: string;
+  postmarkMessageStream: string;
 }
 
 export interface AppSettings {

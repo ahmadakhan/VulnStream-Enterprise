@@ -30,7 +30,7 @@ await transaction(pool, async (db) => {
   await put(db, 'systemState', 'recommended-feeds-v1', { completedAt: new Date().toISOString() });
 });
 const request = createRequester(config),
-  sendMail = createMailSender(config);
+  sendMail = createMailSender(config, pool, request);
 const server = createApp(pool, config, request).listen(config.PORT, '0.0.0.0', () =>
   console.log(JSON.stringify({ event: 'listening', port: config.PORT })),
 );

@@ -15,10 +15,12 @@ import {
   HttpError,
 } from './validation';
 import { encrypt, randomToken } from './secrets';
-import { DEFAULT_SETTINGS } from '../shared/state';
+import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state';
+import { emailConfigSchema } from './validation';
+import { emailEndpoint } from './emailProviders';
 import { compileCustomizedTemplate } from '../src/utils/templateCompiler';
 import type { Config } from './config';
-import type { AppSettings, Finding } from '../src/types';
+import type { AppSettings, Finding, EmailConfiguration } from '../src/types';
 
 export interface CommandRequest {
   action: string;
@@ -184,6 +186,18 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
       vex: undefined,
       sourceFeeds: ['operator-import'],
     });
+  } else if (action === 'email.configure') {
+    const input = emailConfigSchema.parse(data);
+    const old = (await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
+    const apiKey = input.provider === 'SMTP' ? '' : input.apiKey
+      ? encrypt(input.apiKey, config.ENCRYPTION_KEY, `email-provider:${input.provider}`)
+      : old.provider === input.provider ? old.apiKey : '';
+    if (input.provider !== 'SMTP' && !apiKey)
+      throw new HttpError(400, 'Enter an API token for the selected provider');
+    const endpoint = emailEndpoint(input);
+    if (endpoint && !config.EGRESS_ALLOWED_HOSTS.split(',').map((host) => host.trim().toLowerCase()).includes(new URL(endpoint).hostname))
+      throw new HttpError(400, `Allow ${new URL(endpoint).hostname} in EGRESS_ALLOWED_HOSTS before configuring this provider`);
+    await put(db, 'emailConfig', 'main', { ...input, apiKey });
   } else if (action === 'settings.save') {
     const old = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
     await put(

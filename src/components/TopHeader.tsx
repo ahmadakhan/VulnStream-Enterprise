@@ -152,7 +152,7 @@ export const TopHeader: React.FC = () => {
               <button
                 onClick={() => setScopeDropdownOpen((prev) => !prev)}
                 disabled={isPipelineRunning}
-                className="bg-zinc-200 dark:bg-zinc-200 light:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-200 border-l border-zinc-300 dark:border-zinc-300 light:border-zinc-700 px-1.5 text-xs flex items-center justify-center transition"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white border-l border-indigo-400/60 px-2 text-xs flex items-center justify-center transition disabled:opacity-50"
                 title="Change Processing Scope Window"
                 aria-label="Choose pipeline time window"
                 aria-expanded={scopeDropdownOpen}

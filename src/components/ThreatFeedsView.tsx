@@ -182,6 +182,7 @@ export const ThreatFeedsView: React.FC = () => {
           <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
           <input
             type="text"
+            aria-label="Search threat feeds"
             placeholder="Search feeds by vendor, protocol, or URL..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
@@ -226,7 +227,7 @@ export const ThreatFeedsView: React.FC = () => {
                 <th className="py-3 px-4">Auth &amp; Rate Limit</th>
                 <th className="py-3 px-4">Health &amp; Latency</th>
                 <th className="py-3 px-4">Active</th>
-                <th className="py-3 px-4 text-right">Actions</th>
+                <th className="feed-actions py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
@@ -318,7 +319,7 @@ export const ThreatFeedsView: React.FC = () => {
                     </td>
 
                     {/* Actions */}
-                    <td className="py-3 px-4 text-right space-x-1.5">
+                    <td className="feed-actions py-3 px-4 text-right space-x-1.5">
                       <button
                         onClick={() => handleTest(feed.id)}
                         disabled={isTesting}
@@ -359,15 +360,16 @@ export const ThreatFeedsView: React.FC = () => {
       {/* Add / Edit Custom Feed Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
+          <div role="dialog" aria-modal="true" aria-labelledby="feed-dialog-heading" className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
             <button
+              aria-label="Close feed dialog"
               onClick={() => setShowAddModal(false)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <h2 className="text-base font-bold text-zinc-100 mb-1 flex items-center gap-2">
+            <h2 id="feed-dialog-heading" className="text-base font-bold text-zinc-100 mb-1 flex items-center gap-2">
               <Radio className="w-4 h-4 text-zinc-300" />
               {editingFeed ? 'Edit Threat Feed Source' : 'Register Custom Threat Feed'}
             </h2>
@@ -383,8 +385,9 @@ export const ThreatFeedsView: React.FC = () => {
 
             <form onSubmit={handleSaveFeed} className="space-y-4 text-xs">
               <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Feed Name *</label>
+                <label htmlFor="feed-name" className="block text-zinc-400 mb-1 font-mono">Feed Name *</label>
                 <input
+                  id="feed-name"
                   type="text"
                   required
                   placeholder="e.g. Mandiant Threat Intel Stream"
@@ -396,8 +399,9 @@ export const ThreatFeedsView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-zinc-400 mb-1 font-mono">Protocol / Format *</label>
+                  <label htmlFor="feed-format" className="block text-zinc-400 mb-1 font-mono">Protocol / Format *</label>
                   <select
+                    id="feed-format"
                     value={formData.type}
                     onChange={e => {
                       const type = e.target.value as FeedType;
@@ -419,8 +423,9 @@ export const ThreatFeedsView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-zinc-400 mb-1 font-mono">Rate Limit (req/min)</label>
+                  <label htmlFor="feed-rate" className="block text-zinc-400 mb-1 font-mono">Rate Limit (req/min)</label>
                   <input
+                    id="feed-rate"
                     type="number"
                     min={1}
                     max={600}
@@ -432,8 +437,9 @@ export const ThreatFeedsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Endpoint URL *</label>
+                <label htmlFor="feed-url" className="block text-zinc-400 mb-1 font-mono">Endpoint URL *</label>
                 <input
+                  id="feed-url"
                   type="url"
                   required
                   placeholder="https://feed.provider.org/threats.json"
@@ -445,8 +451,9 @@ export const ThreatFeedsView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-zinc-400 mb-1 font-mono">Authentication Type</label>
+                  <label htmlFor="feed-auth-type" className="block text-zinc-400 mb-1 font-mono">Authentication Type</label>
                   <select
+                    id="feed-auth-type"
                     value={formData.authType}
                     onChange={e => setFormData({ ...formData, authType: e.target.value as FeedAuthType })}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 font-mono focus:border-zinc-600 focus:outline-none"
@@ -459,8 +466,9 @@ export const ThreatFeedsView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-zinc-400 mb-1 font-mono">Secret Key / Token</label>
+                  <label htmlFor="feed-token" className="block text-zinc-400 mb-1 font-mono">Secret Key / Token</label>
                   <input
+                    id="feed-token"
                     type="password"
                     placeholder={formData.authType === 'NONE' ? 'Not required' : formData.authType === 'BASIC' ? 'username:password' : editingFeed ? 'Leave blank to retain existing secret' : 'Enter key...'}
                     disabled={formData.authType === 'NONE'}

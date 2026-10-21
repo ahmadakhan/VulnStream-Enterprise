@@ -14,15 +14,17 @@ import { createRequester, resolvePublic } from './network';
 import type { Requester, ResponseData } from './network';
 import { queueRun, stopRun, renderAdvisory } from './pipeline';
 import { enqueue, queueAdvisory } from './delivery';
-import { DEFAULT_SETTINGS } from '../shared/state';
+import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state';
+import { emailIsConfigured } from './emailProviders';
 import type { AppState } from '../shared/state';
-import type { AppSettings, ThreatFeed, WebhookEndpoint, Advisory, TemplateCustomization } from '../src/types';
+import type { AppSettings, ThreatFeed, WebhookEndpoint, Advisory, TemplateCustomization, EmailConfiguration } from '../src/types';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler';
 function publicState(data: AppState): AppState {
   return {
     ...data,
     feeds: data.feeds.map((f) => ({ ...f, authSecretKey: undefined })),
     webhooks: data.webhooks.map((w) => ({ ...w, url: '[configured on server]', secretToken: '' })),
+    emailConfig: { ...data.emailConfig, apiKey: '', hasApiKey: !!data.emailConfig.apiKey },
     settings: {
       ...data.settings,
       webhookSigningSecret: '',
@@ -213,6 +215,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       const heartbeatAgeSeconds = worker.heartbeat
         ? Math.max(0, Math.floor((Date.now() - new Date(worker.heartbeat).getTime()) / 1000))
         : null;
+      const emailConfig = (await get<EmailConfiguration>(pool, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
       res.json({
         database: 'connected',
         databaseLatencyMs: dbMs,
@@ -233,6 +236,8 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         lastScheduledRun: worker.last_run,
         backlog,
         smtpConfigured: !!config.SMTP_HOST && !!config.SMTP_FROM,
+        emailProvider: emailConfig.provider,
+        emailConfigured: emailIsConfigured(emailConfig, config),
         httpsRequired: config.NODE_ENV === 'production',
         csrfEnforced: true,
         ssrfEnforced: true,
@@ -334,9 +339,10 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
     requireRole('ADMIN'),
     asyncRoute(async (req, res) => {
       const { email } = z.object({ email: z.email().max(254) }).parse(req.body);
-      if (!config.SMTP_HOST || !config.SMTP_FROM)
-        throw new HttpError(409, 'Configure SMTP before sending a test');
       const id = await transaction(pool, async (db) => {
+        const emailConfig = (await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
+        if (!emailIsConfigured(emailConfig, config))
+          throw new HttpError(409, 'Configure an email provider in Settings before sending a test');
         const data = await state(db);
         const id = await enqueue(
           db,
@@ -462,7 +468,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         .parse(req.body);
       const { action, id, data } = command,
         actor = req.operator!.username;
-      const adminActions = ['feed', 'recipient', 'webhook', 'settings', 'template'];
+      const adminActions = ['feed', 'recipient', 'webhook', 'settings', 'template', 'email'];
       if (adminActions.some((prefix) => action.startsWith(prefix)) && req.operator!.role !== 'ADMIN')
         throw new HttpError(403, 'Administrator role required');
       // Resolve URLs outside the database transaction. They are validated again at connection time.

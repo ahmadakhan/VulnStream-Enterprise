@@ -11,7 +11,7 @@ import {
 import { Pagination } from './Pagination';
 
 export const EmailHistoryView: React.FC = () => {
-  const { emailLogs, retryEmailDelivery } = useApp();
+  const { emailLogs, retryEmailDelivery, emailConfig } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
@@ -52,7 +52,7 @@ export const EmailHistoryView: React.FC = () => {
 
         <div className="flex items-center space-x-2 text-xs font-mono bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-3 py-1.5 rounded-xl shadow-sm">
           <ShieldCheck className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-400 light:text-zinc-600" />
-          <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700">SMTP transport</span>
+          <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700">{emailConfig.provider === 'SMTP' ? 'SMTP relay' : emailConfig.provider} transport</span>
         </div>
       </div>
 

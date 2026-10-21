@@ -1,6 +1,6 @@
 import type pg from 'pg';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
-import { DEFAULT_SETTINGS } from '../shared/state';
+import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state';
 import type { WatchListItem, NormalizedCVE } from '../src/types';
 import { randomUUID, createHmac, createHash } from 'node:crypto';
 import { stableJson } from '../src/utils/deduplicator';
@@ -8,7 +8,8 @@ import nodemailer from 'nodemailer';
 import type { Config } from './config';
 import { transaction, get, list, put, appendAudit } from './db';
 import type { Db } from './db';
-import type { Requester } from './network';
+import { createRequester, type Requester } from './network';
+import { EMAIL_PROVIDER_LABELS, EmailProviderError, emailIsConfigured, sendProviderEmail } from './emailProviders';
 import { decrypt } from './secrets';
 import type {
   Advisory,
@@ -18,6 +19,7 @@ import type {
   EmailDeliveryLog,
   WebhookDeliveryLog,
   AlertedCVE,
+  EmailConfiguration,
 } from '../src/types';
 export interface Job {
   id: string;
@@ -37,7 +39,7 @@ export interface Job {
   attempts: number;
   lock_token: string;
 }
-export type MailSender = (job: Job) => Promise<string>;
+export type MailSender = (job: Job) => Promise<string | { id: string; provider: EmailDeliveryLog['provider'] }>;
 const revision = (cve: NormalizedCVE) => createHash('sha256').update(stableJson(cve)).digest('hex');
 const findingRevision = (finding: Finding) =>
   createHash('sha256')
@@ -64,7 +66,7 @@ export function webhookAllows(hook: WebhookEndpoint, finding: Finding): boolean 
     (hook.events.includes('CISA_KEV') && finding.cve.cisaKev.isKev)
   );
 }
-export function createMailSender(config: Config): MailSender {
+export function createMailSender(config: Config, db?: Db, request: Requester = createRequester(config)): MailSender {
   const transporter = config.SMTP_HOST
     ? nodemailer.createTransport({
         host: config.SMTP_HOST,
@@ -80,14 +82,29 @@ export function createMailSender(config: Config): MailSender {
       })
     : null;
   return async (job) => {
-    if (!transporter || !config.SMTP_FROM) throw new Error('SMTP is not configured');
+    const saved = (db && await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
+    if (!emailIsConfigured(saved, config)) throw new Error('Email provider is not configured');
+    if (saved.provider !== 'SMTP') {
+      const token = decrypt(saved.apiKey, config.ENCRYPTION_KEY, `email-provider:${saved.provider}`);
+      if (!token) throw new Error('Email provider token is missing');
+      const provider = EMAIL_PROVIDER_LABELS[saved.provider];
+      try {
+        const id = await sendProviderEmail(saved, token, job, request);
+        return { id, provider };
+      } catch (error) {
+        if (error instanceof EmailProviderError) { error.provider = provider; throw error; }
+        throw new EmailProviderError(`${provider} connection failed`, 502, 0, provider);
+      }
+    }
+    const fromEmail = saved.fromEmail || config.SMTP_FROM;
+    if (!transporter || !fromEmail) throw new Error('SMTP is not configured');
     const result = await transporter.sendMail({
-      from: config.SMTP_FROM,
+      from: { address: fromEmail, name: saved.fromName },
       to: job.payload.recipientEmail,
       subject: job.payload.subject,
       text: job.payload.text,
       html: job.payload.html,
-      messageId: `<${job.id}@${config.SMTP_FROM.split('@').pop()}>`,
+      messageId: `<${job.id}@${fromEmail.split('@').pop()}>`,
       headers: { 'X-VulnStream-Delivery-ID': job.id },
     });
     if (
@@ -96,7 +113,7 @@ export function createMailSender(config: Config): MailSender {
       )
     )
       throw new Error('SMTP did not accept the recipient');
-    return result.messageId;
+    return { id: result.messageId, provider: 'SMTP_Relay' };
   };
 }
 export async function enqueue(
@@ -113,20 +130,21 @@ export async function enqueue(
     [id, dedupe, channel, targetId, advisoryId, JSON.stringify(payload)],
   );
   if (!inserted.rowCount) return null;
-  if (channel === 'email')
+  if (channel === 'email') {
+    const configuration = (await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
     await put(db, 'emailLogs', id, {
       id,
       recipientEmail: payload.recipientEmail || '',
       advisoryId,
       subject: payload.subject,
-      provider: 'SMTP_Relay',
+      provider: EMAIL_PROVIDER_LABELS[configuration.provider],
       status: 'QUEUED',
       attemptCount: 0,
       retrySchedule: ['1m', '2m', '4m', '8m', '16m'],
       nextRetryTime: new Date().toISOString(),
       sentAt: '',
     } satisfies EmailDeliveryLog);
-  else {
+  } else {
     const hook = await get<WebhookEndpoint>(db, 'webhooks', targetId);
     await put(db, 'webhookLogs', id, {
       id,
@@ -207,6 +225,7 @@ export async function deliverNext(
     error = '',
     permanent = false,
     retryNotBefore = 0;
+  let emailProvider: EmailDeliveryLog['provider'] | undefined;
   try {
     if (job.attempts > 6) {
       permanent = true;
@@ -274,7 +293,9 @@ export async function deliverNext(
           throw new Error('Recipient subscription no longer permits all advisory findings');
         }
       }
-      providerId = await sendMail(job);
+      const result = await sendMail(job);
+      providerId = typeof result === 'string' ? result : result.id;
+      if (typeof result !== 'string') emailProvider = result.provider;
     } else {
       const hook = await get<WebhookEndpoint>(pool, 'webhooks', job.target_id);
       if (!hook?.enabled) {
@@ -331,6 +352,11 @@ export async function deliverNext(
     }
   } catch (e) {
     error = e instanceof Error ? e.message : 'Delivery failed';
+    if (e instanceof EmailProviderError) {
+      permanent = e.status >= 400 && e.status < 500 && ![408, 429].includes(e.status);
+      retryNotBefore = e.retryAt;
+      emailProvider = e.provider;
+    }
   }
   await transaction(pool, async (db) => {
     const current = await db.query('SELECT status,lock_token FROM outbox WHERE id=$1 FOR UPDATE', [job.id]);
@@ -348,6 +374,7 @@ export async function deliverNext(
       if (log)
         await put(db, 'emailLogs', job.id, {
           ...log,
+          provider: emailProvider || log.provider,
           status: error ? (failed ? 'FAILED' : 'RETRYING') : 'ACCEPTED',
           attemptCount: job.attempts,
           errorMessage: error || undefined,

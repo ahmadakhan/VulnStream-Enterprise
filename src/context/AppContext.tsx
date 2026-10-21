@@ -12,6 +12,7 @@ import type {
   AppSettings,
   PipelineExecution,
   AuditLog,
+  EmailConfiguration,
 } from '../types';
 import { compileCustomizedTemplate } from '../utils/templateCompiler';
 function useApplication() {
@@ -270,6 +271,7 @@ function useApplication() {
         message: 'Test could not be queued; see the error banner.',
       },
     updateSettings: (settings: Partial<AppSettings>) => save('settings.save', settings),
+    configureEmailProvider: (configuration: EmailConfiguration) => save('email.configure', configuration),
     // Audit events are recorded by server operations, never accepted as client claims.
     addAuditLog: (
       _category: AuditLog['category'],

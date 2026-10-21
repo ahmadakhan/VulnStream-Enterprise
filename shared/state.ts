@@ -13,8 +13,14 @@ import type {
   AuditLog,
   PipelineExecution,
   TemplateCustomization,
+  EmailConfiguration,
 } from '../src/types';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION, compileCustomizedTemplate } from '../src/utils/templateCompiler';
+export const DEFAULT_EMAIL_CONFIG: EmailConfiguration = {
+  provider: 'SMTP', fromEmail: '', fromName: 'VulnStream', apiKey: '',
+  mailgunDomain: '', mailgunRegion: 'US', mailtrapMode: 'LIVE', mailtrapInboxId: '',
+  postmarkMessageStream: 'outbound',
+};
 export const DEFAULT_SETTINGS: AppSettings = {
   scopeHours: 24,
   schedulerIntervalMinutes: 60,
@@ -50,6 +56,7 @@ export interface AppState {
   auditLogs: AuditLog[];
   executions: PipelineExecution[];
   settings: AppSettings;
+  emailConfig: EmailConfiguration;
   templateCustomization: TemplateCustomization;
   advisoryTemplate: string;
 }
@@ -67,6 +74,7 @@ export const emptyState = (): AppState => ({
   auditLogs: [],
   executions: [],
   settings: structuredClone(DEFAULT_SETTINGS),
+  emailConfig: { ...DEFAULT_EMAIL_CONFIG },
   templateCustomization: { ...DEFAULT_TEMPLATE_CUSTOMIZATION },
   advisoryTemplate: compileCustomizedTemplate(DEFAULT_TEMPLATE_CUSTOMIZATION),
 });

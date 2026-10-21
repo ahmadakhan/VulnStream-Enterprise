@@ -22,6 +22,10 @@ unset operator_password
 
 Open `https://YOUR_APP_HOST`, sign in, add inventory and feed configuration, and run a pipeline. Scheduling and automatic dispatch are disabled initially; enable them only after checking correlations and channel configuration. Configure recipients before enabling automatic dispatch. Additional operators can be created by an administrator in Settings. There is no default account or password.
 
+Configure email delivery in **Settings → Email delivery**. Choose the deployment SMTP relay, Mailgun (US or EU), Mailtrap (live sending or sandbox), SendGrid, or Postmark. API providers require a verified sender and a provider token; Mailgun also requires its sending domain, Mailtrap sandbox requires its inbox ID, and Postmark uses a transactional message stream. Tokens are encrypted in PostgreSQL and never returned to the browser. Leaving the token blank keeps the saved token for the same provider; switching providers requires a new token. Changes apply to subsequent outbox attempts without restarting the worker. Use **Queue test email** and check **Delivery Log** for provider acceptance. Mailtrap sandbox captures emails in its test inbox rather than delivering to recipients.
+
+The default outbound allowlist includes the supported provider API hosts. If `EGRESS_ALLOWED_HOSTS` is explicitly set in an existing deployment, add the selected provider host: `api.mailgun.net` or `api.eu.mailgun.net`, `send.api.mailtrap.io` or `sandbox.api.mailtrap.io`, `api.sendgrid.com`, or `api.postmarkapp.com`. Provider failures use the durable retry queue and honor `Retry-After`; invalid requests and authorization failures require correction and a manual retry. API delivery, like SMTP, is at least once. Provider acceptance does not prove inbox delivery.
+
 The migration job owns schema changes. The runtime database role has no DDL privileges and cannot update/delete audit records. Existing database volumes do not rerun initialization: changing an environment password alone does not rotate the database role password.
 
 ## Supported behavior

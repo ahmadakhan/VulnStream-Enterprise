@@ -1,0 +1,177 @@
+import { randomUUID } from 'node:crypto';
+import type { EmailConfiguration, EmailDeliveryLog } from '../src/types';
+import type { Job } from './delivery';
+import type { Requester } from './network';
+
+export const EMAIL_PROVIDER_LABELS: Record<EmailConfiguration['provider'], EmailDeliveryLog['provider']> = {
+  SMTP: 'SMTP_Relay',
+  MAILGUN: 'Mailgun',
+  MAILTRAP: 'Mailtrap',
+  SENDGRID: 'SendGrid',
+  POSTMARK: 'Postmark',
+};
+export function emailEndpoint(config: EmailConfiguration): string | null {
+  switch (config.provider) {
+    case 'MAILGUN':
+      return `https://${config.mailgunRegion === 'EU' ? 'api.eu.mailgun.net' : 'api.mailgun.net'}/v3/${encodeURIComponent(config.mailgunDomain)}/messages`;
+    case 'MAILTRAP':
+      return config.mailtrapMode === 'SANDBOX'
+        ? `https://sandbox.api.mailtrap.io/api/send/${encodeURIComponent(config.mailtrapInboxId)}`
+        : 'https://send.api.mailtrap.io/api/send';
+    case 'SENDGRID':
+      return 'https://api.sendgrid.com/v3/mail/send';
+    case 'POSTMARK':
+      return 'https://api.postmarkapp.com/email';
+    default:
+      return null;
+  }
+}
+export function emailIsConfigured(
+  config: EmailConfiguration,
+  env: { SMTP_HOST: string; SMTP_FROM: string },
+): boolean {
+  if (config.provider === 'SMTP') return !!env.SMTP_HOST && !!(config.fromEmail || env.SMTP_FROM);
+  return (
+    !!config.fromEmail &&
+    !!config.apiKey &&
+    (config.provider !== 'MAILGUN' || !!config.mailgunDomain) &&
+    (config.provider !== 'MAILTRAP' || config.mailtrapMode !== 'SANDBOX' || !!config.mailtrapInboxId)
+  );
+}
+export class EmailProviderError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public retryAt = 0,
+    public provider?: EmailDeliveryLog['provider'],
+  ) {
+    super(message);
+  }
+}
+
+/** Fixed provider endpoints use the same DNS-pinned, allowlisted HTTPS client as feeds. */
+export async function sendProviderEmail(
+  config: EmailConfiguration,
+  token: string,
+  job: Job,
+  request: Requester,
+): Promise<string> {
+  const endpoint = emailEndpoint(config);
+  if (!endpoint) throw new Error('Select an API email provider');
+  if (!job.payload.recipientEmail) throw new Error('Email recipient is missing');
+  const from = config.fromName
+    ? `${JSON.stringify(config.fromName)} <${config.fromEmail}>`
+    : config.fromEmail;
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
+  const { subject, text, html, recipientEmail } = job.payload;
+  const deliveryHeader = { 'X-VulnStream-Delivery-ID': job.id };
+  let body: string;
+  if (config.provider === 'MAILGUN') {
+    const boundary = `vulnstream-${randomUUID()}`;
+    headers['content-type'] = `multipart/form-data; boundary=${boundary}`;
+    headers.Authorization = `Basic ${Buffer.from(`api:${token}`).toString('base64')}`;
+    const fields: Record<string, string> = {
+      from,
+      to: recipientEmail,
+      subject,
+      text,
+      'h:X-VulnStream-Delivery-ID': job.id,
+      'h:Message-Id': `<${job.id}@${config.fromEmail.split('@')[1]}>`,
+      'o:require-tls': 'yes',
+      ...(html ? { html } : {}),
+    };
+    body =
+      Object.entries(fields)
+        .map(
+          ([name, value]) =>
+            `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+        )
+        .join('') + `--${boundary}--\r\n`;
+  } else if (config.provider === 'SENDGRID') {
+    body = JSON.stringify({
+      personalizations: [{ to: [{ email: recipientEmail }], custom_args: { delivery_id: job.id } }],
+      from: { email: config.fromEmail, ...(config.fromName ? { name: config.fromName } : {}) },
+      subject,
+      headers: deliveryHeader,
+      content: [{ type: 'text/plain', value: text }, ...(html ? [{ type: 'text/html', value: html }] : [])],
+    });
+  } else if (config.provider === 'POSTMARK') {
+    delete headers.Authorization;
+    headers['X-Postmark-Server-Token'] = token;
+    body = JSON.stringify({
+      From: from,
+      To: recipientEmail,
+      Subject: subject,
+      TextBody: text,
+      ...(html ? { HtmlBody: html } : {}),
+      MessageStream: config.postmarkMessageStream,
+      Metadata: { delivery_id: job.id },
+      Headers: [{ Name: 'X-VulnStream-Delivery-ID', Value: job.id }],
+    });
+  } else {
+    body = JSON.stringify({
+      from: { email: config.fromEmail, name: config.fromName },
+      to: [{ email: recipientEmail }],
+      subject,
+      text,
+      ...(html ? { html } : {}),
+      headers: deliveryHeader,
+    });
+  }
+  const response = await request(endpoint, {
+    method: 'POST',
+    headers,
+    body,
+    timeoutMs: 30000,
+    socketTimeoutMs: 15000,
+    maxResponseBytes: 256 * 1024,
+  });
+  const provider = EMAIL_PROVIDER_LABELS[config.provider];
+  if (response.status < 200 || response.status >= 300) {
+    const value = response.headers['retry-after'];
+    const raw = Array.isArray(value) ? value[0] : value;
+    const seconds = raw ? Number(raw) : NaN;
+    const retryAt = Number.isFinite(seconds)
+      ? Date.now() + Math.max(0, seconds) * 1000
+      : Date.parse(raw || '');
+    throw new EmailProviderError(
+      `${provider} rejected the message (HTTP ${response.status})`,
+      response.status,
+      Number.isFinite(retryAt) ? retryAt : 0,
+    );
+  }
+  if (config.provider === 'SENDGRID') {
+    if (response.status !== 202)
+      throw new EmailProviderError('SendGrid did not confirm message acceptance', 502);
+    const id = response.headers['x-message-id'];
+    return (Array.isArray(id) ? id[0] : id) || job.id;
+  }
+  let data: any;
+  try {
+    data = JSON.parse(response.body);
+  } catch {
+    throw new EmailProviderError(`${provider} returned an invalid acceptance response`, 502);
+  }
+  if (
+    config.provider === 'POSTMARK' &&
+    data.ErrorCode === 0 &&
+    typeof data.MessageID === 'string' &&
+    data.MessageID
+  )
+    return data.MessageID;
+  if (config.provider === 'POSTMARK' && Number.isInteger(data.ErrorCode) && data.ErrorCode !== 0)
+    throw new EmailProviderError(`Postmark rejected the message (provider code ${data.ErrorCode})`, 422);
+  if (config.provider === 'MAILGUN' && typeof data.id === 'string' && data.id) return data.id;
+  if (
+    config.provider === 'MAILTRAP' &&
+    data.success === true &&
+    Array.isArray(data.message_ids) &&
+    typeof data.message_ids[0] === 'string' &&
+    data.message_ids[0]
+  )
+    return data.message_ids[0];
+  throw new EmailProviderError(`${provider} did not confirm message acceptance`, 502);
+}

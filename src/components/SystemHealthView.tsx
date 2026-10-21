@@ -57,7 +57,7 @@ export function SystemHealthView() {
                   : 'None',
               ],
               ['Recoverable delivery leases', `${status.deliveryQueue?.expiredLeases ?? 0} expired`],
-              ['SMTP', status.smtpConfigured ? 'Configured' : 'Not configured'],
+              ['Email provider', `${status.emailProvider || 'SMTP'} · ${status.emailConfigured ? 'Configured' : 'Not configured'}`],
               ['Process uptime', `${status.uptimeSeconds} seconds`],
               ['Heap usage', `${Math.round(status.heapBytes / 1024 / 1024)} MiB`],
               [
