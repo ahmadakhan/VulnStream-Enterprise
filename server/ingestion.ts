@@ -253,6 +253,9 @@ export async function ingestFeed(
     return { cves:[], ...result, count:result.articles.length, etag:typeof response.headers.etag === 'string' ? response.headers.etag : undefined };
   }
   if (feed.type === 'NVD_API') {
+    // NVD API key is recommended: without one, rate limits are 5 req/30s and
+    // responses can exceed 60s for large windows. Configure authType='API_KEY'
+    // with the encrypted key and rateLimitPerMin=100 for 50 req/30s throughput.
     const { start, end, hasMore } = ingestionWindow(scopeHours, syncState);
     const cves: NormalizedCVE[] = [];
     const withdrawals: NonNullable<IngestResult['withdrawals']> = [];
@@ -264,13 +267,13 @@ export async function ingestFeed(
       url.searchParams.set('lastModStartDate', start.toISOString());
       url.searchParams.set('lastModEndDate', end.toISOString());
       url.searchParams.set('startIndex', String(offset));
-      url.searchParams.set('resultsPerPage', '1000');
+      url.searchParams.set('resultsPerPage', '500');
       // Each page has a distinct URL and the time window moves on every run;
       // a single feed-level ETag cannot safely validate this paginated query.
       const { data } = await json(
         url.href,
         false,
-        { timeoutMs: 60000, socketTimeoutMs: 30000, maxResponseBytes: 16 * 1024 * 1024 },
+        { timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: 16 * 1024 * 1024 },
         true,
       );
       if (data === undefined) throw new Error('NVD returned an unexpected conditional response');
