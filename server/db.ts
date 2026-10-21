@@ -59,6 +59,21 @@ export async function put(db: Db, kind: string, id: string, data: unknown) {
     [kind, id, JSON.stringify(data)],
   );
 }
+export async function putMany(db: Db, kind: string, items: { id: string; data: unknown }[]) {
+  if (!items.length) return;
+  const values: unknown[] = [];
+  const params: string[] = [];
+  let idx = 1;
+  for (const item of items) {
+    params.push(`($${idx},$${idx + 1},$${idx + 2})`);
+    values.push(kind, item.id, JSON.stringify(item.data));
+    idx += 3;
+  }
+  await db.query(
+    `INSERT INTO records(kind,id,data) VALUES${params.join(',')} ON CONFLICT(kind,id) DO UPDATE SET data=EXCLUDED.data,updated_at=now()`,
+    values,
+  );
+}
 export async function get<T>(db: Db, kind: string, id: string): Promise<T | undefined> {
   return (await db.query('SELECT data FROM records WHERE kind=$1 AND id=$2', [kind, id])).rows[0]?.data;
 }
@@ -77,6 +92,7 @@ export async function appendAudit(
   actor: string,
   category: AuditLog['category'] = 'SECURITY',
   level: AuditLog['level'] = 'INFO',
+  ipAddress: string = '',
 ) {
   const previous = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 1')).rows[0]?.data;
   const entry = chainAuditLogs(
@@ -89,7 +105,7 @@ export async function appendAudit(
         event,
         details,
         actor,
-        ipAddress: '',
+        ipAddress,
         prevHash: '',
         hash: '',
       },

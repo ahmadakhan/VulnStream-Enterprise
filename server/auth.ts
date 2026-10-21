@@ -69,7 +69,7 @@ export function requireRole(...roles: Role[]) {
   return (req: Request, _res: Response, next: NextFunction) =>
     roles.includes(req.operator!.role) ? next() : next(new HttpError(403, 'Insufficient role'));
 }
-export async function createUser(pool: pg.Pool, username: string, password: string, role: Role) {
+export async function createUser(pool: pg.Pool, username: string, password: string, role: Role, ipAddress = '') {
   z.string()
     .regex(/^[a-zA-Z0-9._@-]{3,100}$/)
     .parse(username);
@@ -86,7 +86,7 @@ export async function createUser(pool: pg.Pool, username: string, password: stri
       hash,
       role,
     ]);
-    await appendAudit(db, 'Operator created', `Role ${role}`, username.toLowerCase());
+    await appendAudit(db, 'Operator created', `Role ${role}`, username.toLowerCase(), 'SECURITY', 'INFO', ipAddress);
   });
 }
 export function loginHandler(pool: pg.Pool, config: Config) {
@@ -133,7 +133,7 @@ export function loginHandler(pool: pg.Pool, config: Config) {
         "INSERT INTO sessions(token_hash,user_id,csrf,expires_at,absolute_expires_at) VALUES($1,$2,$3,$4,now()+interval '12 hours')",
         [tokenHash(token), user.id, csrf, expires],
       );
-      await appendAudit(db, 'Login succeeded', 'Operator session established', username);
+      await appendAudit(db, 'Login succeeded', 'Operator session established', username, 'SECURITY', 'INFO', req.ip || '');
     });
     res.cookie(cookieName(config), token, {
       httpOnly: true,

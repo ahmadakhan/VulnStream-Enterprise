@@ -114,29 +114,39 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       rawCount = 0;
     const results: Awaited<ReturnType<typeof ingestFeed>>[] = [];
     const feedUpdates: ThreatFeed[] = [];
-    for (const feed of feeds) {
-      const start = Date.now();
-      try {
-        const result = await ingestFeed(feed, execution.scopeHours, request, config);
-        results.push(result);
-        rawCount += result.count;
-        succeeded++;
-        feedUpdates.push({
-          ...feed,
-          healthStatus: 'HEALTHY',
-          lastSync: new Date().toISOString(),
-          latencyMs: Date.now() - start,
-          itemCountLastRun: result.count,
-          errorLog: null,
-          ssrfValidated: true,
-        });
-      } catch (e) {
-        const message = e instanceof Error ? e.message : 'Ingestion failed';
-        feedUpdates.push({ ...feed, healthStatus: 'DOWN', latencyMs: Date.now() - start, errorLog: message });
-        execution.logs.push(`Feed ${feed.id}: ${message}`);
+    // Ingest feeds concurrently with a bounded worker pool. Feeds hit different
+    // hostnames, so concurrency is safe for rate limits and dramatically reduces
+    // total ingestion time (NVD alone can take 5+ min sequentially).
+    const concurrency = Math.min(feeds.length, 6);
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < feeds.length) {
+        const i = nextIndex++;
+        const feed = feeds[i];
+        const start = Date.now();
+        try {
+          const result = await ingestFeed(feed, execution.scopeHours, request, config);
+          results.push(result);
+          rawCount += result.count;
+          succeeded++;
+          feedUpdates.push({
+            ...feed,
+            healthStatus: 'HEALTHY',
+            lastSync: new Date().toISOString(),
+            latencyMs: Date.now() - start,
+            itemCountLastRun: result.count,
+            errorLog: null,
+            ssrfValidated: true,
+          });
+        } catch (e) {
+          const message = e instanceof Error ? e.message : 'Ingestion failed';
+          feedUpdates.push({ ...feed, healthStatus: 'DOWN', latencyMs: Date.now() - start, errorLog: message });
+          execution.logs.push(`Feed ${feed.id}: ${message}`);
+        }
+        await lock.query('SELECT 1');
       }
-      await lock.query('SELECT 1'); // Fail if the lock-owning connection has been lost.
-    }
+    };
+    await Promise.all(Array.from({ length: concurrency }, worker));
     const ingestionDuration = Date.now() - new Date(execution.startTime).getTime();
     await lockedTransaction(async (db) => {
       for (const feed of feedUpdates) {
@@ -159,23 +169,23 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       const snapshot = await state(db);
       const byId = new Map(snapshot.cveData.map((c) => [c.cveId, c]));
       for (const result of results)
-        for (const cve of result.cves) {
-          const old = byId.get(cve.cveId);
-          if (!old || new Date(cve.modifiedDate) >= new Date(old.modifiedDate))
-            byId.set(cve.cveId, {
-              ...cve,
-              epss: old?.epss || cve.epss,
-              cisaKev: old?.cisaKev || cve.cisaKev,
-              sourceFeeds: Array.from(new Set([...(old?.sourceFeeds || []), ...cve.sourceFeeds])),
-            });
-        }
-      for (const cve of byId.values()) {
-        for (const result of results) {
-           if (result.kev && result.kev[cve.cveId]) cve.cisaKev = result.kev[cve.cveId];
-          if (result.epss?.[cve.cveId]) cve.epss = result.epss[cve.cveId];
-        }
-        await put(db, 'cveData', cve.cveId, cve);
-      }
+         for (const cve of result.cves) {
+            const old = byId.get(cve.cveId);
+            if (!old || new Date(cve.modifiedDate) >= new Date(old.modifiedDate))
+              byId.set(cve.cveId, {
+                ...cve,
+                epss: old?.epss || cve.epss,
+                cisaKev: old?.cisaKev || cve.cisaKev,
+                sourceFeeds: Array.from(new Set([...(old?.sourceFeeds || []), ...cve.sourceFeeds])),
+              });
+          }
+          for (const cve of byId.values()) {
+            for (const result of results) {
+              if (result.kev && result.kev[cve.cveId]) cve.cisaKev = result.kev[cve.cveId];
+              if (result.epss?.[cve.cveId]) cve.epss = result.epss[cve.cveId];
+            }
+          }
+          await putMany(db, 'cveData', [...byId.values()].map((cve) => ({ id: cve.cveId, data: cve })));
       // The run window limits network ingestion, not applicability of already cached CVEs.
       const settings = { ...snapshot.settings, scopeHours: 0 };
       const correlated = runVulnerabilityPipeline(
@@ -203,7 +213,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         ),
         correlated.newFindings,
       );
-      for (const f of reconciled) await put(db, 'findings', f.id, f);
+       await putMany(db, 'findings', reconciled.map((f) => ({ id: f.id, data: f })));
       const queueStarted = Date.now();
       let notificationsQueued = 0,
         advisoriesQueued = 0;

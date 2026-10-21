@@ -39,35 +39,47 @@ export const feedImportSchema = z
     }),
   )
   .max(100);
-export const assetSchema = z
-  .object({
-    vendor: shortText,
-    product: shortText,
-    version: z.string().max(100).optional(),
-    cpes: z
-      .array(
-        z
-          .string()
-          .max(1000)
-          .refine((s) => parseCPE23(s).isValid, 'Invalid CPE 2.3'),
-      )
-      .max(100),
-    purls: z
-      .array(
-        z
-          .string()
-          .max(1000)
-          .regex(/^pkg:[a-z][a-z0-9.+-]*\/.+/),
-      )
-      .max(100)
-      .optional(),
-    targetHw: z.string().max(100).optional(),
-    assetTag: shortText,
-    ownerGroup: shortText,
-    active: z.boolean(),
-    notes: z.string().max(4000).optional(),
-  })
-  .refine((a) => a.cpes.length > 0 || !!a.purls?.length, 'At least one CPE or PURL is required');
+const assetShape = z.object({
+  vendor: shortText,
+  product: shortText,
+  version: z.string().max(100).optional(),
+  cpes: z
+    .array(
+      z
+        .string()
+        .max(1000)
+        .refine((s) => parseCPE23(s).isValid, 'Invalid CPE 2.3'),
+    )
+    .max(100),
+  purls: z
+    .array(
+      z
+        .string()
+        .max(1000)
+        .regex(/^pkg:[a-z][a-z0-9.+-]*\/.+/),
+    )
+    .max(100)
+    .optional(),
+  targetHw: z.string().max(100).optional(),
+  assetTag: shortText,
+  ownerGroup: shortText,
+  active: z.boolean(),
+  notes: z.string().max(4000).optional(),
+});
+export const assetSchema = assetShape.refine(
+  (a) => a.cpes.length > 0 || !!a.purls?.length,
+  'At least one CPE or PURL is required',
+);
+/** Bulk upsert shape for monitored inventory; keeps identifiers stable across reseeds. */
+export const watchlistImportSchema = z
+  .array(
+    assetShape.extend({
+      id: idSchema,
+      createdAt: z.iso.datetime({ offset: true }).optional(),
+      exposure: z.enum(['INTERNET_FACING', 'INTERNAL_CRITICAL', 'DMZ', 'LOW']).optional(),
+    }),
+  )
+  .max(1000);
 export const recipientSchema = z.object({
   name: shortText,
   email: z

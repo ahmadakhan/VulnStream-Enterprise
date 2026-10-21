@@ -131,7 +131,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       await transaction(pool, async (db) => {
         await db.query('UPDATE users SET password_hash=$2 WHERE id=$1', [req.operator!.id, hash]);
         await db.query('DELETE FROM sessions WHERE user_id=$1', [req.operator!.id]);
-        await appendAudit(db, 'Password changed', 'All sessions revoked', req.operator!.username);
+        await appendAudit(db, 'Password changed', 'All sessions revoked', req.operator!.username, 'SECURITY', 'INFO', req.ip || '');
       });
       res.clearCookie(cookieName(config), { path: '/' });
       res.json({ success: true });
@@ -179,6 +179,9 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           'Operator access changed',
           `Operator ${req.params.id}; role ${data.role}; disabled ${data.disabled}`,
           req.operator!.username,
+          'SECURITY',
+          'INFO',
+          req.ip || '',
         );
       });
       res.json({ success: true });
@@ -255,6 +258,8 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
             `${feed.id}; HTTP ${response.status}`,
             req.operator!.username,
             'FEED',
+            'INFO',
+            req.ip || '',
           );
         });
         res.json({
@@ -280,6 +285,8 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
             `${feed.id}; ERROR: ${message}`,
             req.operator!.username,
             'FEED',
+            'INFO',
+            req.ip || '',
           );
         });
         res.json({ success: false, latency, error: message });
@@ -309,7 +316,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           },
           randomUUID(),
         );
-        await appendAudit(db, 'Test email queued', `Delivery ${id}`, req.operator!.username, 'EMAIL');
+        await appendAudit(db, 'Test email queued', `Delivery ${id}`, req.operator!.username, 'EMAIL', 'INFO', req.ip || '');
         return id;
       });
       res
@@ -353,6 +360,8 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           `Delivery ${req.params.id}`,
           req.operator!.username,
           'EMAIL',
+          'INFO',
+          req.ip || '',
         );
       });
       res.json({ success: true });
@@ -421,7 +430,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         }
       }
       const result = await transaction(pool, (db) =>
-        applyCommand(db, config, { action, id, data, actor }),
+        applyCommand(db, config, { action, id, data, actor, ipAddress: req.ip || '' }),
       );
       res.json(result);
     }),

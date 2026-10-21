@@ -24,6 +24,7 @@ export interface CommandRequest {
   id?: string;
   data?: unknown;
   actor: string;
+  ipAddress?: string;
 }
 
 export interface CommandResult {
@@ -42,7 +43,7 @@ export async function applyCommand(
   config: Config,
   request: CommandRequest,
 ): Promise<CommandResult> {
-  const { action, id, data, actor } = request;
+  const { action, id, data, actor, ipAddress = '' } = request;
   const now = new Date().toISOString(),
     newId = id || randomUUID();
   const checkExisting = async (kind: string) => {
@@ -85,7 +86,7 @@ export async function applyCommand(
         vendorSeed: feed.vendorSeed ?? old?.vendorSeed ?? false,
       });
     }
-    await appendAudit(db, 'Feeds imported', `${input.length} feeds`, actor, 'FEED');
+    await appendAudit(db, 'Feeds imported', `${input.length} feeds`, actor, 'FEED', 'INFO', ipAddress);
     return { success: true, imported: input.length, errors: [] };
   } else if (action === 'asset.save') {
     const input = assetSchema.parse(data),
@@ -97,7 +98,7 @@ export async function applyCommand(
       const assetId = randomUUID();
       await put(db, 'watchlist', assetId, { ...item, id: assetId, createdAt: now });
     }
-    await appendAudit(db, 'Assets imported', `${input.length} assets`, actor, 'WATCHLIST');
+    await appendAudit(db, 'Assets imported', `${input.length} assets`, actor, 'WATCHLIST', 'INFO', ipAddress);
     return { success: true, imported: input.length, errors: [] };
   } else if (action === 'recipient.save') {
     const input = recipientSchema.parse(data);
@@ -171,12 +172,14 @@ export async function applyCommand(
         [entity === 'asset' ? 'active' : 'enabled']: !old[entity === 'asset' ? 'active' : 'enabled'],
       });
   } else throw new HttpError(400, 'Unknown command');
-  await appendAudit(
-    db,
-    action,
-    `Record ${id || newId}`,
-    actor,
-    action.startsWith('asset') ? 'WATCHLIST' : 'SECURITY',
-  );
+   await appendAudit(
+     db,
+     action,
+     `Record ${id || newId}`,
+     actor,
+     action.startsWith('asset') ? 'WATCHLIST' : 'SECURITY',
+     'INFO',
+     ipAddress,
+   );
   return { success: true };
 }
