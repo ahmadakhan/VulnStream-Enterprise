@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { createPool, migrate, transaction, put, putMany, list, get } from '../server/db';
 import { queueRun, processPipeline, stopRun } from '../server/pipeline';
-import { deliverNext } from '../server/delivery';
+import { deliverNext, queueAdvisory } from '../server/delivery';
 import { loadConfig } from '../server/config';
 import { DEFAULT_SETTINGS } from '../shared/state';
 import { applyCommand } from '../server/commands';
@@ -236,7 +236,7 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         assert.equal(execution.stats.advisoriesQueued, 1);
         assert.deepEqual(
           execution.phases.map((phase: any) => phase.name),
-          ['Feed ingestion', 'Structured correlation', 'Delivery queue'],
+          ['Feed ingestion', 'Normalize & deduplicate', 'Product matching', 'Delivery queue'],
         );
         await save('watchlist', 'asset', asset('2.0'));
         let calls = 0;
@@ -305,6 +305,162 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       assert.equal(recovered.healthStatus, 'HEALTHY');
       assert.equal(recovered.consecutiveFailures, 0);
       assert.equal(recovered.circuitOpenUntil, null);
+    });
+    await t.test('unchanged KEV snapshots enrich later CVEs and invalidate on source edits', async () => {
+      await reset();
+      const cve = vulnerability();
+      const source = {
+        id: 'kev',
+        name: 'KEV',
+        type: 'CISA_KEV',
+        url: 'https://example.com/kev',
+        authType: 'NONE',
+        enabled: true,
+        rateLimitPerMin: 60,
+      };
+      await save('feeds', 'kev', source);
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async (_, options) => {
+        assert.equal(options?.headers?.['If-None-Match'], undefined);
+        return {
+          status: 200,
+          headers: { etag: '"catalog-1"' },
+          body: JSON.stringify({
+            vulnerabilities: [
+              {
+                cveID: cve.cveId,
+                dateAdded: '2026-01-01',
+                dueDate: '2026-02-01',
+                requiredAction: 'Patch',
+                knownRansomwareCampaignUse: 'Unknown',
+              },
+            ],
+          }),
+        };
+      });
+      await save('cveData', cve.cveId, cve);
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async (_, options) => {
+        assert.equal(options?.headers?.['If-None-Match'], '"catalog-1"');
+        return { status: 304, headers: {}, body: '' };
+      });
+      assert.equal((await get<NormalizedCVE>(pool, 'cveData', cve.cveId))?.cisaKev.isKev, true);
+      await save('feeds', 'kev', {
+        ...(await get<any>(pool, 'feeds', 'kev')),
+        url: 'https://example.com/other',
+      });
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async (_, options) => {
+        assert.equal(options?.headers?.['If-None-Match'], undefined);
+        return { status: 200, headers: {}, body: '{"vulnerabilities":[]}' };
+      });
+      assert.equal((await get<NormalizedCVE>(pool, 'cveData', cve.cveId))?.cisaKev.isKev, false);
+      assert.equal((await get<any>(pool, 'feeds', 'kev')).etag, undefined);
+    });
+    await t.test('renamed assets invalidate queued rendered systems and rebuild once', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
+      await save('watchlist', 'asset', asset());
+      await save('cveData', vulnerability().cveId, vulnerability());
+      await save('recipients', 'rec', {
+        id: 'rec',
+        name: 'Test',
+        email: 'test@example.invalid',
+        enabled: true,
+        subscriptionTier: 'ALL_SEVERITIES',
+      });
+      await run();
+      await save('watchlist', 'asset', { ...asset(), assetTag: 'RENAMED' });
+      // Correlation may refresh stored findings before old queued payload is checked.
+      await run();
+      let sent = 0;
+      await deliverNext(pool, config, request, async () => {
+        sent++;
+        return 'must-not-send';
+      });
+      assert.equal(sent, 0);
+      await run();
+      await deliverNext(pool, config, request, async (job) => {
+        assert.match(job.payload.text, /RENAMED/);
+        sent++;
+        return 'accepted';
+      });
+      assert.equal(sent, 1);
+      await run();
+      assert.equal(
+        (await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED'")).rows[0].n,
+        0,
+      );
+    });
+    await t.test('interleaved dispatches count each CVE dispatch only once', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
+      await save('watchlist', 'asset', asset());
+      await save('cveData', vulnerability().cveId, vulnerability());
+      await save('recipients', 'rec', {
+        id: 'rec',
+        name: 'Test',
+        email: 'test@example.invalid',
+        enabled: true,
+        subscriptionTier: 'ALL_SEVERITIES',
+      });
+      await run();
+      const advisory = (await list<any>(pool, 'advisories'))[0];
+      const findings = await list<Finding>(pool, 'findings');
+      await deliverNext(pool, config, request, async () => 'accepted-a');
+      await transaction(pool, (db) => queueAdvisory(db, advisory, findings, undefined, 'dispatch-b'));
+      await deliverNext(pool, config, request, async () => 'accepted-b');
+      await save('recipients', 'rec-2', {
+        id: 'rec-2',
+        name: 'Second',
+        email: 'second@example.invalid',
+        enabled: true,
+        subscriptionTier: 'ALL_SEVERITIES',
+      });
+      await transaction(pool, (db) => queueAdvisory(db, advisory, findings));
+      await deliverNext(pool, config, request, async () => 'accepted-a-second');
+      assert.equal((await get<any>(pool, 'alertedCves', vulnerability().cveId)).dispatchCount, 2);
+      assert.equal((await list(pool, 'alertDispatches')).length, 2);
+    });
+    await t.test('feed credential rotation resets validator, health history and cooldown', async () => {
+      await reset();
+      const data = {
+        name: 'Rotated source',
+        type: 'JSON_SEARCH_API',
+        url: 'https://example.com/feed',
+        authType: 'API_KEY',
+        authSecretKey: 'new-secret',
+        rateLimitPerMin: 60,
+        enabled: true,
+      };
+      await save('feeds', 'rotated', {
+        ...data,
+        id: 'rotated',
+        etag: 'old-etag',
+        lastSync: '2026-01-01T00:00:00Z',
+        itemCountLastRun: 12,
+        consecutiveFailures: 5,
+        circuitOpenUntil: '2099-01-01T00:00:00Z',
+      });
+      await transaction(pool, (db) =>
+        applyCommand(db, config, { action: 'feed.save', id: 'rotated', data, actor: 'test' }),
+      );
+      const saved = await get<any>(pool, 'feeds', 'rotated');
+      assert.equal(saved.etag, undefined);
+      assert.equal(saved.lastSync, null);
+      assert.equal(saved.itemCountLastRun, 0);
+      assert.equal(saved.consecutiveFailures, 0);
+      assert.equal(saved.circuitOpenUntil, null);
+      await transaction(pool, (db) =>
+        applyCommand(db, config, {
+          action: 'feed.import',
+          data: [{ ...data, id: 'rotated', etag: 'invented', lastSync: '2026-01-01T00:00:00Z' }],
+          actor: 'test',
+        }),
+      );
+      const imported = await get<any>(pool, 'feeds', 'rotated');
+      assert.equal(imported.etag, undefined);
+      assert.equal(imported.lastSync, null);
     });
     await t.test('complete KEV and EPSS snapshots clear stale enrichment', async () => {
       await reset();

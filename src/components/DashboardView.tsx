@@ -70,7 +70,7 @@ export const DashboardView: React.FC = () => {
               Product Vulnerability Tracking &amp; Notification System
             </h1>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 max-w-2xl mt-1 leading-relaxed">
-              Ingest configured NVD, CISA KEV, EPSS and normalized JSON feeds, correlate them with inventory,
+              Ingest configured NVD, CISA KEV, FIRST EPSS, OpenCVE, VulnCheck KEV and normalized JSON feeds, correlate them with inventory,
               and queue notifications when automatic dispatch is enabled. Review uncertain applicability
               before remediation.
             </p>

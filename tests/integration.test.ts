@@ -481,6 +481,43 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       assert.equal((await list<any>(pool, 'webhookLogs'))[0].status, 'FAILED');
       responseStatus = 200;
     });
+    await t.test('webhook rate limits persist provider cooldown without holding the worker', async () => {
+      const hook = (await list<WebhookEndpoint>(pool, 'webhooks'))[0];
+      for (const delay of ['1200', new Date(Date.now() + 1800000).toUTCString()]) {
+        await post(`/api/webhooks/${hook.id}/test`);
+        const before = Date.now();
+        await deliverNext(
+          pool,
+          config,
+          async () => ({ status: 429, body: '', headers: { 'retry-after': delay } }),
+          async () => 'unused',
+        );
+        const job = (
+          await pool.query(
+            "SELECT status,next_attempt FROM outbox WHERE channel='webhook' ORDER BY updated_at DESC LIMIT 1",
+          )
+        ).rows[0];
+        assert.equal(job.status, 'QUEUED');
+        assert.ok(new Date(job.next_attempt).getTime() >= before + 1199000);
+      }
+      const health = (await admin.get('/api/health')).body;
+      assert.equal(health.deliveryQueue.dueJobs, 0);
+      assert.equal(health.deliveryQueue.oldestDueCreatedAt, null);
+      assert.ok(Date.parse(health.deliveryQueue.nextScheduledAttempt) > Date.now());
+      assert.equal(health.workerStatus, 'DISABLED');
+      // Deferred jobs cannot be claimed by a subsequent idle worker.
+      assert.equal(
+        await deliverNext(
+          pool,
+          config,
+          async () => {
+            throw new Error('Premature retry');
+          },
+          async () => 'unused',
+        ),
+        false,
+      );
+    });
     await t.test('running pipeline recovers after crash and audit is content-verifiable', async () => {
       const queued = await queueRun(pool, 24, 'test');
       await transaction(pool, (db) => put(db, 'executions', queued.id, { ...queued, status: 'RUNNING' }));

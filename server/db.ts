@@ -118,7 +118,18 @@ export async function appendAudit(
 }
 export async function state(db: Db): Promise<AppState> {
   const snapshot = emptyState();
-  const rows = await db.query('SELECT kind,data FROM records ORDER BY updated_at DESC,id');
+  const kinds = [
+    ...Object.entries(snapshot)
+      .filter(([, value]) => Array.isArray(value))
+      .map(([kind]) => kind),
+    'settings',
+    'template',
+  ];
+  // Internal source snapshots and dispatch ledgers are not browser state.
+  const rows = await db.query(
+    'SELECT kind,data FROM records WHERE kind=ANY($1::text[]) ORDER BY updated_at DESC,id',
+    [kinds],
+  );
   for (const row of rows.rows) {
     if (Array.isArray(snapshot[row.kind as keyof AppState]))
       (snapshot[row.kind as keyof AppState] as unknown[]).push(row.data);

@@ -21,12 +21,18 @@ const stages = [
   {
     name: 'Feed ingestion',
     icon: Radio,
-    description: 'Retrieve, validate and enrich intelligence from enabled sources.',
+    description:
+      'Retrieve enabled feeds. NVD requests are limited to CVEs modified inside this ingestion window.',
   },
   {
-    name: 'Structured correlation',
+    name: 'Normalize & deduplicate',
     icon: Cpu,
-    description: 'Normalize, merge and match indicators against monitored products.',
+    description: 'Canonicalize vulnerability records and resolve duplicate source revisions.',
+  },
+  {
+    name: 'Product matching',
+    icon: Cpu,
+    description: 'Match CPE and package identifiers, versions, and ranges against monitored products.',
   },
   {
     name: 'Delivery queue',

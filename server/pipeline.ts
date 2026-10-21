@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { get, list, put, putMany, transaction, appendAudit, state } from './db';
 import { DEFAULT_SETTINGS } from '../shared/state';
 import type {
@@ -19,6 +19,15 @@ import type { Requester } from './network';
 import type { Config } from './config';
 import { queueAdvisory } from './delivery';
 import { HttpError } from './validation';
+type KevSnapshot = {
+  fingerprint: string;
+  etag?: string;
+  kev: NonNullable<Awaited<ReturnType<typeof ingestFeed>>['kev']>;
+};
+const sourceFingerprint = (feed: ThreatFeed) =>
+  createHash('sha256')
+    .update(JSON.stringify([feed.type, feed.url, feed.authType, feed.authSecretKey || '']))
+    .digest('hex');
 export async function queueRun(
   pool: pg.Pool,
   scope: number | undefined,
@@ -140,7 +149,12 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     };
     await checkpoint();
     execution.status = 'RUNNING';
-    execution.phases = ['Feed ingestion', 'Structured correlation', 'Delivery queue'].map((name, index) => ({
+    execution.phases = [
+      'Feed ingestion',
+      'Normalize & deduplicate',
+      'Product matching',
+      'Delivery queue',
+    ].map((name, index) => ({
       name,
       status: index === 0 ? 'RUNNING' : 'PENDING',
       durationMs: 0,
@@ -203,14 +217,33 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
                 await new Promise((resolve) => setTimeout(resolve, Math.min(500, until - Date.now())));
               }
             };
-            const result = await ingestFeed(
-              feed,
+            const savedKev =
+              feed.type === 'CISA_KEV' ? await get<KevSnapshot>(pool, 'feedSnapshots', feed.id) : undefined;
+            const cachedKev = savedKev?.fingerprint === sourceFingerprint(feed) ? savedKev : undefined;
+            // A validator is usable only together with its complete source snapshot.
+            let result = await ingestFeed(
+              feed.type === 'CISA_KEV' ? { ...feed, etag: cachedKev?.etag } : feed,
               execution!.scopeHours,
               checkedRequest,
               config,
               checkedSleep,
               targets,
+              feed.type === 'NVD_API'
+                ? async ({ offset, total, records }) => {
+                    await transaction(pool, async (db) => {
+                      await checkpoint(db);
+                      execution!.phases[0].durationMs = Date.now() - Date.parse(execution!.startTime);
+                      execution!.phases[0].details = `NVD: ${offset.toLocaleString()} of ${total.toLocaleString()} records in the last ${execution!.scopeHours}h; ${records.toLocaleString()} retrieved`;
+                      execution!.stats.rawIngested = rawCount + records;
+                      await put(db, 'executions', execution!.id, execution);
+                    });
+                  }
+                : undefined,
             );
+            if (feed.type === 'CISA_KEV' && result.notModified) {
+              if (!cachedKev) throw new Error('KEV conditional response has no source snapshot');
+              result = { ...result, kev: cachedKev.kev };
+            }
             results.push({ ...result, sourceId: feed.id });
             rawCount += result.notModified ? 0 : result.count;
             succeeded++;
@@ -226,7 +259,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
               itemCountLastRun: result.notModified ? feed.itemCountLastRun : result.count,
               errorLog: null,
               ssrfValidated: true,
-              etag: result.etag || feed.etag,
+              etag: result.etag,
               consecutiveFailures: 0,
               circuitOpenUntil: null,
             });
@@ -291,7 +324,8 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       details: `${succeeded}/${feeds.length} feeds succeeded; ${rawCount} records read`,
     };
     execution.phases[1].status = 'RUNNING';
-    execution.phases[1].details = 'Normalizing, merging and correlating cached indicators';
+    execution.phases[1].details = 'Canonicalizing records and resolving source revisions';
+    execution.phases[2].details = 'Waiting for normalized CVEs';
     await lockedTransaction(async (db) => {
       await checkpoint(db);
       await put(db, 'executions', execution!.id, execution);
@@ -348,6 +382,16 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         );
         execution!.logs.push('All feeds failed; proceeding with cached CVE correlation');
       }
+      for (const result of acceptedResults) {
+        if (result.kev && !result.notModified) {
+          const source = currentFeeds.get(result.sourceId!)!;
+          await put(db, 'feedSnapshots', source.id, {
+            fingerprint: sourceFingerprint(source),
+            etag: result.etag,
+            kev: result.kev,
+          } satisfies KevSnapshot);
+        }
+      }
       const snapshot = await state(db);
       const byId = mergeCveRecords([
         ...snapshot.cveData,
@@ -378,10 +422,19 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           current.cisaKev = old.cisaKev;
         }
       }
-      const kevReports = acceptedResults.filter((result) => result.kev && !result.notModified);
+      const kevReports = acceptedResults.filter((result) => result.kev);
+      const exploitedReports = acceptedResults.filter((result) => result.exploited && !result.notModified);
       const epssReports = acceptedResults.filter((result) => result.epss && !result.notModified);
       const epssScopes = new Map(epssReports.map((result) => [result, new Set(result.epssScope)]));
       for (const cve of byId.values()) {
+        const exploitationSources = exploitedReports
+          .filter((result) => result.exploited?.[cve.cveId])
+          .map((result) => result.sourceId!)
+          .sort();
+        if (exploitationSources.length) {
+          cve.exploitationSources = [...new Set([...(cve.exploitationSources || []), ...exploitationSources])];
+          if (cve.exploitStatus === 'None') cve.exploitStatus = 'Reported In Wild';
+        }
         if (kevReports.length) {
           cve.cisaKev = kevReports.map((result) => result.kev![cve.cveId]).find((entry) => entry?.isKev) || {
             isKev: false,
@@ -508,7 +561,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         scopeHours: execution!.scopeHours,
         logs: [
           ...execution!.logs,
-          `Structured correlation: ${correlated.newFindings.length} current matches; ${reconciled.length} retained findings`,
+          `Product matching: ${correlated.newFindings.length} current matches; ${reconciled.length} retained findings`,
           `Delivery queue: ${notificationsQueued} jobs queued`,
         ],
         phases: [
@@ -516,12 +569,16 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             name: 'Feed ingestion',
             status: succeeded < feeds.length ? 'WARNING' : 'SUCCESS',
             durationMs: ingestionDuration,
-            details: `${succeeded}/${feeds.length} feeds succeeded; ${rawCount} records read`,
+            details: `${succeeded}/${feeds.length} feeds succeeded; ${rawCount} records read in the last ${execution!.scopeHours}h`,
           },
-          ...correlated.execution.phases.map((phase) => ({
-            ...phase,
-            details: `${byId.size} cached CVEs evaluated; ${correlated.newFindings.length} current matches`,
-          })),
+          {
+            ...correlated.execution.phases[0],
+            details: `${byId.size} canonical CVEs; ${correlated.execution.stats.inRunDuplicatesDropped} duplicate records removed`,
+          },
+          {
+            ...correlated.execution.phases[1],
+            details: `${byId.size} CVEs evaluated against ${snapshot.watchlist.filter((asset) => asset.active).length} active products; ${correlated.newFindings.length} matches`,
+          },
           {
             name: 'Delivery queue',
             status: 'SUCCESS',

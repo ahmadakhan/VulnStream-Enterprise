@@ -2,6 +2,56 @@
 
 Reviewed on 21 October 2026. This follow-up audits the current source, Docker topology, ingestion and normalization, correlation, notification outbox, and de-duplication. It includes PostgreSQL-backed tests and small public-provider connectivity checks. It supersedes the outstanding code findings in `THREAT-INTELLIGENCE-AUDIT.md` where described below.
 
+## Current repository re-audit
+
+The latest pass rechecked adapters, source edits, pipeline orchestration, structured correlation, finding reconciliation, notification transport, dispatch accounting, PostgreSQL persistence and Docker topology. Earlier test counts and provider timings below are historical observations from the first pass; the verification in this section is the latest evidence.
+
+### Additional verified defects and fixes
+
+| Priority | Component | Reproduction / consequence | Implemented correction |
+| --- | --- | --- | --- |
+| P1 | KEV enrichment | A catalog fetched before a CVE arrived was discarded after enrichment. A later HTTP 304 left that new CVE incorrectly non-KEV, potentially excluding KEV subscribers. | Persist the complete validated catalog with its ETag and a source configuration fingerprint. A 304 reapplies that catalog to the current corpus. Changed URL/authentication requires a fresh response. Snapshot and source health commit atomically with accepted ingestion. |
+| P1 | Matching | A PURL could inherit the broad range from an unrelated CPE detail, confirming an already patched package. | Evaluate CPE detail ranges and the package-level range separately; retain strongest independent evidence without allowing text fallback to undo structured exclusions. |
+| P1 | Notifications | Renaming an inventory asset after queueing could send an outdated affected-system name, even after reconciliation refreshed the finding. | Queued jobs now include inventory identity/name fingerprints and recheck them before transport. Wholly unaccepted stale bundles rebuild once from current inventory; partially accepted bundles remain guarded. Legacy jobs without inventory fingerprints are also blocked and follow the same rebuild rule. |
+| P2 | Source validation | HTTP 200 JSON `null` was treated as not-modified; unsolicited 304 could claim successful ingestion without a validator. | Distinguish 304 from parsed JSON explicitly, require a matching conditional request, and reject invalid bodies. |
+| P2 | NVD pagination | Duplicate records, changing totals and overfull responses could be counted as a complete source result. | Validate page bounds and total stability; track canonical CVE identities and reject duplicates before committing the source. Moving datasets may now defer a run instead of committing uncertain coverage. |
+| P2 | KEV completeness | Declared catalog count could disagree with rows, or duplicate rows could silently overwrite enrichment. | Validate supplied catalog counts and unique CVE identities before treating a catalog as authoritative. |
+| P2 | Dispatch de-duplication | A → B → A recipient acceptance order inflated a CVE's dispatch count because only the last dispatch key was remembered. | Persist a per-CVE/per-dispatch acceptance ledger in the delivery transaction. Repeated recipients/retries do not add another count. Previously inflated historical counters are not rewritten. |
+| P2 | Source lifecycle | Rotating a credential retained stale validators, successful-sync metadata and an open circuit. Imported metadata could also claim an unobserved remote sync. | Reset validator, sync count/time and cooldown when source or credentials change. Bulk import no longer accepts claimed ETags/sync statistics as observed health. |
+| P2 | State-read efficiency | Browser state queries read every internal record before discarding unknown kinds, including new source snapshots and dispatch ledgers. | Filter record kinds in SQL so internal catalogs/ledgers are not read for browser state or general application snapshots. |
+
+### Continued reliability and observability fixes
+
+- Webhook transient failures now persist the later of exponential backoff and the provider's `Retry-After` delay, accepting delay-seconds or an HTTP date. Workers do not sleep while waiting, and future jobs cannot be claimed early. Unrepresentable future delays fail for operator review instead of overflowing a database timestamp. This follows the [HTTP Retry-After field semantics](https://www.rfc-editor.org/rfc/rfc9110.html#name-retry-after). Invalid or past values leave normal backoff in effect.
+- Numeric version components outside JavaScript's safe integer range no longer justify confirmed exclusions. Mixing vendor suffix families (for example `h2` versus `p1`) is also review-only because lexical ordering does not establish vendor release ordering. Existing supported same-family comparisons remain available.
+- Authenticated health responses and the System Health page distinguish due delivery jobs from delayed retries, display the oldest due job, next scheduled retry, expired delivery leases, and disabled/not-observed/healthy/stale worker state. A heartbeat older than 90 seconds is reported as stale. This is diagnostic visibility, not automatic external paging or an SLA.
+- Regression tests cover provider cooldown persistence and non-claimability, delayed-versus-due health counts, and review-only matching for uncertain numeric/suffix ordering. Existing source, cancellation, pipeline, delivery and security tests remain passing.
+
+### Latest measurements and verification
+
+- PostgreSQL regression suite: **85 passed, zero failed/skipped**; isolated test schemas and mocked transports.
+- TypeScript and production client/server build: passed. Diff whitespace validation: passed.
+- Production dependency audit: zero known advisories reported by `npm audit --omit=dev` at inspection time.
+- Fresh public probes through the application's screened HTTPS requester: NVD HTTP 200 / 2,552 ms / 2,517 bytes; CISA HTTP 200 / 181 ms / 1,803,428 bytes; FIRST HTTP 200 / 779 ms / 201 bytes. These were bounded single requests, not uptime measurements.
+- Synthetic pure-correlation sample on this host: 100 CVEs × 100 assets = 10,000 candidate pairs / 500 findings in 72 ms; 1,000 CVEs × 100 assets = 100,000 pairs / 5,000 findings in 365 ms. Each CVE had one CPE criterion and each asset one installed version, spread over 20 product identities. No network, persistence, delivery, production corpus or percentile/SLA inference is included.
+- The local `.env` does not configure this application's production database. Consequently the actual production feed inventory, freshness distribution, alert volume, delivery latency and false-positive/negative rates remain unmeasured. Repository seed definitions are not evidence that those sources are enabled in production.
+
+### Current assessment by stage
+
+| Stage | Assessment | Remaining bottleneck / automation opportunity |
+| --- | --- | --- |
+| Sources | NVD supplies broad CVE/CPE metadata; KEV provides known exploitation context; EPSS supplies predictive prioritization; normalized JSON supports vetted gateways. These are complementary vulnerability sources, not broad IOC collection. Vendor-specific adapters remain absent. | Add contract-tested vendor adapters and per-indicator enrichment age, then validate coverage against real inventory. EPSS predicts exploitation over the next 30 days, not confirmed local compromise. [FIRST's definition](https://www.first.org/epss/). |
+| Pipeline | Bounded concurrent retrieval, pacing, retry budgets, circuit breakers, cooperative cancellation and atomic persistence are regression-tested. KEV conditional reuse now avoids both redundant downloads and enrichment gaps. | Full corpus processing, fixed lookback without persisted catch-up, and globally serialized final commits remain the major scaling/recovery limits. Add indexed candidate retrieval and a bounded backfill workflow with explicit checkpoints. |
+| Matching | CPE/PURL component and version evidence is isolated; ambiguous configurations and unsupported ordering require review. | Internal evidence is a manually maintained software watchlist, not live endpoint/network telemetry. Measure precision/recall on a labeled representative sample; automate authenticated inventory imports before claiming production correlation accuracy. |
+| Notifications | Durable outbox, bounded retries, target/subscription checks, CVE and inventory fingerprints, and explicit transport acceptance are present. Worker drains up to 20 jobs per tick sequentially; slow SMTP can delay the whole batch. | Add provider receipt reconciliation and owner routing; isolate email/webhook worker throughput if measured backlog warrants it. Timed cross-run digest settings are still reserved, not implemented. New subscribers do not automatically receive already-dispatched history. |
+| De-duplication | Canonical CVEs, deterministic complete-revision merges, stable inventory/finding identities, outbox uniqueness and dispatch ledger protect distinct levels of identity. | This does not merge generic IP/domain/hash indicators or semantically different software identity representations. Establish retention/archive rules that preserve tombstones and dispatch identity long enough to prevent resurrection or repeat counts. |
+
+### Single points of failure and release conditions
+
+`compose.yaml` still contains one PostgreSQL service/volume, one application service, one reverse proxy and one configured SMTP relay. PostgreSQL advisory locks coordinate workers but do not provide database HA. Backups require tested restore procedures and agreed recovery objectives. The global mutation transaction can delay API writes and cooperative stop acknowledgement; synchronous matching can block the event loop at larger scales. SMTP remains at-least-once across the external-acceptance/local-commit crash window.
+
+These fixes require no new SQL migration: snapshots and ledger entries use the existing typed records table. Existing queued jobs lacking inventory fingerprints may fail safely and be rebuilt by the next pipeline only if no delivery in their bundle was accepted or remains in flight. Production deployment, migration execution, recipient changes and external messages were not performed. Capacity/restore/deliverability acceptance remains required before declaring the deployment production-ready.
+
 ## Assessment
 
 The application is a CVE-to-product-inventory correlation system. Its internal telemetry is an operator-managed CPE/PURL watchlist; it has no live EDR, CMDB, cloud, network-event, domain, IP, URL-indicator, or file-hash ingestion. It should not be represented as a complete IOC/SIEM correlation platform.
@@ -114,3 +164,13 @@ De-duplication does not extend to arbitrary IP/domain/hash/URL indicators, campa
 Regression coverage includes a real 22,000-row bulk upsert beyond the old parameter boundary, idempotent inventory import, wildcard/strongest-evidence matching, deterministic conflicting revisions, targeted and partial EPSS responses, same-run enrichment, source edits during ingestion, subscription isolation, stale and legacy payload rejection/rebuild, rejected-CVE persistence, and preventing manual/older-source resurrection.
 
 The full suite uses isolated schemas in the disposable `vulnstream_test` PostgreSQL database and mocks all notification transports. Live provider probes above use public, bounded read requests only. No real email or webhook notification was sent. Runtime application deployment was not changed.
+
+### Product matching stage in execution DAG
+
+The graphical DAG now separates **Normalize & deduplicate** from **Product matching**. The matching phase reports its own measured duration, CVEs evaluated, active inventory product count, and number of current matches. The prior combined correlation phase is split at the engine boundary; the telemetry labels correspond to measured normalization/merge and matching work. Existing responsive graph connectors automatically extend to the fourth stage. TypeScript validation, production client/server builds, and diff checks pass for this follow-up. The latest backend suite remains at 85 passing tests; it was not rerun for this presentation and telemetry-label change.
+
+### NVD ingestion window and gateway errors
+
+NVD requests set both `lastModStartDate` and `lastModEndDate` from the selected `scopeHours` on every run and page; the server caps the range at the supported 120 days. Each page uses `startIndex` and `resultsPerPage=1000`. The execution graph now shows the page offset, declared total, records retrieved and selected hour window while NVD is being read. The completed ingestion phase also states the selected window. This distinguishes a slow multi-page run from a stalled worker without broadening the query to the complete CVE corpus.
+
+The UI retries HTTP 502/503/504 up to two times for idempotent GET state reads only. NVD ingestion retries transient gateway responses within its existing bounded policy; exhausted attempts fail that feed with an execution error. The 502 message alone does not identify whether the failed request was a state read, pipeline enqueue, or infrastructure proxy, so its exact source cannot be established from the message alone. TypeScript validation and production client/server builds pass after this progress and retry-UI change. The backend suite was not rerun for this change.

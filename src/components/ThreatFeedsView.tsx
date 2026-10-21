@@ -31,6 +31,7 @@ export const ThreatFeedsView: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingFeed, setEditingFeed] = useState<ThreatFeed | null>(null);
   const [deletingFeed, setDeletingFeed] = useState<ThreatFeed | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -144,6 +145,14 @@ export const ThreatFeedsView: React.FC = () => {
     }
   };
 
+  const handleDeleteFeed = async () => {
+    if (!deletingFeed || deletePending) return;
+    setDeletePending(true);
+    const result = await deleteFeed(deletingFeed.id);
+    setDeletePending(false);
+    if (result) setDeletingFeed(null);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -154,7 +163,7 @@ export const ThreatFeedsView: React.FC = () => {
             Configurable Threat Feed Ingestion Sources
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Configure NVD, CISA KEV, EPSS, or validated normalized JSON sources. The server scheduler polls enabled feeds when scheduling is enabled.
+            Configure NVD, CISA KEV, FIRST EPSS, OpenCVE, VulnCheck KEV, or validated normalized JSON sources. The server scheduler polls enabled feeds when scheduling is enabled.
           </p>
         </div>
 
@@ -221,6 +230,15 @@ export const ThreatFeedsView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
+              {filteredFeeds.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-zinc-500">
+                    {feeds.length
+                      ? 'No feeds match your search.'
+                      : 'No feeds configured yet. Add a source to start ingesting threat intelligence.'}
+                  </td>
+                </tr>
+              )}
               {filteredFeeds.map(feed => {
                 const isTesting = testingId === feed.id;
 
@@ -321,15 +339,14 @@ export const ThreatFeedsView: React.FC = () => {
                       >
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
-                      {!feed.vendorSeed && (
-                        <button
-                          onClick={() => setDeletingFeed(feed)}
-                          className="p-1 text-zinc-400 hover:text-red-400 transition"
-                          title="Delete Feed"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      <button
+                        onClick={() => setDeletingFeed(feed)}
+                        className="p-1 text-zinc-400 hover:text-red-400 transition"
+                        title="Delete Feed"
+                        aria-label={`Delete ${feed.name}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </td>
                   </tr>
                 );
@@ -382,13 +399,22 @@ export const ThreatFeedsView: React.FC = () => {
                   <label className="block text-zinc-400 mb-1 font-mono">Protocol / Format *</label>
                   <select
                     value={formData.type}
-                    onChange={e => setFormData({ ...formData, type: e.target.value as FeedType })}
+                    onChange={e => {
+                      const type = e.target.value as FeedType;
+                      setFormData({
+                        ...formData,
+                        type,
+                        ...(type === 'OPENCVE_API' || type === 'VULNCHECK_KEV' ? { authType: 'BEARER' as FeedAuthType } : {}),
+                      });
+                    }}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 font-mono focus:border-zinc-600 focus:outline-none"
                   >
                     <option value="JSON_SEARCH_API">Normalized CVE JSON array</option>
                     <option value="NVD_API">NVD CVE API 2.0</option>
                     <option value="CISA_KEV">CISA KEV JSON catalog</option>
                     <option value="EPSS_API">FIRST EPSS API</option>
+                    <option value="OPENCVE_API">OpenCVE API v2 (Bearer token)</option>
+                    <option value="VULNCHECK_KEV">VulnCheck KEV (Bearer token)</option>
                   </select>
                 </div>
 
@@ -483,13 +509,11 @@ export const ThreatFeedsView: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  deleteFeed(deletingFeed.id);
-                  setDeletingFeed(null);
-                }}
+                onClick={() => void handleDeleteFeed()}
+                disabled={deletePending}
                 className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
               >
-                Delete Feed
+                {deletePending ? 'Deleting…' : 'Delete Feed'}
               </button>
             </div>
           </div>

@@ -252,6 +252,8 @@ export const FindingsView: React.FC = () => {
                               className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
                                 finding.exploitRisk === 'CISA_KEV_EXPLOITED'
                                   ? 'bg-amber-950/40 text-amber-300 border-amber-800/80 font-semibold'
+                                  : finding.exploitRisk === 'REPORTED_IN_WILD_EXPLOIT'
+                                    ? 'bg-orange-950/40 text-orange-300 border-orange-800/80 font-semibold'
                                   : finding.exploitRisk === 'WEAPONIZED_EXPLOIT'
                                     ? 'bg-rose-950/40 text-rose-300 border-rose-800/80 font-semibold'
                                     : 'bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border-zinc-700 dark:border-zinc-700 light:border-zinc-300'

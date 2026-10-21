@@ -1,5 +1,7 @@
 import { loadConfig } from './config';
-import { createPool, migrate } from './db';
+import { createPool, migrate, transaction, get, put } from './db';
+import { applyCommand } from './commands';
+import { RECOMMENDED_FEEDS } from './recommendedFeeds';
 import { createApp } from './app';
 import { createRequester } from './network';
 import { createMailSender, deliverNext } from './delivery';
@@ -13,6 +15,20 @@ if (config.NODE_ENV === 'production') {
   const version = await pool.query('SELECT version FROM schema_migrations WHERE version=1');
   if (!version.rowCount) throw new Error('Required migration missing');
 } else await migrate(pool);
+// Upgrade existing installations once; the marker makes later operator deletions persist.
+await transaction(pool, async (db) => {
+  if (await get(db, 'systemState', 'recommended-feeds-v1')) return;
+  const missing = [];
+  for (const feed of RECOMMENDED_FEEDS)
+    if (!(await get(db, 'feeds', feed.id))) missing.push(feed);
+  if (missing.length)
+    await applyCommand(db, config, {
+      action: 'feed.import',
+      data: missing,
+      actor: 'system-bootstrap',
+    });
+  await put(db, 'systemState', 'recommended-feeds-v1', { completedAt: new Date().toISOString() });
+});
 const request = createRequester(config),
   sendMail = createMailSender(config);
 const server = createApp(pool, config, request).listen(config.PORT, '0.0.0.0', () =>

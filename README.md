@@ -26,7 +26,7 @@ The migration job owns schema changes. The runtime database role has no DDL priv
 
 ## Supported behavior
 
-- NVD API ingestion, CISA KEV enrichment, FIRST EPSS enrichment, and schema-validated normalized JSON feeds. RSS, STIX and CSAF adapters are not implemented and cannot be selected.
+- NVD API ingestion, CISA KEV and FIRST EPSS enrichment, OpenCVE API v2 CVE/CPE enrichment, VulnCheck KEV exploited-in-the-wild signals, and schema-validated normalized JSON feeds. OpenCVE and VulnCheck require provider Bearer tokens and are seeded disabled until credentials are configured. Their results merge by canonical CVE ID; VulnCheck exploitation remains distinct from CISA KEV. RSS, STIX and CSAF adapters are not implemented and cannot be selected.
 - Each pipeline reconciles current inventory against all cached CVEs; the selected time window applies to feed ingestion. Existing findings retain stable IDs and history as applicability changes.
 - CPE/PURL inventory matching with version exclusions. Unknown versions or complex NVD applicability require review and are not automatically dispatched. Unsigned VEX cannot suppress findings.
 - Durable PostgreSQL outbox with retries and recovery. SMTP acceptance and webhook HTTP acceptance are recorded as `ACCEPTED`; this is not proof of inbox delivery. Delivery is at least once. Stable email Message-ID and webhook idempotency keys support recipient-side deduplication.

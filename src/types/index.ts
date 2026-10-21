@@ -5,7 +5,12 @@ export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
 export type ExposureLevel = 'INTERNET_FACING' | 'INTERNAL_CRITICAL' | 'DMZ' | 'WORKSTATION' | 'CLOUD_INFRA';
 
 export type ExploitRiskLevel =
-  'CISA_KEV_EXPLOITED' | 'WEAPONIZED_EXPLOIT' | 'HIGH_EPSS_PROBABILITY' | 'ELEVATED' | 'STANDARD';
+  | 'CISA_KEV_EXPLOITED'
+  | 'REPORTED_IN_WILD_EXPLOIT'
+  | 'WEAPONIZED_EXPLOIT'
+  | 'HIGH_EPSS_PROBABILITY'
+  | 'ELEVATED'
+  | 'STANDARD';
 
 export type NotificationStatus =
   | 'AUTO_DISPATCHED'
@@ -24,7 +29,14 @@ export type FindingStatus =
  * Feed types the server can actually ingest. The runtime adapter set and this
  * list must stay identical: a feed that is not in this list cannot be polled.
  */
-export const FEED_TYPES = ['JSON_SEARCH_API', 'NVD_API', 'CISA_KEV', 'EPSS_API'] as const;
+export const FEED_TYPES = [
+  'JSON_SEARCH_API',
+  'NVD_API',
+  'CISA_KEV',
+  'EPSS_API',
+  'OPENCVE_API',
+  'VULNCHECK_KEV',
+] as const;
 
 export type FeedType = (typeof FEED_TYPES)[number];
 
@@ -97,6 +109,7 @@ export interface NormalizedCVE {
   purls?: string[]; // Package URLs (PURL)
   vex?: VexStatement; // CSAF 2.0 VEX status
   sourceFeeds: string[];
+  exploitationSources?: string[];
   epss: EPSSData;
   cisaKev: CisaKevData;
   exploitStatus: 'Active Weaponized' | 'POC Available' | 'Reported In Wild' | 'None';

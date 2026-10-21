@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { loadConfig } from '../server/config';
 import { createPool, get, transaction } from '../server/db';
 import { applyCommand } from '../server/commands';
+import { RECOMMENDED_FEEDS } from '../server/recommendedFeeds';
 import { INITIAL_WATCHLIST } from '../tests/fixtures/seedData';
 
 const config = loadConfig();
@@ -39,6 +40,7 @@ const feedPayload = [
     enabled: true,
     vendorSeed: true,
   },
+  ...RECOMMENDED_FEEDS,
 ];
 
 try {

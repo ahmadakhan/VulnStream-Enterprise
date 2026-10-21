@@ -32,12 +32,23 @@ export interface Job {
     recipientEmail?: string;
     cveIds: string[];
     cveRevisions?: Record<string, string>;
+    findingRevisions?: Record<string, string>;
   };
   attempts: number;
   lock_token: string;
 }
 export type MailSender = (job: Job) => Promise<string>;
 const revision = (cve: NormalizedCVE) => createHash('sha256').update(stableJson(cve)).digest('hex');
+const findingRevision = (finding: Finding) =>
+  createHash('sha256')
+    .update(
+      stableJson({
+        cveId: finding.cveId,
+        assetId: finding.matchedAssetId,
+        assetName: finding.matchedAssetName,
+      }),
+    )
+    .digest('hex');
 export function recipientAllows(recipient: EmailRecipient, finding: Finding): boolean {
   return (
     recipient.subscriptionTier === 'ALL_SEVERITIES' ||
@@ -149,6 +160,7 @@ export async function queueAdvisory(
     text: `${advisory.title}\n\nSeverity: ${advisory.severity}\n\nCVE IDs:\n${advisory.cveIds.join('\n')}\n\n${advisory.executiveSummary}\n\nAffected systems:\n${advisory.affectedSystems.join('\n')}\n\n${advisory.remediationInstructions}${advisory.vendorLink ? `\n\nVendor advisory: ${advisory.vendorLink}` : ''}`,
     html,
     cveIds: advisory.cveIds,
+    findingRevisions: Object.fromEntries(findings.map((finding) => [finding.id, findingRevision(finding)])),
     cveRevisions: Object.fromEntries(findings.map((finding) => [finding.cveId, revision(finding.cve)])),
   };
   let count = 0;
@@ -193,7 +205,8 @@ export async function deliverNext(
     statusCode = 0,
     signature = '',
     error = '',
-    permanent = false;
+    permanent = false,
+    retryNotBefore = 0;
   try {
     if (job.attempts > 6) {
       permanent = true;
@@ -230,6 +243,7 @@ export async function deliverNext(
         if (match) currentFindings.push(match);
         if (
           !finding ||
+          (match && job.payload.findingRevisions?.[id] !== findingRevision(match)) ||
           (cve && withdrawal && Date.parse(cve.modifiedDate) <= Date.parse(withdrawal.modifiedDate)) ||
           (cve &&
             job.payload.cveRevisions?.[cve.cveId] &&
@@ -292,6 +306,24 @@ export async function deliverNext(
       });
       statusCode = response.status;
       if (statusCode < 200 || statusCode >= 300) {
+        const rawDelay = response.headers['retry-after'];
+        const delay = (Array.isArray(rawDelay) ? rawDelay[0] : rawDelay)?.trim();
+        if (delay) {
+          const timestamp = /^\d+$/.test(delay)
+            ? Date.now() + Number(delay) * 1000
+            : /[a-z]/i.test(delay)
+              ? Date.parse(delay)
+              : NaN;
+          if (timestamp > Date.now()) {
+            if (!Number.isFinite(timestamp) || timestamp > 8640000000000000) {
+              permanent = true;
+              throw new Error(
+                'Webhook Retry-After exceeds supported scheduling range; operator review required',
+              );
+            }
+            retryNotBefore = timestamp;
+          }
+        }
         permanent = statusCode >= 400 && statusCode < 500 && ![408, 429].includes(statusCode);
         throw new Error(`Webhook HTTP ${statusCode}`);
       }
@@ -304,7 +336,9 @@ export async function deliverNext(
     const current = await db.query('SELECT status,lock_token FROM outbox WHERE id=$1 FOR UPDATE', [job.id]);
     if (current.rows[0]?.lock_token !== job.lock_token) return;
     const failed = !!error && (permanent || job.attempts >= 6),
-      next = new Date(Date.now() + Math.min(3600000, 60000 * 2 ** (job.attempts - 1)));
+      next = new Date(
+        Math.max(retryNotBefore, Date.now() + Math.min(3600000, 60000 * 2 ** (job.attempts - 1))),
+      );
     await db.query(
       'UPDATE outbox SET status=$2,next_attempt=$3,error=$4,provider_id=$5,locked_at=NULL,lock_token=NULL,updated_at=now() WHERE id=$1',
       [job.id, error ? (failed ? 'FAILED' : 'QUEUED') : 'ACCEPTED', next, error || null, providerId || null],
@@ -366,7 +400,10 @@ export async function deliverNext(
           const prior = await get<AlertedCVE>(db, 'alertedCves', cveId),
             now = new Date().toISOString();
           const dispatchKey = job.dedupe_key.split(':email:')[0].split(':webhook:')[0];
-          const same = prior?.lastDispatchKey === dispatchKey;
+          const dispatchId = `${cveId}:${dispatchKey}`;
+          const same =
+            prior?.lastDispatchKey === dispatchKey || !!(await get(db, 'alertDispatches', dispatchId));
+          await put(db, 'alertDispatches', dispatchId, { cveId, dispatchKey, acceptedAt: now });
           await put(db, 'alertedCves', cveId, {
             cveId,
             firstAlertedAt: prior?.firstAlertedAt || now,

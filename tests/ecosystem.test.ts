@@ -211,3 +211,101 @@ test('long NVD Retry-After defers instead of retrying before the allowed time', 
   );
   assert.equal(calls, 1);
 });
+
+test('package applicability never borrows a range from an unrelated CPE', () => {
+  const record = {
+    ...cve(),
+    purls: ['pkg:npm/widget'],
+    versionRange: { versionEndExcluding: '2.0' },
+    cpeMatchDetails: [
+      { criteria: cpe('*').replace(':widget:', ':other:'), range: { versionEndExcluding: '9.0' } },
+    ],
+  };
+  const run = (version: string) =>
+    runVulnerabilityPipeline(
+      [],
+      [record],
+      [{ ...asset, cpes: [], purls: [`pkg:npm/widget@${version}`] }],
+      [],
+      [],
+      { ...DEFAULT_SETTINGS, scopeHours: 0 },
+    ).newFindings;
+  assert.equal(run('3.0').length, 0);
+  assert.equal(run('1.0')[0].notificationStatus, 'QUEUED_FOR_DISPATCH');
+});
+
+test('null JSON and unsolicited conditional responses cannot claim feed success', async () => {
+  for (const type of ['JSON_SEARCH_API', 'CISA_KEV', 'NVD_API'] as const) {
+    await assert.rejects(
+      ingestFeed(feed(type), 24, async () => ({ status: 200, headers: {}, body: 'null' }), config),
+    );
+    await assert.rejects(
+      ingestFeed(feed(type), 24, async () => ({ status: 304, headers: {}, body: '' }), config),
+      /unexpected conditional/,
+    );
+  }
+});
+
+test('NVD rejects duplicate, overfull and shifting pages atomically', async () => {
+  for (const pages of [
+    [{ startIndex: 0, totalResults: 2, vulnerabilities: [nvd(), nvd()] }],
+    [{ startIndex: 0, totalResults: 0, vulnerabilities: [nvd()] }],
+    [
+      { startIndex: 0, totalResults: 2, vulnerabilities: [nvd()] },
+      { startIndex: 1, totalResults: 1, vulnerabilities: [] },
+    ],
+  ]) {
+    let index = 0;
+    await assert.rejects(
+      ingestFeed(
+        feed('NVD_API'),
+        24,
+        async () => ({ status: 200, headers: {}, body: JSON.stringify(pages[index++]) }),
+        config,
+        async () => {},
+      ),
+      /duplicate|pagination/,
+    );
+  }
+});
+
+test('KEV cannot clear enrichment using a truncated or duplicate catalog', async () => {
+  const entry = {
+    cveID: 'CVE-2026-12345',
+    dateAdded: '2026-01-01',
+    dueDate: '2026-02-01',
+    requiredAction: 'Patch',
+    knownRansomwareCampaignUse: 'Unknown',
+  };
+  for (const data of [
+    { count: 1, vulnerabilities: [] },
+    { count: 2, vulnerabilities: [entry, entry] },
+  ])
+    await assert.rejects(
+      ingestFeed(
+        feed('CISA_KEV'),
+        24,
+        async () => ({ status: 200, headers: {}, body: JSON.stringify(data) }),
+        config,
+      ),
+      /count mismatch or duplicate/,
+    );
+});
+
+test('ambiguous suffix families and unsafe numeric versions remain review-only', () => {
+  for (const [installed, bound] of [
+    ['1.0-h2', '1.0-p1'],
+    ['9007199254740992', '9007199254740993'],
+  ]) {
+    const record = {
+      ...cve(),
+      cpeMatches: [cpe('*')],
+      cpeMatchDetails: [{ criteria: cpe('*'), range: { versionEndExcluding: bound } }],
+    };
+    const finding = runVulnerabilityPipeline([], [record], [{ ...asset, cpes: [cpe(installed)] }], [], [], {
+      ...DEFAULT_SETTINGS,
+      scopeHours: 0,
+    }).newFindings[0];
+    assert.equal(finding?.notificationStatus, 'REVIEW_REQUIRED');
+  }
+});

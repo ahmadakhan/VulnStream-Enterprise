@@ -1,7 +1,6 @@
 /**
- * Enterprise Version Range & SemVer Comparator
- * Evaluates NVD Version Match Criteria intervals [versionStart, versionEnd)
- * Handles standard SemVer, Linux kernels, and vendor patch tags (e.g. 11.0.4-h1, 7.4.3.F-build2573).
+ * Numeric version and supported vendor patch range comparison.
+ * Unknown release ordering is retained as a review candidate rather than excluded.
  */
 
 export interface NvdVersionRange {
@@ -15,7 +14,15 @@ export interface NvdVersionRange {
 export function canCompareRange(version: string, range: NvdVersionRange): boolean {
   const supported = (value: string) =>
     /^[0-9]+(?:\.[0-9]+)*(?:-(?:h|p|patch|hotfix|sp|u|update|build|fix)[0-9]+)?$/.test(value);
-  return supported(version) && Object.values(range).every((bound) => !bound || supported(bound));
+  const values = [version, ...Object.values(range).filter((bound): bound is string => !!bound)];
+  // Different vendor suffix families do not have a portable relative ordering.
+  // Numeric conversion must also be exact before it can justify exclusion.
+  return (
+    values.every(
+      (value) =>
+        supported(value) && (value.match(/\d+/g) || []).every((token) => Number.isSafeInteger(Number(token))),
+    ) && new Set(values.map((value) => /-([a-z]+)/.exec(value)?.[1]).filter(Boolean)).size <= 1
+  );
 }
 
 interface ParsedVersion {

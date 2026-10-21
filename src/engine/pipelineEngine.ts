@@ -46,6 +46,8 @@ export function validateSsrfSafety(value: string): { safe: boolean; reason?: str
 export function determineExploitRisk(cve: NormalizedCVE): ExploitRiskLevel {
   return cve.cisaKev.isKev
     ? 'CISA_KEV_EXPLOITED'
+    : cve.exploitationSources?.length || cve.exploitStatus === 'Reported In Wild'
+      ? 'REPORTED_IN_WILD_EXPLOIT'
     : cve.exploitStatus === 'Active Weaponized'
       ? 'WEAPONIZED_EXPLOIT'
       : cve.epss.score >= 0.4
@@ -69,9 +71,12 @@ export function runVulnerabilityPipeline(
     known = new Set(existing.map((f) => `${normalizeCveId(f.cveId)}:${f.matchedAssetId}`));
   const newFindings: Finding[] = [];
   let processed = 0;
+  const normalizationStarted = performance.now();
   const latest = mergeCveRecords(corpus);
   const duplicates = corpus.filter((cve) => normalizeCveId(cve.cveId)).length - latest.size;
+  const normalizationDurationMs = Math.round(performance.now() - normalizationStarted);
   const activeAssets = watchlist.filter((asset) => asset.active);
+  const matchingStarted = performance.now();
   for (const raw of latest.values()) {
     const canonical = normalizeCveId(raw.cveId);
     if (
@@ -90,23 +95,40 @@ export function runVulnerabilityPipeline(
             range: range || cve.versionRange,
           }))
         : [{ cpes: cve.cpeMatches, range: cve.versionRange }];
-      const result = applicabilitySets
-        .map(({ cpes, range }) =>
+      // Per-CPE ranges apply only to that CPE criterion. PURLs use the
+      // package-level range and must never borrow another product's bounds.
+      const matches = applicabilitySets.map(({ cpes, range }) =>
+        matchesWatchlistItem(
+          asset.cpes,
+          asset.vendor,
+          asset.product,
+          cpes,
+          cve.title,
+          cve.description,
+          range,
+          asset.purls,
+          cve.purls,
+          asset.targetHw,
+          undefined,
+          false,
+        ),
+      );
+      if (asset.purls?.length && cve.purls?.length)
+        matches.push(
           matchesWatchlistItem(
-            asset.cpes,
-            asset.vendor,
-            asset.product,
-            cpes,
-            cve.title,
-            cve.description,
-            range,
+            [],
+            '',
+            '',
+            [],
+            '',
+            '',
+            cve.versionRange,
             asset.purls,
             cve.purls,
             asset.targetHw,
           ),
-        )
-        .filter((match) => match.matched)
-        .sort((a, b) => b.confidence - a.confidence)[0];
+        );
+      const result = matches.filter((match) => match.matched).sort((a, b) => b.confidence - a.confidence)[0];
       if (!result?.matched) continue;
       if (cve.applicabilityRequiresReview || result.applicabilityRequiresReview) result.confidence = 0;
       const confirmed = result.confidence >= 90;
@@ -140,6 +162,7 @@ export function runVulnerabilityPipeline(
       known.add(key);
     }
   }
+  const matchingDurationMs = Math.round(performance.now() - matchingStarted);
   const execution: PipelineExecution = {
     id: crypto.randomUUID(),
     startTime: started.toISOString(),
@@ -148,10 +171,16 @@ export function runVulnerabilityPipeline(
     scopeHours: settings.scopeHours,
     phases: [
       {
-        name: 'Structured correlation',
+        name: 'Normalize & deduplicate',
         status: 'SUCCESS',
-        durationMs: Date.now() - started.getTime(),
-        details: `${processed} CVEs evaluated; ${newFindings.length} new findings`,
+        durationMs: normalizationDurationMs,
+        details: `${latest.size} canonical CVEs; ${duplicates} duplicates removed`,
+      },
+      {
+        name: 'Product matching',
+        status: 'SUCCESS',
+        durationMs: matchingDurationMs,
+        details: `${processed} CVEs evaluated against ${activeAssets.length} active products; ${newFindings.length} matches`,
       },
     ],
     stats: {

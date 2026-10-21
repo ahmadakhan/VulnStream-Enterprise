@@ -104,8 +104,8 @@ export const ThreatDataView: React.FC = () => {
             Threat Intelligence Feed Cache
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Normalized CVE cache unified from NVD CVSS, FIRST.org EPSS scores, CISA KEV catalogs, and vendor
-            threat streams. CVEs are correlated by both <strong>published date</strong> and{' '}
+            Normalized CVE cache unified from NVD, OpenCVE, FIRST.org EPSS, CISA KEV, and VulnCheck exploitation intelligence.
+            CVEs are correlated by both <strong>published date</strong> and{' '}
             <strong>last modified date</strong>.
           </p>
         </div>

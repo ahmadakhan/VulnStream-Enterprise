@@ -306,6 +306,7 @@ export function matchesWatchlistItem(
   vulnPurls?: string[],
   assetTargetHw?: string,
   vulnTargetHw?: string,
+  evaluatePackages = true,
 ): MatchResult {
   let bestMatch: MatchResult | undefined;
   const retain = (candidate: MatchResult) => {
@@ -326,7 +327,7 @@ export function matchesWatchlistItem(
   }
 
   // 2. PURL Matching if present
-  if (assetPurls && vulnPurls) {
+  if (evaluatePackages && assetPurls && vulnPurls) {
     for (const ap of assetPurls) {
       for (const vp of vulnPurls) {
         const packageVersion = ap.split(/[?#]/)[0].split('@').pop();

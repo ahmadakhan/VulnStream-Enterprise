@@ -37,16 +37,22 @@ function useApplication() {
   sessionRef.current = session;
   const request = useCallback(
     async <T,>(url: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> => {
-      const response = await fetch(`/api${url}`, {
-        method,
-        credentials: 'same-origin',
-        headers: {
-          'content-type': 'application/json',
-          ...(sessionRef.current ? { 'x-csrf-token': sessionRef.current.csrfToken } : {}),
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(30000),
-      });
+      let response: Response;
+      for (let attempt = 0; ; attempt++) {
+        response = await fetch(`/api${url}`, {
+          method,
+          credentials: 'same-origin',
+          headers: {
+            'content-type': 'application/json',
+            ...(sessionRef.current ? { 'x-csrf-token': sessionRef.current.csrfToken } : {}),
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: AbortSignal.timeout(30000),
+        });
+        // Retry transient gateway errors only for idempotent state reads.
+        if (method !== 'GET' || ![502, 503, 504].includes(response.status) || attempt >= 2) break;
+        await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+      }
       const data = await response
         .json()
         .catch(() => ({ error: `Server returned an empty or non-JSON response (HTTP ${response.status})` }));

@@ -51,7 +51,11 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
   if (action === 'feed.save') {
     const input = feedSchema.parse(data),
       old = await checkExisting('feeds');
-    const sameSource = old?.url === input.url && old?.type === input.type && old?.authType === input.authType;
+    const sameSource =
+      old?.url === input.url &&
+      old?.type === input.type &&
+      old?.authType === input.authType &&
+      !input.authSecretKey;
     await put(db, 'feeds', newId, {
       ...old,
       ...input,
@@ -63,9 +67,9 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
             ? encrypt(input.authSecretKey, config.ENCRYPTION_KEY, `feed:${newId}`)
             : (sameSource ? old?.authSecretKey : '') || '',
       healthStatus: 'UNTESTED',
-      lastSync: old?.lastSync || null,
+      lastSync: sameSource ? old?.lastSync || null : null,
       latencyMs: 0,
-      itemCountLastRun: old?.itemCountLastRun || 0,
+      itemCountLastRun: sameSource ? old?.itemCountLastRun || 0 : 0,
       ssrfValidated: false,
       etag: sameSource ? old?.etag : undefined,
       consecutiveFailures: sameSource ? old?.consecutiveFailures : 0,
@@ -75,7 +79,11 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     const input = feedImportSchema.parse(data);
     for (const feed of input) {
       const old = await get<any>(db, 'feeds', feed.id);
-      const sameSource = old?.url === feed.url && old?.type === feed.type && old?.authType === feed.authType;
+      const sameSource =
+        old?.url === feed.url &&
+        old?.type === feed.type &&
+        old?.authType === feed.authType &&
+        !feed.authSecretKey;
       await put(db, 'feeds', feed.id, {
         ...old,
         ...feed,
@@ -87,12 +95,12 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
               ? encrypt(feed.authSecretKey, config.ENCRYPTION_KEY, `feed:${feed.id}`)
               : (sameSource ? old?.authSecretKey : '') || '',
         healthStatus: 'UNTESTED',
-        lastSync: feed.lastSync ?? old?.lastSync ?? null,
-        latencyMs: feed.latencyMs ?? 0,
-        itemCountLastRun: feed.itemCountLastRun ?? 0,
+        lastSync: sameSource ? (old?.lastSync ?? null) : null,
+        latencyMs: 0,
+        itemCountLastRun: sameSource ? (old?.itemCountLastRun ?? 0) : 0,
         ssrfValidated: false,
         vendorSeed: feed.vendorSeed ?? old?.vendorSeed ?? false,
-        etag: sameSource ? (feed.etag ?? old?.etag) : undefined,
+        etag: sameSource ? old?.etag : undefined,
         consecutiveFailures: sameSource ? (old?.consecutiveFailures ?? 0) : 0,
         circuitOpenUntil: sameSource ? (old?.circuitOpenUntil ?? null) : null,
       });

@@ -40,7 +40,7 @@ services:
       DATABASE_URL: postgresql://vulnstream_app:${APP_DB_PASSWORD:?Set runtime password}@db:5432/vulnstream
       APP_ORIGIN: https://${APP_HOST:?Set public hostname}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set a base64 32-byte encryption key}
-      EGRESS_ALLOWED_HOSTS: ${EGRESS_ALLOWED_HOSTS:-services.nvd.nist.gov,www.cisa.gov,api.first.org}
+      EGRESS_ALLOWED_HOSTS: ${EGRESS_ALLOWED_HOSTS:-services.nvd.nist.gov,www.cisa.gov,api.first.org,app.opencve.io,api.vulncheck.com}
       TRUST_PROXY: ${TRUST_PROXY:-loopback,linklocal,uniquelocal}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-465}

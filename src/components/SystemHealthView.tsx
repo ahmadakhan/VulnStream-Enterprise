@@ -38,9 +38,25 @@ export function SystemHealthView() {
               [
                 'Worker heartbeat',
                 status.workerHeartbeat
-                  ? new Date(status.workerHeartbeat).toLocaleString()
-                  : 'No worker heartbeat',
+                  ? `${status.workerStatus} · ${status.heartbeatAgeSeconds}s ago`
+                  : status.workerStatus === 'DISABLED'
+                    ? 'Worker disabled'
+                    : 'No worker heartbeat',
               ],
+              ['Due deliveries', `${status.deliveryQueue?.dueJobs ?? 0} ready for processing`],
+              [
+                'Oldest due delivery',
+                status.deliveryQueue?.oldestDueCreatedAt
+                  ? new Date(status.deliveryQueue.oldestDueCreatedAt).toLocaleString()
+                  : 'None',
+              ],
+              [
+                'Next delayed retry',
+                status.deliveryQueue?.nextScheduledAttempt
+                  ? new Date(status.deliveryQueue.nextScheduledAttempt).toLocaleString()
+                  : 'None',
+              ],
+              ['Recoverable delivery leases', `${status.deliveryQueue?.expiredLeases ?? 0} expired`],
               ['SMTP', status.smtpConfigured ? 'Configured' : 'Not configured'],
               ['Process uptime', `${status.uptimeSeconds} seconds`],
               ['Heap usage', `${Math.round(status.heapBytes / 1024 / 1024)} MiB`],

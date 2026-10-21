@@ -202,6 +202,17 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       const worker = (await pool.query('SELECT last_run,heartbeat FROM scheduler_state WHERE id=1')).rows[0];
       const backlog = (await pool.query('SELECT status,count(*)::int AS count FROM outbox GROUP BY status'))
         .rows;
+      const deliveryQueue = (
+        await pool.query(`SELECT
+        count(*) FILTER (WHERE status='QUEUED' AND next_attempt<=now())::int AS "dueJobs",
+        min(created_at) FILTER (WHERE status='QUEUED' AND next_attempt<=now()) AS "oldestDueCreatedAt",
+        min(next_attempt) FILTER (WHERE status='QUEUED' AND next_attempt>now()) AS "nextScheduledAttempt",
+        count(*) FILTER (WHERE status='SENDING' AND locked_at<now()-interval '2 minutes')::int AS "expiredLeases"
+        FROM outbox WHERE status IN ('QUEUED','SENDING')`)
+      ).rows[0];
+      const heartbeatAgeSeconds = worker.heartbeat
+        ? Math.max(0, Math.floor((Date.now() - new Date(worker.heartbeat).getTime()) / 1000))
+        : null;
       res.json({
         database: 'connected',
         databaseLatencyMs: dbMs,
@@ -209,6 +220,16 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         heapBytes: process.memoryUsage().heapUsed,
         workerEnabled: config.WORKER_ENABLED === 'true',
         workerHeartbeat: worker.heartbeat,
+        workerStatus:
+          config.WORKER_ENABLED !== 'true'
+            ? 'DISABLED'
+            : heartbeatAgeSeconds === null
+              ? 'NOT_OBSERVED'
+              : heartbeatAgeSeconds > 90
+                ? 'STALE'
+                : 'HEALTHY',
+        heartbeatAgeSeconds,
+        deliveryQueue,
         lastScheduledRun: worker.last_run,
         backlog,
         smtpConfigured: !!config.SMTP_HOST && !!config.SMTP_FROM,
