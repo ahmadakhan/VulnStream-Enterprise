@@ -46,7 +46,9 @@ function useApplication() {
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(30000),
       });
-      const data = await response.json();
+      const data = await response
+        .json()
+        .catch(() => ({ error: `Server returned an empty or non-JSON response (HTTP ${response.status})` }));
       if (!response.ok) {
         if (response.status === 401) {
           setSession(null);
