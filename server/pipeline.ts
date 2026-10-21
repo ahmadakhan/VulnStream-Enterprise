@@ -124,7 +124,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         const i = nextIndex++;
         const feed = feeds[i];
         if ((feed.consecutiveFailures || 0) >= 5) {
-          execution!.logs.push(`Feed ${feed.id}: skipped (circuit open, ${feed.consecutiveFailures} consecutive failures)`);
+          execution!.logs.push(
+            `Feed ${feed.id}: skipped (circuit open, ${feed.consecutiveFailures} consecutive failures)`,
+          );
           continue;
         }
         const start = Date.now();
@@ -171,37 +173,48 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             latencyMs: feed.latencyMs,
             itemCountLastRun: feed.itemCountLastRun,
             errorLog: feed.errorLog,
-             ssrfValidated: feed.ssrfValidated,
-             etag: feed.etag,
-             consecutiveFailures: feed.consecutiveFailures,
+            ssrfValidated: feed.ssrfValidated,
+            etag: feed.etag,
+            consecutiveFailures: feed.consecutiveFailures,
           });
       }
       if (feeds.length && !succeeded) {
-        await appendAudit(db, 'Pipeline warning', 'All enabled feeds failed; running correlation against cache', 'worker', 'PIPELINE', 'WARNING');
+        await appendAudit(
+          db,
+          'Pipeline warning',
+          'All enabled feeds failed; running correlation against cache',
+          'worker',
+          'PIPELINE',
+          'WARNING',
+        );
         execution!.logs.push('All feeds failed; proceeding with cached CVE correlation');
       }
       const snapshot = await state(db);
       const byId = new Map(snapshot.cveData.map((c) => [c.cveId, c]));
-       for (const result of results) {
-         if (result.notModified) continue;
-         for (const cve of result.cves) {
-           const old = byId.get(cve.cveId);
-           if (!old || new Date(cve.modifiedDate) >= new Date(old.modifiedDate))
-             byId.set(cve.cveId, {
-               ...cve,
-               epss: old?.epss || cve.epss,
-               cisaKev: old?.cisaKev || cve.cisaKev,
-               sourceFeeds: Array.from(new Set([...(old?.sourceFeeds || []), ...cve.sourceFeeds])),
-             });
-         }
-       }
-       for (const cve of byId.values()) {
-         for (const result of results) {
-           if (result.kev && result.kev[cve.cveId]) cve.cisaKev = result.kev[cve.cveId];
-           if (result.epss?.[cve.cveId]) cve.epss = result.epss[cve.cveId];
-         }
-       }
-       await putMany(db, 'cveData', [...byId.values()].map((cve) => ({ id: cve.cveId, data: cve })));
+      for (const result of results) {
+        if (result.notModified) continue;
+        for (const cve of result.cves) {
+          const old = byId.get(cve.cveId);
+          if (!old || new Date(cve.modifiedDate) >= new Date(old.modifiedDate))
+            byId.set(cve.cveId, {
+              ...cve,
+              epss: old?.epss || cve.epss,
+              cisaKev: old?.cisaKev || cve.cisaKev,
+              sourceFeeds: Array.from(new Set([...(old?.sourceFeeds || []), ...cve.sourceFeeds])),
+            });
+        }
+      }
+      for (const cve of byId.values()) {
+        for (const result of results) {
+          if (result.kev && result.kev[cve.cveId]) cve.cisaKev = result.kev[cve.cveId];
+          if (result.epss?.[cve.cveId]) cve.epss = result.epss[cve.cveId];
+        }
+      }
+      await putMany(
+        db,
+        'cveData',
+        [...byId.values()].map((cve) => ({ id: cve.cveId, data: cve })),
+      );
       // The run window limits network ingestion, not applicability of already cached CVEs.
       const settings = { ...snapshot.settings, scopeHours: 0 };
       const correlated = runVulnerabilityPipeline(
@@ -209,15 +222,17 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         [...byId.values()],
         snapshot.watchlist,
         snapshot.alertedCves,
-         snapshot.findings,
+        snapshot.findings,
         settings,
+        'Server worker',
+        true,
       );
       // A wholly rejected stale bundle may be rebuilt from current matches. Never
       // automatically resend a bundle with any acceptance or an in-flight delivery.
       const staleBundles = new Set<string>(
         (
           await db.query(
-             `SELECT advisory_id FROM outbox GROUP BY advisory_id HAVING bool_and(status='FAILED' AND COALESCE(error,'') LIKE '%no longer applicable%')`,
+            `SELECT advisory_id FROM outbox GROUP BY advisory_id HAVING bool_and(status='FAILED' AND COALESCE(error,'') LIKE '%no longer applicable%')`,
           )
         ).rows.map((row) => row.advisory_id),
       );
@@ -229,7 +244,11 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         ),
         correlated.newFindings,
       );
-       await putMany(db, 'findings', reconciled.map((f) => ({ id: f.id, data: f })));
+      await putMany(
+        db,
+        'findings',
+        reconciled.map((f) => ({ id: f.id, data: f })),
+      );
       const queueStarted = Date.now();
       let notificationsQueued = 0,
         advisoriesQueued = 0;
@@ -255,9 +274,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           deliveryStatus: 'PENDING',
           recipientCount: 0,
           executiveSummary: `${pending.length} inventory correlations require investigation. Confirm applicability and consult the vendor before remediation.`,
-           remediationInstructions:
-             'Review vendor advisories and deploy tested remediation through your change process.',
-           vendorLink: pending[0].cve.remediation.vendorAdvisoryRef || pending[0].cve.remediation.patchUrl,
+          remediationInstructions:
+            'Review vendor advisories and deploy tested remediation through your change process.',
+          vendorLink: pending[0].cve.remediation.vendorAdvisoryRef || pending[0].cve.remediation.patchUrl,
           affectedSystems: Array.from(new Set(pending.map((f) => f.matchedAssetName))),
         };
         const count = await queueAdvisory(
@@ -276,6 +295,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         id: execution!.id,
         startTime: execution!.startTime,
         endTime: new Date().toISOString(),
+        status: feeds.length > 0 && succeeded === 0 ? 'FAILED' : correlated.execution.status,
         scopeHours: execution!.scopeHours,
         logs: [
           ...execution!.logs,
@@ -308,10 +328,11 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       await db.query('UPDATE scheduler_state SET last_run=now() WHERE id=1');
       await appendAudit(
         db,
-        'Pipeline completed',
-        `${execution.id}; ${correlated.newFindings.length} findings`,
+        execution.status === 'FAILED' ? 'Pipeline failed' : 'Pipeline completed',
+        `${execution.id}; ${correlated.newFindings.length} findings; ${succeeded}/${feeds.length} feeds succeeded`,
         'worker',
         'PIPELINE',
+        execution.status === 'FAILED' ? 'ERROR' : undefined,
       );
     });
     return true;

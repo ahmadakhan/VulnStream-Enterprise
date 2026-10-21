@@ -63,6 +63,7 @@ export function runVulnerabilityPipeline(
   existing: Finding[],
   settings: AppSettings,
   _caller = 'Server worker',
+  includeExistingCandidates = false,
 ): PipelineRunResult {
   const started = new Date(),
     known = new Set(existing.map((f) => `${normalizeCveId(f.cveId)}:${f.matchedAssetId}`));
@@ -88,7 +89,7 @@ export function runVulnerabilityPipeline(
     const cve = { ...raw, cveId: canonical };
     for (const asset of watchlist.filter((a) => a.active)) {
       const key = `${canonical}:${asset.id}`;
-      if (known.has(key)) continue;
+      if (known.has(key) && !includeExistingCandidates) continue;
       const vulnCpeMatches = cve.cpeMatchDetails?.length
         ? cve.cpeMatchDetails.map((c) => c.criteria)
         : cve.cpeMatches;
@@ -105,7 +106,7 @@ export function runVulnerabilityPipeline(
         asset.targetHw,
       );
       if (!result.matched) continue;
-      if (cve.applicabilityRequiresReview) result.confidence = 0;
+      if (cve.applicabilityRequiresReview || result.applicabilityRequiresReview) result.confidence = 0;
       const confirmed = result.confidence >= 90;
       const evidence = confirmed
         ? 'Structured package/version correlation'

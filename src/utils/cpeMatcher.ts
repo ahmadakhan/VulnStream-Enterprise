@@ -3,7 +3,7 @@
  * Spec: NIST IR 7695 & Package URL (purl-spec)
  */
 
-import { NvdVersionRange, isVersionInNvdRange } from './versionComparator';
+import { NvdVersionRange, canCompareRange, isVersionInNvdRange } from './versionComparator';
 
 export interface ParsedCPE {
   prefix: string; // cpe:2.3
@@ -288,6 +288,7 @@ export interface MatchResult {
   evidence: string;
   suppressedByVex?: boolean;
   suppressedReason?: string;
+  applicabilityRequiresReview?: boolean;
 }
 
 /**
@@ -326,18 +327,26 @@ export function matchesWatchlistItem(
       for (const vp of vulnPurls) {
         const packageVersion = ap.split(/[?#]/)[0].split('@').pop();
         const hasVersion = ap.split(/[?#]/)[0].lastIndexOf('@') > ap.indexOf('/') + 1;
-        if (
-          matchPurl(ap, vp) &&
-          (!versionRange || (hasVersion && isVersionInNvdRange(packageVersion!, versionRange).inRange))
-        ) {
+        if (!matchPurl(ap, vp)) continue;
+        if (versionRange && hasVersion && !isVersionInNvdRange(packageVersion!, versionRange).inRange)
+          continue;
+        if (versionRange) {
           return {
             matched: true,
             method: 'PURL_EXACT',
-            confidence: 95,
+            confidence: hasVersion && canCompareRange(packageVersion!, versionRange) ? 95 : 70,
             matchedCpe: ap,
             evidence: `Matched package dependency via PURL: ${vp} (95% confidence)`,
+            applicabilityRequiresReview: !hasVersion || !canCompareRange(packageVersion!, versionRange),
           };
         }
+        return {
+          matched: true,
+          method: 'PURL_EXACT',
+          confidence: 95,
+          matchedCpe: ap,
+          evidence: `Matched package dependency via PURL: ${vp} (95% confidence)`,
+        };
       }
     }
   }
@@ -347,14 +356,28 @@ export function matchesWatchlistItem(
     for (const vulnCpe of vulnCpeMatches) {
       const matchRes = matchCPE(assetCpe, vulnCpe, versionRange);
       if (matchRes.matched) {
+        const asset = parseCPE23(assetCpe);
+        const vuln = parseCPE23(vulnCpe);
+        const rangeHasBounds = Boolean(versionRange && Object.values(versionRange).some(Boolean));
+        const rangeNeedsReview = Boolean(
+          rangeHasBounds &&
+          (!asset.version || asset.version === '*' || !canCompareRange(asset.version, versionRange!)),
+        );
+        const architectureNeedsReview = Boolean(
+          asset.isValid && vuln.isValid && vuln.targetHw !== '*' && asset.targetHw === '*',
+        );
+        const requiresReview = rangeNeedsReview || architectureNeedsReview;
         return {
           matched: true,
           method: versionRange ? 'STRICT_CPE_INTERVAL' : 'STRICT_CPE',
-          confidence: versionRange ? 100 : 90,
+          confidence: requiresReview ? 70 : versionRange ? 100 : 90,
           matchedCpe: vulnCpe,
           evidence: versionRange
-            ? `Matched strict CPE 2.3 component tokens + verified in version interval [< ${versionRange.versionEndExcluding || versionRange.versionEndIncluding}] (100% confidence)`
+            ? requiresReview
+              ? 'Matched strict CPE 2.3 product identifiers; version or architecture applicability requires review'
+              : `Matched strict CPE 2.3 component tokens + verified in version interval [< ${versionRange.versionEndExcluding || versionRange.versionEndIncluding}] (100% confidence)`
             : `Matched strict CPE 2.3 component tokens (90% confidence)`,
+          applicabilityRequiresReview: requiresReview,
         };
       }
     }
