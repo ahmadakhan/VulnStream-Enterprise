@@ -19,7 +19,7 @@ import {
 } from './validation';
 import { encrypt, randomToken, checkPassword, passwordHash, decrypt } from './secrets';
 import { createRequester, resolvePublic } from './network';
-import type { Requester } from './network';
+import type { Requester, ResponseData } from './network';
 import { queueRun, renderAdvisory } from './pipeline';
 import { enqueue, queueAdvisory } from './delivery';
 import { DEFAULT_SETTINGS } from '../shared/state';
@@ -245,9 +245,33 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       if (feed.authType === 'API_KEY') headers.apiKey = secret;
       if (['BEARER', 'BASIC'].includes(feed.authType))
         headers.Authorization = `${feed.authType === 'BASIC' ? 'Basic' : 'Bearer'} ${feed.authType === 'BASIC' ? Buffer.from(secret).toString('base64') : secret}`;
-      const response = await request(feed.url, { headers });
-      const success = response.status >= 200 && response.status < 300,
-        latency = Math.round(performance.now() - start);
+      let response: ResponseData;
+      const latency = Math.round(performance.now() - start);
+      try {
+        response = await request(feed.url, { headers });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Connection failed';
+        await transaction(pool, async (db) => {
+          const current = await get<ThreatFeed>(db, 'feeds', feed.id);
+          if (current)
+            await put(db, 'feeds', feed.id, {
+              ...current,
+              healthStatus: 'DOWN',
+              latencyMs: Math.round(performance.now() - start),
+              errorLog: message,
+            });
+          await appendAudit(
+            db,
+            'Feed connectivity tested',
+            `${feed.id}; ERROR: ${message}`,
+            req.operator!.username,
+            'FEED',
+          );
+        });
+        res.json({ success: false, latency, error: message });
+        return;
+      }
+      const success = response.status >= 200 && response.status < 300;
       await transaction(pool, async (db) => {
         const current = await get<ThreatFeed>(db, 'feeds', feed.id);
         if (current)
