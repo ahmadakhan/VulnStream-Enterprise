@@ -50,6 +50,7 @@ export const AdvisoryTemplateView: React.FC = () => {
 
   // Enterprise Live Rendering & Scroll Management
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const previewDate = useRef(new Date().toUTCString()).current;
   const [iframeHeight, setIframeHeight] = useState<number>(880);
   const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -123,7 +124,7 @@ export const AdvisoryTemplateView: React.FC = () => {
       .replace(/{{severity}}/g, 'HIGH')
       .replace(/{{advisory_id}}/g, 'PREVIEW-EXAMPLE')
       .replace(/{{advisory_title}}/g, 'Example advisory — template preview only')
-      .replace(/{{dispatch_date}}/g, new Date().toUTCString())
+      .replace(/{{dispatch_date}}/g, previewDate)
       .replace(
         /{{executive_summary}}/g,
         'Example content for checking layout. This is not a vulnerability assessment or a delivery record.',
@@ -176,11 +177,11 @@ export const AdvisoryTemplateView: React.FC = () => {
         <div>
           <h1 className="text-xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight flex items-center gap-2">
             <FileCode className="w-5 h-5 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
-            HTML Template Studio
+            Email Template Studio
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Visual template editor. Changes to typography, background colors, accents, and stamps render live
-            and apply to all future automated security notifications.
+            Design clear, professional security advisories. Preview desktop and mobile layouts, customize your
+            branding, then save to apply the template to future notifications.
           </p>
         </div>
 
@@ -190,7 +191,7 @@ export const AdvisoryTemplateView: React.FC = () => {
             className="text-xs px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-200 light:hover:bg-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-medium transition flex items-center space-x-1"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span>Reset Default</span>
+            <span>Professional Default</span>
           </button>
           <button
             onClick={() => {
@@ -792,7 +793,7 @@ export const AdvisoryTemplateView: React.FC = () => {
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block" />
                   </div>
                   <div className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-white text-zinc-400 dark:text-zinc-400 light:text-zinc-600 px-3 py-1 rounded-lg text-[11px] truncate max-w-md border border-zinc-800/60 dark:border-zinc-800/60 light:border-zinc-300">
-                    https://mail.enterprise.org/advisories/ADV-2026-0842.html
+                    Security advisory · Email preview
                   </div>
                   <div className="text-[10px] text-zinc-500">680px Canvas</div>
                 </div>
@@ -870,13 +871,14 @@ export const AdvisoryTemplateView: React.FC = () => {
             <div className="flex items-center space-x-2">
               <FileCode className="w-5 h-5 text-zinc-300" />
               <h2 className="text-sm font-bold text-zinc-100 font-mono">
-                HTML Template Studio — Fullscreen Inspection
+                Email Template Studio — Fullscreen Inspection
               </h2>
             </div>
             <div className="flex items-center space-x-2">
               <div className="flex items-center space-x-1 bg-zinc-900 border border-zinc-800 p-0.5 rounded-xl">
                 <button
                   type="button"
+                  aria-label="Desktop preview"
                   onClick={() => setPreviewDevice('desktop')}
                   className={`p-1.5 rounded-lg text-xs ${previewDevice === 'desktop' ? 'bg-zinc-800 text-white' : 'text-zinc-400'}`}
                 >
@@ -884,6 +886,7 @@ export const AdvisoryTemplateView: React.FC = () => {
                 </button>
                 <button
                   type="button"
+                  aria-label="Mobile preview"
                   onClick={() => setPreviewDevice('mobile')}
                   className={`p-1.5 rounded-lg text-xs ${previewDevice === 'mobile' ? 'bg-zinc-800 text-white' : 'text-zinc-400'}`}
                 >
@@ -892,6 +895,7 @@ export const AdvisoryTemplateView: React.FC = () => {
               </div>
               <button
                 type="button"
+                aria-label="Close fullscreen preview"
                 onClick={() => setIsFullscreen(false)}
                 className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition"
               >
@@ -902,12 +906,19 @@ export const AdvisoryTemplateView: React.FC = () => {
 
           <div className="flex-1 overflow-y-auto flex justify-center py-6">
             <div
-              className={`transition-all duration-300 shadow-2xl rounded-2xl overflow-hidden border border-zinc-800 ${
+              className={`self-start shrink-0 max-w-full transition-all duration-300 shadow-2xl rounded-2xl overflow-hidden border border-zinc-800 ${
                 previewDevice === 'desktop' ? 'w-[720px]' : 'w-[400px]'
               }`}
             >
               <iframe
                 title="Fullscreen Preview"
+                key={previewDevice}
+                scrolling="no"
+                onLoad={(event) => {
+                  const frame = event.currentTarget;
+                  const height = frame.contentDocument?.documentElement.scrollHeight;
+                  if (height) frame.style.height = `${height + 24}px`;
+                }}
                 srcDoc={getRenderedHtml()}
                 className="w-full min-h-[900px] border-none bg-zinc-950"
                 sandbox="allow-same-origin"
@@ -989,10 +1000,9 @@ export const AdvisoryTemplateView: React.FC = () => {
       {showResetConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
-            <h3 className="text-sm font-bold text-zinc-100 mb-2">Reset Template Customization?</h3>
+            <h3 className="text-sm font-bold text-zinc-100 mb-2">Apply professional default?</h3>
             <p className="text-xs text-zinc-400 leading-relaxed mb-6">
-              This will restore the typography, colors, stamps, and layout to the factory enterprise security
-              preset.
+              Replace the preview with the professional navy-and-white preset. Save the template to apply it to future notifications.
             </p>
             <div className="flex justify-end space-x-2">
               <button
@@ -1005,9 +1015,9 @@ export const AdvisoryTemplateView: React.FC = () => {
               <button
                 type="button"
                 onClick={confirmReset}
-                className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
+                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
               >
-                Reset to Default
+                Apply to preview
               </button>
             </div>
           </div>

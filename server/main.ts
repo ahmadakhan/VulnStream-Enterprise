@@ -1,3 +1,4 @@
+import { writeEvent } from './events';
 import { loadConfig } from './config';
 import { createPool, migrate, transaction, get, put } from './db';
 import { applyCommand } from './commands';
@@ -30,6 +31,7 @@ await transaction(pool, async (db) => {
     });
   await put(db, 'systemState', 'recommended-feeds-v2', { completedAt: new Date().toISOString() });
 });
+await writeEvent(pool, {category:'SYSTEM', code:'system.started', message:'Application initialized', context:{workerEnabled:config.WORKER_ENABLED === 'true'}});
 const request = createRequester(config),
   sendMail = createMailSender(config, pool, request);
 const server = createApp(pool, config, request).listen(config.PORT, '0.0.0.0', () =>
@@ -40,10 +42,12 @@ server.headersTimeout = 15000;
 let stopping = false,
   pipeline: Promise<unknown> | null = null,
   outbox: Promise<unknown> | null = null;
-const report = (event: string) => (error: unknown) =>
+const report = (event: string) => (error: unknown) => {
+  void writeEvent(pool, {category:'ISSUE', level:'ERROR', code:'worker.failed', message:'Background worker failed', context:{component:event,errorType:error instanceof Error ? error.name : 'Error'}}).catch(() => {});
   console.error(
     JSON.stringify({ level: 'error', event, type: error instanceof Error ? error.name : 'Error' }),
   );
+};
 const tick = () => {
   if (stopping || config.WORKER_ENABLED !== 'true') return;
   if (!pipeline)

@@ -68,7 +68,7 @@ const Footer: React.FC = () => {
 };
 
 const AppShell: React.FC = () => {
-  const { theme, session, loading, error, clearError, logout, pending } = useApp();
+  const { theme, session, loading, error, clearError, logout, pending, activeTab } = useApp();
   if (loading || !session) return <LoginView />;
 
   return (
@@ -102,7 +102,7 @@ const AppShell: React.FC = () => {
           </button>
         </div>
         {error && <div role="alert" className="mx-4 mt-3 flex items-start justify-between gap-4 rounded-xl border border-rose-800/50 light:border-rose-200 bg-rose-950/70 light:bg-rose-50 px-4 py-3 text-xs text-rose-100 light:text-rose-800 sm:mx-6"><span>{error}</span><button onClick={clearError} className="shrink-0 underline underline-offset-2">Dismiss</button></div>}
-        <div className="flex-1 flex flex-col max-w-7xl w-full mx-auto">
+        <div className={`flex-1 min-w-0 flex flex-col w-full mx-auto ${activeTab === 'feeds' ? 'max-w-none' : 'max-w-7xl'}`}>
           <MainContent />
           <Footer />
         </div>

@@ -227,8 +227,17 @@ export const ThreatFeedsView: React.FC = () => {
 
       {/* Threat Feeds Table */}
       <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+        <div>
+          <table className="feeds-table w-full table-fixed text-left text-xs">
+            <colgroup>
+              <col style={{ width: '19%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '22%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '17%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '12%' }} />
+            </colgroup>
             <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
               <tr>
                 <th className="py-3 px-4">Feed Source / Vendor</th>
@@ -334,7 +343,8 @@ export const ThreatFeedsView: React.FC = () => {
                     </td>
 
                     {/* Actions */}
-                    <td className="feed-actions py-3 px-4 text-right space-x-1.5">
+                    <td className="feed-actions py-3 px-4 text-right">
+                      <div className="flex flex-wrap items-center justify-end gap-1.5">
                       <button
                         onClick={() => handleTest(feed.id)}
                         disabled={isTesting}
@@ -363,6 +373,7 @@ export const ThreatFeedsView: React.FC = () => {
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
+                      </div>
                     </td>
                   </tr>
                 );

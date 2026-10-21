@@ -2,17 +2,17 @@ import { TemplateCustomization } from '../types';
 
 export const DEFAULT_TEMPLATE_CUSTOMIZATION: TemplateCustomization = {
   fontFamily: 'sans',
-  fontColor: '#d4d4d8',
-  headingColor: '#ffffff',
-  accentColor: '#3b82f6',
-  canvasBg: '#09090b',
-  cardBg: '#18181b',
-  headerBg: '#1e293b',
-  badgeStampText: 'OFFICIAL SECURITY BULLETIN',
-  badgeStampColor: '#ef4444',
+  fontColor: '#334155',
+  headingColor: '#0f172a',
+  accentColor: '#2563eb',
+  canvasBg: '#f1f5f9',
+  cardBg: '#ffffff',
+  headerBg: '#0f172a',
+  badgeStampText: 'SECURITY OPERATIONS',
+  badgeStampColor: '#2563eb',
   showStamp: true,
   showClassificationBanner: true,
-  classificationText: 'TLP:AMBER+STRICT • AUTOMATED UNATTENDED NOTICE',
+  classificationText: 'SECURITY ADVISORY · AUTOMATED INVENTORY CORRELATION',
   borderStyle: 'solid',
   borderRadius: '12px',
 };
@@ -34,228 +34,104 @@ export function getFontFamilyCss(family: TemplateCustomization['fontFamily']): s
 export function compileCustomizedTemplate(config: TemplateCustomization): string {
   // Customization fields are text/CSS values, never arbitrary HTML or CSS.
   config = { ...DEFAULT_TEMPLATE_CUSTOMIZATION, ...config };
-  for (const key of ['fontColor', 'headingColor', 'accentColor', 'canvasBg', 'cardBg', 'headerBg', 'badgeStampColor'] as const) {
-    if (!/^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i.test(config[key])) config[key] = DEFAULT_TEMPLATE_CUSTOMIZATION[key];
+  for (const key of [
+    'fontColor',
+    'headingColor',
+    'accentColor',
+    'canvasBg',
+    'cardBg',
+    'headerBg',
+    'badgeStampColor',
+  ] as const) {
+    if (!/^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i.test(config[key]))
+      config[key] = DEFAULT_TEMPLATE_CUSTOMIZATION[key];
   }
   if (!['solid', 'dashed', 'none'].includes(config.borderStyle)) config.borderStyle = 'solid';
   if (!/^\d{1,3}(?:px|rem|%)$/.test(config.borderRadius)) config.borderRadius = '12px';
-  const escapeHtml = (value: string) => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]!));
+  const escapeHtml = (value: string) =>
+    String(value).replace(
+      /[&<>"']/g,
+      (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!,
+    );
   config.badgeStampText = escapeHtml(config.badgeStampText);
   config.classificationText = escapeHtml(config.classificationText);
   const fontCss = getFontFamilyCss(config.fontFamily);
 
+  const headerHex = config.headerBg.slice(1);
+  const expanded = headerHex.length === 3 ? [...headerHex].map((ch) => ch + ch).join('') : headerHex;
+  const luminance = [0, 2, 4]
+    .map((offset) => parseInt(expanded.slice(offset, offset + 2), 16) / 255)
+    .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
+    .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+  const headerText = luminance > 0.179 ? '#0f172a' : '#ffffff';
+  const headerMuted = luminance > 0.179 ? '#334155' : '#cbd5e1';
   const stampHtml = config.showStamp
-    ? `
-      <div class="badge-stamp" style="position: absolute; top: 18px; right: 24px; border: 2px dashed ${config.badgeStampColor}; color: ${config.badgeStampColor}; font-weight: 800; font-size: 11px; padding: 4px 10px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.1em; transform: rotate(-3deg); opacity: 0.95; font-family: ui-monospace, monospace;">
-        ${config.badgeStampText}
-      </div>`
+    ? `<p style="margin:0 0 12px;font-size:11px;line-height:18px;letter-spacing:1.5px;font-weight:700;color:${config.badgeStampColor};">${config.badgeStampText}</p>`
     : '';
-
   const classificationBanner = config.showClassificationBanner
-    ? `
-      <div style="background: #111827; border-bottom: 1px solid #374151; color: #9ca3af; font-family: ui-monospace, monospace; font-size: 10px; text-align: center; padding: 6px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase;">
-        ${config.classificationText}
-      </div>`
+    ? `<tr><td style="padding:12px 28px;background:${config.canvasBg};color:${config.fontColor};font-size:10px;line-height:16px;letter-spacing:1px;text-align:center;">${config.classificationText}</td></tr>`
     : '';
-
+  const section = (label: string) =>
+    `<h2 style="margin:0 0 12px;color:${config.headingColor};font-size:16px;line-height:24px;font-weight:700;">${label}</h2>`;
   return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Security Advisory</title>
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      -webkit-font-smoothing: antialiased;
-      overflow-x: hidden;
-    }
-    *, *:before, *:after {
-      box-sizing: inherit;
-    }
-    body {
-      font-family: ${fontCss};
-      background-color: ${config.canvasBg};
-      color: ${config.fontColor};
-      padding: 24px 16px;
-      word-wrap: break-word;
-    }
-    .wrapper {
-      max-width: 660px;
-      width: 100%;
-      margin: 0 auto;
-      background-color: ${config.cardBg};
-      border: 1px ${config.borderStyle} #27272a;
-      border-radius: ${config.borderRadius};
-      overflow: hidden;
-      position: relative;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
-    }
-    .header-box {
-      background: ${config.headerBg};
-      padding: 24px;
-      border-bottom: 1px ${config.borderStyle} #27272a;
-      position: relative;
-    }
-    .badge {
-      display: inline-block;
-      padding: 3px 8px;
-      border-radius: 6px;
-      font-weight: 700;
-      font-size: 11px;
-      background: rgba(0, 0, 0, 0.4);
-      color: ${config.headingColor};
-      border: 1px solid #3f3f46;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    .content-box {
-      padding: 24px;
-    }
-    h2 {
-      color: ${config.headingColor};
-      margin: 12px 0 4px 0;
-      font-size: 19px;
-      letter-spacing: -0.02em;
-    }
-    h3 {
-      color: ${config.headingColor};
-      font-size: 14px;
-      margin: 22px 0 8px 0;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      padding-bottom: 4px;
-    }
-    .callout {
-      background: rgba(0, 0, 0, 0.35);
-      border-left: 3px solid ${config.accentColor};
-      padding: 12px 14px;
-      margin: 16px 0;
-      border-radius: 4px;
-      font-size: 13px;
-      line-height: 1.45;
-    }
-    .mono {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      background: rgba(0, 0, 0, 0.4);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 12px;
-      border: 1px solid #3f3f46;
-      color: ${config.headingColor};
-    }
-    .code-block {
-      background: #09090b;
-      border: 1px solid #27272a;
-      border-radius: 8px;
-      padding: 12px 14px;
-      font-family: ui-monospace, monospace;
-      font-size: 12px;
-      line-height: 1.5;
-      color: #a1a1aa;
-      white-space: pre-wrap;
-    }
-    .footer {
-      padding: 16px 24px;
-      font-size: 11px;
-      color: #71717a;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-      background: rgba(0, 0, 0, 0.2);
-      font-family: ui-monospace, monospace;
-    }
-    /* Sleek custom scrollbars */
-    ::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-    ::-webkit-scrollbar-track {
-      background: rgba(0, 0, 0, 0.15);
-    }
-    ::-webkit-scrollbar-thumb {
-      background: #3f3f46;
-      border-radius: 4px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: #52525b;
-    }
-    @media (max-width: 580px) {
-      body {
-        padding: 12px 8px !important;
-      }
-      .wrapper {
-        border-radius: 8px !important;
-      }
-      .header-box {
-        padding: 16px !important;
-      }
-      .content-box {
-        padding: 16px !important;
-      }
-      .badge-stamp {
-        position: static !important;
-        display: inline-block !important;
-        margin-top: 8px !important;
-        margin-bottom: 8px !important;
-        transform: none !important;
-      }
-      h2 {
-        font-size: 16px !important;
-      }
-      .code-block {
-        font-size: 11px !important;
-        padding: 10px !important;
-      }
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Security advisory</title>
+<style>
+  body,table,td,a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+  table,td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+  table { border-collapse:collapse; }
+  a { overflow-wrap:anywhere; word-break:break-word; }
+  @media only screen and (max-width:600px) {
+    .outer { padding:16px 8px !important; }
+    .section { padding:24px 20px !important; }
+    .advisory-title { font-size:24px !important;line-height:32px !important; }
+  }
+</style>
 </head>
-<body>
-  <div class="wrapper">
-    ${classificationBanner}
-    <div class="header-box">
-      ${stampHtml}
-      <span class="badge">{{severity}}</span>
-      <h2>{{advisory_id}}: {{advisory_title}}</h2>
-      <p style="color: #94a3b8; font-size: 12px; margin: 4px 0 0 0;">
-        Automated Notice • Dispatched at {{dispatch_date}}
-      </p>
-    </div>
-
-    <div class="content-box">
-      <div class="callout">
-        This security bulletin was generated and dispatched automatically upon matching monitored product inventory. No human operator approval was required.
-      </div>
-
-      <h3>1. Executive Summary</h3>
-      <p style="font-size: 13px; line-height: 1.55; margin: 0 0 16px 0;">
-        {{executive_summary}}
-      </p>
-
-      <h3>2. Affected Products &amp; Monitored Assets</h3>
-      <p style="font-size: 13px; margin: 6px 0;">
-        <strong>Target CVE:</strong> <span class="mono">{{cve_ids}}</span>
-      </p>
-      <p style="font-size: 13px; margin: 6px 0;">
-        <strong>Monitored Infrastructure:</strong> {{affected_systems}}
-      </p>
-
-      <h3>3. Autonomous Remediation Playbook</h3>
-      <div class="code-block">
-{{remediation_steps}}
-      </div>
-
-      <p style="margin-top: 18px; font-size: 13px;">
-        <strong>Vendor Reference:</strong> 
-        <a href="{{vendor_link}}" style="color: ${config.accentColor}; text-decoration: none; font-weight: 500;">{{vendor_link}}</a>
-      </p>
-    </div>
-
-    <div class="footer">
-      VulnStream Autonomous Intelligence • Zero-Touch Alerting Service
-    </div>
-  </div>
+<body style="margin:0;padding:0;background:${config.canvasBg};color:${config.fontColor};font-family:${escapeHtml(fontCss)};">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{{severity}} security advisory · {{advisory_title}}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:${config.canvasBg};">
+<tr><td class="outer" align="center" style="padding:36px 16px;">
+<!--[if mso]><table role="presentation" width="680" align="center"><tr><td><![endif]-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;max-width:680px;background:${config.cardBg};border:1px ${config.borderStyle} #cbd5e1;border-radius:${config.borderRadius};">
+${classificationBanner}
+<tr><td class="section" style="padding:32px;background:${config.headerBg};border-top:4px solid ${config.accentColor};">
+<p style="margin:0 0 20px;color:${headerMuted};font-size:11px;line-height:18px;font-weight:700;letter-spacing:2px;">VULNSTREAM / THREAT INTELLIGENCE</p>
+<p style="margin:0 0 12px;"><span style="display:inline-block;padding:5px 10px;background:#ffffff;color:#0f172a;font-size:11px;line-height:16px;letter-spacing:1px;font-weight:700;border-radius:4px;">{{severity}} PRIORITY</span></p>
+<h1 class="advisory-title" style="margin:0 0 16px;font-size:28px;line-height:36px;font-weight:700;letter-spacing:-.5px;color:${headerText};">{{advisory_title}}</h1>
+<p style="margin:0;font-size:12px;line-height:20px;color:${headerMuted};">{{advisory_id}}<br>Generated {{dispatch_date}}</p>
+</td></tr>
+<tr><td class="section" style="padding:28px 32px 24px;font-size:14px;line-height:24px;color:${config.fontColor};">
+${stampHtml}
+${section('Executive summary')}
+<p style="margin:0;">{{executive_summary}}</p>
+</td></tr>
+<tr><td class="section" style="padding:24px 32px;border-top:1px solid #cbd5e1;font-size:14px;line-height:24px;color:${config.fontColor};">
+${section('Affected products &amp; assets')}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;font-size:13px;line-height:22px;color:${config.fontColor};">
+<tr><td style="padding:0 0 6px;font-weight:700;color:${config.headingColor};">CVE identifiers</td></tr>
+<tr><td style="padding:0 0 16px;overflow-wrap:anywhere;">{{cve_ids}}</td></tr>
+<tr><td style="padding:0 0 6px;font-weight:700;color:${config.headingColor};">Monitored inventory</td></tr>
+<tr><td style="padding:0;white-space:pre-line;">{{affected_systems}}</td></tr>
+</table>
+</td></tr>
+<tr><td class="section" style="padding:24px 32px;border-top:1px solid #cbd5e1;font-size:14px;line-height:24px;color:${config.fontColor};">
+${section('Recommended response')}
+<div style="border-left:3px solid ${config.accentColor};padding:8px 0 8px 18px;white-space:pre-wrap;overflow-wrap:anywhere;">{{remediation_steps}}</div>
+<p style="margin:20px 0 4px;font-size:12px;font-weight:700;color:${config.headingColor};">SOURCE ADVISORY</p>
+<a href="{{vendor_link}}" style="color:${config.accentColor};font-size:13px;line-height:22px;text-decoration:underline;">{{vendor_link}}</a>
+</td></tr>
+<tr><td class="section" style="padding:20px 32px;border-top:1px solid #cbd5e1;font-size:11px;line-height:18px;color:${config.fontColor};">
+<p style="margin:0 0 8px;font-weight:700;">VulnStream · Security Operations</p>
+<p style="margin:0;">Generated from monitored inventory and threat intelligence. Validate applicability and follow your approved change process before remediation.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</td></tr></table>
 </body>
 </html>`;
 }

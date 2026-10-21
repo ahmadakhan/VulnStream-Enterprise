@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Pagination } from './Pagination';
 
-export const ThreatDataView: React.FC = () => {
+const CveCacheView: React.FC = () => {
   const { cveData, settings } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [kevFilter, setKevFilter] = useState<'ALL' | 'KEV_ONLY'>('ALL');
@@ -104,8 +104,8 @@ export const ThreatDataView: React.FC = () => {
             Threat Intelligence Feed Cache
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Normalized CVE cache unified from NVD, OpenCVE, FIRST.org EPSS, CISA KEV, and VulnCheck exploitation intelligence.
-            CVEs are correlated by both <strong>published date</strong> and{' '}
+            Normalized CVE cache unified from NVD, OpenCVE, FIRST.org EPSS, CISA KEV, and VulnCheck
+            exploitation intelligence. CVEs are correlated by both <strong>published date</strong> and{' '}
             <strong>last modified date</strong>.
           </p>
         </div>
@@ -191,21 +191,46 @@ export const ThreatDataView: React.FC = () => {
             <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
               <tr>
                 <th className="py-3 px-4">Canonical CVE</th>
-                <th aria-sort={sortBy === 'score' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-4">
-                  <button type="button" onClick={() => toggleSort('score')} className="flex items-center space-x-1 hover:text-zinc-200 transition select-none">
+                <th
+                  aria-sort={sortBy === 'score' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  className="py-3 px-4"
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleSort('score')}
+                    className="flex items-center space-x-1 hover:text-zinc-200 transition select-none"
+                  >
                     <span>CVSS Score</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </button>
                 </th>
                 <th className="py-3 px-4">EPSS Percentile</th>
-                <th aria-sort={sortBy === 'published' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-4">
-                  <button type="button" onClick={() => toggleSort('published')} className="flex items-center space-x-1 hover:text-zinc-200 transition select-none">
+                <th
+                  aria-sort={
+                    sortBy === 'published' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'
+                  }
+                  className="py-3 px-4"
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleSort('published')}
+                    className="flex items-center space-x-1 hover:text-zinc-200 transition select-none"
+                  >
                     <span>Published Date</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </button>
                 </th>
-                <th aria-sort={sortBy === 'modified' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-4">
-                  <button type="button" onClick={() => toggleSort('modified')} className="flex items-center space-x-1 hover:text-zinc-200 transition select-none">
+                <th
+                  aria-sort={
+                    sortBy === 'modified' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'
+                  }
+                  className="py-3 px-4"
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleSort('modified')}
+                    className="flex items-center space-x-1 hover:text-zinc-200 transition select-none"
+                  >
                     <span>Last Modified Date</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </button>
@@ -230,9 +255,16 @@ export const ThreatDataView: React.FC = () => {
                     {/* Canonical CVE */}
                     <td className="py-3 px-4">
                       <div className="flex items-center space-x-2">
-                        <span className="font-mono font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 text-sm">
+                        <a
+                          href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cve.cveId)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={`Open ${cve.cveId} on NVD (new tab)`}
+                          title="View the canonical CVE record on NVD"
+                          className="font-mono font-semibold text-blue-400 light:text-blue-700 text-sm hover:underline underline-offset-4 rounded focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4"
+                        >
                           {cve.cveId}
-                        </span>
+                        </a>
                         {cve.cisaKev.isKev && (
                           <span className="bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 px-2 py-0.2 rounded-full font-mono text-[10px] font-medium flex items-center gap-1">
                             <Flame className="w-3 h-3 text-amber-500" />
@@ -398,6 +430,104 @@ export const ThreatDataView: React.FC = () => {
             </pre>
           </div>
         </div>
+      )}
+    </div>
+  );
+};
+
+export const ThreatDataView: React.FC = () => {
+  const [tab, setTab] = useState('cves');
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const { intelligenceArticles, intelligenceMatches } = useApp();
+  const articles = intelligenceArticles.filter((article) =>
+    `${article.title} ${article.cveIds.join(' ')} ${article.summary}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+  return (
+    <div className="space-y-6">
+      <div className="flex gap-2">
+        <button className="btn-secondary" aria-pressed={tab === 'cves'} onClick={() => setTab('cves')}>
+          CVE cache
+        </button>
+        <button className="btn-secondary" aria-pressed={tab === 'news'} onClick={() => setTab('news')}>
+          News &amp; advisory evidence ({intelligenceArticles.length})
+        </button>
+      </div>
+      {tab === 'cves' ? (
+        <CveCacheView />
+      ) : (
+        <>
+          <div>
+            <h2 className="text-2xl font-semibold">News &amp; advisory evidence</h2>
+            <p className="text-sm text-slate-500 mt-2">
+              Vendor and product mentions require review. Confirmed applicability comes from structured CVE
+              matching. Articles never create duplicate CVEs or automatic alerts.
+            </p>
+          </div>
+          <input
+            className="w-full"
+            aria-label="Search news evidence"
+            placeholder="Search title, CVE or summary"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(1);
+            }}
+          />
+          {articles.slice((page - 1) * 20, page * 20).map((article) => (
+            <article
+              key={article.id}
+              className="rounded-xl border border-slate-500/20 bg-slate-500/5 p-5 space-y-3"
+            >
+              <a
+                className="font-semibold text-blue-500 hover:underline"
+                href={article.url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {article.title}
+              </a>
+              <p className="text-xs text-slate-500">
+                {new Date(article.publishedDate).toLocaleDateString()} · {article.sourceFeeds.join(', ')}
+              </p>
+              <p className="text-sm">{article.summary}</p>
+              <p className="text-xs text-slate-500">
+                {article.cveIds.join(' · ') || 'No explicit CVE reference'}
+              </p>
+              {intelligenceMatches
+                .filter((match) => match.articleIds.includes(article.id))
+                .map((match) => (
+                  <div key={match.id} className="border-l-2 border-blue-500 pl-3 text-sm">
+                    <p className="font-medium">
+                      {match.assetName} · {match.cveId || 'CVE unassigned'} ·{' '}
+                      {match.status === 'CORROBORATED' ? 'Corroborated' : 'Review required'}
+                    </p>
+                    <p className="text-slate-500">{match.evidence}</p>
+                  </div>
+                ))}
+            </article>
+          ))}
+          {!articles.length && (
+            <p className="p-8 text-center text-slate-500">
+              No news evidence. Enable an RSS / Atom source and run ingestion.
+            </p>
+          )}
+          <div className="flex items-center gap-3">
+            <button className="btn-secondary" disabled={page === 1} onClick={() => setPage(page - 1)}>
+              Previous
+            </button>
+            <span>Page {page}</span>
+            <button
+              className="btn-secondary"
+              disabled={page * 20 >= articles.length}
+              onClick={() => setPage(page + 1)}
+            >
+              Next
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

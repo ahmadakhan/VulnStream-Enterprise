@@ -271,7 +271,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       const feed = await get<ThreatFeed>(pool, 'feeds', String(req.params.id));
       if (!feed) throw new HttpError(404, 'Feed not found');
       const start = performance.now();
-      const headers: Record<string, string> = {};
+      const headers: Record<string, string> = feed.type === 'RSS_ATOM' ? {Accept:'application/rss+xml, application/atom+xml, application/xml, text/xml'} : {};
       const secret = decrypt(feed.authSecretKey || '', config.ENCRYPTION_KEY, `feed:${feed.id}`);
       if (feed.authType !== 'NONE' && !secret) throw new HttpError(400, 'Feed secret is missing');
       if (feed.authType === 'API_KEY') headers.apiKey = secret;

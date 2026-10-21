@@ -273,6 +273,10 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
     const command = (action: string, data?: any, id?: string) => post('/api/commands', { action, data, id });
     await t.test('unauthenticated reads, CSRF and foreign origins are rejected', async () => {
       assert.equal((await supertest(app).get('/api/state')).status, 401);
+      assert.equal((await supertest(app).get('/api/events')).status, 401);
+      assert.equal((await viewer.get('/api/events')).status, 200);
+      assert.equal((await viewer.get('/api/events?before=9999999999999999999')).status, 400);
+      assert.equal((await viewer.get('/api/events?category=INVALID')).status, 400);
       assert.equal(
         (
           await admin
@@ -345,7 +349,7 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       assert.equal(bad.status, 400);
       const feed = await command('feed.save', {
         name: 'unsupported',
-        type: 'RSS_ATOM',
+        type: 'STIX',
         url: 'https://8.8.8.8',
         authType: 'NONE',
         rateLimitPerMin: 1,

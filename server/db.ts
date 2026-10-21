@@ -1,3 +1,4 @@
+import { compileCustomizedTemplate } from '../src/utils/templateCompiler';
 import pg, { type PoolClient } from 'pg';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -140,6 +141,9 @@ export async function state(db: Db): Promise<AppState> {
     else if (row.kind === 'emailConfig') snapshot.emailConfig = row.data;
     else if (row.kind === 'template') Object.assign(snapshot, row.data);
   }
+  // Saved branding is authoritative; regenerate HTML with the current layout so
+  // existing installations receive layout fixes without losing customization.
+  snapshot.advisoryTemplate = compileCustomizedTemplate(snapshot.templateCustomization);
   snapshot.auditLogs = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 500')).rows.map(
     (r) => r.data,
   );

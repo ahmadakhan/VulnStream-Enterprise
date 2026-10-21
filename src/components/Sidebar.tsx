@@ -80,7 +80,7 @@ export const Sidebar: React.FC = () => {
     {
       title: 'SYSTEM & AUDIT',
       items: [
-        { id: 'logs', label: 'Audit Trail', icon: FileCode2 },
+        { id: 'logs', label: 'Logs & Audit', icon: FileCode2 },
         { id: 'health', label: 'System Health', icon: Cpu },
         { id: 'settings', label: 'Settings', icon: Settings },
       ],

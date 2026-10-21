@@ -71,6 +71,95 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
   };
   try {
     await migrate(pool);
+    await t.test('timed out source recovers without the scheduler being enabled', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: false, autoDispatchEnabled: false });
+      await save('feeds', 'recover-feed', {
+        id: 'recover-feed', name: 'Recovery test', type: 'JSON_SEARCH_API',
+        url: 'https://example.com/feed', enabled: true, authType: 'NONE',
+        rateLimitPerMin: 60, recoveryDelayMinutes: 1,
+      });
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async () => { throw new Error('Outbound request timed out'); });
+      const failed = await get<any>(pool, 'feeds', 'recover-feed');
+      assert.equal(failed.healthStatus, 'DOWN');
+      assert.ok(Date.parse(failed.circuitOpenUntil) > Date.now());
+      assert.equal(await processPipeline(pool, config, request), false);
+      await save('feeds', failed.id, { ...failed, circuitOpenUntil: new Date(Date.now() - 1000).toISOString() });
+      assert.equal(await processPipeline(pool, config, async () => ({ status: 200, body: '[]', headers: {} })), true);
+      const recovered = await get<any>(pool, 'feeds', failed.id);
+      assert.equal(recovered.healthStatus, 'HEALTHY');
+      assert.equal(recovered.consecutiveFailures, 0);
+      assert.equal(recovered.circuitOpenUntil, null);
+    });
+    await t.test('concurrent queue requests create one execution and one worker owns ingestion', async () => {
+      await reset();
+      const queued = await Promise.all(Array.from({ length: 8 }, () => queueRun(pool, 24, 'test')));
+      assert.equal(new Set(queued.map(run => run.id)).size, 1);
+      await save('feeds', 'single-worker', {
+        id: 'single-worker', name: 'Single worker', type: 'JSON_SEARCH_API', url: 'https://example.com/feed',
+        enabled: true, authType: 'NONE', rateLimitPerMin: 60,
+      });
+      let calls = 0;
+      await Promise.all(Array.from({ length: 3 }, () => processPipeline(pool, config, async () => {
+        calls++;
+        await new Promise(resolve => setTimeout(resolve, 50));
+        return { status: 200, body: '[]', headers: {} };
+      })));
+      assert.equal(calls, 1);
+    });
+    await t.test('EPSS without applicable inventory clears overdue recovery instead of repeatedly queuing', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: false });
+      await save('feeds', 'empty-epss', {
+        id: 'empty-epss', name: 'EPSS', type: 'EPSS_API', url: 'https://example.com/epss',
+        enabled: true, authType: 'NONE', rateLimitPerMin: 60, healthStatus: 'DOWN',
+        consecutiveFailures: 1, circuitOpenUntil: new Date(Date.now() - 1000).toISOString(),
+      });
+      assert.equal(await processPipeline(pool, config, request), true);
+      const source = await get<any>(pool, 'feeds', 'empty-epss');
+      assert.equal(source.circuitOpenUntil, null);
+      assert.equal(source.consecutiveFailures, 0);
+      assert.equal(source.healthStatus, 'UNTESTED');
+      assert.equal(await processPipeline(pool, config, request), false);
+    });
+    await t.test('source duration budget discards late responses and schedules recovery', async () => {
+      await reset();
+      await save('feeds', 'slow-feed', {
+        id: 'slow-feed', name: 'Slow source', type: 'JSON_SEARCH_API', url: 'https://example.com/feed',
+        enabled: true, authType: 'NONE', rateLimitPerMin: 60,
+      });
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, { ...config, FEED_MAX_DURATION_SECONDS: 1 }, async (_url, options) => {
+        assert.ok(options!.timeoutMs! <= 1000);
+        await new Promise(resolve => setTimeout(resolve, 1100));
+        return { status: 200, body: JSON.stringify([vulnerability()]), headers: {} };
+      });
+      const source = await get<any>(pool, 'feeds', 'slow-feed');
+      assert.equal(source.healthStatus, 'DOWN');
+      assert.match(source.errorLog, /duration limit/);
+      assert.equal((await list(pool, 'cveData')).length, 0);
+      assert.ok(source.circuitOpenUntil);
+    });
+    await t.test('lost worker lock prevents commit and the next worker recovers the run', async () => {
+      await reset();
+      await save('feeds', 'lock-loss', {
+        id: 'lock-loss', name: 'Lock loss', type: 'JSON_SEARCH_API', url: 'https://example.com/feed',
+        enabled: true, authType: 'NONE', rateLimitPerMin: 60,
+      });
+      const queued = await queueRun(pool, 24, 'test');
+      await assert.rejects(processPipeline(pool, config, async () => {
+        await pool.query(`SELECT pg_terminate_backend(pid) FROM pg_locks
+          WHERE locktype='advisory' AND objid=800003 AND granted`);
+        await new Promise(resolve => setTimeout(resolve, 50));
+        return { status: 200, body: JSON.stringify([vulnerability()]), headers: {} };
+      }), /lock connection/);
+      assert.equal((await list(pool, 'cveData')).length, 0);
+      assert.equal(await processPipeline(pool, config, async () => ({ status: 200, body: '[]', headers: {} })), true);
+      const recovered = await get<any>(pool, 'executions', queued.id);
+      assert.equal(recovered.status, 'COMPLETED');
+      assert.ok(recovered.logs.some((line: string) => line.includes('Recovered interrupted worker')));
+    });
     await t.test('queued stop is idempotent and never runs', async () => {
       await reset();
       const queued = await queueRun(pool, 24, 'test');
@@ -116,7 +205,7 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         22000,
       );
       assert.deepEqual(await get(pool, 'bulk-test', '0'), { value: -1 });
-      await pool.query("UPDATE records SET updated_at='2000-01-01' WHERE kind='bulk-test' AND id='0'");
+      await pool.query("UPDATE records SET updated_at='2000-01-01T00:00:00Z' WHERE kind='bulk-test' AND id='0'");
       await transaction(pool, (db) => putMany(db, 'bulk-test', [{ id: '0', data: { value: -1 } }]));
       assert.equal(
         (

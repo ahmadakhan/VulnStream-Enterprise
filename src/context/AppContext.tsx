@@ -210,6 +210,7 @@ function useApplication() {
       safely(() => request('/users', data)),
     updateUser: (id: string, data: { role: string; disabled: boolean }) =>
       safely(() => request(`/users/${encodeURIComponent(id)}`, data, 'PATCH')),
+    fetchEvents: (query: string) => request<{events: import('../types').OperationalEvent[]; nextCursor:string|null}>(`/events?${query}`),
     health: () => safely(() => request<any>('/health')),
     ntpSyncStatus: { synchronized: false, driftMs: 0, lastChecked: '' },
     toggleFeedEnabled: (id: string) => command('feed.toggle', undefined, id),

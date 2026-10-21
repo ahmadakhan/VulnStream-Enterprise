@@ -150,7 +150,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     await pool.query('UPDATE scheduler_state SET heartbeat=now() WHERE id=1');
     if (!execution) return false;
     const checkpoint = async (db: pg.Pool | pg.PoolClient = pool) => {
+      if (connectionLost) throw new Error('Pipeline worker lost its database lock connection');
       const current = await get<PipelineExecution>(db, 'executions', execution!.id);
+      if (!current) throw new Error('Pipeline execution no longer exists');
       if (current?.stopRequestedAt || current?.status === 'CANCELLED') throw new PipelineStopped();
     };
     await checkpoint();
@@ -183,7 +185,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       await checkpoint(db);
       await put(db, 'executions', execution!.id, execution);
       await db.query('UPDATE scheduler_state SET last_run=now() WHERE id=1');
-      await writeEvent(db, {category:'PIPELINE', level:execution.status === 'FAILED' ? 'ERROR' : 'INFO', code:'pipeline.finished', message:`Pipeline ${execution.status.toLowerCase()}`, runId:execution.id, context:{stats:execution.stats}});
+      await writeEvent(db, {category:'PIPELINE', code:'pipeline.started', message:'Pipeline started', runId:execution!.id});
     });
     const feeds = (await list<ThreatFeed>(pool, 'feeds')).filter((f) => f.enabled);
     let succeeded = 0,
@@ -209,17 +211,27 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             continue;
           }
           const start = Date.now();
+          const deadline = start + config.FEED_MAX_DURATION_SECONDS * 1000;
+          const sourceCheckpoint = async () => {
+            await checkpoint();
+            if (Date.now() >= deadline) throw new Error('Feed ingestion exceeded its configured duration limit');
+          };
           try {
             const checkedRequest: Requester = async (url, options) => {
-              await checkpoint();
-              const response = await request(url, options);
-              await checkpoint();
+              await sourceCheckpoint();
+              const remaining = Math.max(1, deadline - Date.now());
+              const response = await request(url, {
+                ...options,
+                timeoutMs: Math.min(options?.timeoutMs ?? 20000, remaining),
+                socketTimeoutMs: Math.min(options?.socketTimeoutMs ?? 15000, remaining),
+              });
+              await sourceCheckpoint();
               return response;
             };
             const checkedSleep = async (ms: number) => {
               const until = Date.now() + ms;
               while (Date.now() < until) {
-                await checkpoint();
+                await sourceCheckpoint();
                 await new Promise((resolve) => setTimeout(resolve, Math.min(500, until - Date.now())));
               }
             };
@@ -255,6 +267,10 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             succeeded++;
             if (feed.type === 'EPSS_API' && targets.length === 0) {
               execution!.logs.push(`Feed ${feed.id}: no applicable CVEs; EPSS network retrieval skipped`);
+              // No request was needed: clear expired recovery state without claiming
+              // a successful connectivity check or changing lastSync.
+              feedUpdates.push({ ...feed, healthStatus: 'UNTESTED', errorLog: null,
+                consecutiveFailures: 0, circuitOpenUntil: null });
               continue;
             }
             feedUpdates.push({
@@ -270,7 +286,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
               circuitOpenUntil: null,
             });
           } catch (e) {
-            if (e instanceof PipelineStopped) throw e;
+            if (e instanceof PipelineStopped || connectionLost) throw e;
             const message = e instanceof Error ? e.message : 'Ingestion failed';
             const consecutiveFailures = (feed.consecutiveFailures || 0) + 1;
             feedUpdates.push({
@@ -320,7 +336,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     const ingestionDuration = Date.now() - new Date(execution.startTime).getTime();
     execution.phases[0] = {
       name: 'Feed ingestion',
-      status: succeeded < feeds.length ? 'WARNING' : 'SUCCESS',
+      status: succeeded < feeds.length || results.some((result) => result.warnings?.length) ? 'WARNING' : 'SUCCESS',
       durationMs: ingestionDuration,
       details: `${succeeded}/${feeds.length} feeds succeeded; ${rawCount} records read`,
     };
@@ -393,7 +409,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           } satisfies KevSnapshot);
         }
       }
-      for (const update of feedUpdates) await writeEvent(db, { category:'FEED',
+      for (const update of feedUpdates.filter((feed) => validSources.has(feed.id))) await writeEvent(db, { category:'FEED',
         level:update.healthStatus === 'DOWN' ? 'ERROR' : update.healthStatus === 'DEGRADED' ? 'WARNING' : 'INFO',
         code:'feed.ingestion', message:`${update.name}: ${update.healthStatus}`, runId:execution!.id,
         context:{ feedId:update.id, count:update.itemCountLastRun, latencyMs:update.latencyMs } });
@@ -580,7 +596,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         phases: [
           {
             name: 'Feed ingestion',
-            status: succeeded < feeds.length ? 'WARNING' : 'SUCCESS',
+            status: succeeded < feeds.length || acceptedResults.some((result) => result.warnings?.length) ? 'WARNING' : 'SUCCESS',
             durationMs: ingestionDuration,
             details: `${succeeded}/${feeds.length} feeds succeeded; ${rawCount} records read in the last ${execution!.scopeHours}h`,
           },
@@ -605,7 +621,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       execution.stats.advisoriesQueued = advisoriesQueued;
       await put(db, 'executions', execution.id, execution);
       await db.query('UPDATE scheduler_state SET last_run=now() WHERE id=1');
-      await writeEvent(db, {category:'PIPELINE', level:execution.status === 'FAILED' ? 'ERROR' : 'INFO', code:'pipeline.finished', message:`Pipeline ${execution.status.toLowerCase()}`, runId:execution.id, context:{stats:execution.stats}});
+      await writeEvent(db, {category:'PIPELINE', level:execution!.status === 'FAILED' ? 'ERROR' : 'INFO', code:'pipeline.finished', message:`Pipeline ${execution!.status.toLowerCase()}`, runId:execution!.id, context:{stats:execution!.stats}});
       await appendAudit(
         db,
         execution.status === 'FAILED' ? 'Pipeline failed' : 'Pipeline completed',
@@ -646,7 +662,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     return true;
   } finally {
     if (heartbeat) clearInterval(heartbeat);
-    if (locked) await lock.query('SELECT pg_advisory_unlock(800003)').catch(() => {});
+    if (locked) await lock.query('SELECT pg_advisory_unlock(800003)').catch(() => { connectionLost = true; });
     lock.removeListener('error', onError);
     lock.release(connectionLost);
   }
