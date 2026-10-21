@@ -173,7 +173,7 @@ export const ThreatFeedsView: React.FC = () => {
             Configurable Threat Feed Ingestion Sources
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Configure NVD, CISA KEV, FIRST EPSS, OpenCVE, VulnCheck KEV, or validated normalized JSON sources. The server scheduler polls enabled feeds when scheduling is enabled.
+            Configure MITRE CVE, NVD, CISA KEV, FIRST EPSS, OpenCVE, VulnCheck KEV, or validated normalized JSON sources. The server scheduler polls enabled feeds when scheduling is enabled.
           </p>
         </div>
 
@@ -434,6 +434,7 @@ export const ThreatFeedsView: React.FC = () => {
                       setFormData({
                         ...formData,
                         type,
+                        ...(type === 'MITRE_CVE' ? { url: 'https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/deltaLog.json', authType: 'NONE' as FeedAuthType, rateLimitPerMin: 120 } : {}),
                         ...(type === 'OPENCVE_API' || type === 'VULNCHECK_KEV' ? { authType: 'BEARER' as FeedAuthType } : {}),
                       });
                     }}
@@ -441,6 +442,7 @@ export const ThreatFeedsView: React.FC = () => {
                   >
                     <option value="JSON_SEARCH_API">Normalized CVE JSON array</option>
                     <option value="NVD_API">NVD CVE API 2.0</option>
+                    <option value="MITRE_CVE">MITRE CVE (official CVE JSON 5 list)</option>
                     <option value="CISA_KEV">CISA KEV JSON catalog</option>
                     <option value="EPSS_API">FIRST EPSS API</option>
                     <option value="OPENCVE_API">OpenCVE API v2 (Bearer token)</option>

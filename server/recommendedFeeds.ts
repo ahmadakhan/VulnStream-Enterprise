@@ -1,5 +1,8 @@
-/** Disabled provider integrations shown on fresh and existing deployments. */
+/** Provider integrations shown on fresh and existing deployments. */
 export const RECOMMENDED_FEEDS = [
+  { id: 'feed-mitre-cve', name: 'MITRE CVE — Official CVE List', type: 'MITRE_CVE' as const,
+    url: 'https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/deltaLog.json',
+    authType: 'NONE' as const, rateLimitPerMin: 120, enabled: true, vendorSeed: true },
   { id:'feed-bleepingcomputer', name:'BleepingComputer Security News', type:'RSS_ATOM' as const,
     url:'https://www.bleepingcomputer.com/feed/', authType:'NONE' as const, rateLimitPerMin:1, enabled:false, vendorSeed:true },
   { id:'feed-sans-isc', name:'SANS Internet Storm Center Diary', type:'RSS_ATOM' as const,

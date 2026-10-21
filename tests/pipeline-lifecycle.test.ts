@@ -6,6 +6,8 @@ import { queueRun, processPipeline, stopRun } from '../server/pipeline';
 import { deliverNext, queueAdvisory } from '../server/delivery';
 import { loadConfig } from '../server/config';
 import { DEFAULT_SETTINGS } from '../shared/state';
+import { MITRE_DELTA_URL } from '../server/mitre';
+import { mitreRecord, mitreDelta } from './fixtures/mitre';
 import { applyCommand } from '../server/commands';
 import type { Finding, NormalizedCVE, WatchListItem } from '../src/types';
 const database = process.env.TEST_DATABASE_URL;
@@ -71,6 +73,38 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
   };
   try {
     await migrate(pool);
+    await t.test('MITRE CVE and overlapping feeds persist one CVE and stable inventory findings across runs', async () => {
+      await reset();
+      await save('watchlist', 'asset', asset());
+      const date = new Date(Date.now() - 1000).toISOString();
+      const common = { authType: 'NONE', enabled: true, rateLimitPerMin: 600 };
+      await save('feeds', 'mitre', { ...common, id: 'mitre', name: 'MITRE CVE', type: 'MITRE_CVE', url: MITRE_DELTA_URL });
+      await save('feeds', 'nvd', { ...common, id: 'nvd', name: 'NVD', type: 'NVD_API', url: 'https://example.com/nvd' });
+      const sourceRequest = async (url: string) => {
+        const data = url === MITRE_DELTA_URL ? mitreDelta(undefined, date)
+          : url.startsWith('https://raw.githubusercontent.com/') ? mitreRecord(undefined, date)
+          : { startIndex: 0, totalResults: 1, vulnerabilities: [{ cve: {
+              id: 'CVE-2026-98001', published: date, lastModified: date, vulnStatus: 'Analyzed',
+              descriptions: [{ lang: 'en', value: 'Example widget vulnerability' }],
+              configurations: [{ nodes: [{ cpeMatch: [{ vulnerable: true, criteria: cpe('*') }] }] }],
+            } }] };
+        return { status: 200, body: JSON.stringify(data), headers: {} };
+      };
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, sourceRequest);
+      const cves = await list<NormalizedCVE>(pool, 'cveData');
+      assert.equal(cves.length, 1);
+      assert.deepEqual(cves[0].sourceFeeds, ['mitre', 'nvd']);
+      const first = await list<Finding>(pool, 'findings');
+      assert.equal(first.length, 1);
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, sourceRequest);
+      assert.equal((await list(pool, 'cveData')).length, 1);
+      const second = await list<Finding>(pool, 'findings');
+      assert.equal(second.length, 1);
+      assert.equal(second[0].id, first[0].id);
+      assert.equal((await get<any>(pool, 'feeds', 'mitre')).healthStatus, 'HEALTHY');
+    });
     await t.test('timed out source recovers without the scheduler being enabled', async () => {
       await reset();
       await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: false, autoDispatchEnabled: false });

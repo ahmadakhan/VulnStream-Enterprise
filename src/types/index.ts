@@ -32,6 +32,7 @@ export type FindingStatus =
 export const FEED_TYPES = [
   'JSON_SEARCH_API',
   'NVD_API',
+  'MITRE_CVE',
   'CISA_KEV',
   'EPSS_API',
   'OPENCVE_API',

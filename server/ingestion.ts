@@ -1,4 +1,5 @@
 import type { ThreatFeed, NormalizedCVE, IntelligenceArticle } from '../src/types';
+import { ingestMitre } from './mitre';
 import { parseSyndication } from './rss';
 import type { Requester, RequestOptions, ResponseData } from './network';
 import { cveSchema } from './validation';
@@ -237,6 +238,7 @@ export async function ingestFeed(
       throw new Error('Feed did not return valid JSON');
     }
   };
+  if (feed.type === 'MITRE_CVE') return ingestMitre(feed, scopeHours, request, sleep);
   if (feed.type === 'RSS_ATOM') {
     const response = await request(feed.url, { headers: { ...headers, accept:'application/rss+xml, application/atom+xml, application/xml, text/xml',
       ...(feed.etag ? { 'If-None-Match':feed.etag } : {}) }, timeoutMs:25000, maxResponseBytes:2*1024*1024 });

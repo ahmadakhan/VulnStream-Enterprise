@@ -38,11 +38,11 @@ export const feedSchema = z.object({
   recoveryDelayMinutes: z.number().int().min(1).max(60).default(5),
   enabled: z.boolean(),
   vendorSeed: z.boolean().default(false),
-});
+}).refine(feed => feed.type !== 'MITRE_CVE' || (feed.authType === 'NONE' && feed.url === 'https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/deltaLog.json'), { message: 'MITRE CVE requires the official CVE List deltaLog.json URL and no authentication', path: ['url'] });
 /** Bulk import shape: adds the stable identifier and the stored sync metadata. */
 export const feedImportSchema = z
   .array(
-    feedSchema.extend({
+    feedSchema.safeExtend({
       id: idSchema,
       lastSync: z.iso.datetime({ offset: true }).nullable().optional(),
       etag: z.string().max(200).optional(),

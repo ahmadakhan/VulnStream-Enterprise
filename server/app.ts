@@ -284,7 +284,9 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         const requestOptions =
           feed.type === 'NVD_API'
             ? { headers, timeoutMs: 25000, socketTimeoutMs: 20000, maxResponseBytes: 256 * 1024 }
-            : { headers };
+            : feed.type === 'MITRE_CVE'
+              ? { headers, timeoutMs: 60000, maxResponseBytes: 64 * 1024 * 1024 }
+              : { headers };
         response = await request(testUrl.href, requestOptions);
         if (feed.type === 'RSS_ATOM' && response.status === 200) parseSyndication(response.body, feed.id, 2880);
         const latency = Math.round(performance.now() - start);

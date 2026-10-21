@@ -31,6 +31,14 @@ await transaction(pool, async (db) => {
     });
   await put(db, 'systemState', 'recommended-feeds-v2', { completedAt: new Date().toISOString() });
 });
+// Add the official CVE List once, without restoring sources an operator later deletes.
+await transaction(pool, async (db) => {
+  if (await get(db, 'systemState', 'recommended-feeds-v3')) return;
+  const feed = RECOMMENDED_FEEDS.find(feed => feed.type === 'MITRE_CVE')!;
+  if (!(await get(db, 'feeds', feed.id)))
+    await applyCommand(db, config, { action: 'feed.import', data: [feed], actor: 'system-bootstrap' });
+  await put(db, 'systemState', 'recommended-feeds-v3', { completedAt: new Date().toISOString() });
+});
 await writeEvent(pool, {category:'SYSTEM', code:'system.started', message:'Application initialized', context:{workerEnabled:config.WORKER_ENABLED === 'true'}});
 const request = createRequester(config),
   sendMail = createMailSender(config, pool, request);
