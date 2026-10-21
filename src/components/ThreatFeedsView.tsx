@@ -419,6 +419,7 @@ export const ThreatFeedsView: React.FC = () => {
                     <option value="EPSS_API">FIRST EPSS API</option>
                     <option value="OPENCVE_API">OpenCVE API v2 (Bearer token)</option>
                     <option value="VULNCHECK_KEV">VulnCheck KEV (Bearer token)</option>
+                    <option value="RSS_ATOM">RSS / Atom news and advisory evidence</option>
                   </select>
                 </div>
 

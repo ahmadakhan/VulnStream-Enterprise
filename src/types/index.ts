@@ -36,11 +36,44 @@ export const FEED_TYPES = [
   'EPSS_API',
   'OPENCVE_API',
   'VULNCHECK_KEV',
+  'RSS_ATOM',
 ] as const;
 
 export type FeedType = (typeof FEED_TYPES)[number];
 
 export type FeedAuthType = 'NONE' | 'API_KEY' | 'BEARER' | 'BASIC';
+
+export interface IntelligenceArticle {
+  id: string;
+  url: string;
+  title: string;
+  summary: string;
+  publishedDate: string;
+  modifiedDate: string;
+  cveIds: string[];
+  sourceFeeds: string[];
+}
+export interface IntelligenceMatch {
+  id: string;
+  cveId: string | null;
+  assetId: string;
+  assetName: string;
+  articleIds: string[];
+  status: 'CORROBORATED' | 'REVIEW_REQUIRED';
+  evidence: string;
+  findingId?: string;
+}
+export const EVENT_CATEGORIES = ['PIPELINE', 'FEED', 'MATCHING', 'EMAIL', 'SYSTEM', 'ISSUE', 'EVENT'] as const;
+export interface OperationalEvent {
+  id: string;
+  timestamp: string;
+  category: typeof EVENT_CATEGORIES[number];
+  level: 'INFO' | 'WARNING' | 'ERROR';
+  code: string;
+  message: string;
+  runId?: string;
+  context: Record<string, unknown>;
+}
 
 export interface CVSSData {
   version: '3.1' | '4.0' | '2.0' | 'UNKNOWN';

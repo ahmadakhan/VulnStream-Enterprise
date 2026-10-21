@@ -16,6 +16,8 @@ import { queueRun, stopRun, renderAdvisory } from './pipeline';
 import { enqueue, queueAdvisory } from './delivery';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state';
 import { emailIsConfigured } from './emailProviders';
+import { parseSyndication } from './rss';
+import { readEvents, writeEvent } from './events';
 import type { AppState } from '../shared/state';
 import type { AppSettings, ThreatFeed, WebhookEndpoint, Advisory, TemplateCustomization, EmailConfiguration } from '../src/types';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler';
@@ -246,6 +248,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       });
     }),
   );
+  app.get('/api/events', asyncRoute(async (req, res) => res.json(await readEvents(pool, req.query))));
   app.post(
     '/api/pipeline',
     requireRole('ADMIN', 'OPERATOR'),
@@ -283,6 +286,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
             ? { headers, timeoutMs: 25000, socketTimeoutMs: 20000, maxResponseBytes: 256 * 1024 }
             : { headers };
         response = await request(testUrl.href, requestOptions);
+        if (feed.type === 'RSS_ATOM' && response.status === 200) parseSyndication(response.body, feed.id, 2880);
         const latency = Math.round(performance.now() - start);
         await transaction(pool, async (db) => {
           const current = await get<ThreatFeed>(db, 'feeds', feed.id);
@@ -515,6 +519,8 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
     if (error?.type === 'entity.too.large') return res.status(413).json({ error: 'Request body too large' });
     if (error instanceof SyntaxError) return res.status(400).json({ error: 'Invalid JSON' });
     const reference = randomUUID();
+    void writeEvent(pool, { category:'ISSUE', level:'ERROR', code:'http.request_failed', message:'An API request failed',
+      context:{ reference, method:_req.method, path:_req.path, errorType:error?.name || 'Error' } }).catch(() => {});
     console.error(
       JSON.stringify({ level: 'error', reference, type: error?.name || 'Error', code: error?.code }),
     );

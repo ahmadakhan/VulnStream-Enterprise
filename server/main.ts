@@ -12,14 +12,15 @@ pool.on('error', (error) =>
   console.error(JSON.stringify({ level: 'error', event: 'database-connection', code: (error as any).code })),
 );
 if (config.NODE_ENV === 'production') {
-  const version = await pool.query('SELECT version FROM schema_migrations WHERE version=1');
+  const version = await pool.query('SELECT version FROM schema_migrations WHERE version=2');
   if (!version.rowCount) throw new Error('Required migration missing');
 } else await migrate(pool);
 // Upgrade existing installations once; the marker makes later operator deletions persist.
 await transaction(pool, async (db) => {
-  if (await get(db, 'systemState', 'recommended-feeds-v1')) return;
+  if (await get(db, 'systemState', 'recommended-feeds-v2')) return;
   const missing = [];
-  for (const feed of RECOMMENDED_FEEDS)
+  const previousBootstrap = await get(db, 'systemState', 'recommended-feeds-v1');
+  for (const feed of RECOMMENDED_FEEDS.filter((feed) => !previousBootstrap || feed.type === 'RSS_ATOM'))
     if (!(await get(db, 'feeds', feed.id))) missing.push(feed);
   if (missing.length)
     await applyCommand(db, config, {
@@ -27,7 +28,7 @@ await transaction(pool, async (db) => {
       data: missing,
       actor: 'system-bootstrap',
     });
-  await put(db, 'systemState', 'recommended-feeds-v1', { completedAt: new Date().toISOString() });
+  await put(db, 'systemState', 'recommended-feeds-v2', { completedAt: new Date().toISOString() });
 });
 const request = createRequester(config),
   sendMail = createMailSender(config, pool, request);

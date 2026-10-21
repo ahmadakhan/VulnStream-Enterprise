@@ -25,6 +25,8 @@ export async function migrate(pool: pg.Pool) {
       (await client.query('SELECT version FROM schema_migrations WHERE version=1')).rowCount;
     if (!applied)
       await client.query(await readFile(new URL('./migrations/001_initial.sql', import.meta.url), 'utf8'));
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=2')).rowCount)
+      await client.query(await readFile(new URL('./migrations/002_operational_events.sql', import.meta.url), 'utf8'));
     await client.query('COMMIT');
   } catch (e) {
     await client.query('ROLLBACK');

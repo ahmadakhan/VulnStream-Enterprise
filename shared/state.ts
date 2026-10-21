@@ -14,6 +14,8 @@ import type {
   PipelineExecution,
   TemplateCustomization,
   EmailConfiguration,
+  IntelligenceArticle,
+  IntelligenceMatch,
 } from '../src/types';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION, compileCustomizedTemplate } from '../src/utils/templateCompiler';
 export const DEFAULT_EMAIL_CONFIG: EmailConfiguration = {
@@ -57,11 +59,15 @@ export interface AppState {
   executions: PipelineExecution[];
   settings: AppSettings;
   emailConfig: EmailConfiguration;
+  intelligenceArticles: IntelligenceArticle[];
+  intelligenceMatches: IntelligenceMatch[];
   templateCustomization: TemplateCustomization;
   advisoryTemplate: string;
 }
 export const emptyState = (): AppState => ({
   feeds: [],
+  intelligenceArticles: [],
+  intelligenceMatches: [],
   watchlist: [],
   cveData: [],
   findings: [],

@@ -1,4 +1,5 @@
-import type { ThreatFeed, NormalizedCVE } from '../src/types';
+import type { ThreatFeed, NormalizedCVE, IntelligenceArticle } from '../src/types';
+import { parseSyndication } from './rss';
 import type { Requester, RequestOptions, ResponseData } from './network';
 import { cveSchema } from './validation';
 import { decrypt } from './secrets';
@@ -9,6 +10,8 @@ import { normalizeCveId } from '../src/utils/deduplicator';
 export interface IngestResult {
   sourceId?: string;
   cves: NormalizedCVE[];
+  articles?: IntelligenceArticle[];
+  warnings?: string[];
   kev?: Record<string, NormalizedCVE['cisaKev']>;
   /** Provider-asserted exploited-in-the-wild indicators, distinct from CISA KEV. */
   exploited?: Record<string, true>;
@@ -226,6 +229,14 @@ export async function ingestFeed(
       throw new Error('Feed did not return valid JSON');
     }
   };
+  if (feed.type === 'RSS_ATOM') {
+    const response = await request(feed.url, { headers: { ...headers, accept:'application/rss+xml, application/atom+xml, application/xml, text/xml',
+      ...(feed.etag ? { 'If-None-Match':feed.etag } : {}) }, timeoutMs:25000, maxResponseBytes:2*1024*1024 });
+    if (response.status === 304 && feed.etag) return { cves:[], count:0, notModified:true, etag:feed.etag };
+    if (response.status !== 200) throw new Error(`RSS/Atom source returned HTTP ${response.status}`);
+    const result = parseSyndication(response.body, feed.id, scopeHours);
+    return { cves:[], ...result, count:result.articles.length, etag:typeof response.headers.etag === 'string' ? response.headers.etag : undefined };
+  }
   if (feed.type === 'NVD_API') {
     const end = new Date(),
       start = new Date(end.getTime() - Math.min(scopeHours, 2880) * 3600000);
