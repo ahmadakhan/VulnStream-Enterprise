@@ -324,6 +324,8 @@ export async function deliverNext(
           'x-vulnstream-timestamp': timestamp,
           'idempotency-key': job.id,
         },
+        timeoutMs: 25000,
+        socketTimeoutMs: 15000,
       });
       statusCode = response.status;
       if (statusCode < 200 || statusCode >= 300) {

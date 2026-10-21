@@ -127,12 +127,41 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     // Owning the advisory lock proves no other live worker owns a run. Recovery
     // is safe because records, advisories and outbox are committed atomically.
     await lockedTransaction(async (db) => {
-      for (const stale of runs.filter((e) => e.status === 'RUNNING'))
-        await put(db, 'executions', stale.id, {
-          ...stale,
-          status: 'QUEUED',
-          logs: [...stale.logs, 'Recovered interrupted worker; restarting idempotently'],
-        });
+      for (const stale of runs.filter((e) => e.status === 'RUNNING')) {
+        const recoveryCount = stale.logs.filter((l) => l.includes('Recovered interrupted worker')).length + 1;
+        if (recoveryCount > 3) {
+          await put(db, 'executions', stale.id, {
+            ...stale,
+            status: 'FAILED',
+            endTime: new Date().toISOString(),
+            logs: [
+              ...stale.logs,
+              `Worker exceeded maximum recovery attempts (${recoveryCount - 1}); marked FAILED to prevent poison-pill crash loop`,
+            ],
+          });
+          await writeEvent(db, {
+            category: 'ISSUE',
+            level: 'ERROR',
+            code: 'pipeline.recovery_limit_exceeded',
+            message: 'Pipeline execution repeatedly failed; marked FAILED',
+            runId: stale.id,
+          });
+          await appendAudit(
+            db,
+            'Pipeline recovery limit exceeded',
+            `Execution ${stale.id} marked FAILED after ${recoveryCount - 1} crashes`,
+            'worker',
+            'PIPELINE',
+            'ERROR',
+          );
+        } else {
+          await put(db, 'executions', stale.id, {
+            ...stale,
+            status: 'QUEUED',
+            logs: [...stale.logs, `Recovered interrupted worker (attempt ${recoveryCount}/3); restarting idempotently`],
+          });
+        }
+      }
     });
     execution = (await list<PipelineExecution>(pool, 'executions'))
       .reverse()
@@ -306,7 +335,6 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             execution!.stats.rawIngested = rawCount;
             await put(db, 'executions', execution!.id, execution);
           });
-          await lock.query('SELECT 1');
         }
       };
       const workers = await Promise.allSettled(Array.from({ length: concurrency }, worker));
@@ -459,9 +487,16 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           if (cve.exploitStatus === 'None') cve.exploitStatus = 'Reported In Wild';
         }
         if (kevReports.length) {
-          cve.cisaKev = kevReports.map((result) => result.kev![cve.cveId]).find((entry) => entry?.isKev) || {
-            isKev: false,
-          };
+          const hasFullCisaKev = kevReports.some((r) => {
+            const feed = currentFeeds.get(r.sourceId || '');
+            return feed?.type === 'CISA_KEV';
+          });
+          const kevMatch = kevReports.map((result) => result.kev![cve.cveId]).find((entry) => entry?.isKev);
+          if (kevMatch) {
+            cve.cisaKev = kevMatch;
+          } else if (hasFullCisaKev) {
+            cve.cisaKev = { isKev: false };
+          }
         }
         const scopedReports = epssReports.filter((result) => epssScopes.get(result)!.has(cve.cveId));
         if (scopedReports.length) {

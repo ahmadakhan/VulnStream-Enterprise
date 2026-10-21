@@ -26,7 +26,7 @@ export const DEFAULT_EMAIL_CONFIG: EmailConfiguration = {
 export const DEFAULT_SETTINGS: AppSettings = {
   scopeHours: 24,
   schedulerIntervalMinutes: 60,
-  schedulerEnabled: false,
+  schedulerEnabled: true,
   advisoryPrefix: 'ADV-',
   autoDispatchEnabled: false,
   digestBatchingEnabled: false,

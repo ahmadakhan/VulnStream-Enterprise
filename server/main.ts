@@ -79,7 +79,10 @@ tick();
 const cleanup = setInterval(() => {
   void pool
     .query(
-      "DELETE FROM sessions WHERE expires_at<now(); DELETE FROM login_attempts WHERE window_start<now()-interval '1 day'",
+      `DELETE FROM sessions WHERE expires_at<now();
+       DELETE FROM login_attempts WHERE window_start<now()-interval '1 day';
+       DELETE FROM outbox WHERE status IN ('ACCEPTED', 'FAILED') AND updated_at < now() - interval '30 days';
+       DELETE FROM operational_events WHERE occurred_at < now() - interval '90 days';`,
     )
     .catch(report('session-cleanup'));
 }, 60000);
