@@ -22,7 +22,7 @@ export const feedSchema = z.object({
   ),
   authType: z.enum(['NONE', 'API_KEY', 'BEARER', 'BASIC']),
   authSecretKey: z.string().max(4096).optional(),
-  rateLimitPerMin: z.number().int().min(1).max(60),
+  rateLimitPerMin: z.number().int().min(1).max(600),
   enabled: z.boolean(),
   vendorSeed: z.boolean().default(false),
 });

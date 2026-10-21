@@ -120,7 +120,11 @@ export const ThreatFeedsView: React.FC = () => {
         rateLimitPerMin: formData.rateLimitPerMin,
         enabled: formData.enabled,
       });
-      if (ok) setShowAddModal(false);
+      if (ok) {
+        setShowAddModal(false);
+      } else {
+        setFormError('Failed to update feed. Please check the form values and try again.');
+      }
     } else {
       const ok = await addFeed({
         name: formData.name,
