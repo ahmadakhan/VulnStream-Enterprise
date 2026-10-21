@@ -20,18 +20,78 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'microsoft',
     aliases: ['msft', 'microsoft_corp', 'microsoft_corporation'],
     products: [
-      { name: 'Windows Server 2022', normalizedId: 'windows_server_2022', part: 'o', description: 'Enterprise Server Operating System' },
-      { name: 'Windows Server 2019', normalizedId: 'windows_server_2019', part: 'o', description: 'Enterprise Server Operating System' },
-      { name: 'Windows 11', normalizedId: 'windows_11', part: 'o', description: 'Enterprise Client Operating System' },
-      { name: 'Windows 10', normalizedId: 'windows_10', part: 'o', description: 'Enterprise Client Operating System' },
-      { name: 'Exchange Server', normalizedId: 'exchange_server', part: 'a', description: 'Enterprise Mail and Messaging Server' },
-      { name: 'SQL Server', normalizedId: 'sql_server', part: 'a', description: 'Relational Database Management System' },
-      { name: 'SharePoint Server', normalizedId: 'sharepoint_server', part: 'a', description: 'Intranet and Collaboration Platform' },
-      { name: 'Microsoft Edge', normalizedId: 'edge', part: 'a', description: 'Chromium-based Enterprise Browser' },
-      { name: 'Office 365 Apps', normalizedId: 'office_365', part: 'a', description: 'Enterprise Productivity Suite' },
-      { name: 'Defender for Endpoint', normalizedId: 'defender_endpoint', part: 'a', description: 'EDR Agent & Endpoint Security' },
-      { name: 'Internet Information Services (IIS)', normalizedId: 'iis', part: 'a', description: 'Web Server Services' },
-      { name: 'Azure DevOps Server', normalizedId: 'azure_devops_server', part: 'a', description: 'On-premises CI/CD and Version Control' },
+      {
+        name: 'Windows Server 2022',
+        normalizedId: 'windows_server_2022',
+        part: 'o',
+        description: 'Enterprise Server Operating System',
+      },
+      {
+        name: 'Windows Server 2019',
+        normalizedId: 'windows_server_2019',
+        part: 'o',
+        description: 'Enterprise Server Operating System',
+      },
+      {
+        name: 'Windows 11',
+        normalizedId: 'windows_11',
+        part: 'o',
+        description: 'Enterprise Client Operating System',
+      },
+      {
+        name: 'Windows 10',
+        normalizedId: 'windows_10',
+        part: 'o',
+        description: 'Enterprise Client Operating System',
+      },
+      {
+        name: 'Exchange Server',
+        normalizedId: 'exchange_server',
+        part: 'a',
+        description: 'Enterprise Mail and Messaging Server',
+      },
+      {
+        name: 'SQL Server',
+        normalizedId: 'sql_server',
+        part: 'a',
+        description: 'Relational Database Management System',
+      },
+      {
+        name: 'SharePoint Server',
+        normalizedId: 'sharepoint_server',
+        part: 'a',
+        description: 'Intranet and Collaboration Platform',
+      },
+      {
+        name: 'Microsoft Edge',
+        normalizedId: 'edge',
+        part: 'a',
+        description: 'Chromium-based Enterprise Browser',
+      },
+      {
+        name: 'Office 365 Apps',
+        normalizedId: 'office_365',
+        part: 'a',
+        description: 'Enterprise Productivity Suite',
+      },
+      {
+        name: 'Defender for Endpoint',
+        normalizedId: 'defender_endpoint',
+        part: 'a',
+        description: 'EDR Agent & Endpoint Security',
+      },
+      {
+        name: 'Internet Information Services (IIS)',
+        normalizedId: 'iis',
+        part: 'a',
+        description: 'Web Server Services',
+      },
+      {
+        name: 'Azure DevOps Server',
+        normalizedId: 'azure_devops_server',
+        part: 'a',
+        description: 'On-premises CI/CD and Version Control',
+      },
     ],
   },
   {
@@ -39,14 +99,54 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'cisco',
     aliases: ['cisco_systems', 'cisco-systems'],
     products: [
-      { name: 'IOS XE Software', normalizedId: 'ios_xe', part: 'o', description: 'Modular Enterprise Routing & Switching OS' },
-      { name: 'IOS Software', normalizedId: 'ios', part: 'o', description: 'Enterprise Network Operating System' },
-      { name: 'NX-OS Software', normalizedId: 'nx-os', part: 'o', description: 'Data Center Switch Operating System' },
-      { name: 'Adaptive Security Appliance (ASA)', normalizedId: 'adaptive_security_appliance_software', part: 'o', description: 'Security Appliance and Firewall OS' },
-      { name: 'Firepower Threat Defense (FTD)', normalizedId: 'firepower_threat_defense', part: 'o', description: 'Unified NGFW Software' },
-      { name: 'AnyConnect Secure Mobility Client', normalizedId: 'anyconnect_secure_mobility_client', part: 'a', description: 'Enterprise VPN Client' },
-      { name: 'Catalyst 9000 Switches', normalizedId: 'catalyst_9000', part: 'h', description: 'Enterprise Core & Access Switches' },
-      { name: 'Webex Meetings Client', normalizedId: 'webex_meetings', part: 'a', description: 'Collaboration & Video Conferencing Client' },
+      {
+        name: 'IOS XE Software',
+        normalizedId: 'ios_xe',
+        part: 'o',
+        description: 'Modular Enterprise Routing & Switching OS',
+      },
+      {
+        name: 'IOS Software',
+        normalizedId: 'ios',
+        part: 'o',
+        description: 'Enterprise Network Operating System',
+      },
+      {
+        name: 'NX-OS Software',
+        normalizedId: 'nx-os',
+        part: 'o',
+        description: 'Data Center Switch Operating System',
+      },
+      {
+        name: 'Adaptive Security Appliance (ASA)',
+        normalizedId: 'adaptive_security_appliance_software',
+        part: 'o',
+        description: 'Security Appliance and Firewall OS',
+      },
+      {
+        name: 'Firepower Threat Defense (FTD)',
+        normalizedId: 'firepower_threat_defense',
+        part: 'o',
+        description: 'Unified NGFW Software',
+      },
+      {
+        name: 'AnyConnect Secure Mobility Client',
+        normalizedId: 'anyconnect_secure_mobility_client',
+        part: 'a',
+        description: 'Enterprise VPN Client',
+      },
+      {
+        name: 'Catalyst 9000 Switches',
+        normalizedId: 'catalyst_9000',
+        part: 'h',
+        description: 'Enterprise Core & Access Switches',
+      },
+      {
+        name: 'Webex Meetings Client',
+        normalizedId: 'webex_meetings',
+        part: 'a',
+        description: 'Collaboration & Video Conferencing Client',
+      },
     ],
   },
   {
@@ -54,13 +154,48 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'fortinet',
     aliases: ['fortigate', 'fortios'],
     products: [
-      { name: 'FortiOS', normalizedId: 'fortios', part: 'o', description: 'Next-Generation Firewall Operating System' },
-      { name: 'FortiGate NGFW', normalizedId: 'fortigate', part: 'h', description: 'Enterprise Network Security Appliance' },
-      { name: 'FortiClient', normalizedId: 'forticlient', part: 'a', description: 'Endpoint Telemetry & Zero Trust Client' },
-      { name: 'FortiAnalyzer', normalizedId: 'fortianalyzer', part: 'a', description: 'Centralized Logging and Analytics' },
-      { name: 'FortiManager', normalizedId: 'fortimanager', part: 'a', description: 'Centralized Network Management' },
-      { name: 'FortiWeb', normalizedId: 'fortiweb', part: 'a', description: 'Web Application Firewall (WAF)' },
-      { name: 'FortiMail', normalizedId: 'fortimail', part: 'a', description: 'Secure Email Gateway Appliance' },
+      {
+        name: 'FortiOS',
+        normalizedId: 'fortios',
+        part: 'o',
+        description: 'Next-Generation Firewall Operating System',
+      },
+      {
+        name: 'FortiGate NGFW',
+        normalizedId: 'fortigate',
+        part: 'h',
+        description: 'Enterprise Network Security Appliance',
+      },
+      {
+        name: 'FortiClient',
+        normalizedId: 'forticlient',
+        part: 'a',
+        description: 'Endpoint Telemetry & Zero Trust Client',
+      },
+      {
+        name: 'FortiAnalyzer',
+        normalizedId: 'fortianalyzer',
+        part: 'a',
+        description: 'Centralized Logging and Analytics',
+      },
+      {
+        name: 'FortiManager',
+        normalizedId: 'fortimanager',
+        part: 'a',
+        description: 'Centralized Network Management',
+      },
+      {
+        name: 'FortiWeb',
+        normalizedId: 'fortiweb',
+        part: 'a',
+        description: 'Web Application Firewall (WAF)',
+      },
+      {
+        name: 'FortiMail',
+        normalizedId: 'fortimail',
+        part: 'a',
+        description: 'Secure Email Gateway Appliance',
+      },
     ],
   },
   {
@@ -68,13 +203,49 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'vmware',
     aliases: ['broadcom', 'vmware_inc'],
     products: [
-      { name: 'ESXi Hypervisor', normalizedId: 'esxi', part: 'o', description: 'Type-1 Bare-Metal Hypervisor' },
-      { name: 'vCenter Server', normalizedId: 'vcenter_server', part: 'a', description: 'Centralized Hypervisor Management' },
-      { name: 'Horizon Client & Server', normalizedId: 'horizon', part: 'a', description: 'Virtual Desktop Infrastructure (VDI)' },
-      { name: 'Spring Framework', normalizedId: 'spring_framework', part: 'a', defaultPurl: 'pkg:maven/org.springframework/spring-core', description: 'Java Enterprise Application Framework' },
-      { name: 'Cloud Foundation', normalizedId: 'cloud_foundation', part: 'a', description: 'Hybrid Cloud Infrastructure Platform' },
-      { name: 'Tanzu Kubernetes Grid', normalizedId: 'tanzu_kubernetes_grid', part: 'a', description: 'Enterprise Kubernetes Platform' },
-      { name: 'Workstation Pro', normalizedId: 'workstation_pro', part: 'a', description: 'Desktop Virtualization Software' },
+      {
+        name: 'ESXi Hypervisor',
+        normalizedId: 'esxi',
+        part: 'o',
+        description: 'Type-1 Bare-Metal Hypervisor',
+      },
+      {
+        name: 'vCenter Server',
+        normalizedId: 'vcenter_server',
+        part: 'a',
+        description: 'Centralized Hypervisor Management',
+      },
+      {
+        name: 'Horizon Client & Server',
+        normalizedId: 'horizon',
+        part: 'a',
+        description: 'Virtual Desktop Infrastructure (VDI)',
+      },
+      {
+        name: 'Spring Framework',
+        normalizedId: 'spring_framework',
+        part: 'a',
+        defaultPurl: 'pkg:maven/org.springframework/spring-core',
+        description: 'Java Enterprise Application Framework',
+      },
+      {
+        name: 'Cloud Foundation',
+        normalizedId: 'cloud_foundation',
+        part: 'a',
+        description: 'Hybrid Cloud Infrastructure Platform',
+      },
+      {
+        name: 'Tanzu Kubernetes Grid',
+        normalizedId: 'tanzu_kubernetes_grid',
+        part: 'a',
+        description: 'Enterprise Kubernetes Platform',
+      },
+      {
+        name: 'Workstation Pro',
+        normalizedId: 'workstation_pro',
+        part: 'a',
+        description: 'Desktop Virtualization Software',
+      },
     ],
   },
   {
@@ -82,11 +253,36 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'paloaltonetworks',
     aliases: ['palo_alto', 'paloalto', 'pan'],
     products: [
-      { name: 'PAN-OS', normalizedId: 'pan-os', part: 'o', description: 'Next-Generation Firewall Operating System' },
-      { name: 'GlobalProtect', normalizedId: 'globalprotect', part: 'a', description: 'Enterprise Secure Access & VPN' },
-      { name: 'Prisma Cloud', normalizedId: 'prisma_cloud', part: 'a', description: 'Cloud Native Application Protection (CNAPP)' },
-      { name: 'Cortex XDR Agent', normalizedId: 'cortex_xdr', part: 'a', description: 'Extended Detection and Response Agent' },
-      { name: 'PA-Series Hardware', normalizedId: 'pa-series', part: 'h', description: 'Enterprise Physical Security Appliance' },
+      {
+        name: 'PAN-OS',
+        normalizedId: 'pan-os',
+        part: 'o',
+        description: 'Next-Generation Firewall Operating System',
+      },
+      {
+        name: 'GlobalProtect',
+        normalizedId: 'globalprotect',
+        part: 'a',
+        description: 'Enterprise Secure Access & VPN',
+      },
+      {
+        name: 'Prisma Cloud',
+        normalizedId: 'prisma_cloud',
+        part: 'a',
+        description: 'Cloud Native Application Protection (CNAPP)',
+      },
+      {
+        name: 'Cortex XDR Agent',
+        normalizedId: 'cortex_xdr',
+        part: 'a',
+        description: 'Extended Detection and Response Agent',
+      },
+      {
+        name: 'PA-Series Hardware',
+        normalizedId: 'pa-series',
+        part: 'h',
+        description: 'Enterprise Physical Security Appliance',
+      },
     ],
   },
   {
@@ -94,12 +290,39 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'apache',
     aliases: ['apache_software_foundation', 'asf'],
     products: [
-      { name: 'HTTP Server', normalizedId: 'http_server', part: 'a', description: 'High Performance Open Source Web Server' },
-      { name: 'Tomcat Servlet Engine', normalizedId: 'tomcat', part: 'a', description: 'Java Servlet and JSP Application Server' },
-      { name: 'Log4j Logging Library', normalizedId: 'log4j', part: 'a', defaultPurl: 'pkg:maven/org.apache.logging.log4j/log4j-core', description: 'Java Logging Framework' },
-      { name: 'Struts Framework', normalizedId: 'struts', part: 'a', defaultPurl: 'pkg:maven/org.apache.struts/struts2-core', description: 'Java Web Application MVC Framework' },
+      {
+        name: 'HTTP Server',
+        normalizedId: 'http_server',
+        part: 'a',
+        description: 'High Performance Open Source Web Server',
+      },
+      {
+        name: 'Tomcat Servlet Engine',
+        normalizedId: 'tomcat',
+        part: 'a',
+        description: 'Java Servlet and JSP Application Server',
+      },
+      {
+        name: 'Log4j Logging Library',
+        normalizedId: 'log4j',
+        part: 'a',
+        defaultPurl: 'pkg:maven/org.apache.logging.log4j/log4j-core',
+        description: 'Java Logging Framework',
+      },
+      {
+        name: 'Struts Framework',
+        normalizedId: 'struts',
+        part: 'a',
+        defaultPurl: 'pkg:maven/org.apache.struts/struts2-core',
+        description: 'Java Web Application MVC Framework',
+      },
       { name: 'ActiveMQ', normalizedId: 'activemq', part: 'a', description: 'Open Source Message Broker' },
-      { name: 'Kafka', normalizedId: 'kafka', part: 'a', description: 'Distributed Event Streaming Platform' },
+      {
+        name: 'Kafka',
+        normalizedId: 'kafka',
+        part: 'a',
+        description: 'Distributed Event Streaming Platform',
+      },
       { name: 'Airflow', normalizedId: 'airflow', part: 'a', description: 'Workflow Orchestration Platform' },
     ],
   },
@@ -108,11 +331,36 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'redhat',
     aliases: ['red_hat', 'redhat_corp'],
     products: [
-      { name: 'Enterprise Linux (RHEL)', normalizedId: 'enterprise_linux', part: 'o', description: 'Enterprise Linux Server Distribution' },
-      { name: 'OpenShift Container Platform', normalizedId: 'openshift_container_platform', part: 'a', description: 'Enterprise Hybrid Cloud Kubernetes' },
-      { name: 'JBoss Enterprise Application Platform', normalizedId: 'jboss_enterprise_application_platform', part: 'a', description: 'Jakarta EE Application Server' },
-      { name: 'Ansible Automation Platform', normalizedId: 'ansible_automation_platform', part: 'a', description: 'Enterprise Infrastructure Automation' },
-      { name: 'Satellite', normalizedId: 'satellite', part: 'a', description: 'Systems Lifecycle Management Solution' },
+      {
+        name: 'Enterprise Linux (RHEL)',
+        normalizedId: 'enterprise_linux',
+        part: 'o',
+        description: 'Enterprise Linux Server Distribution',
+      },
+      {
+        name: 'OpenShift Container Platform',
+        normalizedId: 'openshift_container_platform',
+        part: 'a',
+        description: 'Enterprise Hybrid Cloud Kubernetes',
+      },
+      {
+        name: 'JBoss Enterprise Application Platform',
+        normalizedId: 'jboss_enterprise_application_platform',
+        part: 'a',
+        description: 'Jakarta EE Application Server',
+      },
+      {
+        name: 'Ansible Automation Platform',
+        normalizedId: 'ansible_automation_platform',
+        part: 'a',
+        description: 'Enterprise Infrastructure Automation',
+      },
+      {
+        name: 'Satellite',
+        normalizedId: 'satellite',
+        part: 'a',
+        description: 'Systems Lifecycle Management Solution',
+      },
     ],
   },
   {
@@ -120,12 +368,42 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'oracle',
     aliases: ['oracle_corp', 'oracle_corporation'],
     products: [
-      { name: 'Database Server', normalizedId: 'database_server', part: 'a', description: 'Enterprise Relational Database Management' },
-      { name: 'WebLogic Server', normalizedId: 'weblogic_server', part: 'a', description: 'Enterprise Java Application Server' },
-      { name: 'Java SE Development Kit / JRE', normalizedId: 'jdk', part: 'a', description: 'Java Standard Edition Runtime Environment' },
-      { name: 'MySQL Community & Enterprise', normalizedId: 'mysql', part: 'a', description: 'Open Source SQL Relational Database' },
-      { name: 'VirtualBox', normalizedId: 'vm_virtualbox', part: 'a', description: 'Open Source Desktop Hypervisor' },
-      { name: 'Solaris Operating System', normalizedId: 'solaris', part: 'o', description: 'Enterprise Unix Operating System' },
+      {
+        name: 'Database Server',
+        normalizedId: 'database_server',
+        part: 'a',
+        description: 'Enterprise Relational Database Management',
+      },
+      {
+        name: 'WebLogic Server',
+        normalizedId: 'weblogic_server',
+        part: 'a',
+        description: 'Enterprise Java Application Server',
+      },
+      {
+        name: 'Java SE Development Kit / JRE',
+        normalizedId: 'jdk',
+        part: 'a',
+        description: 'Java Standard Edition Runtime Environment',
+      },
+      {
+        name: 'MySQL Community & Enterprise',
+        normalizedId: 'mysql',
+        part: 'a',
+        description: 'Open Source SQL Relational Database',
+      },
+      {
+        name: 'VirtualBox',
+        normalizedId: 'vm_virtualbox',
+        part: 'a',
+        description: 'Open Source Desktop Hypervisor',
+      },
+      {
+        name: 'Solaris Operating System',
+        normalizedId: 'solaris',
+        part: 'o',
+        description: 'Enterprise Unix Operating System',
+      },
     ],
   },
   {
@@ -134,8 +412,18 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     aliases: ['alphabet', 'google_llc'],
     products: [
       { name: 'Chrome Browser', normalizedId: 'chrome', part: 'a', description: 'Enterprise Web Browser' },
-      { name: 'Android Operating System', normalizedId: 'android', part: 'o', description: 'Mobile & IoT Operating System' },
-      { name: 'Kubernetes', normalizedId: 'kubernetes', part: 'a', description: 'Container Orchestration Platform' },
+      {
+        name: 'Android Operating System',
+        normalizedId: 'android',
+        part: 'o',
+        description: 'Mobile & IoT Operating System',
+      },
+      {
+        name: 'Kubernetes',
+        normalizedId: 'kubernetes',
+        part: 'a',
+        description: 'Container Orchestration Platform',
+      },
       { name: 'Go Runtime', normalizedId: 'go', part: 'a', description: 'Go Programming Language Runtime' },
     ],
   },
@@ -144,10 +432,30 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'f5',
     aliases: ['f5_networks', 'f5networks'],
     products: [
-      { name: 'BIG-IP Local Traffic Manager (LTM)', normalizedId: 'big-ip_local_traffic_manager', part: 'a', description: 'Application Delivery Controller' },
-      { name: 'BIG-IP Access Policy Manager (APM)', normalizedId: 'big-ip_access_policy_manager', part: 'a', description: 'Identity Federation & SSL-VPN' },
-      { name: 'NGINX Plus / Open Source', normalizedId: 'nginx', part: 'a', description: 'High Performance Reverse Proxy and Load Balancer' },
-      { name: 'BIG-IQ Centralized Management', normalizedId: 'big-iq', part: 'a', description: 'Security and Policy Orchestrator' },
+      {
+        name: 'BIG-IP Local Traffic Manager (LTM)',
+        normalizedId: 'big-ip_local_traffic_manager',
+        part: 'a',
+        description: 'Application Delivery Controller',
+      },
+      {
+        name: 'BIG-IP Access Policy Manager (APM)',
+        normalizedId: 'big-ip_access_policy_manager',
+        part: 'a',
+        description: 'Identity Federation & SSL-VPN',
+      },
+      {
+        name: 'NGINX Plus / Open Source',
+        normalizedId: 'nginx',
+        part: 'a',
+        description: 'High Performance Reverse Proxy and Load Balancer',
+      },
+      {
+        name: 'BIG-IQ Centralized Management',
+        normalizedId: 'big-iq',
+        part: 'a',
+        description: 'Security and Policy Orchestrator',
+      },
     ],
   },
   {
@@ -155,10 +463,30 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'citrix',
     aliases: ['cloud_software_group', 'netscaler'],
     products: [
-      { name: 'NetScaler ADC', normalizedId: 'netscaler_adc', part: 'a', description: 'Application Delivery Controller' },
-      { name: 'NetScaler Gateway', normalizedId: 'netscaler_gateway', part: 'a', description: 'Secure Remote Access Gateway' },
-      { name: 'Virtual Apps and Desktops', normalizedId: 'virtual_apps_and_desktops', part: 'a', description: 'VDI and Desktop Virtualization' },
-      { name: 'Hypervisor (XenServer)', normalizedId: 'hypervisor', part: 'o', description: 'Enterprise Virtualization Platform' },
+      {
+        name: 'NetScaler ADC',
+        normalizedId: 'netscaler_adc',
+        part: 'a',
+        description: 'Application Delivery Controller',
+      },
+      {
+        name: 'NetScaler Gateway',
+        normalizedId: 'netscaler_gateway',
+        part: 'a',
+        description: 'Secure Remote Access Gateway',
+      },
+      {
+        name: 'Virtual Apps and Desktops',
+        normalizedId: 'virtual_apps_and_desktops',
+        part: 'a',
+        description: 'VDI and Desktop Virtualization',
+      },
+      {
+        name: 'Hypervisor (XenServer)',
+        normalizedId: 'hypervisor',
+        part: 'o',
+        description: 'Enterprise Virtualization Platform',
+      },
     ],
   },
   {
@@ -166,9 +494,24 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'linux',
     aliases: ['kernel.org', 'linux_foundation'],
     products: [
-      { name: 'Linux Kernel', normalizedId: 'linux_kernel', part: 'o', description: 'Monolithic Unix-like Operating System Kernel' },
-      { name: 'OpenSSL Cryptographic Toolkit', normalizedId: 'openssl', part: 'a', description: 'Transport Layer Security Library' },
-      { name: 'systemd System Manager', normalizedId: 'systemd', part: 'a', description: 'Basic Building Block for Linux Systems' },
+      {
+        name: 'Linux Kernel',
+        normalizedId: 'linux_kernel',
+        part: 'o',
+        description: 'Monolithic Unix-like Operating System Kernel',
+      },
+      {
+        name: 'OpenSSL Cryptographic Toolkit',
+        normalizedId: 'openssl',
+        part: 'a',
+        description: 'Transport Layer Security Library',
+      },
+      {
+        name: 'systemd System Manager',
+        normalizedId: 'systemd',
+        part: 'a',
+        description: 'Basic Building Block for Linux Systems',
+      },
     ],
   },
   {
@@ -176,10 +519,30 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'hashicorp',
     aliases: ['hashicorp_inc'],
     products: [
-      { name: 'Vault Enterprise', normalizedId: 'vault', part: 'a', description: 'Secrets Management and Data Protection' },
-      { name: 'Terraform Enterprise', normalizedId: 'terraform', part: 'a', description: 'Infrastructure as Code Platform' },
-      { name: 'Consul Service Mesh', normalizedId: 'consul', part: 'a', description: 'Service Networking & Discovery Platform' },
-      { name: 'Nomad Workload Orchestrator', normalizedId: 'nomad', part: 'a', description: 'Flexible Application Scheduler' },
+      {
+        name: 'Vault Enterprise',
+        normalizedId: 'vault',
+        part: 'a',
+        description: 'Secrets Management and Data Protection',
+      },
+      {
+        name: 'Terraform Enterprise',
+        normalizedId: 'terraform',
+        part: 'a',
+        description: 'Infrastructure as Code Platform',
+      },
+      {
+        name: 'Consul Service Mesh',
+        normalizedId: 'consul',
+        part: 'a',
+        description: 'Service Networking & Discovery Platform',
+      },
+      {
+        name: 'Nomad Workload Orchestrator',
+        normalizedId: 'nomad',
+        part: 'a',
+        description: 'Flexible Application Scheduler',
+      },
     ],
   },
   {
@@ -187,9 +550,24 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'canonical',
     aliases: ['ubuntu'],
     products: [
-      { name: 'Ubuntu Linux LTS', normalizedId: 'ubuntu_linux', part: 'o', description: 'Debian-based Enterprise Server Linux' },
-      { name: 'Snapd Service', normalizedId: 'snapd', part: 'a', description: 'Universal Package Management Daemon' },
-      { name: 'MicroK8s', normalizedId: 'microk8s', part: 'a', description: 'Lightweight Zero-Ops Kubernetes' },
+      {
+        name: 'Ubuntu Linux LTS',
+        normalizedId: 'ubuntu_linux',
+        part: 'o',
+        description: 'Debian-based Enterprise Server Linux',
+      },
+      {
+        name: 'Snapd Service',
+        normalizedId: 'snapd',
+        part: 'a',
+        description: 'Universal Package Management Daemon',
+      },
+      {
+        name: 'MicroK8s',
+        normalizedId: 'microk8s',
+        part: 'a',
+        description: 'Lightweight Zero-Ops Kubernetes',
+      },
     ],
   },
   {
@@ -197,10 +575,30 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     normalizedId: 'adobe',
     aliases: ['adobe_systems'],
     products: [
-      { name: 'Acrobat Reader DC', normalizedId: 'acrobat_reader', part: 'a', description: 'PDF Document Reader Client' },
-      { name: 'Acrobat Pro DC', normalizedId: 'acrobat', part: 'a', description: 'PDF Authoring and Editing Application' },
-      { name: 'Experience Manager (AEM)', normalizedId: 'experience_manager', part: 'a', description: 'Enterprise Content Management Platform' },
-      { name: 'ColdFusion Application Server', normalizedId: 'coldfusion', part: 'a', description: 'Rapid Web Application Development' },
+      {
+        name: 'Acrobat Reader DC',
+        normalizedId: 'acrobat_reader',
+        part: 'a',
+        description: 'PDF Document Reader Client',
+      },
+      {
+        name: 'Acrobat Pro DC',
+        normalizedId: 'acrobat',
+        part: 'a',
+        description: 'PDF Authoring and Editing Application',
+      },
+      {
+        name: 'Experience Manager (AEM)',
+        normalizedId: 'experience_manager',
+        part: 'a',
+        description: 'Enterprise Content Management Platform',
+      },
+      {
+        name: 'ColdFusion Application Server',
+        normalizedId: 'coldfusion',
+        part: 'a',
+        description: 'Rapid Web Application Development',
+      },
     ],
   },
 ];
@@ -211,10 +609,11 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
 export function searchCatalogVendors(query: string): CatalogVendor[] {
   if (!query || query.trim() === '') return ENTERPRISE_VENDOR_CATALOG;
   const q = query.toLowerCase().trim();
-  return ENTERPRISE_VENDOR_CATALOG.filter(v => 
-    v.name.toLowerCase().includes(q) ||
-    v.normalizedId.toLowerCase().includes(q) ||
-    v.aliases.some(a => a.toLowerCase().includes(q))
+  return ENTERPRISE_VENDOR_CATALOG.filter(
+    (v) =>
+      v.name.toLowerCase().includes(q) ||
+      v.normalizedId.toLowerCase().includes(q) ||
+      v.aliases.some((a) => a.toLowerCase().includes(q)),
   );
 }
 
@@ -226,10 +625,8 @@ export function getCatalogProductsForVendor(vendorStr: string): CatalogProduct[]
   const q = vendorStr.toLowerCase().trim();
 
   // Find exact or alias match
-  const matchedVendor = ENTERPRISE_VENDOR_CATALOG.find(v => 
-    v.normalizedId === q ||
-    v.name.toLowerCase() === q ||
-    v.aliases.some(a => a.toLowerCase() === q)
+  const matchedVendor = ENTERPRISE_VENDOR_CATALOG.find(
+    (v) => v.normalizedId === q || v.name.toLowerCase() === q || v.aliases.some((a) => a.toLowerCase() === q),
   );
 
   if (matchedVendor) {
@@ -237,9 +634,8 @@ export function getCatalogProductsForVendor(vendorStr: string): CatalogProduct[]
   }
 
   // Partial match fallback
-  const partial = ENTERPRISE_VENDOR_CATALOG.find(v => 
-    v.name.toLowerCase().includes(q) ||
-    v.normalizedId.includes(q)
+  const partial = ENTERPRISE_VENDOR_CATALOG.find(
+    (v) => v.name.toLowerCase().includes(q) || v.normalizedId.includes(q),
   );
 
   return partial ? partial.products : [];
@@ -254,12 +650,12 @@ export function buildStrictCpe23(
   vendor: string,
   product: string,
   version: string = '*',
-  targetHw: string = '*'
+  targetHw: string = '*',
 ): string {
   const normVendor = (vendor || 'any').toLowerCase().trim().replace(/\s+/g, '_');
   const normProduct = (product || 'any').toLowerCase().trim().replace(/\s+/g, '_');
   const normVersion = (version || '*').trim();
-  const normHw = (targetHw && targetHw !== '*' ? targetHw.trim() : '*');
+  const normHw = targetHw && targetHw !== '*' ? targetHw.trim() : '*';
 
   return `cpe:2.3:${part}:${normVendor}:${normProduct}:${normVersion}:*:*:*:*:*:${normHw}:*`;
 }

@@ -181,12 +181,12 @@ export const WatchListView: React.FC = () => {
 
   const handleOpenEdit = (item: WatchListItem) => {
     const parsed = parseCPE23(item.cpes[0] || '');
-    setVendorInput(item.vendor);
-    setCustomProductInput(item.product);
+    setVendorInput(parsed.isValid ? parsed.vendor : item.vendor);
+    setCustomProductInput(parsed.isValid ? parsed.product : item.product);
     setSelectedProductIds([]);
     setCpePart((parsed.part === 'o' || parsed.part === 'h' ? parsed.part : 'a') as 'a' | 'o' | 'h');
     setVersionInput(parsed.version || '*');
-    setTargetHwInput(item.targetHw || '*');
+    setTargetHwInput(parsed.isValid ? parsed.targetHw : item.targetHw || '*');
     setAssetTagInput(item.assetTag);
     setOwnerGroupInput(item.ownerGroup);
     setNotesInput(item.notes || '');
@@ -224,11 +224,23 @@ export const WatchListView: React.FC = () => {
       const finalProduct = customProductInput.trim() || editingItem.product;
       const cpe = buildStrictCpe23(cpePart, vendorInput.trim(), finalProduct, versionInput, targetHwInput);
 
+      const previous = parseCPE23(editingItem.cpes[0] || '');
+      const identifiersUnchanged =
+        previous.isValid &&
+        previous.part === cpePart &&
+        previous.vendor === vendorInput.trim() &&
+        previous.product === finalProduct &&
+        previous.version === versionInput &&
+        previous.targetHw === targetHwInput;
       const saved = await updateWatchlistItem({
         ...editingItem,
         vendor: vendorInput.trim(),
         product: finalProduct,
-        cpes: [cpe],
+        cpes: identifiersUnchanged
+          ? editingItem.cpes
+          : editingItem.cpes.length
+            ? [cpe, ...editingItem.cpes.slice(1)]
+            : [],
         purls: purlList.length > 0 ? purlList : undefined,
         targetHw: targetHwInput !== '*' ? targetHwInput : undefined,
         assetTag: assetTagInput.trim() || editingItem.assetTag,
@@ -256,10 +268,7 @@ export const WatchListView: React.FC = () => {
     if (customProductInput.trim()) {
       productsToCreate.push({
         name: customProductInput.trim(),
-        normalizedId: customProductInput
-          .trim()
-          .toLowerCase()
-          .replace(/[\s-]+/g, '_'),
+        normalizedId: customProductInput.trim().toLowerCase().replace(/\s+/g, '_'),
         part: cpePart,
       });
     }
@@ -371,7 +380,13 @@ export const WatchListView: React.FC = () => {
 
   // Run Simulator Engine
   const runSimulation = () => {
-    const generatedCpe = generateCPE23(simPart, simVendor, simProduct, simVersion, simHw === 'any' ? '*' : simHw);
+    const generatedCpe = generateCPE23(
+      simPart,
+      simVendor,
+      simProduct,
+      simVersion,
+      simHw === 'any' ? '*' : simHw,
+    );
     const simulatedWatchItem: WatchListItem = {
       id: 'sim-test-01',
       vendor: simVendor,
@@ -473,7 +488,18 @@ export const WatchListView: React.FC = () => {
               runSimulation();
             }}
           >
-            <label className="text-sm">CPE part<select className="block w-full border border-zinc-600 rounded p-2 mt-1" value={simPart} onChange={e => setSimPart(e.target.value as 'a' | 'o' | 'h')}><option value="a">Application</option><option value="o">Operating system</option><option value="h">Hardware</option></select></label>
+            <label className="text-sm">
+              CPE part
+              <select
+                className="block w-full border border-zinc-600 rounded p-2 mt-1"
+                value={simPart}
+                onChange={(e) => setSimPart(e.target.value as 'a' | 'o' | 'h')}
+              >
+                <option value="a">Application</option>
+                <option value="o">Operating system</option>
+                <option value="h">Hardware</option>
+              </select>
+            </label>
             {(
               [
                 ['Vendor', simVendor, setSimVendor],

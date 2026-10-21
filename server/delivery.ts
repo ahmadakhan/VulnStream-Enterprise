@@ -1,4 +1,7 @@
 import type pg from 'pg';
+import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
+import { DEFAULT_SETTINGS } from '../shared/state';
+import type { WatchListItem, NormalizedCVE } from '../src/types';
 import { randomUUID, createHmac } from 'node:crypto';
 import nodemailer from 'nodemailer';
 import type { Config } from './config';
@@ -181,6 +184,37 @@ export async function deliverNext(
       permanent = true;
       throw new Error('Delivery retry budget exhausted after worker recovery');
     }
+    const advisory = await get<Advisory>(pool, 'advisories', job.advisory_id);
+    if (!advisory && job.advisory_id !== 'TEST') {
+      permanent = true;
+      throw new Error('Queued advisory no longer exists');
+    }
+    if (advisory) {
+      for (const id of advisory.findingIds) {
+        const finding = await get<Finding>(pool, 'findings', id);
+        const [asset, cve] = finding
+          ? await Promise.all([
+              get<WatchListItem>(pool, 'watchlist', finding.matchedAssetId),
+              get<NormalizedCVE>(pool, 'cveData', finding.cveId),
+            ])
+          : [undefined, undefined];
+        const match =
+          asset && cve
+            ? runVulnerabilityPipeline([], [cve], [asset], [], [], { ...DEFAULT_SETTINGS, scopeHours: 0 })
+                .newFindings[0]
+            : undefined;
+        if (
+          !finding ||
+          ['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(finding.status) ||
+          match?.notificationStatus !== 'QUEUED_FOR_DISPATCH'
+        ) {
+          permanent = true;
+          throw new Error(
+            'Advisory applicability changed; review current inventory before issuing a new notification',
+          );
+        }
+      }
+    }
     if (job.channel === 'email') {
       if (job.target_id !== 'test') {
         const rec = await get<EmailRecipient>(pool, 'recipients', job.target_id);
@@ -310,14 +344,16 @@ export async function deliverNext(
         }
       for (const findingId of advisory.findingIds) {
         const f = await get<Finding>(db, 'findings', findingId);
-        if (f)
+        if (f && f.advisoryId === advisory.id)
           await put(db, 'findings', findingId, {
             ...f,
-            notificationStatus: totals.pending
-              ? 'QUEUED_FOR_DISPATCH'
-              : totals.failed
-                ? 'DELIVERY_FAILED'
-                : 'AUTO_DISPATCHED',
+            notificationStatus: ['NOT_APPLICABLE', 'REVIEW_REQUIRED'].includes(f.notificationStatus)
+              ? f.notificationStatus
+              : totals.pending
+                ? 'QUEUED_FOR_DISPATCH'
+                : totals.failed
+                  ? 'DELIVERY_FAILED'
+                  : 'AUTO_DISPATCHED',
             autoDispatchedAt: !totals.pending && !totals.failed ? new Date().toISOString() : null,
           });
       }

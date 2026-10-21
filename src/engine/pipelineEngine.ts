@@ -13,7 +13,7 @@ import type {
 } from '../types';
 import { normalizeCveId, isWithinTimelineScope } from '../utils/deduplicator';
 import { matchCPE, matchPurl, parseCPE23 } from '../utils/cpeMatcher';
-import { isVersionInNvdRange } from '../utils/versionComparator';
+import { isVersionInNvdRange, canCompareRange } from '../utils/versionComparator';
 import ipaddr from 'ipaddr.js';
 export interface PipelineRunResult {
   execution: PipelineExecution;
@@ -66,23 +66,25 @@ export function runVulnerabilityPipeline(
   _caller = 'Server worker',
 ): PipelineRunResult {
   const started = new Date(),
-    seen = new Set<string>(),
     known = new Set(existing.map((f) => `${normalizeCveId(f.cveId)}:${f.matchedAssetId}`));
   const newFindings: Finding[] = [];
   let duplicates = 0,
     processed = 0;
+  const latest = new Map<string, NormalizedCVE>();
   for (const raw of corpus) {
+    const id = normalizeCveId(raw.cveId);
+    if (!id) continue;
+    const previous = latest.get(id);
+    if (previous) duplicates++;
+    if (!previous || Date.parse(raw.modifiedDate) > Date.parse(previous.modifiedDate)) latest.set(id, raw);
+  }
+  for (const raw of latest.values()) {
     const canonical = normalizeCveId(raw.cveId);
     if (
       !canonical ||
       !isWithinTimelineScope(raw.publishedDate, raw.modifiedDate, settings.scopeHours, started)
     )
       continue;
-    if (seen.has(canonical)) {
-      duplicates++;
-      continue;
-    }
-    seen.add(canonical);
     processed++;
     const cve = { ...raw, cveId: canonical };
     for (const asset of watchlist.filter((a) => a.active)) {
@@ -118,17 +120,7 @@ export function runVulnerabilityPipeline(
               confirmed ||
               (knownContext &&
                 !['*', '-', ''].includes(version) &&
-                (!v.range ||
-                  (Object.values(v.range).every(
-                    (bound) =>
-                      !bound ||
-                      /^[0-9]+(?:\.[0-9]+)*(?:-(?:h|p|patch|hotfix|sp|u|update|build|fix)[0-9]+)?$/.test(
-                        bound,
-                      ),
-                  ) &&
-                    /^[0-9]+(?:\.[0-9]+)*(?:-(?:h|p|patch|hotfix|sp|u|update|build|fix)[0-9]+)?$/.test(
-                      version,
-                    ))));
+                (!v.range || canCompareRange(version, v.range)));
           }
         }
       for (const a of asset.purls || [])
@@ -141,14 +133,8 @@ export function runVulnerabilityPipeline(
             (!cve.versionRange || !version || isVersionInNvdRange(version, cve.versionRange).inRange)
           ) {
             matched = v;
-            const supported = (value: string) =>
-              /^[0-9]+(?:\.[0-9]+)*(?:-(?:h|p|patch|hotfix|sp|u|update|build|fix)[0-9]+)?$/.test(value);
             confirmed =
-              confirmed ||
-              (!!version &&
-                (!cve.versionRange ||
-                  (supported(version) &&
-                    Object.values(cve.versionRange).every((bound) => !bound || supported(bound)))));
+              confirmed || (!!version && (!cve.versionRange || canCompareRange(version, cve.versionRange)));
           }
         }
       if (!matched) continue;

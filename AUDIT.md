@@ -38,3 +38,7 @@ This is a source and local runtime audit, not a penetration test or certificatio
 Delivery is at least once; remote acceptance immediately before a crash can duplicate a notification. Stable IDs support deduplication. Database-owner compromise can rewrite audit history; independently anchored immutable exports are needed for stronger evidence. Matching intentionally requires review for unsupported applicability/version ordering and does not implement all NIST/vendor semantics.
 
 The snapshot architecture and serialized writes have not been load-tested for a full historical vulnerability mirror or high operator concurrency. Feed/body caps fail explicitly, and capacity must be measured against the deployment's inventory and ingestion window. No automatic business-data retention policy is applied. See [OPERATIONS.md](OPERATIONS.md) for capacity, backup, restore and key-rotation boundaries. These are explicit operating limits, not claims of unlimited production readiness.
+
+## Follow-up page and watchlist verification
+
+The 21 October follow-up tested populated pages and a persisted CPE/PURL matrix, fixed additional matching and inventory UI defects, and passed 42 tests. See [PAGE-VERIFICATION.md](PAGE-VERIFICATION.md) for the precise cases, page coverage and limits.

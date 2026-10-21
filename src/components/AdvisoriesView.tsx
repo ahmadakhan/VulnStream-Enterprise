@@ -1,16 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Advisory } from '../types';
-import {
-  FileText,
-  Download,
-  Printer,
-  Copy,
-  Check,
-  Send,
-  X,
-  ShieldAlert,
-} from 'lucide-react';
+import { FileText, Download, Printer, Copy, Check, Send, X, ShieldAlert } from 'lucide-react';
 import { Pagination } from './Pagination';
 
 export const AdvisoriesView: React.FC = () => {
@@ -22,26 +13,23 @@ export const AdvisoriesView: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
 
-  const paginatedAdvisories = advisories.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
+  const paginatedAdvisories = advisories.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleCopyMarkdown = (adv: Advisory) => {
     const md = `# PRODUCT SECURITY ADVISORY: ${adv.id}
 **Title:** ${adv.title}
 **Severity:** ${adv.severity}
 **Created:** ${new Date(adv.createdDate).toUTCString()}
-**Status:** ${adv.deliveryStatus} (${adv.recipientCount} Recipients Dispatched)
+**Status:** ${adv.deliveryStatus} (${adv.recipientCount} Recipients)
 
 ## Summary
 ${adv.executiveSummary}
 
 ## Affected Vulnerabilities
-${adv.cveIds.map(c => `- ${c}`).join('\n')}
+${adv.cveIds.map((c) => `- ${c}`).join('\n')}
 
 ## Monitored Systems
-${adv.affectedSystems.map(s => `- ${s}`).join('\n')}
+${adv.affectedSystems.map((s) => `- ${s}`).join('\n')}
 
 ## Remediation Instructions
 ${adv.remediationInstructions}
@@ -55,8 +43,20 @@ ${adv.remediationInstructions}
   };
 
   const handleDownloadHtmlPdf = (original: Advisory) => {
-    const escape = (value: string) => value.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]!));
-    const adv = { ...original, id: escape(original.id), title: escape(original.title), executiveSummary: escape(original.executiveSummary), remediationInstructions: escape(original.remediationInstructions), cveIds: original.cveIds.map(escape), affectedSystems: original.affectedSystems.map(escape) };
+    const escape = (value: string) =>
+      value.replace(
+        /[&<>"']/g,
+        (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!,
+      );
+    const adv = {
+      ...original,
+      id: escape(original.id),
+      title: escape(original.title),
+      executiveSummary: escape(original.executiveSummary),
+      remediationInstructions: escape(original.remediationInstructions),
+      cveIds: original.cveIds.map(escape),
+      affectedSystems: original.affectedSystems.map(escape),
+    };
     const htmlContent = `<!DOCTYPE html>
 <html>
 <head>
@@ -78,7 +78,7 @@ ${adv.remediationInstructions}
   <div class="header">
     <span class="badge">${adv.severity}</span>
     <h1 class="title">${adv.id}: ${adv.title}</h1>
-    <p style="color: #71717a; font-size: 12px; margin: 0;">Dispatched automatically on ${new Date(adv.createdDate).toUTCString()} to ${adv.recipientCount} authorized stakeholders</p>
+    <p style="color: #71717a; font-size: 12px; margin: 0;">Generated on ${new Date(adv.createdDate).toUTCString()} to ${adv.recipientCount} authorized stakeholders</p>
   </div>
 
   <div class="section">
@@ -91,7 +91,7 @@ ${adv.remediationInstructions}
     <p style="font-size: 13px;"><strong>CVE Identifiers:</strong> <span class="mono">${adv.cveIds.join(', ')}</span></p>
     <p style="font-size: 13px;"><strong>Impacted Systems:</strong></p>
     <ul style="font-size: 13px;">
-      ${adv.affectedSystems.map(s => `<li>${s}</li>`).join('')}
+      ${adv.affectedSystems.map((s) => `<li>${s}</li>`).join('')}
     </ul>
   </div>
 
@@ -131,18 +131,22 @@ ${adv.remediationInstructions}
             Product Security Advisories
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Generated bulletins and their actual transport status. Provider acceptance is not confirmation of inbox delivery.
+            Generated bulletins and their actual transport status. Provider acceptance is not confirmation of
+            inbox delivery.
           </p>
         </div>
 
         <div className="text-xs font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-3 py-1.5 rounded-xl shadow-sm">
-          Total Generated: <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{advisories.length}</strong>
+          Total Generated:{' '}
+          <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">
+            {advisories.length}
+          </strong>
         </div>
       </div>
 
       {/* Advisory Cards List */}
       <div className="space-y-4">
-        {paginatedAdvisories.map(adv => (
+        {paginatedAdvisories.map((adv) => (
           <div
             key={adv.id}
             className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm space-y-4 transition-colors"
@@ -177,7 +181,9 @@ ${adv.remediationInstructions}
                 </div>
                 <div className="text-[11px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-500">
                   <span>Impacted Systems: </span>
-                  <span className="text-zinc-200 dark:text-zinc-200 light:text-zinc-800">{adv.affectedSystems.join(', ')}</span>
+                  <span className="text-zinc-200 dark:text-zinc-200 light:text-zinc-800">
+                    {adv.affectedSystems.join(', ')}
+                  </span>
                 </div>
               </div>
 
@@ -186,7 +192,7 @@ ${adv.remediationInstructions}
                   Correlated CVEs
                 </div>
                 <div className="flex flex-wrap gap-1">
-                  {adv.cveIds.map(cve => (
+                  {adv.cveIds.map((cve) => (
                     <span
                       key={cve}
                       className="text-[10px] font-mono bg-zinc-900 dark:bg-zinc-900 light:bg-white text-zinc-300 dark:text-zinc-300 light:text-zinc-800 px-1.5 py-0.5 rounded border border-zinc-800 dark:border-zinc-800 light:border-zinc-300"
@@ -196,16 +202,14 @@ ${adv.remediationInstructions}
                   ))}
                 </div>
                 <div className="text-[10px] text-zinc-500 font-mono pt-1">
-                  Dispatched: {new Date(adv.createdDate).toLocaleDateString()}
+                  Generated: {new Date(adv.createdDate).toLocaleDateString()}
                 </div>
               </div>
             </div>
 
             {/* Action Buttons */}
             <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-xs">
-              <div className="text-[11px] text-zinc-500 font-mono">
-                Advisory Ref: {adv.id} • Zero Human Intervention
-              </div>
+              <div className="text-[11px] text-zinc-500 font-mono">Advisory Ref: {adv.id}</div>
 
               <div className="flex items-center space-x-2">
                 <button
@@ -213,7 +217,11 @@ ${adv.remediationInstructions}
                   className="px-2.5 py-1 rounded-xl bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition flex items-center space-x-1"
                   title="Copy Markdown"
                 >
-                  {copied === adv.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied === adv.id ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
                   <span>{copied === adv.id ? 'Copied' : 'Markdown'}</span>
                 </button>
                 <button
@@ -267,7 +275,7 @@ ${adv.remediationInstructions}
                 {activeModalAdvisory.id}: {activeModalAdvisory.title}
               </h2>
               <p className="text-xs text-zinc-500 font-mono mt-0.5">
-                Dispatched automatically on {new Date(activeModalAdvisory.createdDate).toUTCString()}
+                Generated on {new Date(activeModalAdvisory.createdDate).toUTCString()}
               </p>
             </div>
 
@@ -286,8 +294,12 @@ ${adv.remediationInstructions}
                   2. Impacted Products &amp; Assets
                 </h4>
                 <div className="bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 p-3 rounded-xl border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 space-y-1 text-zinc-300 dark:text-zinc-300 light:text-zinc-800">
-                  <div><strong>CVEs:</strong> {activeModalAdvisory.cveIds.join(', ')}</div>
-                  <div><strong>Monitored Products:</strong> {activeModalAdvisory.affectedSystems.join(', ')}</div>
+                  <div>
+                    <strong>CVEs:</strong> {activeModalAdvisory.cveIds.join(', ')}
+                  </div>
+                  <div>
+                    <strong>Monitored Products:</strong> {activeModalAdvisory.affectedSystems.join(', ')}
+                  </div>
                 </div>
               </div>
 

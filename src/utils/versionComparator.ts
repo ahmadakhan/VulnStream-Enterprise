@@ -11,6 +11,13 @@ export interface NvdVersionRange {
   versionEndExcluding?: string;
 }
 
+/** Only these version families have defined ordering in this comparator. */
+export function canCompareRange(version: string, range: NvdVersionRange): boolean {
+  const supported = (value: string) =>
+    /^[0-9]+(?:\.[0-9]+)*(?:-(?:h|p|patch|hotfix|sp|u|update|build|fix)[0-9]+)?$/.test(value);
+  return supported(version) && Object.values(range).every((bound) => !bound || supported(bound));
+}
+
 interface ParsedVersion {
   numbers: number[];
   prerelease: string[];
@@ -86,10 +93,14 @@ export function compareVersions(v1Str: string, v2Str: string): number {
  */
 export function isVersionInNvdRange(
   deployedVersion: string,
-  range: NvdVersionRange
+  range: NvdVersionRange,
 ): { inRange: boolean; reason: string } {
   if (!deployedVersion || deployedVersion === '*') {
     return { inRange: true, reason: 'Wildcard version on asset matches all ranges' };
+  }
+
+  if (!canCompareRange(deployedVersion, range)) {
+    return { inRange: true, reason: 'Version ordering is unsupported; applicability requires review' };
   }
 
   // 1. Check versionStartIncluding (>= start)

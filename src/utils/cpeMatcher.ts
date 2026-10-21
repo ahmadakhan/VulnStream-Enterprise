@@ -156,6 +156,9 @@ export function matchCPE(
     if (!matchComponent(asset[field], vuln[field])) return { matched: false, reason: `${field} mismatch` };
   }
 
+  if (!matchComponent(asset.version, vuln.version))
+    return { matched: false, reason: 'Version token mismatch' };
+
   // Version matching: If explicit NVD version interval provided, evaluate interval
   if (
     versionRange &&
@@ -412,8 +415,14 @@ export function generateCPE23(
   targetHw: string = '*',
 ): string {
   const cleanPart = part || 'a';
-  const cleanVendor = (vendor || 'any').toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '_');
-  const cleanProduct = (product || 'any').toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '_');
+  const cleanVendor = (vendor || 'any')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_.-]/g, '_');
+  const cleanProduct = (product || 'any')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_.-]/g, '_');
   const cleanVersion = version && version !== '*' ? version.trim() : '*';
   const cleanHw = targetHw && targetHw !== '*' ? targetHw.trim() : '*';
 

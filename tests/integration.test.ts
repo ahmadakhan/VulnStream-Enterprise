@@ -258,7 +258,10 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       };
       assert.equal((await command('feed.save', edit, saved.id)).status, 200);
       assert.equal((await get<any>(pool, 'feeds', saved.id)).authSecretKey, '');
-      assert.equal((await command('feed.save', { ...edit, authSecretKey: 'fixture-secret' }, saved.id)).status, 200);
+      assert.equal(
+        (await command('feed.save', { ...edit, authSecretKey: 'fixture-secret' }, saved.id)).status,
+        200,
+      );
 
       assert.equal((await supertest(createApp(pool, config, requester)).get('/ready')).status, 200);
     });

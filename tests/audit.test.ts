@@ -235,6 +235,28 @@ test('unknown architecture cannot confirm an architecture-specific vulnerability
 
 test('inventory CPE builders preserve hyphens in canonical product identifiers', () => {
   for (const build of [generateCPE23, buildStrictCpe23]) {
-    assert.equal(parseCPE23(build('o','paloaltonetworks','pan-os','10.2.3')).product,'pan-os');
+    assert.equal(parseCPE23(build('o', 'paloaltonetworks', 'pan-os', '10.2.3')).product, 'pan-os');
   }
+});
+
+test('a CPE range cannot override an explicit vulnerable version token', () => {
+  assert.equal(matchCPE(cpe('2.0'), cpe('1.0'), { versionEndExcluding: '3.0' }).matched, false);
+});
+test('unsupported vendor version ordering creates a review candidate rather than a false exclusion', () => {
+  const { cve, asset, settings } = fixture();
+  asset.cpes = [cpe('2026release')];
+  cve.versionRange = { versionEndExcluding: '2.0' };
+  const findings = runVulnerabilityPipeline([], [cve], [asset], [], [], settings).newFindings;
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].notificationStatus, 'REVIEW_REQUIRED');
+});
+test('in-run duplicates use the latest modified CVE rather than input order', () => {
+  const { cve, asset, settings } = fixture();
+  cve.modifiedDate = '2020-01-01T00:00:00Z';
+  const newer = { ...cve, modifiedDate: '2026-01-01T00:00:00Z', cpeMatches: [cpe('2.0')] };
+  for (const corpus of [
+    [cve, newer],
+    [newer, cve],
+  ])
+    assert.equal(runVulnerabilityPipeline([], corpus, [asset], [], [], settings).newFindings.length, 0);
 });

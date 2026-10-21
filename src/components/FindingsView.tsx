@@ -95,7 +95,7 @@ export const FindingsView: React.FC = () => {
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
             Correlated vulnerabilities matching monitored products with uniform enterprise protection.
-            Notifications are dispatched autonomously upon detection.
+            Confirmed matches can enter configured delivery channels; uncertain applicability requires review.
           </p>
         </div>
       </div>
@@ -414,15 +414,19 @@ export const FindingsView: React.FC = () => {
                   Ref: {selectedFinding.cve.remediation.vendorAdvisoryRef}
                 </div>
               </div>
-              <a
-                href={selectedFinding.cve.remediation.patchUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="px-3 py-1 bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 rounded-xl font-medium flex items-center space-x-1 transition border border-zinc-700 dark:border-zinc-700 light:border-zinc-300"
-              >
-                <span>Vendor Advisory</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
+              {/^https:\/\//i.test(selectedFinding.cve.remediation.patchUrl) ? (
+                <a
+                  href={selectedFinding.cve.remediation.patchUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1 bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 rounded-xl font-medium flex items-center space-x-1 transition border border-zinc-700 dark:border-zinc-700 light:border-zinc-300"
+                >
+                  <span>Vendor Advisory</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              ) : (
+                <span className="text-zinc-500">No vendor link supplied</span>
+              )}
             </div>
 
             {/* Immediate Mitigation Commands */}

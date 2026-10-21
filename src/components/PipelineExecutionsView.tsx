@@ -25,13 +25,7 @@ import { PipelineExecution, PipelinePhase } from '../types';
 import { Pagination } from './Pagination';
 
 export const PipelineExecutionsView: React.FC = () => {
-  const {
-    executions,
-    isPipelineRunning,
-    currentPipelinePhase,
-    triggerPipelineRun,
-    settings,
-  } = useApp();
+  const { executions, isPipelineRunning, currentPipelinePhase, triggerPipelineRun, settings } = useApp();
 
   const [selectedExecution, setSelectedExecution] = useState<PipelineExecution | null>(null);
   const [scopeHours, setScopeHours] = useState(settings.scopeHours);
@@ -41,12 +35,9 @@ export const PipelineExecutionsView: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
 
-  const activeExecution = executions.find(e => e.id === selectedExecution?.id) || executions[0] || null;
+  const activeExecution = executions.find((e) => e.id === selectedExecution?.id) || executions[0] || null;
 
-  const paginatedExecutions = executions.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
+  const paginatedExecutions = executions.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleRun = async () => {
     const res = await triggerPipelineRun(scopeHours);
@@ -63,63 +54,21 @@ export const PipelineExecutionsView: React.FC = () => {
     downloadAnchor.remove();
   };
 
-  // Graphical Stages Definition
-  const pipelineStages = [
-    {
-      idx: 0,
-      phaseNumber: 1,
-      title: 'Safe Feed Ingestion',
-      subtitle: 'SSRF & Ingress Guard',
-      icon: Radio,
-      metricLabel: 'Feeds Ingested',
-      getMetric: (exec: PipelineExecution) => `${exec.stats.rawIngested} Feeds`,
-      description: 'Ingests NVD, CISA KEV, GHSA, and vendor threat feeds with RFC1918 SSRF blocking.',
-    },
-    {
-      idx: 1,
-      phaseNumber: 2,
-      title: 'Deduplication & Scope',
-      subtitle: 'Canonical ID Normalization',
-      icon: Filter,
-      metricLabel: 'Normalized Records',
-      getMetric: (exec: PipelineExecution) => `${exec.stats.normalized} In-Scope`,
-      description: 'Normalizes canonical CVE IDs and filters against published and modified date window.',
-    },
-    {
-      idx: 2,
-      phaseNumber: 3,
-      title: 'Multi-Source Enrichment',
-      subtitle: 'NVD, EPSS & KEV Sync',
-      icon: Sparkles,
-      metricLabel: 'Correlated Data',
-      getMetric: (exec: PipelineExecution) => `CVSS + EPSS`,
-      description: 'Enriches CVEs with CVSS v3.1/v4.0 vectors, FIRST EPSS percentiles, and CISA KEV exploitation.',
-    },
-    {
-      idx: 3,
-      phaseNumber: 4,
-      title: 'Strict Product Match',
-      subtitle: 'CPE 2.3 & PURL Engine',
-      icon: Cpu,
-      metricLabel: 'Product Impacts',
-      getMetric: (exec: PipelineExecution) => `${exec.stats.matchedWatchlist} Matches`,
-      description: 'Matches all monitored inventory with CPE 2.3 components, supported version intervals. Complex applicability requires review.',
-    },
-    {
-      idx: 4,
-      phaseNumber: 5,
-      title: 'Zero-Touch Dispatch',
-      subtitle: 'Email & HMAC Webhooks',
-      icon: Send,
-      metricLabel: 'Dispatched Alerts',
-      getMetric: (exec: PipelineExecution) => `${exec.stats.autoDispatchedNotifications} Notices`,
-      description: 'Autonomously dispatches advisories to SMTP recipients and Slack/Teams/SOAR webhooks.',
-    },
-  ];
+  // Render persisted phases rather than attaching unrelated metrics to fixed stage indices.
+  const pipelineStages = (activeExecution?.phases || []).map((phase, idx) => ({
+    idx,
+    phaseNumber: idx + 1,
+    title: phase.name,
+    subtitle: phase.details,
+    icon: phase.name === 'Feed ingestion' ? Radio : phase.name === 'Delivery queue' ? Send : Cpu,
+    metricLabel: 'Measured duration',
+    getMetric: (_exec: PipelineExecution) => `${phase.durationMs} ms`,
+    description: phase.details,
+  }));
 
   const filteredLogs = activeExecution
     ? selectedPhaseIdx !== null
-      ? activeExecution.logs.filter(l => {
+      ? activeExecution.logs.filter((l) => {
           const phaseName = activeExecution.phases[selectedPhaseIdx]?.name.toLowerCase() || '';
           return l.toLowerCase().includes(phaseName) || l.includes(`Phase ${selectedPhaseIdx + 1}`);
         })
@@ -136,16 +85,17 @@ export const PipelineExecutionsView: React.FC = () => {
             Autonomous Pipeline Executions &amp; Telemetry
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Server-side scheduled runs persist across browser sessions. Failed deliveries remain visible for retry.
+            Server-side scheduled runs persist across browser sessions. Failed deliveries remain visible for
+            retry.
           </p>
         </div>
 
         <div className="flex items-center space-x-2">
           <div className="flex items-center space-x-1.5 text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-3 py-1.5 rounded-xl shadow-sm">
-            <span>Scope:</span>
+            <span>Ingestion window:</span>
             <select
               value={scopeHours}
-              onChange={e => setScopeHours(Number(e.target.value))}
+              onChange={(e) => setScopeHours(Number(e.target.value))}
               disabled={isPipelineRunning}
               className="bg-transparent text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono font-medium focus:outline-none"
             >
@@ -203,12 +153,21 @@ export const PipelineExecutionsView: React.FC = () => {
         </div>
 
         {/* The Graphical Flowchart Canvas */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 relative py-2">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 relative py-2">
+          {!pipelineStages.length && (
+            <p className="text-sm text-zinc-400">
+              {activeExecution
+                ? `Execution ${activeExecution.status.toLowerCase()}; phase measurements appear when available.`
+                : 'No pipeline executions yet.'}
+            </p>
+          )}
           {pipelineStages.map((stage, idx) => {
             const PhaseIcon = stage.icon;
             const phaseData: PipelinePhase | undefined = activeExecution?.phases[idx];
             const isPhaseSelected = selectedPhaseIdx === idx;
-            const isPhaseActiveInRun = isPipelineRunning && currentPipelinePhase?.toLowerCase().includes(stage.title.toLowerCase().slice(0, 5));
+            const isPhaseActiveInRun =
+              isPipelineRunning &&
+              currentPipelinePhase?.toLowerCase().includes(stage.title.toLowerCase().slice(0, 5));
 
             let statusLabel = 'PENDING';
             let statusColor = 'text-zinc-500 border-zinc-800 bg-zinc-900/50';
@@ -238,8 +197,8 @@ export const PipelineExecutionsView: React.FC = () => {
                     isPhaseSelected
                       ? 'bg-zinc-800/90 dark:bg-zinc-800/90 light:bg-zinc-200 border-zinc-500 shadow-md ring-1 ring-zinc-400'
                       : isPhaseActiveInRun
-                      ? 'bg-zinc-950 dark:bg-zinc-950 light:bg-white border-amber-500/60 shadow-lg'
-                      : 'bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-50 border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 hover:border-zinc-600 dark:hover:border-zinc-600 light:hover:border-zinc-400 hover:bg-zinc-900/60'
+                        ? 'bg-zinc-950 dark:bg-zinc-950 light:bg-white border-amber-500/60 shadow-lg'
+                        : 'bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-50 border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 hover:border-zinc-600 dark:hover:border-zinc-600 light:hover:border-zinc-400 hover:bg-zinc-900/60'
                   }`}
                 >
                   {/* Top node header */}
@@ -254,7 +213,9 @@ export const PipelineExecutionsView: React.FC = () => {
                         </span>
                       </div>
 
-                      <PhaseIcon className={`w-4 h-4 ${isPhaseActiveInRun ? 'text-amber-400 animate-spin' : 'text-zinc-400 dark:text-zinc-400 light:text-zinc-600'}`} />
+                      <PhaseIcon
+                        className={`w-4 h-4 ${isPhaseActiveInRun ? 'text-amber-400 animate-spin' : 'text-zinc-400 dark:text-zinc-400 light:text-zinc-600'}`}
+                      />
                     </div>
 
                     <div className="font-bold text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 leading-snug">
@@ -268,7 +229,9 @@ export const PipelineExecutionsView: React.FC = () => {
                   {/* Bottom node metrics & status badge */}
                   <div className="mt-3 pt-2.5 border-t border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 space-y-1.5">
                     <div className="flex items-center justify-between text-[11px] font-mono">
-                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase tracking-wider ${statusColor}`}>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase tracking-wider ${statusColor}`}
+                      >
                         {statusLabel}
                       </span>
                       <span className="text-zinc-400 font-medium">
@@ -310,7 +273,7 @@ export const PipelineExecutionsView: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
-            {paginatedExecutions.map(exec => {
+            {paginatedExecutions.map((exec) => {
               const isSelected = activeExecution?.id === exec.id;
               return (
                 <div
@@ -330,7 +293,8 @@ export const PipelineExecutionsView: React.FC = () => {
                     <span className="text-[10px] text-emerald-400 font-semibold">{exec.status}</span>
                   </div>
                   <div className="text-[10px] text-zinc-500 light:text-zinc-600 font-sans mt-1">
-                    {new Date(exec.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {exec.stats.matchedWatchlist} Matches
+                    {new Date(exec.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{' '}
+                    • {exec.stats.matchedWatchlist} Matches
                   </div>
                 </div>
               );
@@ -366,7 +330,7 @@ export const PipelineExecutionsView: React.FC = () => {
                   {activeExecution.status}
                 </span>
                 <span className="text-xs font-mono text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
-                  Window: {activeExecution.scopeHours}h Scope (Published &amp; Modified Dates)
+                  Ingestion window: {activeExecution.scopeHours}h; matching evaluates all cached CVEs
                 </span>
               </div>
 
@@ -384,39 +348,51 @@ export const PipelineExecutionsView: React.FC = () => {
             {/* Ingestion Metric Counters */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
               <div className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 p-3 rounded-xl border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
-                <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[11px]">Raw Feeds Ingested</div>
+                <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[11px]">
+                  Feed Records Read
+                </div>
                 <div className="font-mono font-bold text-zinc-200 dark:text-zinc-200 light:text-zinc-900 text-lg mt-0.5">
                   {activeExecution.stats.rawIngested}
                 </div>
               </div>
               <div className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 p-3 rounded-xl border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
-                <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[11px]">Normalized CVEs</div>
+                <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[11px]">
+                  Normalized CVEs
+                </div>
                 <div className="font-mono font-bold text-zinc-200 dark:text-zinc-200 light:text-zinc-900 text-lg mt-0.5">
                   {activeExecution.stats.normalized}
                 </div>
               </div>
               <div className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 p-3 rounded-xl border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
-                <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[11px]">Duplicates Dropped</div>
+                <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[11px]">
+                  Duplicates Dropped
+                </div>
                 <div className="font-mono font-bold text-zinc-400 dark:text-zinc-400 light:text-zinc-700 text-lg mt-0.5">
                   {activeExecution.stats.inRunDuplicatesDropped}
                 </div>
               </div>
               <div className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 p-3 rounded-xl border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
-                <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[11px]">Product Matches</div>
+                <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[11px]">
+                  Product Matches
+                </div>
                 <div className="font-mono font-bold text-zinc-200 dark:text-zinc-200 light:text-zinc-900 text-lg mt-0.5">
                   {activeExecution.stats.matchedWatchlist}
                 </div>
               </div>
               <div className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 p-3 rounded-xl border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
-                <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[11px]">Auto-Dispatched</div>
+                <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[11px]">
+                  Notifications Queued
+                </div>
                 <div className="font-mono font-bold text-emerald-400 text-lg mt-0.5">
-                  {activeExecution.stats.autoDispatchedNotifications}
+                  {activeExecution.stats.notificationsQueued ?? 0}
                 </div>
               </div>
               <div className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 p-3 rounded-xl border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
-                <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[11px]">Webhooks Dispatched</div>
+                <div className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[11px]">
+                  Advisories Queued
+                </div>
                 <div className="font-mono font-bold text-zinc-200 dark:text-zinc-200 light:text-zinc-900 text-lg mt-0.5">
-                  {activeExecution.stats.webhooksFired || 0}
+                  {activeExecution.stats.advisoriesQueued ?? 0}
                 </div>
               </div>
             </div>
@@ -458,13 +434,17 @@ export const PipelineExecutionsView: React.FC = () => {
                           <span>{phase.name}</span>
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                         </div>
-                        <div className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px] mt-0.5">{phase.details}</div>
+                        <div className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px] mt-0.5">
+                          {phase.details}
+                        </div>
                       </div>
                     </div>
 
                     <div className="sm:text-right shrink-0 font-mono text-[11px]">
                       <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600">Duration: </span>
-                      <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-800 font-medium">{phase.durationMs}ms</span>
+                      <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-800 font-medium">
+                        {phase.durationMs}ms
+                      </span>
                     </div>
                   </div>
                 );
@@ -491,7 +471,10 @@ export const PipelineExecutionsView: React.FC = () => {
                 <div className="text-zinc-500 py-2">No log entries found for this specific filter.</div>
               ) : (
                 filteredLogs.map((log, i) => (
-                  <div key={i} className="hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition">
+                  <div
+                    key={i}
+                    className="hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
+                  >
                     {log}
                   </div>
                 ))
@@ -502,7 +485,9 @@ export const PipelineExecutionsView: React.FC = () => {
       ) : (
         <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-12 text-center text-zinc-500 text-xs">
           <Clock className="w-8 h-8 text-zinc-600 mx-auto mb-3" />
-          <p className="font-medium text-zinc-300 dark:text-zinc-300 light:text-zinc-800">No executions recorded yet this session.</p>
+          <p className="font-medium text-zinc-300 dark:text-zinc-300 light:text-zinc-800">
+            No executions recorded yet this session.
+          </p>
           <p className="text-[11px] text-zinc-500 mt-1">
             Click &quot;Run Pipeline&quot; above to execute automated ingestion.
           </p>

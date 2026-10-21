@@ -38,7 +38,9 @@ export const DashboardView: React.FC = () => {
   } = useApp();
 
   const activeVulnerabilities = findings.filter(
-    (f) => f.status !== 'RESOLVED' && f.status !== 'FALSE_POSITIVE',
+    (f) =>
+      !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status) &&
+      f.notificationStatus !== 'NOT_APPLICABLE',
   );
   const kevFindings = findings.filter((f) => f.cve.cisaKev.isKev);
   const criticalFindings = findings.filter((f) => f.cve.cvss.severity === 'CRITICAL');
@@ -260,7 +262,9 @@ export const DashboardView: React.FC = () => {
                       <span>•</span>
                       <span>
                         Protection:{' '}
-                        <span className="text-emerald-400 font-medium">{settings.schedulerEnabled ? 'Scheduled matching' : 'Manual matching'}</span>
+                        <span className="text-emerald-400 font-medium">
+                          {settings.schedulerEnabled ? 'Scheduled matching' : 'Manual matching'}
+                        </span>
                       </span>
                     </div>
                   </div>
@@ -270,7 +274,13 @@ export const DashboardView: React.FC = () => {
                       <Send className="w-3 h-3 text-emerald-400" />
                       <span>{finding.notificationStatus.replace(/_/g, ' ')}</span>
                     </span>
-                    <div className="text-[10px] text-zinc-500 font-mono mt-1">{finding.notificationStatus === 'REVIEW_REQUIRED' ? 'Applicability review required; not dispatched' : finding.autoDispatchedAt ? 'Provider accepted notification' : 'Notification pending'}</div>
+                    <div className="text-[10px] text-zinc-500 font-mono mt-1">
+                      {['REVIEW_REQUIRED', 'NOT_APPLICABLE'].includes(finding.notificationStatus)
+                        ? 'Not eligible for automatic dispatch'
+                        : finding.autoDispatchedAt
+                          ? 'Provider accepted notification'
+                          : 'Notification pending'}
+                    </div>
                   </div>
                 </div>
               );

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { get, list, put, transaction, appendAudit, state } from './db';
 import { DEFAULT_SETTINGS } from '../shared/state';
 import type { AppSettings, PipelineExecution, ThreatFeed, Advisory, Finding } from '../src/types';
+import { reconcileFindings } from '../src/engine/reconcileFindings';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { ingestFeed } from './ingestion';
 import type { Requester } from './network';
@@ -178,18 +179,39 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         }
         await put(db, 'cveData', cve.cveId, cve);
       }
-      const settings = { ...snapshot.settings, scopeHours: execution!.scopeHours };
+      // The run window limits network ingestion, not applicability of already cached CVEs.
+      const settings = { ...snapshot.settings, scopeHours: 0 };
       const correlated = runVulnerabilityPipeline(
         feeds,
         [...byId.values()],
         snapshot.watchlist,
         snapshot.alertedCves,
-        snapshot.findings,
+        [],
         settings,
       );
-      for (const f of correlated.newFindings) await put(db, 'findings', f.id, f);
+      // A wholly rejected stale bundle may be rebuilt from current matches. Never
+      // automatically resend a bundle with any acceptance or an in-flight delivery.
+      const staleBundles = new Set<string>(
+        (
+          await db.query(
+            `SELECT advisory_id FROM outbox GROUP BY advisory_id HAVING bool_and(status='FAILED' AND COALESCE(error,'') LIKE 'Advisory applicability changed;%')`,
+          )
+        ).rows.map((row) => row.advisory_id),
+      );
+      const reconciled = reconcileFindings(
+        snapshot.findings.map((f) =>
+          f.advisoryId && staleBundles.has(f.advisoryId) && !f.autoDispatchedAt
+            ? { ...f, advisoryId: null }
+            : f,
+        ),
+        correlated.newFindings,
+      );
+      for (const f of reconciled) await put(db, 'findings', f.id, f);
+      const queueStarted = Date.now();
+      let notificationsQueued = 0,
+        advisoriesQueued = 0;
       // Previously queued findings also become deliverable after enabling dispatch.
-      const pending = [...snapshot.findings, ...correlated.newFindings].filter(
+      const pending = reconciled.filter(
         (f) =>
           f.notificationStatus === 'QUEUED_FOR_DISPATCH' &&
           !f.advisoryId &&
@@ -220,6 +242,8 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           pending,
           renderAdvisory(snapshot.advisoryTemplate, advisory),
         );
+        notificationsQueued = count;
+        advisoriesQueued = count ? 1 : 0;
         if (count)
           for (const f of pending) await put(db, 'findings', f.id, { ...f, advisoryId: advisory.id });
       }
@@ -227,7 +251,13 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         ...correlated.execution,
         id: execution!.id,
         startTime: execution!.startTime,
-        logs: execution!.logs,
+        endTime: new Date().toISOString(),
+        scopeHours: execution!.scopeHours,
+        logs: [
+          ...execution!.logs,
+          `Structured correlation: ${correlated.newFindings.length} current matches; ${reconciled.length} retained findings`,
+          `Delivery queue: ${notificationsQueued} jobs queued`,
+        ],
         phases: [
           {
             name: 'Feed ingestion',
@@ -235,10 +265,21 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             durationMs: ingestionDuration,
             details: `${succeeded}/${feeds.length} feeds succeeded; ${rawCount} records read`,
           },
-          ...correlated.execution.phases,
+          ...correlated.execution.phases.map((phase) => ({
+            ...phase,
+            details: `${byId.size} cached CVEs evaluated; ${correlated.newFindings.length} current matches`,
+          })),
+          {
+            name: 'Delivery queue',
+            status: 'SUCCESS',
+            durationMs: Date.now() - queueStarted,
+            details: `${notificationsQueued} jobs queued; transport acceptance is tracked separately`,
+          },
         ],
       };
       execution.stats.rawIngested = rawCount;
+      execution.stats.notificationsQueued = notificationsQueued;
+      execution.stats.advisoriesQueued = advisoriesQueued;
       await put(db, 'executions', execution.id, execution);
       await db.query('UPDATE scheduler_state SET last_run=now() WHERE id=1');
       await appendAudit(

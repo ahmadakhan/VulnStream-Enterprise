@@ -2,44 +2,32 @@ import { NvdVersionRange } from '../utils/versionComparator';
 
 export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
-export type ExposureLevel = 
-  | 'INTERNET_FACING' 
-  | 'INTERNAL_CRITICAL' 
-  | 'DMZ' 
-  | 'WORKSTATION' 
-  | 'CLOUD_INFRA';
+export type ExposureLevel = 'INTERNET_FACING' | 'INTERNAL_CRITICAL' | 'DMZ' | 'WORKSTATION' | 'CLOUD_INFRA';
 
-export type ExploitRiskLevel = 
-  | 'CISA_KEV_EXPLOITED'
-  | 'WEAPONIZED_EXPLOIT'
-  | 'HIGH_EPSS_PROBABILITY'
-  | 'ELEVATED'
-  | 'STANDARD';
+export type ExploitRiskLevel =
+  'CISA_KEV_EXPLOITED' | 'WEAPONIZED_EXPLOIT' | 'HIGH_EPSS_PROBABILITY' | 'ELEVATED' | 'STANDARD';
 
-export type NotificationStatus = 
+export type NotificationStatus =
   | 'AUTO_DISPATCHED'
   | 'QUEUED_FOR_DISPATCH'
   | 'DIGEST_BATCHED'
   | 'REVIEW_REQUIRED'
+  | 'NOT_APPLICABLE'
   | 'SUPPRESSED_VEX_NOT_AFFECTED'
   | 'DELIVERED'
   | 'DELIVERY_FAILED';
 
-export type FindingStatus = 
-  | 'MONITORED' 
-  | 'REMEDIATION_AVAILABLE' 
-  | 'PATCH_APPLIED' 
-  | 'RESOLVED' 
-  | 'FALSE_POSITIVE';
+export type FindingStatus =
+  'MONITORED' | 'REMEDIATION_AVAILABLE' | 'PATCH_APPLIED' | 'RESOLVED' | 'FALSE_POSITIVE';
 
-export type FeedType = 
-  | 'RSS_ATOM' 
-  | 'STIX_2' 
-  | 'TAXII_21' 
-  | 'GITHUB_ADVISORY' 
-  | 'JSON_SEARCH_API' 
-  | 'NVD_API' 
-  | 'EPSS_API' 
+export type FeedType =
+  | 'RSS_ATOM'
+  | 'STIX_2'
+  | 'TAXII_21'
+  | 'GITHUB_ADVISORY'
+  | 'JSON_SEARCH_API'
+  | 'NVD_API'
+  | 'EPSS_API'
   | 'CISA_KEV'
   | 'CSAF_VEX';
 
@@ -216,6 +204,8 @@ export interface PipelineExecution {
     advisoriesDispatched: number;
     webhooksFired: number;
     vexSuppressedCount: number;
+    notificationsQueued?: number;
+    advisoriesQueued?: number;
   };
   logs: string[];
 }
