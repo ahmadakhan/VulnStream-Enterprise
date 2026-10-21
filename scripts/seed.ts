@@ -1,34 +1,71 @@
+import { z } from 'zod';
 import { loadConfig } from '../server/config';
-import { createPool, put, transaction } from '../server/db';
-import { encrypt } from '../server/secrets';
+import { createPool, transaction } from '../server/db';
+import { applyCommand } from '../server/commands';
 import { INITIAL_FEEDS, INITIAL_WATCHLIST } from '../tests/fixtures/seedData';
 
 const config = loadConfig();
 const pool = createPool(config.DATABASE_URL);
 
-const encryptFeedKey = (feed: (typeof INITIAL_FEEDS)[number]) =>
-  feed.authSecretKey ? encrypt(feed.authSecretKey, config.ENCRYPTION_KEY, `feed:${feed.id}`) : '';
+/** Map the fixture feeds onto the shared import command payload. */
+const feedPayload = INITIAL_FEEDS.map((feed) => ({
+  id: feed.id,
+  name: feed.name,
+  type: feed.type,
+  url: feed.url,
+  authType: feed.authType,
+  authSecretKey: feed.authSecretKey,
+  rateLimitPerMin: feed.rateLimitPerMin,
+  enabled: feed.enabled,
+  vendorSeed: feed.vendorSeed ?? true,
+  lastSync: feed.lastSync,
+  etag: feed.etag,
+  itemCountLastRun: feed.itemCountLastRun,
+  latencyMs: feed.latencyMs,
+}));
 
 try {
   await transaction(pool, async (db) => {
-    for (const feed of INITIAL_FEEDS) {
-      await put(db, 'feeds', feed.id, {
-        ...feed,
-        authSecretKey: encryptFeedKey(feed),
-        healthStatus: 'UNTESTED' as const,
-        ssrfValidated: true,
-        latencyMs: 0,
-      });
-    }
+    // Feeds go through the same validated command path the API uses, so a
+    // misconfigured feed fails loudly here instead of landing in the database.
+    await applyCommand(db, config, {
+      action: 'feed.import',
+      data: feedPayload,
+      actor: 'seed-script',
+    });
 
     for (const item of INITIAL_WATCHLIST) {
-      await put(db, 'watchlist', item.id, item);
+      await applyCommand(db, config, {
+        action: 'asset.save',
+        id: item.id,
+        data: {
+          vendor: item.vendor,
+          product: item.product,
+          version: item.version,
+          cpes: item.cpes,
+          purls: item.purls,
+          targetHw: item.targetHw,
+          assetTag: item.assetTag,
+          ownerGroup: item.ownerGroup,
+          active: item.active,
+          notes: item.notes,
+        },
+        actor: 'seed-script',
+      });
     }
   });
 
   console.log('Seed data applied: Threat Feed Sources and Monitored Product Inventory only.');
 } catch (e) {
-  console.error('Seed failed:', e);
+  if (e instanceof z.ZodError) {
+    console.error('Seed failed: feed configuration is invalid.');
+    for (const issue of e.issues)
+      console.error(`  - ${issue.path.join('.') || '(root)'}: ${issue.message}`);
+    process.exitCode = 1;
+  } else {
+    console.error('Seed failed:', e);
+    process.exitCode = 1;
+  }
 } finally {
   await pool.end();
 }

@@ -20,16 +20,13 @@ export type NotificationStatus =
 export type FindingStatus =
   'MONITORED' | 'REMEDIATION_AVAILABLE' | 'PATCH_APPLIED' | 'RESOLVED' | 'FALSE_POSITIVE';
 
-export type FeedType =
-  | 'RSS_ATOM'
-  | 'STIX_2'
-  | 'TAXII_21'
-  | 'GITHUB_ADVISORY'
-  | 'JSON_SEARCH_API'
-  | 'NVD_API'
-  | 'EPSS_API'
-  | 'CISA_KEV'
-  | 'CSAF_VEX';
+/**
+ * Feed types the server can actually ingest. The runtime adapter set and this
+ * list must stay identical: a feed that is not in this list cannot be polled.
+ */
+export const FEED_TYPES = ['JSON_SEARCH_API', 'NVD_API', 'CISA_KEV', 'EPSS_API'] as const;
+
+export type FeedType = (typeof FEED_TYPES)[number];
 
 export type FeedAuthType = 'NONE' | 'API_KEY' | 'BEARER' | 'BASIC';
 
@@ -174,9 +171,10 @@ export interface Advisory {
   deliveryStatus: 'ACCEPTED' | 'DELIVERED' | 'PENDING' | 'FAILED' | 'RETRYING' | 'DRAFT';
   recipientCount: number;
   executiveSummary: string;
-  remediationInstructions: string;
+   remediationInstructions: string;
   affectedSystems: string[];
   isDigestBatch?: boolean;
+  vendorLink?: string;
 }
 
 export interface PipelinePhase {

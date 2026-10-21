@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FEED_TYPES } from '../src/types';
 import { parseCPE23 } from '../src/utils/cpeMatcher';
 export const shortText = z.string().trim().min(1).max(200);
 export const idSchema = z.string().min(1).max(150);
@@ -12,7 +13,7 @@ const httpsUrl = z
   }, 'HTTPS URL without embedded credentials required');
 export const feedSchema = z.object({
   name: shortText,
-  type: z.enum(['NVD_API', 'CISA_KEV', 'EPSS_API', 'JSON_SEARCH_API']),
+  type: z.enum(FEED_TYPES),
   url: httpsUrl.refine(
     (s) =>
       !Array.from(new URL(s).searchParams.keys()).some((key) =>
@@ -26,6 +27,18 @@ export const feedSchema = z.object({
   enabled: z.boolean(),
   vendorSeed: z.boolean().default(false),
 });
+/** Bulk import shape: adds the stable identifier and the stored sync metadata. */
+export const feedImportSchema = z
+  .array(
+    feedSchema.extend({
+      id: idSchema,
+      lastSync: z.iso.datetime({ offset: true }).nullable().optional(),
+      etag: z.string().max(200).optional(),
+      itemCountLastRun: z.number().int().min(0).optional(),
+      latencyMs: z.number().int().min(0).optional(),
+    }),
+  )
+  .max(100);
 export const assetSchema = z
   .object({
     vendor: shortText,

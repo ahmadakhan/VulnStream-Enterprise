@@ -61,7 +61,7 @@ export function renderAdvisory(template: string, advisory: Advisory): string {
     cve_ids: advisory.cveIds.join(', '),
     affected_systems: advisory.affectedSystems.join('\n'),
     remediation_steps: advisory.remediationInstructions,
-    vendor_link: '',
+    vendor_link: advisory.vendorLink || '',
   };
   return template.replace(/{{([a-z_]+)}}/g, (_, key) => escape(values[key] || ''));
 }
@@ -153,11 +153,8 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           });
       }
       if (feeds.length && !succeeded) {
-        execution!.status = 'FAILED';
-        execution!.endTime = new Date().toISOString();
-        await put(db, 'executions', execution!.id, execution);
-        await appendAudit(db, 'Pipeline failed', 'All enabled feeds failed', 'worker', 'PIPELINE', 'ERROR');
-        return;
+        await appendAudit(db, 'Pipeline warning', 'All enabled feeds failed; running correlation against cache', 'worker', 'PIPELINE', 'WARNING');
+        execution!.logs.push('All feeds failed; proceeding with cached CVE correlation');
       }
       const snapshot = await state(db);
       const byId = new Map(snapshot.cveData.map((c) => [c.cveId, c]));
@@ -174,7 +171,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         }
       for (const cve of byId.values()) {
         for (const result of results) {
-          if (result.kev) cve.cisaKev = result.kev[cve.cveId] || { isKev: false };
+           if (result.kev && result.kev[cve.cveId]) cve.cisaKev = result.kev[cve.cveId];
           if (result.epss?.[cve.cveId]) cve.epss = result.epss[cve.cveId];
         }
         await put(db, 'cveData', cve.cveId, cve);
@@ -186,7 +183,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         [...byId.values()],
         snapshot.watchlist,
         snapshot.alertedCves,
-        [],
+         snapshot.findings,
         settings,
       );
       // A wholly rejected stale bundle may be rebuilt from current matches. Never
@@ -232,8 +229,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           deliveryStatus: 'PENDING',
           recipientCount: 0,
           executiveSummary: `${pending.length} inventory correlations require investigation. Confirm applicability and consult the vendor before remediation.`,
-          remediationInstructions:
-            'Review vendor advisories and deploy tested remediation through your change process.',
+           remediationInstructions:
+             'Review vendor advisories and deploy tested remediation through your change process.',
+           vendorLink: pending[0].cve.remediation.vendorAdvisoryRef || pending[0].cve.remediation.patchUrl,
           affectedSystems: Array.from(new Set(pending.map((f) => f.matchedAssetName))),
         };
         const count = await queueAdvisory(
