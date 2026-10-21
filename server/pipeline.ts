@@ -18,6 +18,7 @@ import { reconcileFindings } from '../src/engine/reconcileFindings';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { ingestFeed } from './ingestion';
 import { recoveryDue, recoveryAt } from './feedRecovery';
+import { ingestionWindow, type FeedCursor } from './ingestionState';
 import type { Requester } from './network';
 import type { Config } from './config';
 import { queueAdvisory } from './delivery';
@@ -169,8 +170,15 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     if (!execution) {
       const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
       const last = (await pool.query('SELECT last_run FROM scheduler_state WHERE id=1')).rows[0]?.last_run;
+      const configuredFeeds = await list<ThreatFeed>(pool, 'feeds');
+      const cursors = new Map((await pool.query("SELECT id,data FROM records WHERE kind='feedCursors'")).rows.map(row => [row.id, row.data as FeedCursor]));
+      const catchupDue = configuredFeeds.some(feed => {
+        const cursor = cursors.get(feed.id);
+        return feed.enabled && cursor?.hasMore && cursor.fingerprint === sourceFingerprint(feed) &&
+          !(Date.parse(feed.circuitOpenUntil || '') > Date.now());
+      });
       if (
-        (await list<ThreatFeed>(pool, 'feeds')).some((feed) => recoveryDue(feed)) ||
+        catchupDue || configuredFeeds.some((feed) => recoveryDue(feed)) ||
         (settings.schedulerEnabled &&
         (!last || Date.now() - new Date(last).getTime() >= settings.schedulerIntervalMinutes * 60000))
       )
@@ -264,6 +272,12 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
                 await new Promise((resolve) => setTimeout(resolve, Math.min(500, until - Date.now())));
               }
             };
+            const savedCursor = await get<FeedCursor>(pool, 'feedCursors', feed.id);
+            const cursor = savedCursor?.fingerprint === sourceFingerprint(feed) ? savedCursor : undefined;
+            if (['NVD_API', 'OPENCVE_API', 'MITRE_CVE'].includes(feed.type)) {
+              const window = ingestionWindow(execution!.scopeHours, cursor);
+              execution!.logs.push(`Feed ${feed.id}: ${window.incremental ? 'incremental' : 'initial bounded'} sync ${window.start.toISOString()} to ${window.end.toISOString()}`);
+            }
             const savedKev =
               feed.type === 'CISA_KEV' ? await get<KevSnapshot>(pool, 'feedSnapshots', feed.id) : undefined;
             const cachedKev = savedKev?.fingerprint === sourceFingerprint(feed) ? savedKev : undefined;
@@ -280,12 +294,13 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
                     await transaction(pool, async (db) => {
                       await checkpoint(db);
                       execution!.phases[0].durationMs = Date.now() - Date.parse(execution!.startTime);
-                      execution!.phases[0].details = `NVD: ${offset.toLocaleString()} of ${total.toLocaleString()} records in the last ${execution!.scopeHours}h; ${records.toLocaleString()} retrieved`;
+                      execution!.phases[0].details = `NVD: ${offset.toLocaleString()} of ${total.toLocaleString()} records in incremental sync; ${records.toLocaleString()} retrieved`;
                       execution!.stats.rawIngested = rawCount + records;
                       await put(db, 'executions', execution!.id, execution);
                     });
                   }
                 : undefined,
+              cursor,
             );
             if (feed.type === 'CISA_KEV' && result.notModified) {
               if (!cachedKev) throw new Error('KEV conditional response has no source snapshot');
@@ -428,6 +443,12 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         execution!.logs.push('All feeds failed; proceeding with cached CVE correlation');
       }
       for (const result of acceptedResults) {
+        if (result.syncState) {
+          const source = currentFeeds.get(result.sourceId!)!;
+          await put(db, 'feedCursors', source.id, {
+            ...result.syncState, fingerprint: sourceFingerprint(source),
+          } satisfies FeedCursor);
+        }
         if (result.kev && !result.notModified) {
           const source = currentFeeds.get(result.sourceId!)!;
           await put(db, 'feedSnapshots', source.id, {
@@ -633,7 +654,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             name: 'Feed ingestion',
             status: succeeded < feeds.length || acceptedResults.some((result) => result.warnings?.length) ? 'WARNING' : 'SUCCESS',
             durationMs: ingestionDuration,
-            details: `${succeeded}/${feeds.length} feeds succeeded; ${rawCount} records read in the last ${execution!.scopeHours}h`,
+            details: `${succeeded}/${feeds.length} feeds succeeded; ${rawCount} records read; cached intelligence retained`,
           },
           {
             ...correlated.execution.phases[0],

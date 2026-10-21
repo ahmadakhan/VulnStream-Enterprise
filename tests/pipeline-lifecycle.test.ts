@@ -73,6 +73,55 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
   };
   try {
     await migrate(pool);
+    await t.test('incremental checkpoints commit atomically, survive failures, and reset after source changes', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: false });
+      const source = { id: 'incremental', name: 'NVD incremental', type: 'NVD_API', url: 'https://example.com/nvd', authType: 'NONE', rateLimitPerMin: 600, enabled: true };
+      await save('feeds', source.id, source);
+      let requestedStart = '', requestedEnd = '';
+      const success = async (raw: string) => {
+        const url = new URL(raw);
+        requestedStart = url.searchParams.get('lastModStartDate')!;
+        requestedEnd = url.searchParams.get('lastModEndDate')!;
+        return { status: 200, headers: {}, body: JSON.stringify({ startIndex: 0, totalResults: 0, vulnerabilities: [] }) };
+      };
+      await queueRun(pool, 2880, 'test');
+      await processPipeline(pool, config, success);
+      assert.ok(Date.parse(requestedEnd) - Date.parse(requestedStart) <= 86400000);
+      const first = await get<any>(pool, 'feedCursors', source.id);
+      assert.equal(first.cursor, requestedEnd);
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, success);
+      assert.equal(Date.parse(requestedStart), Date.parse(first.cursor) - 600000);
+      const committed = await get<any>(pool, 'feedCursors', source.id);
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async () => { throw new Error('Upstream unavailable'); });
+      assert.deepEqual(await get(pool, 'feedCursors', source.id), committed);
+      await transaction(pool, db => applyCommand(db, config, { action: 'feed.save', id: source.id, data: { ...source, url: 'https://example.com/new-nvd' }, actor: 'test' }));
+      await queueRun(pool, 2880, 'test');
+      await processPipeline(pool, config, success);
+      assert.ok(Date.parse(requestedEnd) - Date.parse(requestedStart) >= 86399000);
+      assert.notEqual((await get<any>(pool, 'feedCursors', source.id)).fingerprint, committed.fingerprint);
+    });
+    await t.test('outstanding checkpoints automatically catch up with scheduling disabled', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: false });
+      const source = { id: 'catchup', name: 'NVD catch-up', type: 'NVD_API', url: 'https://example.com/nvd', authType: 'NONE', rateLimitPerMin: 600, enabled: true };
+      await save('feeds', source.id, source);
+      const request = async () => ({ status: 200, headers: {}, body: JSON.stringify({ startIndex: 0, totalResults: 0, vulnerabilities: [] }) });
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, request);
+      const cursor = await get<any>(pool, 'feedCursors', source.id);
+      const old = Date.now() - 72 * 3600000;
+      await save('feedCursors', source.id, { ...cursor, cursor: new Date(old).toISOString(), hasMore: true });
+      assert.equal(await processPipeline(pool, config, request), true);
+      const next = await get<any>(pool, 'feedCursors', source.id);
+      assert.ok(Date.parse(next.cursor) > old);
+      assert.ok(Date.parse(next.cursor) - old <= 86400000);
+      assert.equal(next.hasMore, true);
+      await save('feeds', source.id, { ...source, enabled: false });
+      assert.equal(await processPipeline(pool, config, request), false);
+    });
     await t.test('MITRE CVE and overlapping feeds persist one CVE and stable inventory findings across runs', async () => {
       await reset();
       await save('watchlist', 'asset', asset());
@@ -237,6 +286,7 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       const stopped = await get<any>(pool, 'executions', queued.id);
       assert.equal(stopped.status, 'CANCELLED');
       assert.ok(stopped.stopRequestedAt);
+      assert.equal(await get(pool, 'feedCursors', 'stop-feed'), undefined);
       assert.equal((await list(pool, 'cveData')).length, 0);
       assert.equal((await list(pool, 'findings')).length, 0);
       assert.equal((await pool.query('SELECT count(*) FROM outbox')).rows[0].count, '0');
