@@ -1,6 +1,6 @@
 import type pg from 'pg';
 import { randomUUID } from 'node:crypto';
-import { get, list, put, transaction, appendAudit, state } from './db';
+import { get, list, put, putMany, transaction, appendAudit, state } from './db';
 import { DEFAULT_SETTINGS } from '../shared/state';
 import type { AppSettings, PipelineExecution, ThreatFeed, Advisory, Finding } from '../src/types';
 import { reconcileFindings } from '../src/engine/reconcileFindings';
@@ -125,7 +125,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         const feed = feeds[i];
         const start = Date.now();
         try {
-          const result = await ingestFeed(feed, execution.scopeHours, request, config);
+          const result = await ingestFeed(feed, execution!.scopeHours, request, config);
           results.push(result);
           rawCount += result.count;
           succeeded++;
@@ -141,7 +141,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         } catch (e) {
           const message = e instanceof Error ? e.message : 'Ingestion failed';
           feedUpdates.push({ ...feed, healthStatus: 'DOWN', latencyMs: Date.now() - start, errorLog: message });
-          execution.logs.push(`Feed ${feed.id}: ${message}`);
+          execution!.logs.push(`Feed ${feed.id}: ${message}`);
         }
         await lock.query('SELECT 1');
       }

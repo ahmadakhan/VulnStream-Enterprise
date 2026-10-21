@@ -171,8 +171,8 @@ export const settingsSchema = z.object({
   schedulerEnabled: z.boolean(),
   advisoryPrefix: z.string().regex(/^[A-Za-z0-9_-]{1,30}$/),
   autoDispatchEnabled: z.boolean(),
-  // Unsupported knobs cannot silently promise behavior.
-  digestBatchingEnabled: z.literal(false),
+  // Digest coalescing is opt-in so existing deployments keep their current behavior.
+  digestBatchingEnabled: z.boolean().default(false),
   digestWindowMinutes: z.number().int().min(1).max(1440),
   webhookSigningSecret: z.literal(''),
   authorityPrecedence: z.array(z.enum(['VENDOR_PSIRT', 'CISA_KEV', 'FIRST_EPSS', 'NVD_BATCH'])).max(4),

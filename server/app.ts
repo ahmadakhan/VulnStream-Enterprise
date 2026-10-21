@@ -339,7 +339,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           { subject: 'VulnStream connection test', text: 'Requested VulnStream webhook test', cveIds: [] },
           randomUUID(),
         );
-        await appendAudit(db, 'Test webhook queued', `Delivery ${id}`, req.operator!.username, 'WEBHOOK');
+        await appendAudit(db, 'Test webhook queued', `Delivery ${id}`, req.operator!.username, 'WEBHOOK', 'INFO', req.ip || '');
       });
       res.status(202).json({ success: true, statusCode: 202, signature: 'Pending worker delivery' });
     }),
