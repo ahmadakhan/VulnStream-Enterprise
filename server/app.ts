@@ -14,6 +14,7 @@ import { createRequester, resolvePublic } from './network';
 import type { Requester, ResponseData } from './network';
 import { queueRun, stopRun, renderAdvisory } from './pipeline';
 import { enqueue, queueAdvisory } from './delivery';
+import { advisoryEmail } from './advisoryEmail';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state';
 import { emailIsConfigured } from './emailProviders';
 import { parseSyndication } from './rss';
@@ -350,15 +351,19 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         if (!emailIsConfigured(emailConfig, config))
           throw new HttpError(409, 'Configure an email provider in Settings before sending a test');
         const data = await state(db);
+        const testAdvisory: Advisory = {
+          id: `${data.settings.advisoryPrefix}TEST`, title: 'VulnStream template test', severity: 'UNKNOWN',
+          cveIds: [], findingIds: [], createdDate: new Date().toISOString(), deliveryStatus: 'PENDING',
+          recipientCount: 1, executiveSummary: 'Requested template test. This is not a live vulnerability advisory.',
+          affectedSystems: ['Example inventory asset'], remediationInstructions: 'Preview only; no remediation action is required.',
+        };
         const id = await enqueue(
           db,
           'email',
           'test',
           'TEST',
           {
-            subject: 'VulnStream template test',
-            text: 'Requested template test',
-            html: data.advisoryTemplate,
+            ...advisoryEmail(testAdvisory, renderAdvisory(data.advisoryTemplate, testAdvisory)),
             recipientEmail: email,
             cveIds: [],
           },

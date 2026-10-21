@@ -34,6 +34,7 @@ import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../utils/templateCompiler';
 export const AdvisoryTemplateView: React.FC = () => {
   const {
     advisoryTemplate,
+    settings,
     templateCustomization,
     updateTemplateCustomization,
     sendTestEmail,
@@ -122,7 +123,7 @@ export const AdvisoryTemplateView: React.FC = () => {
   const getRenderedHtml = () =>
     advisoryTemplate
       .replace(/{{severity}}/g, 'HIGH')
-      .replace(/{{advisory_id}}/g, 'PREVIEW-EXAMPLE')
+      .replace(/{{advisory_id}}/g, `${settings.advisoryPrefix}PREVIEW-EXAMPLE`)
       .replace(/{{advisory_title}}/g, 'Example advisory — template preview only')
       .replace(/{{dispatch_date}}/g, previewDate)
       .replace(

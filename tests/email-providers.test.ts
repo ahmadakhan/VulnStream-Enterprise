@@ -202,6 +202,11 @@ test(
         .set('x-csrf-token', csrf)
         .send({ email: job.payload.recipientEmail });
       assert.equal(queued.status, 202);
+      const queuedPayload = (await pool.query('SELECT payload FROM outbox')).rows[0].payload;
+      assert.match(queuedPayload.subject, /^\[ADV-TEST\]/);
+      assert.match(queuedPayload.text, /Advisory ID: ADV-TEST/);
+      assert.match(queuedPayload.html, /ADV-TEST/);
+      assert.ok(!queuedPayload.html.includes('{{advisory_id}}'));
       assert.equal(await deliverNext(pool, config, request, createMailSender(config, pool, request)), true);
       const logs = await list<EmailDeliveryLog>(pool, 'emailLogs');
       assert.equal(logs.length, 1);

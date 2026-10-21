@@ -41,7 +41,7 @@ export function SystemHealthView() {
   };
   useEffect(() => { void refresh(); }, []);
   const count = (name: string) => status?.backlog.find(row => row.status === name)?.count ?? 0;
-  const attention = status && (status.database !== 'connected' || ['STALE', 'NOT_OBSERVED'].includes(status.workerStatus) || !status.emailConfigured || status.deliveryQueue.expiredLeases > 0 || count('FAILED') > 0);
+  const attention = status && (status.database !== 'connected' || ['STALE', 'NOT_OBSERVED'].includes(status.workerStatus) || !status.emailConfigured || !status.csrfEnforced || !status.ssrfEnforced || status.deliveryQueue.expiredLeases > 0 || count('FAILED') > 0);
   const workerTone: Tone = status?.workerStatus === 'HEALTHY' ? 'good' : status?.workerStatus === 'DISABLED' ? 'neutral' : 'warning';
   return (
     <div className="space-y-6 text-zinc-100 light:text-zinc-900" aria-busy={busy}>
