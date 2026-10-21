@@ -27,6 +27,7 @@ export const ThreatFeedsView: React.FC = () => {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [testMessage, setTestMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingFeed, setEditingFeed] = useState<ThreatFeed | null>(null);
   const [deletingFeed, setDeletingFeed] = useState<ThreatFeed | null>(null);
@@ -50,9 +51,28 @@ export const ThreatFeedsView: React.FC = () => {
   );
 
   const handleTest = async (feedId: string) => {
+    const feed = feeds.find((f) => f.id === feedId);
     setTestingId(feedId);
-    await testFeedConnectivity(feedId);
+    setTestMessage(null);
+    const result = await testFeedConnectivity(feedId);
     setTestingId(null);
+    if (result?.success) {
+      setTestMessage({
+        type: 'success',
+        text: `${feed?.name || 'Feed'} connectivity OK (${result.latency}ms)`,
+      });
+    } else if (result?.error) {
+      setTestMessage({
+        type: 'error',
+        text: `${feed?.name || 'Feed'} test failed: ${result.error}`,
+      });
+    } else {
+      setTestMessage({
+        type: 'error',
+        text: `${feed?.name || 'Feed'} test failed. See error banner for details.`,
+      });
+    }
+    setTimeout(() => setTestMessage(null), 8000);
   };
 
   const handleOpenAdd = () => {
@@ -168,6 +188,19 @@ export const ThreatFeedsView: React.FC = () => {
         </div>
       </div>
 
+      {testMessage && (
+        <div
+          className={`mb-4 px-4 py-2.5 rounded-xl text-xs font-mono flex items-center space-x-2 ${
+            testMessage.type === 'success'
+              ? 'bg-emerald-950/40 border border-emerald-800 text-emerald-300'
+              : 'bg-red-950/40 border border-red-800 text-red-300'
+          }`}
+        >
+          <Zap className="w-3.5 h-3.5 flex-shrink-0" />
+          <span>{testMessage.text}</span>
+        </div>
+      )}
+
       {/* Threat Feeds Table */}
       <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
         <div className="overflow-x-auto">
@@ -225,24 +258,29 @@ export const ThreatFeedsView: React.FC = () => {
                       </div>
                     </td>
 
-                    {/* Health & Latency */}
-                    <td className="py-3 px-4 font-mono">
-                      <div className="flex items-center space-x-1.5">
-                        <span
-                          className={`w-2 h-2 rounded-full ${
-                            feed.healthStatus === 'HEALTHY'
-                              ? 'bg-emerald-500'
-                              : 'bg-zinc-500'
-                          }`}
-                        />
-                        <span className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900 font-semibold text-[11px]">
-                          {feed.healthStatus}
-                        </span>
-                        <span className="text-zinc-500 text-[10px]">
-                          ({feed.latencyMs}ms)
-                        </span>
-                      </div>
-                    </td>
+                      {/* Health & Latency */}
+                      <td className="py-3 px-4 font-mono">
+                        <div className="flex items-center space-x-1.5">
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              feed.healthStatus === 'HEALTHY'
+                                ? 'bg-emerald-500'
+                                : 'bg-zinc-500'
+                            }`}
+                          />
+                          <span className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900 font-semibold text-[11px]">
+                            {feed.healthStatus}
+                          </span>
+                          <span className="text-zinc-500 text-[10px]">
+                            ({feed.latencyMs}ms)
+                          </span>
+                        </div>
+                        {feed.healthStatus !== 'HEALTHY' && feed.errorLog && (
+                          <div className="text-[10px] text-red-400 mt-0.5 max-w-xs truncate" title={feed.errorLog}>
+                            {feed.errorLog}
+                          </div>
+                        )}
+                      </td>
 
                     {/* Active toggle */}
                     <td className="py-3 px-4">
