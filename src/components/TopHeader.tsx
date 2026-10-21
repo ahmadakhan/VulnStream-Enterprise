@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   RotateCw,
@@ -11,6 +11,7 @@ import {
   Sun,
   Moon,
   Search,
+  Menu,
 } from 'lucide-react';
 
 const TAB_TITLES: Record<string, { section: string; title: string }> = {
@@ -41,40 +42,55 @@ export const TopHeader: React.FC = () => {
     theme,
     toggleTheme,
     settings,
+    mobileNavOpen,
+    setMobileNavOpen,
   } = useApp();
 
   const [scopeDropdownOpen, setScopeDropdownOpen] = useState(false);
   const [selectedScope, setSelectedScope] = useState(settings.scopeHours || 24);
 
-  const handleRunPipeline = async (hours: number) => {
-    setSelectedScope(hours);
+  useEffect(() => {
+    setSelectedScope(settings.scopeHours || 24);
+  }, [settings.scopeHours]);
+
+  const handleRunPipeline = async () => {
     setScopeDropdownOpen(false);
-    await triggerPipelineRun(hours);
+    await triggerPipelineRun(selectedScope);
   };
 
   const meta = TAB_TITLES[activeTab] || { section: 'OPERATIONS', title: 'Vulnerability Intelligence' };
 
   return (
     <header className="border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-white/80 backdrop-blur-md sticky top-0 z-20 transition-colors duration-200">
-      <div className="px-6 py-3.5 flex items-center justify-between">
+      <div className="px-3 sm:px-6 py-3.5 flex items-center justify-between gap-2">
         {/* Active View Breadcrumb Title */}
-        <div className="flex items-center space-x-3">
-          <div>
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(!mobileNavOpen)}
+            className="md:hidden shrink-0 p-2 rounded-lg text-zinc-300 hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-zinc-400"
+            aria-label={mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            aria-expanded={mobileNavOpen}
+            aria-controls="primary-navigation"
+          >
+            <Menu className="w-4 h-4" />
+          </button>
+          <div className="min-w-0">
             <div className="text-[10px] font-mono text-zinc-500 uppercase font-semibold tracking-wider">
               {meta.section}
             </div>
-            <h1 className="text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight">
+            <h1 className="text-sm sm:text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight truncate">
               {meta.title}
             </h1>
           </div>
         </div>
 
         {/* Center / Right Telemetry & Actions */}
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {/* Status chips */}
           <div className="hidden lg:flex items-center space-x-2 text-xs">
             <div className="flex items-center space-x-1.5 bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-2.5 py-1 rounded-full text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className={`w-1.5 h-1.5 rounded-full ${feeds.some((feed) => feed.enabled) ? 'bg-emerald-500' : 'bg-zinc-500'}`} />
               <span className="text-[11px] font-mono">
                 {feeds.filter((f) => f.enabled).length} Feeds Enabled
               </span>
@@ -98,6 +114,8 @@ export const TopHeader: React.FC = () => {
             onClick={toggleTheme}
             className="p-1.5 rounded-xl border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/80 dark:bg-zinc-900/80 light:bg-zinc-100 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 hover:text-zinc-100 dark:hover:text-zinc-100 light:hover:text-zinc-900 transition"
             title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-pressed={theme === 'light'}
           >
             {theme === 'dark' ? (
               <Sun className="w-4 h-4 text-amber-400" />
@@ -110,7 +128,7 @@ export const TopHeader: React.FC = () => {
           <div className="relative">
             <div className="flex rounded-xl overflow-hidden shadow-sm border border-zinc-700/80 dark:border-zinc-700/80 light:border-zinc-300">
               <button
-                onClick={() => handleRunPipeline(selectedScope)}
+                onClick={() => void handleRunPipeline()}
                 disabled={isPipelineRunning}
                 className={`inline-flex items-center space-x-1.5 px-3.5 py-1.5 text-xs font-semibold transition ${
                   isPipelineRunning
@@ -126,7 +144,8 @@ export const TopHeader: React.FC = () => {
                 ) : (
                   <>
                     <Play className="w-3 h-3 fill-current" />
-                    <span>Run Pipeline ({selectedScope}h)</span>
+                    <span className="hidden sm:inline">Run Pipeline ({selectedScope}h)</span>
+                    <span className="sm:hidden">Run</span>
                   </>
                 )}
               </button>
@@ -135,20 +154,26 @@ export const TopHeader: React.FC = () => {
                 disabled={isPipelineRunning}
                 className="bg-zinc-200 dark:bg-zinc-200 light:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-200 border-l border-zinc-300 dark:border-zinc-300 light:border-zinc-700 px-1.5 text-xs flex items-center justify-center transition"
                 title="Change Processing Scope Window"
+                aria-label="Choose pipeline time window"
+                aria-expanded={scopeDropdownOpen}
+                aria-controls="pipeline-scope-options"
               >
                 <ChevronDown className="w-3 h-3" />
               </button>
             </div>
 
             {scopeDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-48 bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-xl shadow-xl py-1 z-50 text-xs">
+              <div id="pipeline-scope-options" className="absolute right-0 mt-2 w-48 bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-xl shadow-xl py-1 z-50 text-xs">
                 <div className="px-3 py-1.5 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider font-mono">
                   Timeline Window
                 </div>
                 {[6, 12, 24, 48, 72, 168].map((hrs) => (
                   <button
                     key={hrs}
-                    onClick={() => handleRunPipeline(hrs)}
+                    onClick={() => {
+                      setSelectedScope(hrs);
+                      setScopeDropdownOpen(false);
+                    }}
                     className={`w-full text-left px-3 py-1.5 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 flex items-center justify-between ${
                       selectedScope === hrs
                         ? 'text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold bg-zinc-800/40 dark:bg-zinc-800/40 light:bg-zinc-200/50'

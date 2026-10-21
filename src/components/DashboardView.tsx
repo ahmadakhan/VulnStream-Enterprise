@@ -61,7 +61,7 @@ export const DashboardView: React.FC = () => {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center space-x-2 text-xs font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className={`w-2 h-2 rounded-full ${settings.schedulerEnabled ? 'bg-emerald-500' : 'bg-zinc-500'}`} />
               <span>
                 SCHEDULER {settings.schedulerEnabled ? 'ENABLED' : 'DISABLED'} • CPE &amp; PURL CORRELATION
               </span>

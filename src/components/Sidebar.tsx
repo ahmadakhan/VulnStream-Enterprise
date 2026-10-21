@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   LayoutDashboard,
@@ -24,9 +24,14 @@ import {
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
+  const [isMobileView, setIsMobileView] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches,
+  );
   const {
     activeTab,
     setActiveTab,
+    mobileNavOpen,
+    setMobileNavOpen,
     findings,
     watchlist,
     feeds,
@@ -34,8 +39,6 @@ export const Sidebar: React.FC = () => {
     toggleTheme,
     sessionTimeRemainingSec,
     resetSessionTimeout,
-    ntpSyncStatus,
-    isPipelineRunning,
   } = useApp();
 
   const activeFindingsCount = findings.filter(
@@ -44,6 +47,13 @@ export const Sidebar: React.FC = () => {
 
   const sessionMins = Math.floor(sessionTimeRemainingSec / 60);
   const sessionSecs = sessionTimeRemainingSec % 60;
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)');
+    const update = () => setIsMobileView(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
 
   const navSections = [
     {
@@ -78,15 +88,26 @@ export const Sidebar: React.FC = () => {
   ];
 
   return (
-    <aside className="w-64 bg-zinc-950 dark:bg-zinc-950 light:bg-white border-r border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 flex flex-col shrink-0 select-none z-30 transition-colors duration-200">
+    <>
+    {mobileNavOpen && (
+      <button
+        type="button"
+        aria-label="Close navigation menu"
+        className="fixed inset-0 z-30 bg-black/60 md:hidden"
+        onClick={() => setMobileNavOpen(false)}
+      />
+    )}
+    <aside id="primary-navigation" aria-hidden={isMobileView && !mobileNavOpen} inert={isMobileView && !mobileNavOpen} className={`fixed inset-y-0 left-0 z-40 w-64 bg-zinc-950 dark:bg-zinc-950 light:bg-white border-r border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 flex flex-col shrink-0 select-none transition-transform duration-200 md:sticky md:top-0 md:h-screen md:translate-x-0 md:z-30 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}>
       {/* Brand Header */}
       <div className="p-4 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
-        <div
+        <button
+          type="button"
           onClick={() => setActiveTab('dashboard')}
-          className="flex items-center space-x-3 cursor-pointer group"
+          className="flex items-center space-x-3 text-left cursor-pointer group"
+          aria-label="VulnStream dashboard"
         >
-          <div className="w-8 h-8 rounded-xl bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-100 border border-zinc-700/60 dark:border-zinc-700/60 light:border-zinc-300 flex items-center justify-center text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm transition group-hover:border-zinc-500">
-            <Shield className="w-4 h-4 text-zinc-200 dark:text-zinc-200 light:text-zinc-800" />
+          <div className="w-9 h-9 rounded-2xl bg-blue-500/15 border border-blue-400/25 flex items-center justify-center text-blue-200 shadow-sm transition group-hover:border-blue-400/50">
+            <Shield className="w-4 h-4 text-blue-300" />
           </div>
           <div>
             <div className="flex items-center space-x-1.5">
@@ -101,11 +122,11 @@ export const Sidebar: React.FC = () => {
               Vulnerability Operations
             </div>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* Nav List with Sections & SVG Icons */}
-      <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
+      <nav aria-label="Primary navigation" className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
         {navSections.map(section => (
           <div key={section.title}>
             <div className="px-3 mb-2 text-[10px] font-bold tracking-wider text-zinc-500 font-mono uppercase">
@@ -119,6 +140,7 @@ export const Sidebar: React.FC = () => {
                   <button
                     key={item.id}
                     onClick={() => setActiveTab(item.id)}
+                    aria-current={isActive ? 'page' : undefined}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition duration-150 ${
                       isActive
                         ? 'bg-zinc-800 text-zinc-100 dark:bg-zinc-800 dark:text-zinc-100 light:bg-zinc-200 light:text-zinc-900 font-semibold shadow-sm'
@@ -153,7 +175,7 @@ export const Sidebar: React.FC = () => {
             </div>
           </div>
         ))}
-      </div>
+      </nav>
 
       {/* Sidebar Footer: Theme Toggle & Session Security */}
       <div className="p-3 border-t border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 space-y-2 bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50">
@@ -162,6 +184,8 @@ export const Sidebar: React.FC = () => {
           onClick={toggleTheme}
           className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-900/80 dark:bg-zinc-900/80 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 light:text-zinc-700 light:hover:text-zinc-900 transition shadow-sm"
           title="Toggle light and dark mode"
+          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          aria-pressed={theme === 'light'}
         >
           <div className="flex items-center space-x-2">
             {theme === 'dark' ? (
@@ -179,10 +203,12 @@ export const Sidebar: React.FC = () => {
         </button>
 
         {/* Session Security Indicator */}
-        <div
-          onClick={resetSessionTimeout}
-          className="flex items-center justify-between px-3 py-1.5 rounded-xl text-[11px] font-mono text-zinc-500 bg-zinc-900/40 dark:bg-zinc-900/40 light:bg-zinc-100 cursor-pointer hover:text-zinc-300 transition"
-          title="Session Token TTL • Click to renew"
+        <button
+          type="button"
+          onClick={() => void resetSessionTimeout()}
+          className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl text-[11px] font-mono text-zinc-500 bg-zinc-900/40 dark:bg-zinc-900/40 light:bg-zinc-100 hover:text-zinc-300 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-zinc-400"
+          title="Renew session"
+          aria-label={`Renew session, ${sessionMins} minutes and ${sessionSecs} seconds remaining`}
         >
           <div className="flex items-center space-x-1.5">
             <KeyRound className="w-3 h-3 text-zinc-500" />
@@ -191,17 +217,18 @@ export const Sidebar: React.FC = () => {
           <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-bold">
             {String(sessionMins).padStart(2, '0')}:{String(sessionSecs).padStart(2, '0')}
           </span>
-        </div>
+        </button>
 
         {/* NTP & Live Status */}
         <div className="flex items-center justify-between px-3 py-1 text-[10px] font-mono text-zinc-500">
           <div className="flex items-center space-x-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
             <span>Server-backed session</span>
           </div>
           <span>Authenticated</span>
         </div>
       </div>
     </aside>
+    </>
   );
 };

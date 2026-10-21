@@ -191,33 +191,24 @@ export const ThreatDataView: React.FC = () => {
             <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
               <tr>
                 <th className="py-3 px-4">Canonical CVE</th>
-                <th
-                  onClick={() => toggleSort('score')}
-                  className="py-3 px-4 cursor-pointer hover:text-zinc-200 transition select-none"
-                >
-                  <div className="flex items-center space-x-1">
+                <th aria-sort={sortBy === 'score' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-4">
+                  <button type="button" onClick={() => toggleSort('score')} className="flex items-center space-x-1 hover:text-zinc-200 transition select-none">
                     <span>CVSS Score</span>
                     <ArrowUpDown className="w-3 h-3" />
-                  </div>
+                  </button>
                 </th>
                 <th className="py-3 px-4">EPSS Percentile</th>
-                <th
-                  onClick={() => toggleSort('published')}
-                  className="py-3 px-4 cursor-pointer hover:text-zinc-200 transition select-none"
-                >
-                  <div className="flex items-center space-x-1">
+                <th aria-sort={sortBy === 'published' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-4">
+                  <button type="button" onClick={() => toggleSort('published')} className="flex items-center space-x-1 hover:text-zinc-200 transition select-none">
                     <span>Published Date</span>
                     <ArrowUpDown className="w-3 h-3" />
-                  </div>
+                  </button>
                 </th>
-                <th
-                  onClick={() => toggleSort('modified')}
-                  className="py-3 px-4 cursor-pointer hover:text-zinc-200 transition select-none"
-                >
-                  <div className="flex items-center space-x-1">
+                <th aria-sort={sortBy === 'modified' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'} className="py-3 px-4">
+                  <button type="button" onClick={() => toggleSort('modified')} className="flex items-center space-x-1 hover:text-zinc-200 transition select-none">
                     <span>Last Modified Date</span>
                     <ArrowUpDown className="w-3 h-3" />
-                  </div>
+                  </button>
                 </th>
                 <th className="py-3 px-4">Exploit Status</th>
                 <th className="py-3 px-4">Sources Ingested</th>

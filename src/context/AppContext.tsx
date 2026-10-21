@@ -20,6 +20,7 @@ function useApplication() {
     [loading, setLoading] = useState(true),
     [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard'),
+    [mobileNavOpen, setMobileNavOpen] = useState(false),
     [selectedFinding, setSelectedFinding] = useState<Finding | null>(null),
     [selectedAdvisory, setSelectedAdvisory] = useState<Advisory | null>(null);
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -161,7 +162,12 @@ function useApplication() {
   return {
     ...snapshot,
     activeTab,
-    setActiveTab,
+    setActiveTab: (tab: string) => {
+      setActiveTab(tab);
+      setMobileNavOpen(false);
+    },
+    mobileNavOpen,
+    setMobileNavOpen,
     theme,
     toggleTheme: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')),
     session,

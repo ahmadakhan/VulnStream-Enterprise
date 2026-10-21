@@ -1,4 +1,5 @@
 import React from 'react';
+import { LogOut, ShieldCheck } from 'lucide-react';
 import { LoginView } from './components/LoginView';
 import { AppProvider, useApp } from './context/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -44,17 +45,17 @@ const MainContent: React.FC = () => {
 
 const Footer: React.FC = () => {
   return (
-    <footer className="border-t border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-white py-4 text-xs text-zinc-500 transition-colors duration-200">
-      <div className="px-6 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-[11px]">
-        <div className="flex items-center space-x-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <span className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+    <footer className="mt-auto border-t border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-white py-4 text-xs text-zinc-500 transition-colors duration-200">
+      <div className="px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px]">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+          <span className="font-semibold text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
             VulnStream Enterprise
           </span>
           <span>•</span>
           <span>PostgreSQL persistence</span>
         </div>
-        <div className="flex items-center space-x-3 text-zinc-500">
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-zinc-500">
           <span>Server scheduler</span>
           <span>•</span>
           <span>Strict CPE 2.3 + PURL</span>
@@ -82,11 +83,25 @@ const AppShell: React.FC = () => {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 min-h-screen">
         <TopHeader />
-        <div className="px-6 py-2 flex justify-between text-xs border-b border-zinc-700">
-          <span>{session.username} · {session.role}{pending > 0 ? ' · Saving…' : ''}</span>
-          <button onClick={() => void logout()}>Sign out</button>
+        <div className="flex items-center justify-between gap-3 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 bg-zinc-900/30 dark:bg-zinc-900/30 light:bg-white/70 px-4 sm:px-6 py-2.5 text-xs">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-zinc-700/70 dark:border-zinc-700/70 light:border-zinc-300 bg-zinc-800/70 dark:bg-zinc-800/70 light:bg-zinc-100 font-semibold text-zinc-200 dark:text-zinc-200 light:text-zinc-700">
+              {session.username.slice(0, 1).toUpperCase()}
+            </span>
+            <span className="truncate font-medium text-zinc-200 dark:text-zinc-200 light:text-zinc-800">{session.username}</span>
+            <span className="rounded-md border border-zinc-700/70 dark:border-zinc-700/70 light:border-zinc-300 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-zinc-400 dark:text-zinc-400 light:text-zinc-600">{session.role}</span>
+            {pending > 0 && <span role="status" className="text-[10px] text-blue-400">Saving changes…</span>}
+          </div>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 font-medium text-zinc-400 transition hover:bg-zinc-800/70 hover:text-zinc-100 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100 light:hover:bg-zinc-100 light:hover:text-zinc-900"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            <span>Sign out</span>
+          </button>
         </div>
-        {error && <div role="alert" className="px-6 py-3 bg-red-950 text-red-100">{error} <button onClick={clearError} className="underline ml-3">Dismiss</button></div>}
+        {error && <div role="alert" className="mx-4 mt-3 flex items-start justify-between gap-4 rounded-xl border border-rose-800/50 bg-rose-950/70 px-4 py-3 text-xs text-rose-100 sm:mx-6"><span>{error}</span><button onClick={clearError} className="shrink-0 underline underline-offset-2">Dismiss</button></div>}
         <div className="flex-1 flex flex-col max-w-7xl w-full mx-auto">
           <MainContent />
           <Footer />
