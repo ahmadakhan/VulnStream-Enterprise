@@ -7,7 +7,6 @@ import {
   FileText,
   Server,
   ArrowUpRight,
-  Zap,
   Cpu,
   MailCheck,
   Send,
@@ -30,8 +29,6 @@ export const DashboardView: React.FC = () => {
     advisories,
     setActiveTab,
     setSelectedFinding,
-    triggerPipelineRun,
-    isPipelineRunning,
     emailLogs,
     webhooks,
     settings,
@@ -81,14 +78,6 @@ export const DashboardView: React.FC = () => {
               className="text-xs px-3.5 py-2 rounded-xl bg-zinc-800/80 hover:bg-zinc-700/80 dark:bg-zinc-800/80 dark:hover:bg-zinc-700/80 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 border border-zinc-700/50 dark:border-zinc-700/50 light:border-zinc-300 font-medium transition"
             >
               Monitored Products ({watchlist.length})
-            </button>
-            <button
-              onClick={() => triggerPipelineRun()}
-              disabled={isPipelineRunning}
-              className="text-xs px-4 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition flex items-center space-x-2 shadow-sm"
-            >
-              <Zap className="w-3.5 h-3.5 fill-current" />
-              <span>Trigger Ingestion</span>
             </button>
           </div>
         </div>
