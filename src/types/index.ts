@@ -159,6 +159,7 @@ export interface ThreatFeed {
   errorLog?: string | null;
   ssrfValidated: boolean;
   etag?: string;
+  consecutiveFailures?: number;
 }
 
 export interface Advisory {

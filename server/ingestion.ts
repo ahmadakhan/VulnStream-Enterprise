@@ -10,6 +10,8 @@ export interface IngestResult {
   kev?: Record<string, NormalizedCVE['cisaKev']>;
   epss?: Record<string, NormalizedCVE['epss']>;
   count: number;
+  etag?: string;
+  notModified?: boolean;
 }
 const iso = (s: string) => new Date(s).toISOString();
 export function normalizeNvd(item: any, feedId: string): NormalizedCVE | null {
@@ -88,11 +90,16 @@ export async function ingestFeed(
     else
       headers.Authorization = `${feed.authType === 'BASIC' ? 'Basic' : 'Bearer'} ${feed.authType === 'BASIC' ? Buffer.from(secret).toString('base64') : secret}`;
   }
-  const json = async (url: string) => {
+  const json = async (url: string): Promise<{ data: any; etag: string | undefined }> => {
+    if (feed.etag) headers['If-None-Match'] = feed.etag;
     const response = await request(url, { headers });
+    if (response.status === 304) {
+      return { data: null, etag: feed.etag };
+    }
     if (response.status !== 200) throw new Error(`Feed returned HTTP ${response.status}`);
+    const etag = response.headers.etag as string | undefined;
     try {
-      return JSON.parse(response.body);
+      return { data: JSON.parse(response.body), etag };
     } catch {
       throw new Error('Feed did not return valid JSON');
     }
@@ -102,14 +109,18 @@ export async function ingestFeed(
       start = new Date(end.getTime() - Math.min(scopeHours, 2880) * 3600000);
     const cves: NormalizedCVE[] = [];
     let rawCount = 0;
+    let etag: string | undefined;
     for (let offset = 0; ;) {
       const url = new URL(feed.url);
       url.searchParams.set('lastModStartDate', start.toISOString());
       url.searchParams.set('lastModEndDate', end.toISOString());
       url.searchParams.set('startIndex', String(offset));
       url.searchParams.set('resultsPerPage', '1000');
-      const page = await json(url.href);
-      if (
+        const { data, etag: newEtag } = await json(url.href);
+        if (!etag) etag = newEtag;
+        if (!data) return { cves: [], count: 0, notModified: true, etag };
+       const page = data;
+       if (
         !Array.isArray(page.vulnerabilities) ||
         !Number.isInteger(page.totalResults) ||
         page.totalResults < 0 ||
@@ -127,9 +138,11 @@ export async function ingestFeed(
       if (!page.vulnerabilities.length) throw new Error('NVD pagination stopped before completion');
       await sleep(Math.max(60000 / feed.rateLimitPerMin, feed.authType === 'NONE' ? 6500 : 700));
     }
-    return { cves, count: rawCount };
+    return { cves, count: rawCount, etag };
   }
   if (feed.type === 'CISA_KEV') {
+    const { data: rawData, etag } = await json(feed.url);
+    if (!rawData) return { cves: [], count: 0, notModified: true, etag };
     const data = z
       .object({
         vulnerabilities: z
@@ -144,10 +157,11 @@ export async function ingestFeed(
           )
           .max(50000),
       })
-      .parse(await json(feed.url));
+      .parse(rawData);
     return {
       cves: [],
       count: data.vulnerabilities.length,
+      etag,
       kev: Object.fromEntries(
         data.vulnerabilities.map((v) => [
           v.cveID,
@@ -165,39 +179,41 @@ export async function ingestFeed(
   if (feed.type === 'EPSS_API') {
     const epss: Record<string, NormalizedCVE['epss']> = {};
     let count = 0;
+    let etag: string | undefined;
     for (let offset = 0; ;) {
       const url = new URL(feed.url);
       url.searchParams.set('offset', String(offset));
       url.searchParams.set('limit', '10000');
-      const page = await json(url.href);
-      const rows = z
-        .array(
-          z.object({
-            cve: z.string(),
-            epss: z.coerce.number().min(0).max(1),
-            percentile: z.coerce.number().min(0).max(1),
-          }),
-        )
-        .max(10000)
-        .parse(page.data);
-      const total = Number(page.total);
-      if (!Number.isInteger(total) || total < 0 || total > 500000) throw new Error('Invalid EPSS total');
-      for (const row of rows) epss[row.cve] = { score: row.epss, percentile: row.percentile };
-      count += rows.length;
-      offset += rows.length;
-      if (offset >= total) break;
-      if (!rows.length) throw new Error('EPSS pagination stopped before completion');
-      await sleep(60000 / feed.rateLimitPerMin);
-    }
-    return { cves: [], epss, count };
+       const { data: page, etag: newEtag } = await json(url.href);
+      if (!etag) etag = newEtag;
+       if (!page) return { cves: [], epss, count, notModified: true, etag };
+       const rows = z
+         .array(
+           z.object({
+             cve: z.string(),
+             epss: z.coerce.number().min(0).max(1),
+             percentile: z.coerce.number().min(0).max(1),
+           }),
+         )
+         .max(10000)
+         .parse(page.data);
+       const total = Number(page.total);
+       if (!Number.isInteger(total) || total < 0 || total > 500000) throw new Error('Invalid EPSS total');
+       for (const row of rows) epss[row.cve] = { score: row.epss, percentile: row.percentile };
+       count += rows.length;
+       offset += rows.length;
+       if (offset >= total) break;
+       if (!rows.length) throw new Error('EPSS pagination stopped before completion');
+       await sleep(60000 / feed.rateLimitPerMin);
+     }
+     return { cves: [], epss, count, etag };
   }
   if (feed.type === 'JSON_SEARCH_API') {
-    const cves = z
-      .array(cveSchema)
-      .max(10000)
-      .parse(await json(feed.url));
-    // Generic feeds may assert VEX, but unsigned claims cannot suppress alerts.
-    return { cves: cves.map((c) => ({ ...c, vex: undefined, sourceFeeds: [feed.id] })), count: cves.length };
+       const { data, etag } = await json(feed.url);
+       if (!data) return { cves: [], count: 0, notModified: true, etag };
+       const cves = z.array(cveSchema).max(10000).parse(data);
+       // Generic feeds may assert VEX, but unsigned claims cannot suppress alerts.
+       return { cves: cves.map((c) => ({ ...c, vex: undefined, sourceFeeds: [feed.id] })), count: cves.length, etag };
   }
   throw new Error(`Unsupported feed adapter: ${feed.type}`);
 }

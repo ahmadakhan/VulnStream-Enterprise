@@ -62,11 +62,13 @@ export async function applyCommand(
       authSecretKey: input.authSecretKey
         ? encrypt(input.authSecretKey, config.ENCRYPTION_KEY, `feed:${newId}`)
         : (old?.url === input.url && old?.authType === input.authType ? old?.authSecretKey : '') || '',
-      healthStatus: 'UNTESTED',
-      lastSync: old?.lastSync || null,
-      latencyMs: 0,
-      itemCountLastRun: old?.itemCountLastRun || 0,
-      ssrfValidated: false,
+       healthStatus: 'UNTESTED',
+       lastSync: old?.lastSync || null,
+       latencyMs: 0,
+       itemCountLastRun: old?.itemCountLastRun || 0,
+       ssrfValidated: false,
+       etag: old?.etag,
+       consecutiveFailures: old?.consecutiveFailures,
     });
   } else if (action === 'feed.import') {
     const input = feedImportSchema.parse(data);

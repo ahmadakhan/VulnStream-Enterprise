@@ -123,24 +123,36 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       while (nextIndex < feeds.length) {
         const i = nextIndex++;
         const feed = feeds[i];
+        if ((feed.consecutiveFailures || 0) >= 5) {
+          execution!.logs.push(`Feed ${feed.id}: skipped (circuit open, ${feed.consecutiveFailures} consecutive failures)`);
+          continue;
+        }
         const start = Date.now();
         try {
           const result = await ingestFeed(feed, execution!.scopeHours, request, config);
           results.push(result);
-          rawCount += result.count;
+          rawCount += result.notModified ? 0 : result.count;
           succeeded++;
           feedUpdates.push({
             ...feed,
             healthStatus: 'HEALTHY',
             lastSync: new Date().toISOString(),
             latencyMs: Date.now() - start,
-            itemCountLastRun: result.count,
+            itemCountLastRun: result.notModified ? feed.itemCountLastRun : result.count,
             errorLog: null,
             ssrfValidated: true,
+            etag: result.etag || feed.etag,
+            consecutiveFailures: 0,
           });
         } catch (e) {
           const message = e instanceof Error ? e.message : 'Ingestion failed';
-          feedUpdates.push({ ...feed, healthStatus: 'DOWN', latencyMs: Date.now() - start, errorLog: message });
+          feedUpdates.push({
+            ...feed,
+            healthStatus: 'DOWN',
+            latencyMs: Date.now() - start,
+            errorLog: message,
+            consecutiveFailures: (feed.consecutiveFailures || 0) + 1,
+          });
           execution!.logs.push(`Feed ${feed.id}: ${message}`);
         }
         await lock.query('SELECT 1');
@@ -159,7 +171,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             latencyMs: feed.latencyMs,
             itemCountLastRun: feed.itemCountLastRun,
             errorLog: feed.errorLog,
-            ssrfValidated: feed.ssrfValidated,
+             ssrfValidated: feed.ssrfValidated,
+             etag: feed.etag,
+             consecutiveFailures: feed.consecutiveFailures,
           });
       }
       if (feeds.length && !succeeded) {
@@ -168,24 +182,26 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       }
       const snapshot = await state(db);
       const byId = new Map(snapshot.cveData.map((c) => [c.cveId, c]));
-      for (const result of results)
+       for (const result of results) {
+         if (result.notModified) continue;
          for (const cve of result.cves) {
-            const old = byId.get(cve.cveId);
-            if (!old || new Date(cve.modifiedDate) >= new Date(old.modifiedDate))
-              byId.set(cve.cveId, {
-                ...cve,
-                epss: old?.epss || cve.epss,
-                cisaKev: old?.cisaKev || cve.cisaKev,
-                sourceFeeds: Array.from(new Set([...(old?.sourceFeeds || []), ...cve.sourceFeeds])),
-              });
-          }
-          for (const cve of byId.values()) {
-            for (const result of results) {
-              if (result.kev && result.kev[cve.cveId]) cve.cisaKev = result.kev[cve.cveId];
-              if (result.epss?.[cve.cveId]) cve.epss = result.epss[cve.cveId];
-            }
-          }
-          await putMany(db, 'cveData', [...byId.values()].map((cve) => ({ id: cve.cveId, data: cve })));
+           const old = byId.get(cve.cveId);
+           if (!old || new Date(cve.modifiedDate) >= new Date(old.modifiedDate))
+             byId.set(cve.cveId, {
+               ...cve,
+               epss: old?.epss || cve.epss,
+               cisaKev: old?.cisaKev || cve.cisaKev,
+               sourceFeeds: Array.from(new Set([...(old?.sourceFeeds || []), ...cve.sourceFeeds])),
+             });
+         }
+       }
+       for (const cve of byId.values()) {
+         for (const result of results) {
+           if (result.kev && result.kev[cve.cveId]) cve.cisaKev = result.kev[cve.cveId];
+           if (result.epss?.[cve.cveId]) cve.epss = result.epss[cve.cveId];
+         }
+       }
+       await putMany(db, 'cveData', [...byId.values()].map((cve) => ({ id: cve.cveId, data: cve })));
       // The run window limits network ingestion, not applicability of already cached CVEs.
       const settings = { ...snapshot.settings, scopeHours: 0 };
       const correlated = runVulnerabilityPipeline(
