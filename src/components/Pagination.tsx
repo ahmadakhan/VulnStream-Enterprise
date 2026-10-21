@@ -33,7 +33,7 @@ export const Pagination: React.FC<PaginationProps> = ({
     } else {
       pages.push(1);
       if (currentPage > 3) pages.push('...');
-      
+
       const start = Math.max(2, currentPage - 1);
       const end = Math.min(totalPages - 1, currentPage + 1);
       for (let i = start; i <= end; i++) pages.push(i);
@@ -49,23 +49,26 @@ export const Pagination: React.FC<PaginationProps> = ({
       {/* Items count & page size */}
       <div className="flex items-center space-x-3">
         <span className="font-mono text-[11px]">
-          Showing <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{startItem}</strong>-
+          Showing{' '}
+          <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{startItem}</strong>-
           <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{endItem}</strong> of{' '}
-          <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{totalItems}</strong> records
+          <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{totalItems}</strong>{' '}
+          records
         </span>
 
         {onPageSizeChange && (
           <div className="flex items-center space-x-1.5 text-[11px] font-mono">
             <span>Per page:</span>
             <select
+              aria-label="Records per page"
               value={pageSize}
-              onChange={e => {
+              onChange={(e) => {
                 onPageSizeChange(Number(e.target.value));
                 onPageChange(1);
               }}
               className="bg-zinc-950 dark:bg-zinc-950 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded px-1.5 py-0.5 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 focus:outline-none"
             >
-              {pageSizeOptions.map(opt => (
+              {pageSizeOptions.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
                 </option>
@@ -97,12 +100,17 @@ export const Pagination: React.FC<PaginationProps> = ({
         <div className="flex items-center space-x-1 px-1">
           {getPageNumbers().map((p, idx) =>
             typeof p === 'string' ? (
-              <span key={`ellipsis-${idx}`} className="px-1.5 py-0.5 text-zinc-500 light:text-zinc-400 font-mono text-xs">
+              <span
+                key={`ellipsis-${idx}`}
+                className="px-1.5 py-0.5 text-zinc-500 light:text-zinc-400 font-mono text-xs"
+              >
                 ...
               </span>
             ) : (
               <button
                 key={p}
+                aria-label={`Page ${p}`}
+                aria-current={currentPage === p ? 'page' : undefined}
                 onClick={() => onPageChange(p)}
                 className={`min-w-[26px] h-[26px] rounded-lg font-mono text-xs flex items-center justify-center transition ${
                   currentPage === p
@@ -112,7 +120,7 @@ export const Pagination: React.FC<PaginationProps> = ({
               >
                 {p}
               </button>
-            )
+            ),
           )}
         </div>
 

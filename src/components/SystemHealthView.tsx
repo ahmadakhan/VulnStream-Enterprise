@@ -20,7 +20,11 @@ export function SystemHealthView() {
     <div className="space-y-5">
       <div className="flex justify-between">
         <h1 className="text-xl font-bold">System health</h1>
-        <button className="border rounded px-4 py-2" disabled={busy} onClick={refresh}>
+        <button
+          className="rounded-lg border border-zinc-700 light:border-zinc-300 bg-zinc-900 light:bg-white px-4 py-2 text-sm font-medium disabled:opacity-50"
+          disabled={busy}
+          onClick={refresh}
+        >
           {busy ? 'Checking…' : 'Refresh'}
         </button>
       </div>
@@ -45,8 +49,11 @@ export function SystemHealthView() {
                 status.lastScheduledRun ? new Date(status.lastScheduledRun).toLocaleString() : 'Not yet run',
               ],
             ].map(([name, value]) => (
-              <div key={name} className="border border-zinc-700 rounded-xl p-5">
-                <h2 className="text-sm text-zinc-400">{name}</h2>
+              <div
+                key={name}
+                className="border border-zinc-800 light:border-zinc-200 bg-zinc-900/60 light:bg-white shadow-sm rounded-2xl p-5"
+              >
+                <h2 className="text-sm text-zinc-400 light:text-zinc-600">{name}</h2>
                 <p className="mt-2">{value}</p>
               </div>
             ))}
@@ -63,7 +70,7 @@ export function SystemHealthView() {
               <li>No deliveries queued.</li>
             )}
           </ul>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-zinc-400 light:text-zinc-600">
             Clock synchronization: {status.ntp}. HTTPS{' '}
             {status.httpsRequired ? 'required' : 'development mode'}. CSRF and outbound address validation
             enforced by the server.

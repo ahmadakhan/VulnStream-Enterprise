@@ -244,6 +244,8 @@ function useApplication() {
     isPipelineRunning: !!activeExecution,
     currentPipelinePhase: activeExecution ? `${activeExecution.status}: ${activeExecution.id}` : null,
     latestExecution: snapshot.executions[0] || null,
+    stopPipelineRun: async (id: string) =>
+      (await call<PipelineExecution>(`/pipeline/${encodeURIComponent(id)}/stop`)) || null,
     triggerPipelineRun: async (scopeHours?: number) =>
       (await call<PipelineExecution>('/pipeline', { scopeHours })) || null,
     templateCustomization: customization,

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { createPool, migrate, transaction, put, putMany, list, get } from '../server/db';
-import { queueRun, processPipeline } from '../server/pipeline';
+import { queueRun, processPipeline, stopRun } from '../server/pipeline';
 import { deliverNext } from '../server/delivery';
 import { loadConfig } from '../server/config';
 import { DEFAULT_SETTINGS } from '../shared/state';
@@ -71,6 +71,42 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
   };
   try {
     await migrate(pool);
+    await t.test('queued stop is idempotent and never runs', async () => {
+      await reset();
+      const queued = await queueRun(pool, 24, 'test');
+      assert.equal((await stopRun(pool, queued.id, 'test')).status, 'CANCELLED');
+      assert.equal((await stopRun(pool, queued.id, 'test')).status, 'CANCELLED');
+      assert.equal(await processPipeline(pool, config, request), false);
+    });
+    await t.test('stop during network retrieval discards results and releases worker lock', async () => {
+      await reset();
+      await save('feeds', 'stop-feed', {
+        id: 'stop-feed',
+        name: 'Stop test',
+        type: 'JSON_SEARCH_API',
+        url: 'https://example.com/feed',
+        enabled: true,
+        authType: 'NONE',
+        rateLimitPerMin: 60,
+      });
+      const queued = await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async () => {
+        const live = await get<any>(pool, 'executions', queued.id);
+        assert.equal(live.phases[0].status, 'RUNNING');
+        assert.equal(live.phases[1].status, 'PENDING');
+        await stopRun(pool, queued.id, 'test');
+        return { status: 200, body: JSON.stringify([vulnerability()]), headers: {} };
+      });
+      const stopped = await get<any>(pool, 'executions', queued.id);
+      assert.equal(stopped.status, 'CANCELLED');
+      assert.ok(stopped.stopRequestedAt);
+      assert.equal((await list(pool, 'cveData')).length, 0);
+      assert.equal((await list(pool, 'findings')).length, 0);
+      assert.equal((await pool.query('SELECT count(*) FROM outbox')).rows[0].count, '0');
+      await save('feeds', 'stop-feed', { id: 'stop-feed', enabled: false });
+      await run();
+      assert.ok((await list<any>(pool, 'executions')).some((e) => e.status === 'COMPLETED'));
+    });
     await t.test('large bulk writes stay below parameter limits and preserve unchanged rows', async () => {
       await reset();
       const rows = Array.from({ length: 22000 }, (_, id) => ({ id: String(id), data: { value: id } }));

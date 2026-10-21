@@ -12,17 +12,11 @@ import { applyCommand } from './commands';
 import { checkPassword, passwordHash, decrypt } from './secrets';
 import { createRequester, resolvePublic } from './network';
 import type { Requester, ResponseData } from './network';
-import { queueRun, renderAdvisory } from './pipeline';
+import { queueRun, stopRun, renderAdvisory } from './pipeline';
 import { enqueue, queueAdvisory } from './delivery';
 import { DEFAULT_SETTINGS } from '../shared/state';
 import type { AppState } from '../shared/state';
-import type {
-  AppSettings,
-  ThreatFeed,
-  WebhookEndpoint,
-  Advisory,
-  TemplateCustomization,
-} from '../src/types';
+import type { AppSettings, ThreatFeed, WebhookEndpoint, Advisory, TemplateCustomization } from '../src/types';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler';
 function publicState(data: AppState): AppState {
   return {
@@ -131,7 +125,15 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       await transaction(pool, async (db) => {
         await db.query('UPDATE users SET password_hash=$2 WHERE id=$1', [req.operator!.id, hash]);
         await db.query('DELETE FROM sessions WHERE user_id=$1', [req.operator!.id]);
-        await appendAudit(db, 'Password changed', 'All sessions revoked', req.operator!.username, 'SECURITY', 'INFO', req.ip || '');
+        await appendAudit(
+          db,
+          'Password changed',
+          'All sessions revoked',
+          req.operator!.username,
+          'SECURITY',
+          'INFO',
+          req.ip || '',
+        );
       });
       res.clearCookie(cookieName(config), { path: '/' });
       res.json({ success: true });
@@ -227,6 +229,13 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
     }),
   );
   app.post(
+    '/api/pipeline/:id/stop',
+    requireRole('ADMIN', 'OPERATOR'),
+    asyncRoute(async (req, res) => {
+      res.json(await stopRun(pool, String(req.params.id), req.operator!.username));
+    }),
+  );
+  app.post(
     '/api/feeds/:id/test',
     requireRole('ADMIN'),
     asyncRoute(async (req, res) => {
@@ -243,9 +252,10 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       try {
         const testUrl = new URL(feed.url);
         if (feed.type === 'NVD_API') testUrl.searchParams.set('resultsPerPage', '1');
-        const requestOptions = feed.type === 'NVD_API'
-          ? { headers, timeoutMs: 25000, socketTimeoutMs: 20000, maxResponseBytes: 256 * 1024 }
-          : { headers };
+        const requestOptions =
+          feed.type === 'NVD_API'
+            ? { headers, timeoutMs: 25000, socketTimeoutMs: 20000, maxResponseBytes: 256 * 1024 }
+            : { headers };
         response = await request(testUrl.href, requestOptions);
         const latency = Math.round(performance.now() - start);
         await transaction(pool, async (db) => {
@@ -321,7 +331,15 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           },
           randomUUID(),
         );
-        await appendAudit(db, 'Test email queued', `Delivery ${id}`, req.operator!.username, 'EMAIL', 'INFO', req.ip || '');
+        await appendAudit(
+          db,
+          'Test email queued',
+          `Delivery ${id}`,
+          req.operator!.username,
+          'EMAIL',
+          'INFO',
+          req.ip || '',
+        );
         return id;
       });
       res
@@ -344,7 +362,15 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           { subject: 'VulnStream connection test', text: 'Requested VulnStream webhook test', cveIds: [] },
           randomUUID(),
         );
-        await appendAudit(db, 'Test webhook queued', `Delivery ${id}`, req.operator!.username, 'WEBHOOK', 'INFO', req.ip || '');
+        await appendAudit(
+          db,
+          'Test webhook queued',
+          `Delivery ${id}`,
+          req.operator!.username,
+          'WEBHOOK',
+          'INFO',
+          req.ip || '',
+        );
       });
       res.status(202).json({ success: true, statusCode: 202, signature: 'Pending worker delivery' });
     }),

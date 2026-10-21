@@ -298,6 +298,21 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       assert.equal(response.headers['cache-control'], 'no-store');
       assert.equal(response.body.watchlist.length, 0);
     });
+    await t.test('pipeline stop enforces authentication, CSRF and operator roles', async () => {
+      const path = '/api/pipeline/missing/stop';
+      assert.equal((await supertest(app).post(path).set('Origin', config.APP_ORIGIN).send({})).status, 401);
+      assert.equal((await admin.post(path).set('Origin', config.APP_ORIGIN).send({})).status, 403);
+      assert.equal(
+        (await viewer.post(path).set('Origin', config.APP_ORIGIN).set('x-csrf-token', viewCsrf).send({}))
+          .status,
+        403,
+      );
+      assert.equal(
+        (await operator.post(path).set('Origin', config.APP_ORIGIN).set('x-csrf-token', opCsrf).send({}))
+          .status,
+        404,
+      );
+    });
     await t.test('roles enforce write and administration boundaries', async () => {
       assert.equal(
         (

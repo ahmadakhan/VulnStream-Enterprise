@@ -181,7 +181,7 @@ export interface Advisory {
 
 export interface PipelinePhase {
   name: string;
-  status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'WARNING' | 'FAILED';
+  status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'WARNING' | 'FAILED' | 'CANCELLED';
   durationMs: number;
   details: string;
   metrics?: Record<string, string | number>;
@@ -191,7 +191,8 @@ export interface PipelineExecution {
   id: string;
   startTime: string;
   endTime: string | null;
-  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'QUARANTINED';
+  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'QUARANTINED' | 'CANCELLED';
+  stopRequestedAt?: string;
   scopeHours: number;
   phases: PipelinePhase[];
   stats: {

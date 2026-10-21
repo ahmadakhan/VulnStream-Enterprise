@@ -55,6 +55,27 @@ export async function queueRun(
     return execution;
   });
 }
+class PipelineStopped extends Error {
+  constructor() {
+    super('Pipeline stopped by operator; uncommitted results discarded');
+  }
+}
+export async function stopRun(pool: pg.Pool, id: string, actor: string): Promise<PipelineExecution> {
+  return transaction(pool, async (db) => {
+    const run = await get<PipelineExecution>(db, 'executions', id);
+    if (!run) throw new HttpError(404, 'Execution not found');
+    if (!['QUEUED', 'RUNNING'].includes(run.status) || run.stopRequestedAt) return run;
+    run.stopRequestedAt = new Date().toISOString();
+    if (run.status === 'QUEUED') {
+      run.status = 'CANCELLED';
+      run.endTime = run.stopRequestedAt;
+    }
+    run.logs.push('Operator requested stop');
+    await put(db, 'executions', id, run);
+    await appendAudit(db, 'Pipeline stop requested', `Execution ${id}`, actor, 'PIPELINE');
+    return run;
+  });
+}
 export function renderAdvisory(template: string, advisory: Advisory): string {
   const escape = (v: string) =>
     v.replace(
@@ -113,7 +134,18 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     }
     await pool.query('UPDATE scheduler_state SET heartbeat=now() WHERE id=1');
     if (!execution) return false;
+    const checkpoint = async (db: pg.Pool | pg.PoolClient = pool) => {
+      const current = await get<PipelineExecution>(db, 'executions', execution!.id);
+      if (current?.stopRequestedAt || current?.status === 'CANCELLED') throw new PipelineStopped();
+    };
+    await checkpoint();
     execution.status = 'RUNNING';
+    execution.phases = ['Feed ingestion', 'Structured correlation', 'Delivery queue'].map((name, index) => ({
+      name,
+      status: index === 0 ? 'RUNNING' : 'PENDING',
+      durationMs: 0,
+      details: index === 0 ? 'Retrieving and enriching enabled sources' : 'Waiting for dependencies',
+    }));
     execution.startTime = new Date().toISOString();
     let heartbeatPending = false;
     heartbeat = setInterval(() => {
@@ -128,6 +160,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     }, 15000);
     heartbeat.unref();
     await lockedTransaction(async (db) => {
+      await checkpoint(db);
       await put(db, 'executions', execution!.id, execution);
       await db.query('UPDATE scheduler_state SET last_run=now() WHERE id=1');
     });
@@ -144,6 +177,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         while (nextIndex < sources.length) {
           const i = nextIndex++;
           const feed = sources[i];
+          await checkpoint();
           if (
             (feed.consecutiveFailures || 0) >= 5 &&
             feed.circuitOpenUntil &&
@@ -156,7 +190,27 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           }
           const start = Date.now();
           try {
-            const result = await ingestFeed(feed, execution!.scopeHours, request, config, undefined, targets);
+            const checkedRequest: Requester = async (url, options) => {
+              await checkpoint();
+              const response = await request(url, options);
+              await checkpoint();
+              return response;
+            };
+            const checkedSleep = async (ms: number) => {
+              const until = Date.now() + ms;
+              while (Date.now() < until) {
+                await checkpoint();
+                await new Promise((resolve) => setTimeout(resolve, Math.min(500, until - Date.now())));
+              }
+            };
+            const result = await ingestFeed(
+              feed,
+              execution!.scopeHours,
+              checkedRequest,
+              config,
+              checkedSleep,
+              targets,
+            );
             results.push({ ...result, sourceId: feed.id });
             rawCount += result.notModified ? 0 : result.count;
             succeeded++;
@@ -177,6 +231,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
               circuitOpenUntil: null,
             });
           } catch (e) {
+            if (e instanceof PipelineStopped) throw e;
             const message = e instanceof Error ? e.message : 'Ingestion failed';
             const consecutiveFailures = (feed.consecutiveFailures || 0) + 1;
             feedUpdates.push({
@@ -194,6 +249,13 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             });
             execution!.logs.push(`Feed ${feed.id}: ${message}`);
           }
+          await transaction(pool, async (db) => {
+            await checkpoint(db);
+            execution!.phases[0].durationMs = Date.now() - Date.parse(execution!.startTime);
+            execution!.phases[0].details = `${results.length + feedUpdates.filter((f) => f.healthStatus === 'DOWN').length}/${feeds.length} sources processed; ${rawCount} records read`;
+            execution!.stats.rawIngested = rawCount;
+            await put(db, 'executions', execution!.id, execution);
+          });
           await lock.query('SELECT 1');
         }
       };
@@ -222,7 +284,20 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     }
     results.sort((a, b) => (a.sourceId || '').localeCompare(b.sourceId || ''));
     const ingestionDuration = Date.now() - new Date(execution.startTime).getTime();
+    execution.phases[0] = {
+      name: 'Feed ingestion',
+      status: succeeded < feeds.length ? 'WARNING' : 'SUCCESS',
+      durationMs: ingestionDuration,
+      details: `${succeeded}/${feeds.length} feeds succeeded; ${rawCount} records read`,
+    };
+    execution.phases[1].status = 'RUNNING';
+    execution.phases[1].details = 'Normalizing, merging and correlating cached indicators';
     await lockedTransaction(async (db) => {
+      await checkpoint(db);
+      await put(db, 'executions', execution!.id, execution);
+    });
+    await lockedTransaction(async (db) => {
+      await checkpoint(db);
       const currentFeeds = new Map((await list<ThreatFeed>(db, 'feeds')).map((feed) => [feed.id, feed]));
       const validSources = new Set(
         feeds
@@ -476,11 +551,24 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       await lockedTransaction(async (db) => {
         await put(db, 'executions', execution!.id, {
           ...execution,
-          status: 'FAILED',
+          status: e instanceof PipelineStopped ? 'CANCELLED' : 'FAILED',
+          stopRequestedAt: (await get<PipelineExecution>(db, 'executions', execution!.id))?.stopRequestedAt,
+          phases: execution!.phases.map((phase) =>
+            phase.status === 'RUNNING' || phase.status === 'PENDING'
+              ? { ...phase, status: e instanceof PipelineStopped ? 'CANCELLED' : 'FAILED' }
+              : phase,
+          ),
           endTime: new Date().toISOString(),
           logs: [...execution!.logs, e instanceof Error ? e.message : 'Worker failed'],
         });
-        await appendAudit(db, 'Pipeline failed', `Execution ${execution!.id}`, 'worker', 'PIPELINE', 'ERROR');
+        await appendAudit(
+          db,
+          e instanceof PipelineStopped ? 'Pipeline stopped' : 'Pipeline failed',
+          `Execution ${execution!.id}`,
+          'worker',
+          'PIPELINE',
+          e instanceof PipelineStopped ? undefined : 'ERROR',
+        );
       });
     else throw e;
     return true;
