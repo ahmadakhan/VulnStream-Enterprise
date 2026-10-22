@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Finding } from '../types';
 import { CveLink } from './CveLink';
+import { compareFindingsByRecency } from '../utils/findingSort';
 
 export const DashboardView: React.FC = () => {
   const {
@@ -39,7 +40,7 @@ export const DashboardView: React.FC = () => {
     (f) =>
       !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status) &&
       f.notificationStatus !== 'NOT_APPLICABLE',
-  );
+  ).sort(compareFindingsByRecency);
   const kevFindings = activeVulnerabilities.filter((f) => f.cve.cisaKev.isKev);
   const criticalFindings = activeVulnerabilities.filter((f) => f.cve.cvss.severity === 'CRITICAL');
   const deliveredEmails = emailLogs.filter((e) => ['ACCEPTED', 'DELIVERED'].includes(e.status)).length;

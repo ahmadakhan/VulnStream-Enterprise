@@ -21,6 +21,7 @@ import {
 import { Pagination } from './Pagination';
 import { copyText } from '../utils/clipboard';
 import { CveLink } from './CveLink';
+import { compareFindingsByRecency, formatCveDate } from '../utils/findingSort';
 
 export const FindingsView: React.FC = () => {
   const { findings, selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification } = useApp();
@@ -51,7 +52,7 @@ export const FindingsView: React.FC = () => {
     const matchesStatus = statusFilter === 'ALL' || f.status === statusFilter;
 
     return matchesSearch && matchesSeverity && matchesStatus;
-  });
+  }).sort(compareFindingsByRecency);
 
   const paginatedFindings = filteredFindings.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
@@ -163,15 +164,17 @@ export const FindingsView: React.FC = () => {
       </div>
 
       {/* Main Layout: Findings Table + Details Drawer */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="grid grid-cols-1 gap-6 items-start">
         {/* Table column */}
-        <div className={`transition-all ${selectedFinding ? 'lg:col-span-7' : 'lg:col-span-12'}`}>
+        <div className="w-full min-w-0">
           <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full min-w-[1200px] text-left text-xs">
                 <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
                   <tr>
                     <th className="py-3 px-3.5">CVE Identifier</th>
+                    <th className="py-3 px-3.5 whitespace-nowrap">Published</th>
+                    <th className="py-3 px-3.5 whitespace-nowrap">Modified</th>
                     <th className="py-3 px-3.5">Monitored Product</th>
                     <th className="py-3 px-3.5">CVSS / EPSS</th>
                     <th className="py-3 px-3.5">Exploit Risk</th>
@@ -182,7 +185,7 @@ export const FindingsView: React.FC = () => {
                 <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
                   {paginatedFindings.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-zinc-500 text-xs">
+                      <td colSpan={8} className="py-8 text-center text-zinc-500 text-xs">
                         No product vulnerabilities match the current filter.
                       </td>
                     </tr>
@@ -214,6 +217,14 @@ export const FindingsView: React.FC = () => {
                             <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600 line-clamp-1 max-w-[160px]">
                               {finding.cve.title}
                             </div>
+                          </td>
+
+                          {/* CVE dates */}
+                          <td className="py-3 px-3.5 whitespace-nowrap text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono text-[11px]">
+                            {formatCveDate(finding.cve.publishedDate)}
+                          </td>
+                          <td className="py-3 px-3.5 whitespace-nowrap text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono text-[11px]">
+                            {formatCveDate(finding.cve.modifiedDate)}
                           </td>
 
                           {/* Matched Product */}
@@ -318,7 +329,7 @@ export const FindingsView: React.FC = () => {
 
         {/* Detailed Drawer Column */}
         {selectedFinding && (
-          <div className="lg:col-span-5 bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm space-y-4 transition-colors">
+          <div className="w-full bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm space-y-4 transition-colors">
             {/* Drawer Header */}
             <div className="flex items-start justify-between border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 pb-3">
               <div>
