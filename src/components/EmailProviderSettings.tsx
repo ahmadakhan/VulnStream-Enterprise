@@ -120,7 +120,14 @@ export function EmailProviderSettings() {
                 <label htmlFor="smtp-port">
                   SMTP port
                   <input id="smtp-port" type="number" min={1} max={65535} className="ui-field"
-                    value={form.smtpPort} onChange={(event) => update({ smtpPort: Number(event.target.value) })} />
+                    value={form.smtpPort} onChange={(event) => {
+                      const port = Number(event.target.value);
+                      update({
+                        smtpPort: port,
+                        ...(port === 465 ? { smtpSecurity: 'IMPLICIT_TLS' as const } :
+                          port === 587 ? { smtpSecurity: 'STARTTLS' as const } : {}),
+                      });
+                    }} />
                 </label>
                 <label htmlFor="smtp-security">
                   SMTP encryption
