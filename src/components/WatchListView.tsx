@@ -69,6 +69,7 @@ export const WatchListView: React.FC = () => {
   const [vendorInput, setVendorInput] = useState('');
   const [customProductInput, setCustomProductInput] = useState('');
   const [additionalProductInput, setAdditionalProductInput] = useState('');
+  const [additionalCpes, setAdditionalCpes] = useState<string[]>([]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [cpePart, setCpePart] = useState<'a' | 'o' | 'h'>('a');
   const [versionInput, setVersionInput] = useState('*');
@@ -201,6 +202,7 @@ export const WatchListView: React.FC = () => {
     setVendorInput('');
     setCustomProductInput('');
     setAdditionalProductInput('');
+    setAdditionalCpes([]);
     setSelectedProductIds([]);
     setCpePart('a');
     setVersionInput('*');
@@ -219,6 +221,7 @@ export const WatchListView: React.FC = () => {
     setVendorInput(parsed.isValid ? parsed.vendor : item.vendor);
     setCustomProductInput(parsed.isValid ? parsed.product : item.product);
     setAdditionalProductInput('');
+    setAdditionalCpes(item.cpes.slice(1));
     setSelectedProductIds([]);
     setCpePart((parsed.part === 'o' || parsed.part === 'h' ? parsed.part : 'a') as 'a' | 'o' | 'h');
     setVersionInput(parsed.version || '*');
@@ -266,7 +269,7 @@ export const WatchListView: React.FC = () => {
         vendor: parsedCpe.vendor,
         product: parsedCpe.product,
         version: parsedCpe.version,
-        cpes: editingItem.cpes.length ? [cpe, ...editingItem.cpes.slice(1)] : [cpe],
+        cpes: [cpe, ...additionalCpes],
         purls: purlList.length > 0 ? purlList : undefined,
         targetHw: parsedCpe.targetHw !== '*' ? parsedCpe.targetHw : undefined,
         assetTag: assetTagInput.trim() || editingItem.assetTag,
@@ -974,6 +977,29 @@ export const WatchListView: React.FC = () => {
                   <p className="mt-1 text-zinc-500">
                     Change the product fields or expression to update this asset. Select catalog products above to add separate monitored products.
                   </p>
+                </div>
+              )}
+
+              {editingItem && additionalCpes.length > 0 && (
+                <div className="rounded-xl border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 p-3 space-y-2">
+                  <div className="text-[11px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                    Additional CPEs currently attached to this asset. Remove any that should not be monitored.
+                  </div>
+                  {additionalCpes.map((cpe, index) => (
+                    <div key={`${cpe}-${index}`} className="flex items-center gap-2">
+                      <code className="min-w-0 flex-1 truncate text-xs text-zinc-300 dark:text-zinc-300 light:text-zinc-700" title={cpe}>
+                        {cpe}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => setAdditionalCpes((current) => current.filter((_, cpeIndex) => cpeIndex !== index))}
+                        aria-label={`Remove additional CPE ${cpe}`}
+                        className="shrink-0 rounded-lg p-1 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
 

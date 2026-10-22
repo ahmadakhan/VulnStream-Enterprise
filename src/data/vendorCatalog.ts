@@ -21,6 +21,12 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     aliases: ['msft', 'microsoft_corp', 'microsoft_corporation'],
     products: [
       {
+        name: 'Windows Server 2025',
+        normalizedId: 'windows_2025',
+        part: 'o',
+        description: 'Enterprise Server Operating System',
+      },
+      {
         name: 'Windows Server 2022',
         normalizedId: 'windows_server_2022',
         part: 'o',
