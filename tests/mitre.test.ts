@@ -6,7 +6,7 @@ import { loadConfig } from '../server/config.ts';
 import { feedSchema, feedImportSchema } from '../server/validation.ts';
 import { mergeCveRecords } from '../src/utils/deduplicator';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
-import { DEFAULT_SETTINGS } from '../shared/state/state.ts';
+import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import type { ThreatFeed, WatchListItem } from '../src/types/index.ts';
 import { mitreRecord, mitreDelta } from './fixtures/mitre';
 const config = loadConfig({ NODE_ENV: 'test', DATABASE_URL: 'postgres://unused', APP_ORIGIN: 'http://localhost', ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64') });

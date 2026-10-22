@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { ingestFeed, normalizeNvd } from '../server/ingestion';
 import { loadConfig } from '../server/config.ts';
 import { mergeCveRecords } from '../src/utils/deduplicator';
-import { matchesWatchlistItem } from '../src/utils/cpeMatcher/cpeMatcher.ts';
+import { matchesWatchlistItem } from '../src/utils/cpeMatcher.ts';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
-import { DEFAULT_SETTINGS } from '../shared/state/state.ts';
+import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import { cveSchema } from '../server/validation.ts';
 import type { NormalizedCVE, ThreatFeed, WatchListItem } from '../src/types/index.ts';
 

@@ -40,6 +40,26 @@ const feedPayload = [
     enabled: true,
     vendorSeed: true,
   },
+  {
+    id: 'feed-msrc',
+    name: 'Microsoft Security Response Center (MSRC)',
+    type: 'JSON_SEARCH_API' as const,
+    url: 'https://api.msrc.microsoft.com/cvrf/v2.0/updates',
+    authType: 'NONE' as const,
+    rateLimitPerMin: 120,
+    enabled: false,
+    vendorSeed: true,
+  },
+  {
+    id: 'feed-paloalto',
+    name: 'Palo Alto Networks Unit 42 Advisory Feed',
+    type: 'JSON_SEARCH_API' as const,
+    url: 'https://security.paloaltonetworks.com/api/v1/advisories',
+    authType: 'NONE' as const,
+    rateLimitPerMin: 100,
+    enabled: false,
+    vendorSeed: true,
+  },
   ...RECOMMENDED_FEEDS,
 ];
 

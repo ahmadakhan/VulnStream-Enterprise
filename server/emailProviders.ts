@@ -58,6 +58,9 @@ export function emailIsConfigured(
   );
 }
 export class EmailProviderError extends Error {
+  status: number;
+  retryAt: number;
+  provider?: EmailDeliveryLog['provider'];
   constructor(message: string, status: number, retryAt = 0, provider?: EmailDeliveryLog['provider']) {
     super(message);
     this.status = status;

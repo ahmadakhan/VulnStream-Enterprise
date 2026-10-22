@@ -13,7 +13,7 @@ import { ingestFeed } from '../server/ingestion';
 import { processPipeline, queueRun } from '../server/pipeline';
 import { deliverNext } from '../server/delivery';
 import { verifyAuditChain } from '../src/utils/cryptoChain';
-import { DEFAULT_SETTINGS } from '../shared/state/state.ts';
+import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import type { NormalizedCVE, Finding, Advisory, WebhookEndpoint } from '../src/types/index.ts';
 const database = process.env.TEST_DATABASE_URL;
 const key = randomBytes(32).toString('base64');

@@ -5,7 +5,7 @@ import { createPool, migrate, transaction, put, putMany, list, get } from '../se
 import { queueRun, processPipeline, stopRun } from '../server/pipeline';
 import { deliverNext, queueAdvisory } from '../server/delivery';
 import { loadConfig } from '../server/config.ts';
-import { DEFAULT_SETTINGS } from '../shared/state/state.ts';
+import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import { MITRE_DELTA_URL } from '../server/mitre';
 import { mitreRecord, mitreDelta } from './fixtures/mitre';
 import { applyCommand } from '../server/commands.ts';

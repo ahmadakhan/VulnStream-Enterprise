@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { emptyState, type AppState } from '../shared/state.ts';
 import { chainAuditLogs } from '../src/utils/cryptoChain.ts';
-import type { AuditLog } from '../src/types.ts';
+import type { AuditLog } from '../src/types/index.ts';
 import { orderWatchlist } from '../src/utils/watchlist.ts';
 export type Db = pg.Pool | PoolClient;
 export const createPool = (url: string) =>

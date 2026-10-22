@@ -21,7 +21,7 @@ import { parseSyndication, RSS_MAX_BYTES } from './rss';
 import { readEvents, writeEvent } from './events';
 import type { AppState } from '../shared/state.ts';
 import type { AppSettings, ThreatFeed, WebhookEndpoint, Advisory, TemplateCustomization, EmailConfiguration } from '../src/types/index.ts';
-import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler/templateCompiler.ts';
+import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler.ts';
 function publicState(data: AppState): AppState {
   return {
     ...data,

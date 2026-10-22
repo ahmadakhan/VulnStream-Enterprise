@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import supertest from 'supertest';
-import { DEFAULT_EMAIL_CONFIG } from '../shared/state/state.ts';
+import { DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
 import { EmailProviderError, sendProviderEmail } from '../server/emailProviders.ts';
 import { createMailSender, deliverNext, type Job } from '../server/delivery';
 import { createPool, migrate, get, list } from '../server/db.ts';
