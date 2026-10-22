@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { recoveryAt, recoveryDue } from '../server/feedRecovery';
+import { recoveryAt, recoveryDue, shouldStartAutomaticRun } from '../server/feedRecovery';
 import { feedSchema } from '../server/validation';
 import { ingestFeed } from '../server/ingestion';
 import type { ThreatFeed } from '../src/types';
@@ -15,6 +15,30 @@ test('failed sources recover at their persisted deadline and back off to one hou
   assert.equal(recoveryDue({ ...feed, enabled: false, circuitOpenUntil: deadline }, now + 120000), false);
   assert.equal(recoveryDue({ ...feed, healthStatus: 'HEALTHY', circuitOpenUntil: deadline }, now + 120000), false);
   assert.equal(Date.parse(recoveryAt(feed, 100, now)), now + 3600000);
+});
+
+test('recovery probes run with routine scheduling disabled, while periodic runs remain disabled', () => {
+  const now = Date.parse('2026-10-22T00:00:00Z');
+  assert.equal(
+    shouldStartAutomaticRun({
+      schedulerEnabled: false,
+      recoveryProbeDue: true,
+      catchupDue: false,
+      lastRun: new Date(now).toISOString(),
+      intervalMinutes: 60,
+    }, now),
+    true,
+  );
+  assert.equal(
+    shouldStartAutomaticRun({
+      schedulerEnabled: false,
+      recoveryProbeDue: false,
+      catchupDue: true,
+      lastRun: null,
+      intervalMinutes: 60,
+    }, now),
+    false,
+  );
 });
 test('feed settings validate bounds and retain legacy timeout behavior', () => {
   assert.equal(feedSchema.parse(feed).requestTimeoutSeconds, undefined);

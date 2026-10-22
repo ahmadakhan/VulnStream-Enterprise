@@ -17,7 +17,7 @@ import { mergeCveRecords, normalizeCveId, stableJson } from '../src/utils/dedupl
 import { reconcileFindings } from '../src/engine/reconcileFindings';
 import { determineExploitRisk, runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { ingestFeed, type IngestContext } from './ingestion';
-import { recoveryDue, recoveryAt } from './feedRecovery';
+import { recoveryDue, recoveryAt, shouldStartAutomaticRun } from './feedRecovery';
 import { ingestionWindow, type FeedCursor } from './ingestionState';
 import type { Requester } from './network';
 import type { Config } from './config';
@@ -199,11 +199,14 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         return feed.enabled && cursor?.hasMore && cursor.fingerprint === sourceFingerprint(feed) &&
           !(Date.parse(feed.circuitOpenUntil || '') > Date.now());
       });
-      if (
-        settings.schedulerEnabled &&
-        (catchupDue || configuredFeeds.some((feed) => recoveryDue(feed)) ||
-          !last || Date.now() - new Date(last).getTime() >= settings.schedulerIntervalMinutes * 60000)
-      )
+      const recoveryProbeDue = configuredFeeds.some((feed) => recoveryDue(feed));
+      if (shouldStartAutomaticRun({
+        schedulerEnabled: settings.schedulerEnabled,
+        recoveryProbeDue,
+        catchupDue,
+        lastRun: last ? new Date(last).toISOString() : null,
+        intervalMinutes: settings.schedulerIntervalMinutes,
+      }))
         execution = await queueRun(pool, undefined, 'scheduler');
     }
     await pool.query('UPDATE scheduler_state SET heartbeat=now() WHERE id=1');

@@ -10,3 +10,22 @@ export function recoveryAt(feed: ThreatFeed, failures: number, now = Date.now())
   const base = (feed.recoveryDelayMinutes ?? 5) * 60000;
   return new Date(now + Math.min(3600000, base * 2 ** Math.min(6, Math.max(0, failures - 1)))).toISOString();
 }
+
+/** Recovery probes remain active when routine scheduled runs are disabled. */
+export function shouldStartAutomaticRun(
+  input: {
+    schedulerEnabled: boolean;
+    recoveryProbeDue: boolean;
+    catchupDue: boolean;
+    lastRun?: string | null;
+    intervalMinutes: number;
+  },
+  now = Date.now(),
+): boolean {
+  if (input.recoveryProbeDue) return true;
+  return input.schedulerEnabled && (
+    input.catchupDue ||
+    !input.lastRun ||
+    now - Date.parse(input.lastRun) >= input.intervalMinutes * 60000
+  );
+}
