@@ -149,3 +149,21 @@ export async function state(db: Db): Promise<AppState> {
   );
   return snapshot;
 }
+
+/** Pipeline-only snapshot avoids loading executions, delivery logs, recipients and audit history. */
+export async function pipelineState(db: Db): Promise<AppState> {
+  const snapshot = emptyState();
+  const kinds = ['settings', 'watchlist', 'cveData', 'findings', 'alertedCves', 'intelligenceArticles', 'template'];
+  const rows = await db.query(
+    'SELECT kind,data FROM records WHERE kind=ANY($1::text[]) ORDER BY updated_at DESC,id',
+    [kinds],
+  );
+  for (const row of rows.rows) {
+    if (Array.isArray(snapshot[row.kind as keyof AppState]))
+      (snapshot[row.kind as keyof AppState] as unknown[]).push(row.data);
+    else if (row.kind === 'settings') snapshot.settings = row.data;
+    else if (row.kind === 'template') Object.assign(snapshot, row.data);
+  }
+  snapshot.advisoryTemplate = compileCustomizedTemplate(snapshot.templateCustomization);
+  return snapshot;
+}

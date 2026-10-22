@@ -68,6 +68,7 @@ export const PipelineExecutionsView: React.FC = () => {
     useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scopeHours, setScopeHours] = useState(settings.scopeHours);
+  const [incrementalFeeds, setIncrementalFeeds] = useState(true);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
@@ -144,6 +145,18 @@ export const PipelineExecutionsView: React.FC = () => {
                 ))}
             </select>
           </label>
+          <label className="flex items-center gap-2 text-xs text-zinc-400 light:text-zinc-600">
+            <input
+              type="checkbox"
+              checked={incrementalFeeds}
+              onChange={(e) => setIncrementalFeeds(e.target.checked)}
+              disabled={isPipelineRunning}
+              className="accent-blue-500"
+            />
+            <span title="Resume each supported feed from its last successful checkpoint. Turn this off to scan the selected lookback window again.">
+              Use source checkpoints
+            </span>
+          </label>
           {running && canOperate ? (
             <button
               disabled={!!running.stopRequestedAt || pending > 0}
@@ -157,7 +170,7 @@ export const PipelineExecutionsView: React.FC = () => {
             <button
               disabled={!canOperate || isPipelineRunning || pending > 0}
               onClick={async () => {
-                const run = await triggerPipelineRun(scopeHours);
+                const run = await triggerPipelineRun(scopeHours, incrementalFeeds);
                 if (run) {
                   setSelectedId(run.id);
                   setSelectedStage(null);

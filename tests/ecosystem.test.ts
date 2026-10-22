@@ -133,6 +133,36 @@ test('NVD retains provisional analysis as review-only and reports withdrawals', 
   ]);
 });
 
+test('NVD resumes from an overlapping checkpoint and avoids normalizing cached revisions', async () => {
+  const checkpoint = new Date(Date.now() - 60 * 60 * 1000);
+  let requestedUrl = '';
+  const result = await ingestFeed(
+    feed('NVD_API'),
+    24,
+    async (value) => {
+      requestedUrl = value;
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({ startIndex: 0, totalResults: 1, vulnerabilities: [nvd()] }),
+      };
+    },
+    config,
+    async () => {},
+    [],
+    undefined,
+    {
+      checkpoint: checkpoint.toISOString(),
+      knownCveModifiedAt: new Map([['CVE-2026-12345', '2026-10-20T00:00:00.000Z']]),
+    },
+  );
+  const url = new URL(requestedUrl);
+  assert.equal(Date.parse(url.searchParams.get('lastModStartDate')!), checkpoint.getTime() - 15 * 60 * 1000);
+  assert.equal(result.count, 1);
+  assert.equal(result.cves.length, 0);
+  assert.ok(result.sourceCheckpoint);
+});
+
 test('EPSS fetches only requested inventory CVEs in bounded batches', async () => {
   const ids = Array.from({ length: 205 }, (_, index) => `CVE-2026-${10000 + index}`);
   let calls = 0;

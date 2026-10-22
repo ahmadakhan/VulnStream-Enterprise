@@ -253,6 +253,8 @@ export interface PipelineExecution {
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'QUARANTINED' | 'CANCELLED';
   stopRequestedAt?: string;
   scopeHours: number;
+  /** Use a successfully committed source checkpoint instead of rescanning the full lookback. */
+  incrementalFeeds?: boolean;
   phases: PipelinePhase[];
   stats: {
     rawIngested: number;

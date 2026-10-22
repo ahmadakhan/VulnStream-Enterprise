@@ -75,6 +75,7 @@ export const WatchListView: React.FC = () => {
   const [ownerGroupInput, setOwnerGroupInput] = useState('SecOps-Core');
   const [notesInput, setNotesInput] = useState('');
   const [purlInput, setPurlInput] = useState('');
+  const [cpeExpressionInput, setCpeExpressionInput] = useState('');
 
   const [bulkJsonText, setBulkJsonText] = useState('');
   const [bulkFeedback, setBulkFeedback] = useState<{ imported: number; errors: string[] } | null>(null);
@@ -115,6 +116,11 @@ export const WatchListView: React.FC = () => {
 
   // Dynamically generated Strict CPE 2.3 expressions
   const generatedCpes = useMemo(() => {
+    if (editingItem) {
+      return cpeExpressionInput.trim()
+        ? [{ product: 'Edited CPE', cpe: cpeExpressionInput.trim(), part: cpePart }]
+        : [];
+    }
     const list: Array<{ product: string; cpe: string; part: 'a' | 'o' | 'h' }> = [];
     const v = vendorInput.trim() || 'vendor';
 
@@ -148,6 +154,8 @@ export const WatchListView: React.FC = () => {
     versionInput,
     targetHwInput,
     catalogProducts,
+    editingItem,
+    cpeExpressionInput,
   ]);
 
   const filteredAssets = watchlist.filter((item) => {
@@ -175,6 +183,7 @@ export const WatchListView: React.FC = () => {
     setOwnerGroupInput('SecOps-Core');
     setNotesInput('');
     setPurlInput('');
+    setCpeExpressionInput('');
     setEditingItem(null);
     setShowAddModal(true);
   };
@@ -191,6 +200,7 @@ export const WatchListView: React.FC = () => {
     setOwnerGroupInput(item.ownerGroup);
     setNotesInput(item.notes || '');
     setPurlInput((item.purls || []).join('\n'));
+    setCpeExpressionInput(item.cpes[0] || '');
     setEditingItem(item);
     setShowAddModal(true);
   };
@@ -221,28 +231,17 @@ export const WatchListView: React.FC = () => {
 
     // If editing existing single item
     if (editingItem) {
-      const finalProduct = customProductInput.trim() || editingItem.product;
-      const cpe = buildStrictCpe23(cpePart, vendorInput.trim(), finalProduct, versionInput, targetHwInput);
-
-      const previous = parseCPE23(editingItem.cpes[0] || '');
-      const identifiersUnchanged =
-        previous.isValid &&
-        previous.part === cpePart &&
-        previous.vendor === vendorInput.trim() &&
-        previous.product === finalProduct &&
-        previous.version === versionInput &&
-        previous.targetHw === targetHwInput;
+      const parsedCpe = parseCPE23(cpeExpressionInput.trim());
+      if (!parsedCpe.isValid) return;
+      const cpe = cpeExpressionInput.trim();
       const saved = await updateWatchlistItem({
         ...editingItem,
-        vendor: vendorInput.trim(),
-        product: finalProduct,
-        cpes: identifiersUnchanged
-          ? editingItem.cpes
-          : editingItem.cpes.length
-            ? [cpe, ...editingItem.cpes.slice(1)]
-            : [],
+        vendor: parsedCpe.vendor,
+        product: parsedCpe.product,
+        version: parsedCpe.version,
+        cpes: editingItem.cpes.length ? [cpe, ...editingItem.cpes.slice(1)] : [cpe],
         purls: purlList.length > 0 ? purlList : undefined,
-        targetHw: targetHwInput !== '*' ? targetHwInput : undefined,
+        targetHw: parsedCpe.targetHw !== '*' ? parsedCpe.targetHw : undefined,
         assetTag: assetTagInput.trim() || editingItem.assetTag,
         ownerGroup: ownerGroupInput.trim() || 'Unassigned',
         notes: notesInput.trim(),
@@ -890,6 +889,28 @@ export const WatchListView: React.FC = () => {
                 />
               </div>
 
+              {editingItem && (
+                <div>
+                  <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                    CPE 2.3 Expression (editable)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={cpeExpressionInput}
+                    onChange={(e) => setCpeExpressionInput(e.target.value)}
+                    aria-invalid={!parseCPE23(cpeExpressionInput.trim()).isValid}
+                    className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
+                  />
+                  {!parseCPE23(cpeExpressionInput.trim()).isValid && (
+                    <p className="mt-1 text-rose-400">Enter a valid CPE 2.3 expression before saving.</p>
+                  )}
+                  <p className="mt-1 text-zinc-500">
+                    This expression is used for matching; its vendor, product, version, and target hardware are saved with the asset.
+                  </p>
+                </div>
+              )}
+
               {/* CPE Attributes (Part, Version, Target HW) */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -1003,7 +1024,7 @@ export const WatchListView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={!vendorInput.trim()}
+                  disabled={!vendorInput.trim() || (Boolean(editingItem) && !parseCPE23(cpeExpressionInput.trim()).isValid)}
                   className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition disabled:opacity-50 shadow-sm"
                 >
                   {editingItem

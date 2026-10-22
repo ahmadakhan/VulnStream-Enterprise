@@ -23,6 +23,27 @@ export interface IngestResult {
   count: number;
   etag?: string;
   notModified?: boolean;
+  /** End of the fully fetched source window; persisted only after the whole pipeline commits. */
+  sourceCheckpoint?: string;
+}
+export interface IngestContext {
+  /** Last fully committed source checkpoint for the same source configuration. */
+  checkpoint?: string;
+  /** Latest cached CVE revision times, keyed by canonical CVE ID. */
+  knownCveModifiedAt?: ReadonlyMap<string, string>;
+  /** Latest cached withdrawal times, keyed by canonical CVE ID. */
+  knownWithdrawalAt?: ReadonlyMap<string, string>;
+}
+const CHECKPOINT_OVERLAP_MS = 15 * 60 * 1000;
+export function getIngestionWindowStart(end: Date, scopeHours: number, checkpoint?: string, maxHours = 2880): Date {
+  const requestedStart = end.getTime() - Math.min(scopeHours, maxHours) * 3600000;
+  if (!checkpoint) return new Date(requestedStart);
+  const checkpointTime = Date.parse(checkpoint);
+  if (!Number.isFinite(checkpointTime)) throw new Error('Saved source checkpoint is invalid; clear it and re-run ingestion');
+  if (checkpointTime > end.getTime() + CHECKPOINT_OVERLAP_MS)
+    throw new Error('Saved source checkpoint is ahead of the current clock; clear it and re-run ingestion');
+  // Keep a bounded overlap for provider indexing delays and timestamps at window edges.
+  return new Date(Math.max(0, checkpointTime - CHECKPOINT_OVERLAP_MS));
 }
 const iso = (s: string) => new Date(s).toISOString();
 function normalizeOpenCve(detail: any, feedId: string): NormalizedCVE {
@@ -165,6 +186,7 @@ export async function ingestFeed(
   sleep: (ms: number) => Promise<unknown> = delay,
   targetCveIds: string[] = [],
   onNvdProgress?: (progress: { offset: number; total: number; records: number }) => Promise<void> | void,
+  context: IngestContext = {},
 ): Promise<IngestResult> {
   const upstreamRequest = request;
   request = (url, options = {}) => upstreamRequest(url, {
@@ -238,7 +260,7 @@ export async function ingestFeed(
       throw new Error('Feed did not return valid JSON');
     }
   };
-  if (feed.type === 'MITRE_CVE') return ingestMitre(feed, scopeHours, request, sleep);
+  if (feed.type === 'MITRE_CVE') return ingestMitre(feed, scopeHours, request, sleep, context);
   if (feed.type === 'RSS_ATOM') {
     const response = await request(feed.url, { headers: { ...headers, accept:'application/rss+xml, application/atom+xml, application/xml, text/xml',
       ...(feed.etag ? { 'If-None-Match':feed.etag } : {}) }, timeoutMs:25000, maxResponseBytes:2*1024*1024 });
@@ -249,7 +271,9 @@ export async function ingestFeed(
   }
   if (feed.type === 'NVD_API') {
     const end = new Date(),
-      start = new Date(end.getTime() - Math.min(scopeHours, 2880) * 3600000);
+      start = getIngestionWindowStart(end, scopeHours, context.checkpoint);
+    if (end.getTime() - start.getTime() > 120 * 24 * 3600000)
+      throw new Error('NVD checkpoint exceeds the 120-day API limit; a bounded re-baseline is required');
     const cves: NormalizedCVE[] = [];
     const withdrawals: NonNullable<IngestResult['withdrawals']> = [];
     let rawCount = 0;
@@ -290,9 +314,18 @@ export async function ingestFeed(
         seen.add(id);
         if (item.cve?.vulnStatus === 'Rejected') {
           const cveId = normalizeCveId(item.cve.id);
-          if (cveId) withdrawals.push({ cveId, modifiedDate: iso(item.cve.lastModified) });
+          if (cveId) {
+            const modifiedDate = iso(item.cve.lastModified);
+            const knownWithdrawal = Date.parse(context.knownWithdrawalAt?.get(cveId) || '');
+            if (!Number.isFinite(knownWithdrawal) || knownWithdrawal < Date.parse(modifiedDate))
+              withdrawals.push({ cveId, modifiedDate });
+          }
           continue;
         }
+        const cachedModified = Date.parse(context.knownCveModifiedAt?.get(id) || '');
+        const incomingModified = Date.parse(item.cve?.lastModified || '');
+        if (Number.isFinite(cachedModified) && Number.isFinite(incomingModified) && cachedModified >= incomingModified)
+          continue;
         const cve = normalizeNvd(item, feed.id);
         if (cve) cves.push(cve);
       }
@@ -303,7 +336,7 @@ export async function ingestFeed(
       if (!page.vulnerabilities.length) throw new Error('NVD pagination stopped before completion');
       await sleep(nvdInterval);
     }
-    return { cves, count: rawCount, withdrawals };
+    return { cves, count: rawCount, withdrawals, sourceCheckpoint: end.toISOString() };
   }
   if (feed.type === 'CISA_KEV') {
     const { data: rawData, etag } = await json(feed.url);
@@ -413,7 +446,7 @@ export async function ingestFeed(
   if (feed.type === 'OPENCVE_API') {
     if (feed.authType !== 'BEARER') throw new Error('OpenCVE API v2 requires an organization Bearer token');
     const end = new Date();
-    const start = new Date(end.getTime() - Math.min(scopeHours, 2880) * 3600000);
+    const start = getIngestionWindowStart(end, scopeHours, context.checkpoint);
     const base = new URL(feed.url);
     const listUrl = new URL(base);
     listUrl.search = '';
@@ -449,7 +482,11 @@ export async function ingestFeed(
     }
     const cves: NormalizedCVE[] = [];
     let requests = 0;
-    for (const [id] of records) {
+    for (const [id, row] of records) {
+      const cachedModified = Date.parse(context.knownCveModifiedAt?.get(id) || '');
+      const listedModified = Date.parse(row.updated_at);
+      if (Number.isFinite(cachedModified) && Number.isFinite(listedModified) && cachedModified >= listedModified)
+        continue;
       if (requests++) await sleep(Math.max(1000, 60000 / feed.rateLimitPerMin));
       const detailUrl = new URL(`${listPath}/${encodeURIComponent(id)}`, listUrl.origin);
       detailUrl.searchParams.set('include', 'nvd_cpe_configurations');
@@ -458,7 +495,7 @@ export async function ingestFeed(
       const cve = normalizeOpenCve(data, feed.id);
       if (Date.parse(cve.modifiedDate) >= start.getTime() && Date.parse(cve.modifiedDate) <= end.getTime()) cves.push(cve);
     }
-    return { cves, count: cves.length };
+    return { cves, count: cves.length, sourceCheckpoint: end.toISOString() };
   }
   if (feed.type === 'VULNCHECK_KEV') {
     if (feed.authType !== 'BEARER') throw new Error('VulnCheck KEV requires a Bearer API token');

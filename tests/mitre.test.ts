@@ -39,6 +39,25 @@ test('MITRE ingests each canonical CVE once across overlapping delta entries and
   assert.equal(result.count, 1);
   assert.equal(result.cves.length, 1);
 });
+test('MITRE skips fetching details for revisions already in the canonical cache', async () => {
+  const date = new Date(Date.now() - 1000).toISOString();
+  const calls: string[] = [];
+  const result = await ingestFeed(
+    source,
+    24,
+    async (url) => {
+      calls.push(url);
+      return response(url === MITRE_DELTA_URL ? mitreDelta('CVE-2026-98001', date) : mitreRecord('CVE-2026-98001', date));
+    },
+    config,
+    sleep,
+    [],
+    undefined,
+    { knownCveModifiedAt: new Map([['CVE-2026-98001', date]]) },
+  );
+  assert.deepEqual(calls, [MITRE_DELTA_URL]);
+  assert.equal(result.cves.length, 0);
+});
 test('MITRE rejects mismatched records and preserves upstream rejection as a withdrawal', async () => {
   const date = new Date(Date.now() - 1000).toISOString();
   const request = async (url: string) => response(url === MITRE_DELTA_URL ? mitreDelta(undefined, date) : mitreRecord('CVE-2026-99999', date));

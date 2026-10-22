@@ -2,7 +2,7 @@ import { writeEvent } from './events';
 import { mergeArticles, matchIntelligence } from '../src/utils/intelligenceMatcher';
 import type pg from 'pg';
 import { randomUUID, createHash } from 'node:crypto';
-import { get, list, put, putMany, transaction, appendAudit, state } from './db';
+import { get, list, put, putMany, transaction, appendAudit, pipelineState } from './db';
 import { DEFAULT_SETTINGS } from '../shared/state';
 import type {
   AppSettings,
@@ -13,10 +13,10 @@ import type {
   NormalizedCVE,
   WatchListItem,
 } from '../src/types';
-import { mergeCveRecords, normalizeCveId } from '../src/utils/deduplicator';
+import { mergeCveRecords, normalizeCveId, stableJson } from '../src/utils/deduplicator';
 import { reconcileFindings } from '../src/engine/reconcileFindings';
-import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
-import { ingestFeed } from './ingestion';
+import { determineExploitRisk, runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
+import { ingestFeed, type IngestContext } from './ingestion';
 import { recoveryDue, recoveryAt } from './feedRecovery';
 import type { Requester } from './network';
 import type { Config } from './config';
@@ -31,10 +31,31 @@ const sourceFingerprint = (feed: ThreatFeed) =>
   createHash('sha256')
     .update(JSON.stringify([feed.type, feed.url, feed.authType, feed.authSecretKey || '']))
     .digest('hex');
+const matchingCveSignature = (cves: NormalizedCVE[]) => {
+  const digest = createHash('sha256');
+  for (const cve of [...cves].sort((a, b) => a.cveId.localeCompare(b.cveId)))
+    digest.update(stableJson({
+      cveId: cve.cveId,
+      title: cve.title,
+      description: cve.description,
+      cpeMatches: cve.cpeMatches,
+      cpeMatchDetails: cve.cpeMatchDetails,
+      versionRange: cve.versionRange,
+      purls: cve.purls,
+      applicabilityRequiresReview: cve.applicabilityRequiresReview,
+    }));
+  return digest.digest('hex');
+};
+const inventorySignature = (assets: WatchListItem[]) => {
+  const digest = createHash('sha256');
+  for (const asset of [...assets].sort((a, b) => a.id.localeCompare(b.id))) digest.update(stableJson(asset));
+  return digest.digest('hex');
+};
 export async function queueRun(
   pool: pg.Pool,
   scope: number | undefined,
   actor: string,
+  incrementalFeeds = true,
 ): Promise<PipelineExecution> {
   return transaction(pool, async (db) => {
     const existing = (await list<PipelineExecution>(db, 'executions')).find((e) =>
@@ -48,6 +69,7 @@ export async function queueRun(
       endTime: null,
       status: 'QUEUED',
       scopeHours: scope ?? settings.scopeHours,
+      incrementalFeeds,
       phases: [],
       stats: {
         rawIngested: 0,
@@ -217,10 +239,22 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       await writeEvent(db, {category:'PIPELINE', code:'pipeline.started', message:'Pipeline started', runId:execution!.id});
     });
     const feeds = (await list<ThreatFeed>(pool, 'feeds')).filter((f) => f.enabled);
+    const [cachedCves, cachedWithdrawals, inventory] = await Promise.all([
+      list<NormalizedCVE>(pool, 'cveData'),
+      list<{ cveId: string; modifiedDate: string }>(pool, 'cveWithdrawals'),
+      list<WatchListItem>(pool, 'watchlist'),
+    ]);
+    const canonicalCache = mergeCveRecords(cachedCves);
+    const knownCveModifiedAt = new Map([...canonicalCache].map(([id, cve]) => [id, cve.modifiedDate]));
+    const knownWithdrawalAt = new Map(cachedWithdrawals.map((entry) => [entry.cveId, entry.modifiedDate]));
     let succeeded = 0,
       rawCount = 0;
     const results: Awaited<ReturnType<typeof ingestFeed>>[] = [];
     const feedUpdates: ThreatFeed[] = [];
+    let preliminaryCorrelation: ReturnType<typeof runVulnerabilityPipeline> | undefined;
+    let preliminaryCveSignature = '';
+    let preliminaryInventorySignature = '';
+    let preliminarySourceIds: string[] = [];
     // Bound cross-feed concurrency; each adapter also paces its own pages.
     const ingestSources = async (sources: ThreatFeed[], targets: string[] = []) => {
       const concurrency = Math.min(sources.length, 6);
@@ -267,6 +301,15 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             const savedKev =
               feed.type === 'CISA_KEV' ? await get<KevSnapshot>(pool, 'feedSnapshots', feed.id) : undefined;
             const cachedKev = savedKev?.fingerprint === sourceFingerprint(feed) ? savedKev : undefined;
+            const savedCheckpoint = await get<{ fingerprint: string; checkpoint: string }>(pool, 'feedCheckpoints', feed.id);
+            const context: IngestContext = {
+              checkpoint:
+                execution!.incrementalFeeds !== false && savedCheckpoint?.fingerprint === sourceFingerprint(feed)
+                  ? savedCheckpoint.checkpoint
+                  : undefined,
+              knownCveModifiedAt,
+              knownWithdrawalAt,
+            };
             // A validator is usable only together with its complete source snapshot.
             let result = await ingestFeed(
               feed.type === 'CISA_KEV' ? { ...feed, etag: cachedKev?.etag } : feed,
@@ -286,6 +329,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
                     });
                   }
                 : undefined,
+              context,
             );
             if (feed.type === 'CISA_KEV' && result.notModified) {
               if (!cachedKev) throw new Error('KEV conditional response has no source snapshot');
@@ -341,27 +385,38 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       const failure = workers.find((result) => result.status === 'rejected');
       if (failure?.status === 'rejected') throw failure.reason;
     };
+    const primaryIngestionStartedAt = Date.now();
     await ingestSources(feeds.filter((feed) => feed.type !== 'EPSS_API'));
+    const primaryIngestionDuration = Date.now() - primaryIngestionStartedAt;
+    const preliminaryCorpus = mergeCveRecords([
+      ...cachedCves,
+      ...results.flatMap((result) => result.cves),
+    ]);
+    const preliminaryCves = [...preliminaryCorpus.values()];
+    preliminaryCorrelation = runVulnerabilityPipeline(
+      [],
+      preliminaryCves,
+      inventory,
+      [],
+      [],
+      { ...DEFAULT_SETTINGS, scopeHours: 0 },
+    );
+    preliminaryCveSignature = matchingCveSignature(preliminaryCves);
+    preliminaryInventorySignature = inventorySignature(inventory);
+    preliminarySourceIds = results
+      .filter((result) => result.cves.length > 0 || (result.withdrawals?.length || 0) > 0)
+      .map((result) => result.sourceId || '')
+      .sort();
     const epssFeeds = feeds.filter((feed) => feed.type === 'EPSS_API');
+    const epssIngestionStartedAt = Date.now();
     if (epssFeeds.length) {
-      const [cached, inventory] = await Promise.all([
-        list<NormalizedCVE>(pool, 'cveData'),
-        list<WatchListItem>(pool, 'watchlist'),
-      ]);
       // EPSS changes risk, not product applicability. Query only CVEs that can
       // currently affect inventory, including uncertain matches awaiting review.
-      const candidates = runVulnerabilityPipeline(
-        [],
-        [...mergeCveRecords([...cached, ...results.flatMap((result) => result.cves)]).values()],
-        inventory,
-        [],
-        [],
-        { ...DEFAULT_SETTINGS, scopeHours: 0 },
-      ).newFindings;
-      await ingestSources(epssFeeds, [...new Set(candidates.map((finding) => finding.cveId))]);
+      await ingestSources(epssFeeds, [...new Set(preliminaryCorrelation.newFindings.map((finding) => finding.cveId))]);
     }
+    const epssIngestionDuration = Date.now() - epssIngestionStartedAt;
     results.sort((a, b) => (a.sourceId || '').localeCompare(b.sourceId || ''));
-    const ingestionDuration = Date.now() - new Date(execution.startTime).getTime();
+    const ingestionDuration = primaryIngestionDuration + epssIngestionDuration;
     execution.phases[0] = {
       name: 'Feed ingestion',
       status: succeeded < feeds.length || results.some((result) => result.warnings?.length) ? 'WARNING' : 'SUCCESS',
@@ -428,6 +483,13 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         execution!.logs.push('All feeds failed; proceeding with cached CVE correlation');
       }
       for (const result of acceptedResults) {
+        if (result.sourceCheckpoint) {
+          const source = currentFeeds.get(result.sourceId!)!;
+          await put(db, 'feedCheckpoints', source.id, {
+            fingerprint: sourceFingerprint(source),
+            checkpoint: result.sourceCheckpoint,
+          });
+        }
         if (result.kev && !result.notModified) {
           const source = currentFeeds.get(result.sourceId!)!;
           await put(db, 'feedSnapshots', source.id, {
@@ -441,7 +503,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         level:update.healthStatus === 'DOWN' ? 'ERROR' : update.healthStatus === 'DEGRADED' ? 'WARNING' : 'INFO',
         code:'feed.ingestion', message:`${update.name}: ${update.healthStatus}`, runId:execution!.id,
         context:{ feedId:update.id, count:update.itemCountLastRun, latencyMs:update.latencyMs } });
-      const snapshot = await state(db);
+      const snapshot = await pipelineState(db);
       const articles = mergeArticles([...snapshot.intelligenceArticles, ...acceptedResults.flatMap(result => result.articles || [])]);
       await putMany(db, 'intelligenceArticles', articles.map(data => ({id:data.id,data})));
       const byId = mergeCveRecords([
@@ -449,24 +511,26 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         ...acceptedResults.filter((result) => !result.notModified).flatMap((result) => result.cves),
       ]);
       type Withdrawal = { cveId: string; modifiedDate: string };
-      const withdrawals = new Map(
+      const oldWithdrawals = new Map(
         (await list<Withdrawal>(db, 'cveWithdrawals')).map((entry) => [entry.cveId, entry]),
       );
+      const withdrawals = new Map(oldWithdrawals);
       for (const entry of acceptedResults.flatMap((result) => result.withdrawals || [])) {
         const old = withdrawals.get(entry.cveId);
         if (!old || Date.parse(entry.modifiedDate) > Date.parse(old.modifiedDate))
           withdrawals.set(entry.cveId, entry);
       }
-      await putMany(
-        db,
-        'cveWithdrawals',
-        [...withdrawals.values()].map((entry) => ({ id: entry.cveId, data: entry })),
-      );
+      const changedWithdrawals = [...withdrawals.values()].filter((entry) => {
+        const old = oldWithdrawals.get(entry.cveId);
+        return !old || old.modifiedDate !== entry.modifiedDate;
+      });
+      await putMany(db, 'cveWithdrawals', changedWithdrawals.map((entry) => ({ id: entry.cveId, data: entry })));
       for (const entry of withdrawals.values()) {
         const cve = byId.get(entry.cveId);
         if (cve && Date.parse(cve.modifiedDate) <= Date.parse(entry.modifiedDate)) byId.delete(entry.cveId);
       }
-      for (const old of mergeCveRecords(snapshot.cveData).values()) {
+      const oldCveMap = mergeCveRecords(snapshot.cveData);
+      for (const old of oldCveMap.values()) {
         const current = byId.get(normalizeCveId(old.cveId) || '');
         if (current) {
           current.epss = old.epss;
@@ -506,11 +570,11 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           };
         }
       }
-      await putMany(
-        db,
-        'cveData',
-        [...byId.values()].map((cve) => ({ id: cve.cveId, data: cve })),
-      );
+      const changedCves = [...byId.values()].filter((cve) => {
+        const old = oldCveMap.get(cve.cveId);
+        return !old || stableJson(old) !== stableJson(cve);
+      });
+      await putMany(db, 'cveData', changedCves.map((cve) => ({ id: cve.cveId, data: cve })));
       const keys = await db.query("SELECT id FROM records WHERE kind='cveData'");
       for (const { id } of keys.rows) {
         const canonical = normalizeCveId(id);
@@ -522,16 +586,36 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       }
       // The run window limits network ingestion, not applicability of already cached CVEs.
       const settings = { ...snapshot.settings, scopeHours: 0 };
-      const correlated = runVulnerabilityPipeline(
-        feeds,
-        [...byId.values()],
-        snapshot.watchlist,
-        snapshot.alertedCves,
-        snapshot.findings,
-        settings,
-        'Server worker',
-        true,
-      );
+      const finalCves = [...byId.values()];
+      const finalSourceIds = acceptedResults
+        .filter((result) => result.cves.length > 0 || (result.withdrawals?.length || 0) > 0)
+        .map((result) => result.sourceId || '')
+        .sort();
+      const reusableMatches =
+        preliminaryCorrelation !== undefined &&
+        stableJson(preliminarySourceIds) === stableJson(finalSourceIds) &&
+        preliminaryCveSignature === matchingCveSignature(finalCves) &&
+        preliminaryInventorySignature === inventorySignature(snapshot.watchlist);
+      const correlated = reusableMatches
+        ? {
+            ...preliminaryCorrelation!,
+            newFindings: preliminaryCorrelation!.newFindings
+              .filter((finding) => byId.has(finding.cveId))
+              .map((finding) => {
+                const cve = byId.get(finding.cveId)!;
+                return { ...finding, cve, exploitRisk: determineExploitRisk(cve) };
+              }),
+          }
+        : runVulnerabilityPipeline(
+            feeds,
+            finalCves,
+            snapshot.watchlist,
+            snapshot.alertedCves,
+            snapshot.findings,
+            settings,
+            'Server worker',
+            true,
+          );
       // A wholly rejected stale bundle may be rebuilt from current matches. Never
       // automatically resend a bundle with any acceptance or an in-flight delivery.
       const staleBundles = new Set<string>(

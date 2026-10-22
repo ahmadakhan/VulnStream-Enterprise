@@ -1,6 +1,6 @@
 import type { NormalizedCVE, ThreatFeed } from '../src/types';
 import type { Requester } from './network';
-import type { IngestResult } from './ingestion';
+import { getIngestionWindowStart, type IngestContext, type IngestResult } from './ingestion';
 import { cveSchema } from './validation';
 import { normalizeCveId } from '../src/utils/deduplicator';
 import { parseCPE23 } from '../src/utils/cpeMatcher';
@@ -47,7 +47,13 @@ export function normalizeMitre(record: any, feedId: string): NormalizedCVE | nul
   });
 }
 
-export async function ingestMitre(feed: ThreatFeed, scopeHours: number, request: Requester, sleep: (ms: number) => Promise<unknown>): Promise<IngestResult> {
+export async function ingestMitre(
+  feed: ThreatFeed,
+  scopeHours: number,
+  request: Requester,
+  sleep: (ms: number) => Promise<unknown>,
+  context: IngestContext = {},
+): Promise<IngestResult> {
   if (feed.url !== MITRE_DELTA_URL || feed.authType !== 'NONE') throw new Error('MITRE CVE requires the official cvelistV5 deltaLog.json endpoint without authentication');
   const readJson = async (url: string, maxResponseBytes: number) => {
     const response = await request(url, { timeoutMs: 60000, maxResponseBytes });
@@ -55,7 +61,8 @@ export async function ingestMitre(feed: ThreatFeed, scopeHours: number, request:
     try { return JSON.parse(response.body); } catch { throw new Error('MITRE CVE returned invalid JSON'); }
   };
   // The upstream rolling delta log covers at most 30 days; it is not a full historical dump.
-  const end = Date.now(), start = end - Math.min(scopeHours, 720) * 3600000;
+  const end = new Date();
+  const start = getIngestionWindowStart(end, scopeHours, context.checkpoint, 720);
   const changes = z.array(z.object({
     fetchTime: z.string(),
     new: z.array(z.object({ cveId: z.string(), dateUpdated: z.string() })),
@@ -67,29 +74,56 @@ export async function ingestMitre(feed: ThreatFeed, scopeHours: number, request:
   if (scopeHours > 720) warnings.push('MITRE incremental history is limited to 30 days; older CVEs require a historical import');
   for (const entry of changes) {
     const fetched = Date.parse(timestamp(entry.fetchTime));
-    if (fetched >= start && fetched <= end && entry.error?.length) throw new Error('MITRE delta log reports upstream record errors; retry later');
+    if (fetched >= start.getTime() && fetched <= end.getTime() && entry.error?.length) throw new Error('MITRE delta log reports upstream record errors; retry later');
     for (const row of [...entry.new, ...entry.updated]) {
       const updated = Date.parse(timestamp(row.dateUpdated));
       const id = normalizeCveId(row.cveId);
       if (!id) throw new Error('MITRE delta log contains an invalid CVE identifier');
-      if (updated >= start && updated <= end) ids.add(id);
+      if (updated >= start.getTime() && updated <= end.getTime()) {
+        const knownTimes = [context.knownCveModifiedAt?.get(id), context.knownWithdrawalAt?.get(id)]
+          .map((value) => Date.parse(value || ''))
+          .filter(Number.isFinite);
+        const known = knownTimes.length ? Math.max(...knownTimes) : NaN;
+        if (!Number.isFinite(known) || updated > known) ids.add(id);
+      }
     }
   }
   if (ids.size > 5000) throw new Error('MITRE window exceeds 5,000 unique CVEs; reduce ingestion scope');
   const cves: NormalizedCVE[] = [], withdrawals: NonNullable<IngestResult['withdrawals']> = [];
-  let count = 0;
-  for (const id of [...ids].sort()) {
-    if (count) await sleep(60000 / feed.rateLimitPerMin);
-    const [, year, sequence] = id.split('-');
-    // Construct paths from validated IDs; never follow URLs supplied inside feed content.
-    const bucket = `${sequence.slice(0, -3)}xxx`;
-    const url = `https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/${year}/${bucket}/${id}.json`;
-    const record = await readJson(url, 4 * 1024 * 1024);
-    if (normalizeCveId(record?.cveMetadata?.cveId) !== id) throw new Error('MITRE response did not match requested CVE');
-    const cve = normalizeMitre(record, feed.id);
-    if (cve) cves.push(cve);
-    else withdrawals.push({ cveId: id, modifiedDate: timestamp(record.cveMetadata.dateUpdated) });
-    count++;
-  }
-  return { cves, withdrawals, count, warnings };
+  const sortedIds = [...ids].sort();
+  const records = new Array<NormalizedCVE | null>(sortedIds.length);
+  const rejected: NonNullable<IngestResult['withdrawals']> = [];
+  let nextIndex = 0;
+  let nextRequestAt = Date.now();
+  const concurrency = Math.min(4, sortedIds.length);
+  const interval = 60000 / feed.rateLimitPerMin;
+  const worker = async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= sortedIds.length) return;
+      const wait = Math.max(0, nextRequestAt - Date.now());
+      nextRequestAt = Math.max(Date.now(), nextRequestAt) + interval;
+      if (wait) await sleep(wait);
+      const id = sortedIds[index];
+      const [, year, sequence] = id.split('-');
+      // Construct paths from validated IDs; never follow URLs supplied inside feed content.
+      const bucket = `${sequence.slice(0, -3)}xxx`;
+      const url = `https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/${year}/${bucket}/${id}.json`;
+      const record = await readJson(url, 4 * 1024 * 1024);
+      if (normalizeCveId(record?.cveMetadata?.cveId) !== id)
+        throw new Error('MITRE response did not match requested CVE');
+      const cve = normalizeMitre(record, feed.id);
+      records[index] = cve;
+      if (!cve) rejected.push({ cveId: id, modifiedDate: timestamp(record.cveMetadata.dateUpdated) });
+    }
+  };
+  const settled = await Promise.allSettled(Array.from({ length: concurrency }, worker));
+  const failed = settled.find((result) => result.status === 'rejected');
+  if (failed?.status === 'rejected') throw failed.reason;
+  for (const record of records) if (record) cves.push(record);
+  withdrawals.push(...rejected);
+  const checkpointCovered = !context.checkpoint || end.getTime() - Date.parse(context.checkpoint) <= 30 * 24 * 3600000;
+  if (!checkpointCovered)
+    warnings.push('Saved MITRE checkpoint is older than the rolling 30-day delta log; a source re-baseline is required and the checkpoint was not advanced');
+  return { cves, withdrawals, count: sortedIds.length, warnings, ...(checkpointCovered ? { sourceCheckpoint: end.toISOString() } : {}) };
 }

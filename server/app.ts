@@ -254,8 +254,11 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
     '/api/pipeline',
     requireRole('ADMIN', 'OPERATOR'),
     asyncRoute(async (req, res) => {
-      const data = z.object({ scopeHours: z.number().int().min(1).max(2880).optional() }).parse(req.body);
-      res.status(202).json(await queueRun(pool, data.scopeHours, req.operator!.username));
+      const data = z.object({
+        scopeHours: z.number().int().min(1).max(2880).optional(),
+        incrementalFeeds: z.boolean().default(true),
+      }).parse(req.body);
+      res.status(202).json(await queueRun(pool, data.scopeHours, req.operator!.username, data.incrementalFeeds));
     }),
   );
   app.post(
