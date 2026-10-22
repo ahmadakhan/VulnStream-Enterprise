@@ -84,22 +84,6 @@ export function LoginView() {
                 <span>{pending ? 'Signing in…' : 'Sign in securely'}</span>
                 {pending ? <LoaderCircle className="animate-spin" size={17} /> : <ArrowRight size={17} />}
               </button>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setUsername('admin');
-                    setPassword('admin1234567890!');
-                    await login('admin', 'admin1234567890!');
-                  }}
-                  disabled={pending > 0}
-                  className="w-full py-2 px-3 text-xs font-medium rounded-lg border border-dashed border-zinc-700 hover:border-zinc-500 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 hover:text-white transition flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <KeyRound size={13} className="text-emerald-400" />
-                  <span>1-Click Operator Sign In (admin / demo)</span>
-                </button>
-              </div>
             </>
           )}
 
