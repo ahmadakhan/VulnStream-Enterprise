@@ -12,7 +12,7 @@ import type {
   AuditLog,
 } from '../types';
 import { normalizeCveId, isWithinTimelineScope, mergeCveRecords } from '../utils/deduplicator';
-import { matchesWatchlistItem } from '../utils/cpeMatcher';
+import { matchesWatchlistItem, parseCPE23 } from '../utils/cpeMatcher';
 import ipaddr from 'ipaddr.js';
 export interface PipelineRunResult {
   execution: PipelineExecution;
@@ -76,6 +76,54 @@ export function runVulnerabilityPipeline(
   const duplicates = corpus.filter((cve) => normalizeCveId(cve.cveId)).length - latest.size;
   const normalizationDurationMs = Math.round(performance.now() - normalizationStarted);
   const activeAssets = watchlist.filter((asset) => asset.active);
+  // Index inventory once. Matching the entire CVE cache against every asset
+  // on every run is the dominant avoidable cost for large installations.
+  // The candidate selection is deliberately a superset: wildcard criteria,
+  // unstructured assets, and package assets stay eligible for full matching.
+  const assetsByProduct = new Map<string, WatchListItem[]>();
+  const assetsWithNoCpes: WatchListItem[] = [];
+  const assetsWithBroadCpes: WatchListItem[] = [];
+  const assetsWithPurls = activeAssets.filter((asset) => !!asset.purls?.length);
+  for (const asset of activeAssets) {
+    if (!asset.cpes.length) {
+      assetsWithNoCpes.push(asset);
+      continue;
+    }
+    for (const cpe of asset.cpes) {
+      const parsed = parseCPE23(cpe);
+      if (!parsed.isValid) continue;
+      if (/[?*]/.test(parsed.vendor) || /[?*]/.test(parsed.product)) {
+        assetsWithBroadCpes.push(asset);
+        break;
+      }
+      const key = `${parsed.vendor}\u0000${parsed.product}`;
+      const bucket = assetsByProduct.get(key) || [];
+      bucket.push(asset);
+      assetsByProduct.set(key, bucket);
+    }
+    // Keep assets with non-empty but invalid CPE lists out of text fallback;
+    // the matcher correctly treats structured identifiers as authoritative.
+  }
+  const candidateAssets = (cve: NormalizedCVE): WatchListItem[] => {
+    const criteria = cve.cpeMatchDetails?.length
+      ? cve.cpeMatchDetails.map((detail) => detail.criteria)
+      : cve.cpeMatches;
+    if (!criteria.length) return activeAssets;
+    const candidates = new Map<string, WatchListItem>();
+    const add = (items: WatchListItem[]) => items.forEach((asset) => candidates.set(asset.id, asset));
+    add(assetsWithNoCpes);
+    add(assetsWithBroadCpes);
+    if (cve.purls?.length) add(assetsWithPurls);
+    for (const criterion of criteria) {
+      const parsed = parseCPE23(criterion);
+      if (!parsed.isValid || /[?*]/.test(parsed.vendor) || /[?*]/.test(parsed.product)) {
+        add(activeAssets);
+        break;
+      }
+      add(assetsByProduct.get(`${parsed.vendor}\u0000${parsed.product}`) || []);
+    }
+    return [...candidates.values()];
+  };
   const matchingStarted = performance.now();
   for (const raw of latest.values()) {
     const canonical = normalizeCveId(raw.cveId);
@@ -86,7 +134,7 @@ export function runVulnerabilityPipeline(
       continue;
     processed++;
     const cve = { ...raw, cveId: canonical };
-    for (const asset of activeAssets) {
+    for (const asset of candidateAssets(cve)) {
       const key = `${canonical}:${asset.id}`;
       if (known.has(key) && !includeExistingCandidates) continue;
       const applicabilitySets = cve.cpeMatchDetails?.length

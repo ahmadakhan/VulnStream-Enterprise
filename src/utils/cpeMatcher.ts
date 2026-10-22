@@ -128,15 +128,47 @@ function createEmptyCPE(raw: string, isValid: boolean): ParsedCPE {
   };
 }
 
+function cpeComponentPattern(value: string): { regex: RegExp; hasWildcard: boolean; literal: string } {
+  let source = '';
+  let literal = '';
+  let escaped = false;
+  let hasWildcard = false;
+  for (const char of value.toLowerCase()) {
+    if (escaped) {
+      source += char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      literal += char;
+      escaped = false;
+    } else if (char === '\\') {
+      escaped = true;
+    } else if (char === '*') {
+      source += '.*';
+      hasWildcard = true;
+    } else if (char === '?') {
+      source += '.';
+      hasWildcard = true;
+    } else {
+      source += char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      literal += char;
+    }
+  }
+  return { regex: new RegExp(`^${source}$`, 'i'), hasWildcard, literal };
+}
+
 function matchComponent(assetAttr: string, vulnAttr: string): boolean {
   if (assetAttr === '*' || vulnAttr === '*') return true;
   if (assetAttr === '-' && vulnAttr === '-') return true;
   if (assetAttr === '-' || vulnAttr === '-') return false;
 
-  const a = assetAttr.replace(/\\/g, '').toLowerCase();
-  const v = vulnAttr.replace(/\\/g, '').toLowerCase();
+  const asset = cpeComponentPattern(assetAttr);
+  const vuln = cpeComponentPattern(vulnAttr);
+  if (asset.hasWildcard && vuln.hasWildcard) return true;
+  if (vuln.hasWildcard) return vuln.regex.test(asset.literal);
+  if (asset.hasWildcard) return asset.regex.test(vuln.literal);
+  return asset.literal === vuln.literal;
+}
 
-  return a === v;
+function hasUnescapedCpeWildcard(value: string): boolean {
+  return value !== '*' && cpeComponentPattern(value).hasWildcard;
 }
 
 /**
@@ -410,7 +442,22 @@ export function matchesWatchlistItem(
             'targetHw',
             'other',
           ] as const
-        ).some((field) => asset[field] === '*' && vuln[field] !== '*');
+        ).some((field) => asset[field] === '*' && vuln[field] !== '*') ||
+          (
+            [
+              'part',
+              'vendor',
+              'product',
+              'version',
+              'update',
+              'edition',
+              'language',
+              'swEdition',
+              'targetSw',
+              'targetHw',
+              'other',
+            ] as const
+          ).some((field) => hasUnescapedCpeWildcard(asset[field]));
         const requiresReview = rangeNeedsReview || contextNeedsReview;
         retain({
           matched: true,

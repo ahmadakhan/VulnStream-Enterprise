@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import { matchCPE, matchPurl, matchesWatchlistItem, parseCPE23 } from '../src/utils/cpeMatcher';
 import { compareVersions } from '../src/utils/versionComparator';
+import { mergeCveRecords } from '../src/utils/deduplicator';
 import { quickHash, generateHmacSignature } from '../src/utils/cryptoChain';
 import { runVulnerabilityPipeline, validateSsrfSafety } from '../src/engine/pipelineEngine';
 import {
@@ -23,6 +24,12 @@ test('CPE rejects malformed names and substring component matches', () => {
 });
 test('CPE applies start-only ranges', () => {
   assert.equal(matchCPE(cpe('1'), cpe('*'), { versionStartIncluding: '2' }).matched, false);
+});
+test('CPE component wildcards match only the intended version pattern', () => {
+  const pattern = (version: string) => `cpe:2.3:a:vendor:widget:${version}:*:*:*:*:*:*:*`;
+  assert.equal(matchCPE(pattern('1.2.3'), pattern('1.*')).matched, true);
+  assert.equal(matchCPE(pattern('2.0'), pattern('1.*')).matched, false);
+  assert.equal(matchCPE(pattern('1.2'), pattern('1.\\*')).matched, false);
 });
 test('fallback cannot override a known version exclusion', () => {
   assert.equal(
@@ -269,4 +276,28 @@ test('in-run duplicates use the latest modified CVE rather than input order', ()
     [newer, cve],
   ])
     assert.equal(runVulnerabilityPipeline([], corpus, [asset], [], [], settings).newFindings.length, 0);
+});
+test('equal-time conflicting CVE applicability keeps both candidate sets in review', () => {
+  const { cve } = fixture();
+  const firstCriteria = cpe('*', 'widget');
+  const secondCriteria = cpe('*', 'other');
+  const first = {
+    ...cve,
+    modifiedDate: '2026-01-01T00:00:00Z',
+    cpeMatches: [firstCriteria],
+    cpeMatchDetails: [{ criteria: firstCriteria, range: { versionEndExcluding: '2.0' } }],
+    sourceFeeds: ['source-a'],
+  };
+  const second = {
+    ...cve,
+    modifiedDate: first.modifiedDate,
+    cpeMatches: [secondCriteria],
+    cpeMatchDetails: [{ criteria: secondCriteria, range: { versionStartIncluding: '3.0' } }],
+    sourceFeeds: ['source-b'],
+  };
+  const merged = mergeCveRecords([first, second]).get('CVE-2026-12345')!;
+  assert.deepEqual(new Set(merged.cpeMatches), new Set([firstCriteria, secondCriteria]));
+  assert.equal(merged.cpeMatchDetails?.length, 2);
+  assert.equal(merged.versionRange, undefined);
+  assert.equal(merged.applicabilityRequiresReview, true);
 });

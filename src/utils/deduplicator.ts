@@ -30,6 +30,10 @@ export function mergeCveRecords(records: NormalizedCVE[]): Map<string, Normalize
     });
   const content = ({ sourceFeeds: _sources, applicabilityRequiresReview: _review, ...cve }: NormalizedCVE) =>
     stableJson(cve);
+  const detailsFor = (cve: NormalizedCVE) =>
+    cve.cpeMatchDetails?.length
+      ? cve.cpeMatchDetails
+      : cve.cpeMatches.map((criteria) => ({ criteria, range: cve.versionRange }));
   for (const raw of records) {
     const cveId = normalizeCveId(raw.cveId);
     if (!cveId) continue;
@@ -41,15 +45,25 @@ export function mergeCveRecords(records: NormalizedCVE[]): Map<string, Normalize
     }
     const delta = Date.parse(candidate.modifiedDate) - Date.parse(old.modifiedDate);
     const winner = delta > 0 || (delta === 0 && content(candidate) > content(old)) ? candidate : old;
+    const applicabilityConflict = delta === 0 && applicability(old) !== applicability(candidate);
+    const mergedDetails = applicabilityConflict
+      ? [...new Map([...detailsFor(old), ...detailsFor(candidate)].map((detail) => [stableJson(detail), detail])).values()]
+          .sort((a, b) => stableJson(a).localeCompare(stableJson(b)))
+      : winner.cpeMatchDetails;
     merged.set(cveId, {
       ...winner,
+      ...(applicabilityConflict
+        ? {
+            cpeMatches: [...new Set([...old.cpeMatches, ...candidate.cpeMatches])].sort(),
+            cpeMatchDetails: mergedDetails,
+            purls: [...new Set([...(old.purls || []), ...(candidate.purls || [])])].sort(),
+            // The top-level range cannot safely describe conflicting source
+            // applicability. Preserve candidates and require operator review.
+            versionRange: undefined,
+          }
+        : {}),
       sourceFeeds: [...new Set([...old.sourceFeeds, ...candidate.sourceFeeds])].sort(),
-      applicabilityRequiresReview:
-        winner.applicabilityRequiresReview ||
-        (delta === 0 &&
-          (old.applicabilityRequiresReview ||
-            candidate.applicabilityRequiresReview ||
-            applicability(old) !== applicability(candidate))),
+      applicabilityRequiresReview: winner.applicabilityRequiresReview || applicabilityConflict,
     });
   }
   return merged;
