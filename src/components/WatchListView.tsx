@@ -47,7 +47,7 @@ export const WatchListView: React.FC = () => {
     watchlist,
     addWatchlistItem,
     updateWatchlistItem,
-    setWatchlistItemActive,
+    toggleWatchlistItemActive,
     deleteWatchlistItem,
     bulkImportWatchlist,
     cveData,
@@ -819,7 +819,7 @@ export const WatchListView: React.FC = () => {
                               onClick={async () => {
                                 setTogglingAssetId(asset.id);
                                 try {
-                                  await setWatchlistItemActive(asset.id, !asset.active);
+                                  await toggleWatchlistItemActive(asset.id);
                                 } finally {
                                   setTogglingAssetId(null);
                                 }

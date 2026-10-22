@@ -243,7 +243,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
         { timestamp: now, action: input.status, system: actor, details: input.note || '' },
       ],
     });
-  } else if (/^(feed|asset|recipient|webhook)\.(delete|toggle)$/.test(action) || action === 'asset.setActive') {
+  } else if (/^(feed|asset|recipient|webhook)\.(delete|toggle)$/.test(action)) {
     const [entity, operation] = action.split('.'),
       kind = (
         { feed: 'feeds', asset: 'watchlist', recipient: 'recipients', webhook: 'webhooks' } as Record<
@@ -255,8 +255,6 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     const old = await get<any>(db, kind, id);
     if (!old) throw new HttpError(404, 'Record not found');
     if (operation === 'delete') await remove(db, kind, id);
-    else if (action === 'asset.setActive')
-      await put(db, kind, id, { ...old, active: z.object({ active: z.boolean() }).parse(data).active });
     else
       await put(db, kind, id, {
         ...old,
