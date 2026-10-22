@@ -16,8 +16,8 @@ import type {
   EmailConfiguration,
   IntelligenceArticle,
   IntelligenceMatch,
-} from '../src/types';
-import { DEFAULT_TEMPLATE_CUSTOMIZATION, compileCustomizedTemplate } from '../src/utils/templateCompiler';
+} from '../src/types/index.ts';
+import { DEFAULT_TEMPLATE_CUSTOMIZATION, compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
 export const DEFAULT_EMAIL_CONFIG: EmailConfiguration = {
   provider: 'SMTP', fromEmail: '', fromName: 'VulnStream', apiKey: '',
   apiEndpoint: '', apiHeaderKey: 'Authorization', apiAuthPrefix: 'Bearer', apiSourceDomain: '',
@@ -45,6 +45,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   ntpConfig: { enabled: false, server: '', driftToleranceMs: 50 },
   mailgunConfig: { enabled: false, apiKey: '', domain: '', fromEmail: '' },
+  retentionConfig: {
+    enabled: false,
+    retentionHours: 24,
+    cleanupIntervalMinutes: 60,
+    maxArchivedRecords: 10000,
+    autoCleanup: true,
+    retentionMode: 'rolling',
+  },
 };
 export interface AppState {
   feeds: ThreatFeed[];

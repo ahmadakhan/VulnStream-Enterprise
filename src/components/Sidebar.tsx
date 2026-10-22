@@ -22,6 +22,7 @@ import {
   Clock,
   KeyRound,
   RotateCw,
+  Archive,
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
@@ -40,6 +41,7 @@ export const Sidebar: React.FC = () => {
     toggleTheme,
     sessionTimeRemainingSec,
     resetSessionTimeout,
+    session,
   } = useApp();
 
   const activeFindingsCount = findings.filter(
@@ -82,6 +84,12 @@ export const Sidebar: React.FC = () => {
       ],
     },
     {
+      title: 'ARCHIVE & RETENTION',
+      items: [
+        { id: 'archive', label: 'Archives & Retention', icon: Archive },
+      ],
+    },
+    {
       title: 'SYSTEM & AUDIT',
       items: [
         { id: 'logs', label: 'Logs & Audit', icon: FileCode2 },
@@ -92,16 +100,12 @@ export const Sidebar: React.FC = () => {
   ];
 
   return (
-    <>
-    {mobileNavOpen && (
-      <button
-        type="button"
-        aria-label="Close navigation menu"
-        className="fixed inset-0 z-30 bg-black/60 md:hidden"
-        onClick={() => setMobileNavOpen(false)}
-      />
-    )}
-    <aside id="primary-navigation" aria-hidden={isMobileView && !mobileNavOpen} inert={isMobileView && !mobileNavOpen} className={`fixed inset-y-0 left-0 z-40 w-64 bg-zinc-950 dark:bg-zinc-950 light:bg-white border-r border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 flex flex-col shrink-0 select-none transition-transform duration-200 md:sticky md:top-0 md:h-screen md:translate-x-0 md:z-30 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+    <aside
+      id="primary-navigation"
+      aria-hidden={isMobileView && !mobileNavOpen}
+      inert={isMobileView && !mobileNavOpen}
+      className={`fixed inset-y-0 left-0 z-40 w-64 bg-zinc-950 dark:bg-zinc-950 light:bg-white border-r border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 flex flex-col shrink-0 select-none transition-transform duration-200 md:sticky md:top-0 md:h-screen md:translate-x-0 md:z-30 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}
+    >
       {/* Brand Header */}
       <div className="p-4 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
         <button
@@ -116,7 +120,8 @@ export const Sidebar: React.FC = () => {
           <div>
             <div className="flex items-center space-x-1.5">
               <span className="text-sm font-bold tracking-tight text-zinc-100 dark:text-zinc-100 light:text-zinc-900">
-                Vuln<span className="text-zinc-400 dark:text-zinc-400 light:text-zinc-500">Stream</span>
+                VulnStream
+                <span className="text-zinc-400 dark:text-zinc-400 light:text-zinc-500">Stream</span>
               </span>
               <span className="text-[10px] font-semibold bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 px-1.5 py-0.2 rounded">
                 Auto
@@ -131,13 +136,13 @@ export const Sidebar: React.FC = () => {
 
       {/* Nav List with Sections & SVG Icons */}
       <nav aria-label="Primary navigation" className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
-        {navSections.map(section => (
+        {navSections.map((section) => (
           <div key={section.title}>
             <div className="px-3 mb-2 text-[10px] font-bold tracking-wider text-zinc-500 font-mono uppercase">
               {section.title}
             </div>
             <div className="space-y-0.5">
-              {section.items.map(item => {
+              {section.items.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
                 return (
@@ -233,6 +238,5 @@ export const Sidebar: React.FC = () => {
         </div>
       </div>
     </aside>
-    </>
   );
 };

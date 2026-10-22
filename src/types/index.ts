@@ -1,4 +1,4 @@
-import { NvdVersionRange } from '../utils/versionComparator';
+import { NvdVersionRange } from '../utils/versionComparator.ts';
 
 export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
 
@@ -400,6 +400,15 @@ export interface EmailConfiguration {
   postmarkMessageStream: string;
 }
 
+export interface RetentionConfig {
+  enabled: boolean;
+  retentionHours: number;
+  cleanupIntervalMinutes: number;
+  maxArchivedRecords: number;
+  autoCleanup: boolean;
+  retentionMode: 'strict' | 'rolling' | 'checkpoints';
+}
+
 export interface AppSettings {
   scopeHours: number;
   schedulerIntervalMinutes: number;
@@ -433,6 +442,7 @@ export interface AppSettings {
     domain: string;
     fromEmail: string;
   };
+  retentionConfig: RetentionConfig;
 }
 
 export interface SystemHealth {

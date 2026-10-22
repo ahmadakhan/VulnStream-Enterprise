@@ -21,7 +21,9 @@ import { OperationalLogsView } from './components/OperationalLogsView';
 import { SystemHealthView } from './components/SystemHealthView';
 import { SettingsView } from './components/SettingsView';
 
-const MainContent: React.FC = () => {
+import { ArchiveRetentionView } from './components/ArchiveRetentionView';
+
+export const MainContent: React.FC = () => {
   const { activeTab } = useApp();
 
   return (
@@ -41,6 +43,7 @@ const MainContent: React.FC = () => {
       {activeTab === 'logs' && <OperationalLogsView />}
       {activeTab === 'health' && <SystemHealthView />}
       {activeTab === 'settings' && <SettingsView />}
+      {activeTab === 'archive' && <ArchiveRetentionView />}
     </main>
   );
 };
