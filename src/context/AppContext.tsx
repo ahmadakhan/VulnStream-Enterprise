@@ -249,7 +249,11 @@ function useApplication() {
       if (updated) await refresh();
       return updated;
     },
-    deleteWatchlistItem: (id: string) => command('asset.delete', undefined, id),
+    deleteWatchlistItem: async (id: string) => {
+      const result = await command('asset.delete', undefined, id);
+      if (result?.success) await refresh();
+      return result?.success || false;
+    },
     bulkImportWatchlist: async (items: unknown[]) => {
       const result = await command('asset.import', items);
       if (result && !result.errors?.length) await refresh();
