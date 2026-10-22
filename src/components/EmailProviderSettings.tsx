@@ -36,6 +36,7 @@ export function EmailProviderSettings() {
     setMessage('');
   };
   const isSmtp = isSmtpEmailProvider(form.provider);
+  const isGmailSmtp = form.smtpHost.trim().toLowerCase() === 'smtp.gmail.com';
   const hasSavedApiKey = form.provider === emailConfig.provider && !!emailConfig.hasApiKey;
   const hasSavedSmtpPassword = form.provider === emailConfig.provider && !!emailConfig.hasSmtpPassword;
 
@@ -138,16 +139,18 @@ export function EmailProviderSettings() {
                   </select>
                 </label>
                 <label htmlFor="smtp-username">
-                  SMTP username
+                  {isGmailSmtp ? 'Authentication username' : 'SMTP username'}
                   <input id="smtp-username" className="ui-field" autoComplete="username" value={form.smtpUsername}
-                    placeholder="SMTP username" onChange={(event) => update({ smtpUsername: event.target.value })} />
+                    placeholder={isGmailSmtp ? 'yourusername@gmail.com' : 'SMTP username'}
+                    onChange={(event) => update({ smtpUsername: event.target.value })} />
                 </label>
                 <label htmlFor="smtp-password" className="sm:col-span-2">
-                  SMTP password
+                  {isGmailSmtp ? 'Authentication password' : 'SMTP password'}
                   <input id="smtp-password" type="password" autoComplete="new-password" spellCheck={false}
                     className="ui-field" value={form.smtpPassword} maxLength={4096}
                     required={!!form.smtpUsername && !hasSavedSmtpPassword}
-                    placeholder={hasSavedSmtpPassword ? 'Credential saved — leave blank to keep it' : 'Enter SMTP password'}
+                    placeholder={hasSavedSmtpPassword ? 'Credential saved — leave blank to keep it' :
+                      isGmailSmtp ? '16-character Gmail App Password' : 'Enter SMTP password'}
                     onChange={(event) => update({ smtpPassword: event.target.value })} />
                   <span className="ui-description mt-1.5 flex items-center gap-1.5">
                     <KeyRound className="h-3 w-3" /> Encrypted on the server. Leave blank to keep a saved credential.
@@ -155,7 +158,7 @@ export function EmailProviderSettings() {
                 </label>
               </>}
               <p className="ui-description sm:col-span-2">
-                Gmail: use your full Gmail address as the username and a generated 16-character App Password. Port 587 uses STARTTLS (recommended); port 465 uses implicit TLS. SMTP also supports Maileroo, Lettr, Mailjet, and other relays.
+                Gmail configuration: host smtp.gmail.com; use your full Gmail address and generated 16-character App Password. Port 587 uses STARTTLS (recommended); port 465 uses implicit TLS. SMTP also supports Maileroo, Lettr, Mailjet, and other relays.
               </p>
             </>
           ) : (
