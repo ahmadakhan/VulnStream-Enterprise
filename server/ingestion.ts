@@ -199,7 +199,10 @@ export async function ingestFeed(
     }),
   });
   const headers: Record<string, string> = {};
-  const nvdInterval = Math.max(60000 / feed.rateLimitPerMin, feed.authType === 'API_KEY' ? 700 : 6500);
+  // NVD's rolling budgets are 50 requests / 30s with a key and 5 / 30s
+  // without one. Keep a small scheduling margin while avoiding the extra
+  // throttling in the older 700ms / 6.5s defaults.
+  const nvdInterval = Math.max(60000 / feed.rateLimitPerMin, feed.authType === 'API_KEY' ? 610 : 6100);
   if (feed.authType !== 'NONE') {
     let secret: string;
     try { secret = decrypt(feed.authSecretKey || '', config.ENCRYPTION_KEY, `feed:${feed.id}`); }
@@ -290,13 +293,15 @@ export async function ingestFeed(
       url.searchParams.set('lastModStartDate', start.toISOString());
       url.searchParams.set('lastModEndDate', end.toISOString());
       url.searchParams.set('startIndex', String(offset));
-      url.searchParams.set('resultsPerPage', '500');
+      // NVD permits up to 2,000 results per response; larger pages reduce
+      // network round trips and provider pacing delays during catch-up runs.
+      url.searchParams.set('resultsPerPage', '2000');
       // Each page has a distinct URL and the time window moves on every run;
       // a single feed-level ETag cannot safely validate this paginated query.
       const { data } = await json(
         url.href,
         false,
-        { timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: 16 * 1024 * 1024 },
+        { timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: 32 * 1024 * 1024 },
         true,
       );
       if (data === undefined) throw new Error('NVD returned an unexpected conditional response');
@@ -304,7 +309,7 @@ export async function ingestFeed(
       if (
         !page ||
         !Array.isArray(page.vulnerabilities) ||
-        page.vulnerabilities.length > 1000 ||
+        page.vulnerabilities.length > 2000 ||
         offset + page.vulnerabilities.length > page.totalResults ||
         (expectedTotal !== undefined && page.totalResults !== expectedTotal) ||
         !Number.isInteger(page.totalResults) ||

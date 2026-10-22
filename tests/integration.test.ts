@@ -165,7 +165,8 @@ test('NVD uses bounded large-page requests and honors rate-limit retries', async
   await ingestFeed(
     feed,
     24,
-    async (_url, options) => {
+    async (rawUrl, options) => {
+      assert.equal(new URL(rawUrl).searchParams.get('resultsPerPage'), '2000');
       headers.push(options?.headers || {});
       requestLimits.push({
         timeoutMs: options?.timeoutMs,
@@ -183,7 +184,7 @@ test('NVD uses bounded large-page requests and honors rate-limit retries', async
   assert.equal(headers.length, 1);
   assert.equal(headers[0]['If-None-Match'], undefined);
   assert.deepEqual(requestLimits, [
-    { timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: 16 * 1024 * 1024 },
+    { timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: 32 * 1024 * 1024 },
   ]);
 
   const retryDelays: number[] = [];
@@ -208,7 +209,7 @@ test('NVD uses bounded large-page requests and honors rate-limit retries', async
     },
   );
   assert.equal(retryCalls, 2);
-  assert.deepEqual(retryDelays, [6500]);
+  assert.deepEqual(retryDelays, [6100]);
 
   const timeoutDelays: number[] = [];
   let timeoutCalls = 0;
@@ -231,7 +232,7 @@ test('NVD uses bounded large-page requests and honors rate-limit retries', async
     },
   );
   assert.equal(timeoutCalls, 2);
-  assert.deepEqual(timeoutDelays, [6500]);
+  assert.deepEqual(timeoutDelays, [6100]);
 });
 
 test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !database }, async (t) => {
