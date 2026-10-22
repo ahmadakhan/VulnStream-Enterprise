@@ -12,6 +12,7 @@ import {
   Users,
   FileCode,
   Mail,
+  Inbox,
   FileCode2,
   Cpu,
   Settings,
@@ -77,6 +78,7 @@ export const Sidebar: React.FC = () => {
         { id: 'recipients', label: 'Recipients & Webhooks', icon: Users },
         { id: 'template', label: 'HTML Template', icon: FileCode },
         { id: 'emails', label: 'Delivery Log', icon: Mail },
+        { id: 'email-queue', label: 'Email Queue', icon: Inbox },
       ],
     },
     {

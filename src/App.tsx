@@ -16,6 +16,7 @@ import { ThreatFeedsView } from './components/ThreatFeedsView';
 import { RecipientsView } from './components/RecipientsView';
 import { AdvisoryTemplateView } from './components/AdvisoryTemplateView';
 import { EmailHistoryView } from './components/EmailHistoryView';
+import { EmailQueueView } from './components/EmailQueueView';
 import { OperationalLogsView } from './components/OperationalLogsView';
 import { SystemHealthView } from './components/SystemHealthView';
 import { SettingsView } from './components/SettingsView';
@@ -36,6 +37,7 @@ const MainContent: React.FC = () => {
       {activeTab === 'recipients' && <RecipientsView />}
       {activeTab === 'template' && <AdvisoryTemplateView />}
       {activeTab === 'emails' && <EmailHistoryView />}
+      {activeTab === 'email-queue' && <EmailQueueView />}
       {activeTab === 'logs' && <OperationalLogsView />}
       {activeTab === 'health' && <SystemHealthView />}
       {activeTab === 'settings' && <SettingsView />}
@@ -88,9 +90,17 @@ const AppShell: React.FC = () => {
             <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-zinc-700/70 dark:border-zinc-700/70 light:border-zinc-300 bg-zinc-800/70 dark:bg-zinc-800/70 light:bg-zinc-100 font-semibold text-zinc-200 dark:text-zinc-200 light:text-zinc-700">
               {session.username.slice(0, 1).toUpperCase()}
             </span>
-            <span className="truncate font-medium text-zinc-200 dark:text-zinc-200 light:text-zinc-800">{session.username}</span>
-            <span className="rounded-md border border-zinc-700/70 dark:border-zinc-700/70 light:border-zinc-300 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-zinc-400 dark:text-zinc-400 light:text-zinc-600">{session.role}</span>
-            {pending > 0 && <span role="status" className="text-[10px] text-blue-400">Saving changes…</span>}
+            <span className="truncate font-medium text-zinc-200 dark:text-zinc-200 light:text-zinc-800">
+              {session.username}
+            </span>
+            <span className="rounded-md border border-zinc-700/70 dark:border-zinc-700/70 light:border-zinc-300 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+              {session.role}
+            </span>
+            {pending > 0 && (
+              <span role="status" className="text-[10px] text-blue-400">
+                Saving changes…
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -101,8 +111,20 @@ const AppShell: React.FC = () => {
             <span>Sign out</span>
           </button>
         </div>
-        {error && <div role="alert" className="mx-4 mt-3 flex items-start justify-between gap-4 rounded-xl border border-rose-800/50 light:border-rose-200 bg-rose-950/70 light:bg-rose-50 px-4 py-3 text-xs text-rose-100 light:text-rose-800 sm:mx-6"><span>{error}</span><button onClick={clearError} className="shrink-0 underline underline-offset-2">Dismiss</button></div>}
-        <div className={`flex-1 min-w-0 flex flex-col w-full mx-auto ${activeTab === 'feeds' ? 'max-w-none' : 'max-w-7xl'}`}>
+        {error && (
+          <div
+            role="alert"
+            className="mx-4 mt-3 flex items-start justify-between gap-4 rounded-xl border border-rose-800/50 light:border-rose-200 bg-rose-950/70 light:bg-rose-50 px-4 py-3 text-xs text-rose-100 light:text-rose-800 sm:mx-6"
+          >
+            <span>{error}</span>
+            <button onClick={clearError} className="shrink-0 underline underline-offset-2">
+              Dismiss
+            </button>
+          </div>
+        )}
+        <div
+          className={`flex-1 min-w-0 flex flex-col w-full mx-auto ${activeTab === 'feeds' ? 'max-w-none' : 'max-w-7xl'}`}
+        >
           <MainContent />
           <Footer />
         </div>

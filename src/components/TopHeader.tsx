@@ -26,6 +26,7 @@ const TAB_TITLES: Record<string, { section: string; title: string }> = {
   recipients: { section: 'AUTONOMOUS PIPELINE', title: 'Notification Channels & Webhooks' },
   template: { section: 'AUTONOMOUS PIPELINE', title: 'HTML Template Studio' },
   emails: { section: 'AUTONOMOUS PIPELINE', title: 'Email Delivery Audit' },
+  'email-queue': { section: 'AUTONOMOUS PIPELINE', title: 'Email Queue' },
   logs: { section: 'SYSTEM & AUDIT', title: 'Operational Logs & Audit' },
   health: { section: 'SYSTEM & AUDIT', title: 'Infrastructure & Readiness Health' },
   settings: { section: 'SYSTEM & AUDIT', title: 'Engine Configuration & Policies' },

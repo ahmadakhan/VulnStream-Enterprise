@@ -64,11 +64,19 @@ export interface IntelligenceMatch {
   evidence: string;
   findingId?: string;
 }
-export const EVENT_CATEGORIES = ['PIPELINE', 'FEED', 'MATCHING', 'EMAIL', 'SYSTEM', 'ISSUE', 'EVENT'] as const;
+export const EVENT_CATEGORIES = [
+  'PIPELINE',
+  'FEED',
+  'MATCHING',
+  'EMAIL',
+  'SYSTEM',
+  'ISSUE',
+  'EVENT',
+] as const;
 export interface OperationalEvent {
   id: string;
   timestamp: string;
-  category: typeof EVENT_CATEGORIES[number];
+  category: (typeof EVENT_CATEGORIES)[number];
   level: 'INFO' | 'WARNING' | 'ERROR';
   code: string;
   message: string;
@@ -314,12 +322,24 @@ export interface EmailDeliveryLog {
   advisoryId: string;
   subject: string;
   provider: 'Mailgun' | 'Mailtrap' | 'SendGrid' | 'Postmark' | 'SMTP_Relay' | 'Local_Mock';
-  status: 'QUEUED' | 'ACCEPTED' | 'DELIVERED' | 'BOUNCED' | 'RETRYING' | 'FAILED';
+  status: 'QUEUED' | 'ACCEPTED' | 'DELIVERED' | 'BOUNCED' | 'RETRYING' | 'FAILED' | 'CANCELLED';
   attemptCount: number;
   retrySchedule: string[];
   nextRetryTime: string | null;
   sentAt: string;
   errorMessage?: string;
+}
+
+export interface EmailQueueItem {
+  id: string;
+  recipientEmail: string;
+  advisoryId: string;
+  subject: string;
+  status: 'QUEUED' | 'SENDING' | 'FAILED';
+  attempts: number;
+  nextAttemptAt: string;
+  createdAt: string;
+  error: string | null;
 }
 
 export interface AuditLog {
@@ -395,7 +415,12 @@ export interface SystemHealth {
   workerHeartbeat: string | null;
   workerStatus: 'DISABLED' | 'NOT_OBSERVED' | 'STALE' | 'HEALTHY';
   heartbeatAgeSeconds: number | null;
-  deliveryQueue: { dueJobs: number; oldestDueCreatedAt: string | null; nextScheduledAttempt: string | null; expiredLeases: number };
+  deliveryQueue: {
+    dueJobs: number;
+    oldestDueCreatedAt: string | null;
+    nextScheduledAttempt: string | null;
+    expiredLeases: number;
+  };
   lastScheduledRun: string | null;
   backlog: { status: string; count: number }[];
   emailProvider: string;

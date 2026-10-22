@@ -1,17 +1,10 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import {
-  Mail,
-  RotateCw,
-  CheckCircle2,
-  Clock,
-  Search,
-  ShieldCheck,
-} from 'lucide-react';
+import { Mail, RotateCw, CheckCircle2, Clock, Search, ShieldCheck, Inbox } from 'lucide-react';
 import { Pagination } from './Pagination';
 
 export const EmailHistoryView: React.FC = () => {
-  const { emailLogs, retryEmailDelivery, emailConfig } = useApp();
+  const { emailLogs, retryEmailDelivery, emailConfig, setActiveTab } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
@@ -19,16 +12,14 @@ export const EmailHistoryView: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const filteredLogs = emailLogs.filter(log =>
-    log.recipientEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    log.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    log.advisoryId.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredLogs = emailLogs.filter(
+    (log) =>
+      log.recipientEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      log.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      log.advisoryId.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
-  const paginatedLogs = filteredLogs.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
+  const paginatedLogs = filteredLogs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleRetry = async (logId: string) => {
     setRetryingId(logId);
@@ -46,13 +37,26 @@ export const EmailHistoryView: React.FC = () => {
             Automated Notification Delivery Log
           </h1>
           <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Provider acceptance is not confirmation of inbox delivery. Notification attempts with retry schedules (1m / 2m / 4m / 8m / 16m).
+            Provider acceptance is not confirmation of inbox delivery. Notification attempts with retry
+            schedules (1m / 2m / 4m / 8m / 16m).
           </p>
         </div>
 
-        <div className="flex items-center space-x-2 text-xs font-mono bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-3 py-1.5 rounded-xl shadow-sm">
-          <ShieldCheck className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-400 light:text-zinc-600" />
-          <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700">{emailConfig.provider === 'SMTP' ? 'SMTP relay' : emailConfig.provider} transport</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center space-x-2 text-xs font-mono bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-3 py-1.5 rounded-xl shadow-sm">
+            <ShieldCheck className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-400 light:text-zinc-600" />
+            <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
+              {emailConfig.provider === 'SMTP' ? 'SMTP relay' : emailConfig.provider} transport
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('email-queue')}
+            className="ui-secondary min-h-8 px-3 py-1.5 text-[11px]"
+          >
+            <Inbox className="h-3.5 w-3.5" aria-hidden="true" />
+            Open queue
+          </button>
         </div>
       </div>
 
@@ -64,7 +68,7 @@ export const EmailHistoryView: React.FC = () => {
             type="text"
             placeholder="Search logs by recipient, subject, or advisory..."
             value={searchTerm}
-            onChange={e => {
+            onChange={(e) => {
               setSearchTerm(e.target.value);
               setCurrentPage(1);
             }}
@@ -73,7 +77,8 @@ export const EmailHistoryView: React.FC = () => {
         </div>
 
         <div className="text-xs font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-          Total Dispatches: <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{emailLogs.length}</strong>
+          Total Dispatches:{' '}
+          <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{emailLogs.length}</strong>
         </div>
       </div>
 
@@ -92,7 +97,7 @@ export const EmailHistoryView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
-              {paginatedLogs.map(log => {
+              {paginatedLogs.map((log) => {
                 const isDelivered = log.status === 'DELIVERED';
 
                 return (

@@ -199,6 +199,20 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
     asyncRoute(async (_req, res) => res.json(publicState(await state(pool)))),
   );
   app.get(
+    '/api/email-queue',
+    asyncRoute(async (_req, res) => {
+      const rows = await pool.query(
+        `SELECT id, payload->>'recipientEmail' AS "recipientEmail", advisory_id AS "advisoryId",
+          payload->>'subject' AS subject, status, attempts, next_attempt AS "nextAttemptAt",
+          created_at AS "createdAt", error
+         FROM outbox
+         WHERE channel='email' AND status IN ('QUEUED','SENDING','FAILED')
+         ORDER BY created_at DESC, id DESC LIMIT 1000`,
+      );
+      res.json(rows.rows);
+    }),
+  );
+  app.get(
     '/api/health',
     asyncRoute(async (_req, res) => {
       const start = performance.now();
@@ -426,10 +440,19 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
     asyncRoute(async (req, res) => {
       await transaction(pool, async (db) => {
         const row = await db.query(
-          "UPDATE outbox SET status='QUEUED',attempts=0,next_attempt=now(),error=NULL WHERE id=$1 AND status='FAILED' RETURNING id",
+          "UPDATE outbox SET status='QUEUED',attempts=0,next_attempt=now(),error=NULL WHERE id=$1 AND channel='email' AND status='FAILED' RETURNING id",
           [req.params.id],
         );
         if (!row.rowCount) throw new HttpError(409, 'Only failed deliveries may be retried');
+        const log = await get<any>(db, 'emailLogs', String(req.params.id));
+        if (log)
+          await put(db, 'emailLogs', String(req.params.id), {
+            ...log,
+            status: 'QUEUED',
+            attemptCount: 0,
+            nextRetryTime: new Date().toISOString(),
+            errorMessage: undefined,
+          });
         await appendAudit(
           db,
           'Delivery retry queued',
@@ -437,6 +460,39 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           req.operator!.username,
           'EMAIL',
           'INFO',
+          req.ip || '',
+        );
+      });
+      res.json({ success: true });
+    }),
+  );
+  app.delete(
+    '/api/email/:id',
+    requireRole('ADMIN', 'OPERATOR'),
+    asyncRoute(async (req, res) => {
+      const id = String(req.params.id);
+      await transaction(pool, async (db) => {
+        const deleted = await db.query(
+          "DELETE FROM outbox WHERE id=$1 AND channel='email' AND status IN ('QUEUED','FAILED') RETURNING id",
+          [id],
+        );
+        if (!deleted.rowCount)
+          throw new HttpError(409, 'Only queued or failed email deliveries can be deleted');
+        const log = await get<any>(db, 'emailLogs', id);
+        if (log)
+          await put(db, 'emailLogs', id, {
+            ...log,
+            status: 'CANCELLED',
+            nextRetryTime: null,
+            errorMessage: 'Removed from the delivery queue by an operator',
+          });
+        await appendAudit(
+          db,
+          'Email delivery deleted from queue',
+          `Delivery ${id}`,
+          req.operator!.username,
+          'EMAIL',
+          'WARNING',
           req.ip || '',
         );
       });

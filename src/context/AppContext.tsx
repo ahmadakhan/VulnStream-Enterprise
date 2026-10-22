@@ -14,6 +14,7 @@ import type {
   AuditLog,
   EmailConfiguration,
   SystemHealth,
+  EmailQueueItem,
 } from '../types';
 import { compileCustomizedTemplate } from '../utils/templateCompiler';
 function useApplication() {
@@ -162,9 +163,9 @@ function useApplication() {
     if (saved) await refresh();
     return saved;
   };
-  const call = async <T,>(url: string, body: unknown = {}) =>
+  const call = async <T,>(url: string, body: unknown = {}, method = 'POST') =>
     safely(async () => {
-      const result = await request<T>(url, body);
+      const result = await request<T>(url, body, method);
       await refresh();
       return result;
     });
@@ -214,7 +215,10 @@ function useApplication() {
       safely(() => request('/users', data)),
     updateUser: (id: string, data: { role: string; disabled: boolean }) =>
       safely(() => request(`/users/${encodeURIComponent(id)}`, data, 'PATCH')),
-    fetchEvents: (query: string) => request<{events: import('../types').OperationalEvent[]; nextCursor:string|null}>(`/events?${query}`),
+    fetchEvents: (query: string) =>
+      request<{ events: import('../types').OperationalEvent[]; nextCursor: string | null }>(
+        `/events?${query}`,
+      ),
     health: () => safely(() => request<SystemHealth>('/health')),
     ntpSyncStatus: { synchronized: false, driftMs: 0, lastChecked: '' },
     toggleFeedEnabled: (id: string) => command('feed.toggle', undefined, id),
@@ -253,6 +257,8 @@ function useApplication() {
       )) || { success: false, statusCode: 0, signature: '' },
     resendNotification: (cveId: string, reason: string) => call('/resend', { cveId, reason }),
     retryEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/retry`),
+    listEmailQueue: () => safely(() => request<EmailQueueItem[]>('/email-queue')),
+    deleteEmailQueueItem: (id: string) => call(`/email/${encodeURIComponent(id)}`, {}, 'DELETE'),
     isPipelineRunning: !!activeExecution,
     currentPipelinePhase: activeExecution ? `${activeExecution.status}: ${activeExecution.id}` : null,
     latestExecution: snapshot.executions[0] || null,
