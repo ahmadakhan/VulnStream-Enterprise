@@ -101,13 +101,15 @@ export function createMailSender(config: Config, db?: Db, request: Requester = c
       }
     }
     const fromEmail = saved.fromEmail || config.SMTP_FROM;
-    const smtpPassword = saved.provider === 'SMTP'
+    const configuredSmtpHost = saved.smtpHost;
+    const usesDeploymentSmtp = saved.provider === 'SMTP' && !configuredSmtpHost;
+    const smtpPassword = usesDeploymentSmtp
       ? config.SMTP_PASSWORD
       : decrypt(saved.smtpPassword, config.ENCRYPTION_KEY, `email-smtp:${saved.provider}`);
-    const smtpTransport = saved.provider === 'SMTP'
+    const smtpTransport = usesDeploymentSmtp
       ? transporter
       : nodemailer.createTransport({
-          host: saved.smtpHost,
+          host: configuredSmtpHost || config.SMTP_HOST,
           port: saved.smtpPort,
           secure: saved.smtpSecurity === 'IMPLICIT_TLS',
           requireTLS: saved.smtpSecurity === 'STARTTLS',

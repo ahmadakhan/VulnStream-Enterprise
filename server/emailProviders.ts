@@ -5,6 +5,7 @@ import type { Requester } from './network';
 
 export const EMAIL_PROVIDER_LABELS: Record<EmailConfiguration['provider'], EmailDeliveryLog['provider']> = {
   SMTP: 'SMTP_Relay',
+  API: 'Custom API',
   SMTP_CUSTOM: 'SMTP_Relay',
   MAILEROO_SMTP: 'SMTP_Relay',
   LETTR_SMTP: 'SMTP_Relay',
@@ -16,6 +17,8 @@ export const EMAIL_PROVIDER_LABELS: Record<EmailConfiguration['provider'], Email
 };
 export function emailEndpoint(config: EmailConfiguration): string | null {
   switch (config.provider) {
+    case 'API':
+      return config.apiEndpoint.replaceAll('{domain}', encodeURIComponent(config.apiSourceDomain));
     case 'MAILGUN':
       return `https://${config.mailgunRegion === 'EU' ? 'api.eu.mailgun.net' : 'api.mailgun.net'}/v3/${encodeURIComponent(config.mailgunDomain)}/messages`;
     case 'MAILTRAP':
@@ -34,12 +37,12 @@ export function emailIsConfigured(
   config: EmailConfiguration,
   env: { SMTP_HOST: string; SMTP_FROM: string; EGRESS_ALLOWED_HOSTS?: string },
 ): boolean {
-  if (config.provider === 'SMTP') return !!env.SMTP_HOST && !!(config.fromEmail || env.SMTP_FROM);
+  if (config.provider === 'SMTP' && !config.smtpHost) return !!env.SMTP_HOST && !!(config.fromEmail || env.SMTP_FROM);
   if (isSmtpEmailProvider(config.provider)) {
     const allowedHosts = (env.EGRESS_ALLOWED_HOSTS || '').split(',').map((host) => host.trim().toLowerCase());
-    const needsAuth = config.provider !== 'SMTP_CUSTOM';
+    const needsAuth = config.provider !== 'SMTP_CUSTOM' && config.provider !== 'SMTP';
     return (
-      !!config.fromEmail &&
+      !!(config.fromEmail || (config.provider === 'SMTP' && env.SMTP_FROM)) &&
       !!config.smtpHost &&
       allowedHosts.includes(config.smtpHost.toLowerCase()) &&
       (!needsAuth || (!!config.smtpUsername && !!config.smtpPassword)) &&
@@ -49,6 +52,7 @@ export function emailIsConfigured(
   return (
     !!config.fromEmail &&
     !!config.apiKey &&
+    (config.provider !== 'API' || !!config.apiEndpoint) &&
     (config.provider !== 'MAILGUN' || !!config.mailgunDomain) &&
     (config.provider !== 'MAILTRAP' || config.mailtrapMode !== 'SANDBOX' || !!config.mailtrapInboxId)
   );
@@ -79,12 +83,22 @@ export async function sendProviderEmail(
     : config.fromEmail;
   const headers: Record<string, string> = {
     'content-type': 'application/json',
-    Authorization: `Bearer ${token}`,
+    [config.provider === 'API' ? config.apiHeaderKey : 'Authorization']:
+      `${config.provider === 'API' ? config.apiAuthPrefix : 'Bearer'}${config.provider === 'API' && !config.apiAuthPrefix ? '' : ' '}${token}`,
   };
   const { subject, text, html, recipientEmail } = job.payload;
   const deliveryHeader = { 'X-VulnStream-Delivery-ID': job.id };
   let body: string;
-  if (config.provider === 'MAILGUN') {
+  if (config.provider === 'API') {
+    body = JSON.stringify({
+      from: { email: config.fromEmail, ...(config.fromName ? { name: config.fromName } : {}) },
+      to: [{ email: recipientEmail }],
+      subject,
+      text,
+      ...(html ? { html } : {}),
+      headers: deliveryHeader,
+    });
+  } else if (config.provider === 'MAILGUN') {
     const boundary = `vulnstream-${randomUUID()}`;
     headers['content-type'] = `multipart/form-data; boundary=${boundary}`;
     headers.Authorization = `Basic ${Buffer.from(`api:${token}`).toString('base64')}`;
@@ -157,6 +171,18 @@ export async function sendProviderEmail(
       response.status,
       Number.isFinite(retryAt) ? retryAt : 0,
     );
+  }
+  if (config.provider === 'API') {
+    const requestId = response.headers['x-request-id'] || response.headers['x-message-id'];
+    if (Array.isArray(requestId)) return requestId[0] || job.id;
+    if (requestId) return requestId;
+    try {
+      const accepted = JSON.parse(response.body);
+      return (typeof accepted.id === 'string' && accepted.id) ||
+        (typeof accepted.messageId === 'string' && accepted.messageId) || job.id;
+    } catch {
+      return job.id;
+    }
   }
   if (config.provider === 'SENDGRID') {
     if (response.status !== 202)

@@ -184,6 +184,10 @@ export const emailConfigSchema = z.object({
   fromEmail: z.union([z.email().max(254), z.literal('')]),
   fromName: z.string().trim().max(100).regex(/^[^\r\n]*$/),
   apiKey: z.string().trim().max(4096).regex(/^[^\r\n]*$/).default(''),
+  apiEndpoint: z.string().trim().max(2048).default(''),
+  apiHeaderKey: z.string().trim().max(100).regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/).default('Authorization'),
+  apiAuthPrefix: z.string().trim().max(40).regex(/^[A-Za-z0-9._~-]*$/).default('Bearer'),
+  apiSourceDomain: z.string().trim().max(253).regex(/^[a-zA-Z0-9.-]*$/).default(''),
   smtpHost: z.string().trim().toLowerCase().max(253).regex(/^$|^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/).default(''),
   smtpPort: z.number().int().min(1).max(65535).default(587),
   smtpSecurity: z.enum(['IMPLICIT_TLS', 'STARTTLS']).default('STARTTLS'),
@@ -204,6 +208,25 @@ export const emailConfigSchema = z.object({
     if (presetRequiresAuth && !value.smtpUsername)
       ctx.addIssue({ code: 'custom', path: ['smtpUsername'], message: 'SMTP username is required' });
   }
+  if (value.provider === 'API') {
+    if (!value.apiEndpoint)
+      ctx.addIssue({ code: 'custom', path: ['apiEndpoint'], message: 'API endpoint is required' });
+    if (value.apiEndpoint) {
+      try {
+        const endpoint = new URL(value.apiEndpoint.replaceAll('{domain}', 'source-domain'));
+        if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || (endpoint.port && endpoint.port !== '443'))
+          throw new Error('invalid endpoint');
+      } catch {
+        ctx.addIssue({ code: 'custom', path: ['apiEndpoint'], message: 'Use an HTTPS URL on port 443 without URL credentials' });
+      }
+    }
+    if (value.apiEndpoint.includes('{domain}') && !value.apiSourceDomain)
+      ctx.addIssue({ code: 'custom', path: ['apiSourceDomain'], message: 'Source / Domain is required when the endpoint contains {domain}' });
+    if (['content-type', 'host', 'content-length', 'transfer-encoding', 'connection', 'user-agent', 'accept', 'accept-encoding'].includes(value.apiHeaderKey.toLowerCase()))
+      ctx.addIssue({ code: 'custom', path: ['apiHeaderKey'], message: 'This header name is reserved' });
+  }
+  if (value.provider === 'SMTP' && !value.smtpHost && (value.smtpUsername || value.smtpPassword))
+    ctx.addIssue({ code: 'custom', path: ['smtpHost'], message: 'Set an SMTP host to use custom SMTP credentials' });
   if (value.provider === 'MAILGUN' && !value.mailgunDomain)
     ctx.addIssue({ code: 'custom', path: ['mailgunDomain'], message: 'Mailgun sending domain is required' });
   if (value.provider === 'MAILTRAP' && value.mailtrapMode === 'SANDBOX' && !value.mailtrapInboxId)

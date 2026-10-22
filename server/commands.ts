@@ -193,16 +193,16 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     const apiKey = smtpProvider ? '' : input.apiKey
       ? encrypt(input.apiKey, config.ENCRYPTION_KEY, `email-provider:${input.provider}`)
       : old.provider === input.provider ? old.apiKey : '';
-    const smtpPassword = smtpProvider && input.provider !== 'SMTP' ? input.smtpPassword
+    const smtpPassword = smtpProvider && (input.provider !== 'SMTP' || !!input.smtpHost) ? input.smtpPassword
       ? encrypt(input.smtpPassword, config.ENCRYPTION_KEY, `email-smtp:${input.provider}`)
       : old.provider === input.provider ? old.smtpPassword : '' : '';
     if (!smtpProvider && !apiKey)
       throw new HttpError(400, 'Enter an API token for the selected provider');
-    if (smtpProvider && input.provider !== 'SMTP') {
+    if (smtpProvider && input.smtpHost) {
       const allowedHosts = config.EGRESS_ALLOWED_HOSTS.split(',').map((host) => host.trim().toLowerCase());
       if (!allowedHosts.includes(input.smtpHost))
         throw new HttpError(400, `Add ${input.smtpHost} to EGRESS_ALLOWED_HOSTS before configuring this SMTP host`);
-      const presetRequiresAuth = input.provider !== 'SMTP_CUSTOM';
+      const presetRequiresAuth = input.provider !== 'SMTP_CUSTOM' && input.provider !== 'SMTP';
       if (presetRequiresAuth && (!input.smtpUsername || !smtpPassword))
         throw new HttpError(400, 'SMTP username and password or API secret are required');
       if (!presetRequiresAuth && Boolean(input.smtpUsername) !== Boolean(smtpPassword))

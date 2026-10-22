@@ -324,7 +324,7 @@ export interface EmailDeliveryLog {
   recipientEmail: string;
   advisoryId: string;
   subject: string;
-  provider: 'Mailgun' | 'Mailtrap' | 'SendGrid' | 'Postmark' | 'SMTP_Relay' | 'Local_Mock';
+  provider: 'Mailgun' | 'Mailtrap' | 'SendGrid' | 'Postmark' | 'Custom API' | 'SMTP_Relay' | 'Local_Mock';
   status:
     'REVIEW_REQUIRED' | 'QUEUED' | 'ACCEPTED' | 'DELIVERED' | 'BOUNCED' | 'RETRYING' | 'FAILED' | 'CANCELLED';
   attemptCount: number;
@@ -364,6 +364,7 @@ export interface AuditLog {
 export const SMTP_EMAIL_PROVIDERS = ['SMTP_CUSTOM', 'MAILEROO_SMTP', 'LETTR_SMTP', 'MAILJET_SMTP'] as const;
 export const EMAIL_PROVIDERS = [
   'SMTP',
+  'API',
   ...SMTP_EMAIL_PROVIDERS,
   'MAILGUN',
   'MAILTRAP',
@@ -380,6 +381,11 @@ export interface EmailConfiguration {
   /** Encrypted in storage; always blank in browser state. */
   apiKey: string;
   hasApiKey?: boolean;
+  /** Generic API transport settings. Secrets are encrypted in storage. */
+  apiEndpoint: string;
+  apiHeaderKey: string;
+  apiAuthPrefix: string;
+  apiSourceDomain: string;
   smtpHost: string;
   smtpPort: number;
   smtpSecurity: 'IMPLICIT_TLS' | 'STARTTLS';
