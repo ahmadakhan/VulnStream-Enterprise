@@ -188,7 +188,7 @@ export function SettingsView() {
                   Automatic dispatch
                 </span>
                 <span className="ui-description mt-0.5 block">
-                  Queue confirmed correlations for enabled recipients and webhooks.
+                  Send confirmed findings to security teams automatically; everyone recipients wait in Email Queue for security review.
                 </span>
               </span>
             </label>
@@ -296,6 +296,19 @@ export function SettingsView() {
             ))}
           </div>
 
+          <div className="grid grid-cols-3 gap-2" aria-label="Account totals">
+            {[
+              ['Active', users.filter((user) => !user.disabled).length, 'text-emerald-300 light:text-emerald-700'],
+              ['Disabled', users.filter((user) => user.disabled).length, 'text-zinc-400'],
+              ['Admins', users.filter((user) => user.role === 'ADMIN').length, 'text-blue-300 light:text-blue-700'],
+            ].map(([label, count, color]) => (
+              <div key={String(label)} className="rounded-xl border border-zinc-800/80 bg-zinc-950/25 px-3 py-2.5 light:border-zinc-200 light:bg-zinc-50">
+                <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">{label}</p>
+                <p className={`mt-1 text-lg font-semibold tabular-nums ${color}`}>{count}</p>
+              </div>
+            ))}
+          </div>
+
           <form
             className="grid gap-4 rounded-xl border border-zinc-800/80 bg-zinc-950/25 p-4 sm:grid-cols-2 lg:grid-cols-[1.1fr_1.1fr_0.8fr_auto] lg:items-end light:border-zinc-200 light:bg-zinc-50"
             onSubmit={async (e) => {
@@ -347,14 +360,14 @@ export function SettingsView() {
 
           <div>
             <div className="mb-2 flex items-center justify-between gap-3">
-              <h3 className="text-xs font-semibold">Workspace users</h3>
+              <h3 className="text-xs font-semibold">Workspace accounts</h3>
               <span className="ui-description">
                 {users.length} {users.length === 1 ? 'account' : 'accounts'}
               </span>
             </div>
             {users.length ? (
               <ul className="divide-y divide-zinc-800/80 overflow-hidden rounded-xl border border-zinc-800/80 light:divide-zinc-200 light:border-zinc-200">
-                {users.map((user) => (
+                {[...users].sort((a, b) => Number(a.disabled) - Number(b.disabled) || a.username.localeCompare(b.username)).map((user) => (
                   <li
                     key={user.id}
                     className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
@@ -362,7 +375,13 @@ export function SettingsView() {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{user.username}</p>
                       <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                        <span className="rounded-full border border-zinc-700/80 bg-zinc-800/60 px-2 py-0.5 text-[10px] font-medium text-zinc-300 light:border-zinc-200 light:bg-zinc-100 light:text-zinc-700">
+                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                          user.role === 'ADMIN'
+                            ? 'border-blue-500/25 bg-blue-500/10 text-blue-300 light:text-blue-700'
+                            : user.role === 'OPERATOR'
+                              ? 'border-violet-500/25 bg-violet-500/10 text-violet-300 light:text-violet-700'
+                              : 'border-zinc-700/80 bg-zinc-800/60 text-zinc-300 light:border-zinc-200 light:bg-zinc-100 light:text-zinc-700'
+                        }`}>
                           {user.role}
                         </span>
                         <span
@@ -381,7 +400,10 @@ export function SettingsView() {
                     {user.username !== session?.username && (
                       <button
                         type="button"
-                        className="ui-secondary min-h-8 px-3 py-1.5 text-[11px]"
+                        className={`min-h-8 rounded-lg border px-3 py-1.5 text-[11px] font-medium transition ${user.disabled
+                          ? 'border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/10 light:text-emerald-700'
+                          : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800 light:border-zinc-300 light:text-zinc-700 light:hover:bg-zinc-100'
+                        }`}
                         disabled={pending > 0}
                         onClick={async () => {
                           await updateUser(user.id, { role: user.role, disabled: !user.disabled });

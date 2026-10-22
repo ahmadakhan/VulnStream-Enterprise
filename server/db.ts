@@ -32,6 +32,8 @@ export async function migrate(pool: pg.Pool) {
       await client.query(await readFile(new URL('./migrations/002_operational_events.sql', import.meta.url), 'utf8'));
     if (!(await client.query('SELECT version FROM schema_migrations WHERE version=3')).rowCount)
       await client.query(await readFile(new URL('./migrations/003_record_creation_order.sql', import.meta.url), 'utf8'));
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=4')).rowCount)
+      await client.query(await readFile(new URL('./migrations/004_email_review_queue.sql', import.meta.url), 'utf8'));
     await client.query('COMMIT');
   } catch (e) {
     failed = true;

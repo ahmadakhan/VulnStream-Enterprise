@@ -40,6 +40,7 @@ export interface Job {
   };
   attempts: number;
   lock_token: string;
+  review_approved?: boolean;
 }
 export type MailSender = (job: Job) => Promise<string | { id: string; provider: EmailDeliveryLog['provider'] }>;
 const revision = (cve: NormalizedCVE) => createHash('sha256').update(stableJson(cve)).digest('hex');
@@ -125,11 +126,12 @@ export async function enqueue(
   advisoryId: string,
   payload: Job['payload'],
   dedupe: string,
+  initialStatus: 'QUEUED' | 'REVIEW' = 'QUEUED',
 ) {
   const id = randomUUID();
   const inserted = await db.query(
-    'INSERT INTO outbox(id,dedupe_key,channel,target_id,advisory_id,payload) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(dedupe_key) DO NOTHING RETURNING id',
-    [id, dedupe, channel, targetId, advisoryId, JSON.stringify(payload)],
+    'INSERT INTO outbox(id,dedupe_key,channel,target_id,advisory_id,payload,status) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(dedupe_key) DO NOTHING RETURNING id',
+    [id, dedupe, channel, targetId, advisoryId, JSON.stringify(payload), channel === 'email' ? initialStatus : 'QUEUED'],
   );
   if (!inserted.rowCount) return null;
   if (channel === 'email') {
@@ -140,10 +142,10 @@ export async function enqueue(
       advisoryId,
       subject: payload.subject,
       provider: EMAIL_PROVIDER_LABELS[configuration.provider],
-      status: 'QUEUED',
+      status: initialStatus === 'REVIEW' ? 'REVIEW_REQUIRED' : 'QUEUED',
       attemptCount: 0,
       retrySchedule: ['1m', '2m', '4m', '8m', '16m'],
-      nextRetryTime: new Date().toISOString(),
+      nextRetryTime: initialStatus === 'REVIEW' ? null : new Date().toISOString(),
       sentAt: '',
     } satisfies EmailDeliveryLog);
   } else {
@@ -191,6 +193,7 @@ export async function queueAdvisory(
         advisory.id,
         { ...payload, recipientEmail: recipient.email },
         `${dispatchKey}:email:${recipient.id}`,
+        recipient.deliveryGroup === 'EVERYONE' ? 'REVIEW' : 'QUEUED',
       )
     )
       count++;
@@ -225,7 +228,8 @@ export async function deliverNext(
     error = '',
     permanent = false,
     retryNotBefore = 0;
-  let emailProvider: EmailDeliveryLog['provider'] | undefined;
+  let emailProvider: EmailDeliveryLog['provider'] | undefined,
+    routeToReview = false;
   try {
     if (job.attempts > 6) {
       permanent = true;
@@ -291,6 +295,10 @@ export async function deliverNext(
         if (advisory && !currentFindings.every((finding) => recipientAllows(rec, finding))) {
           permanent = true;
           throw new Error('Recipient subscription no longer permits all advisory findings');
+        }
+        if (rec.deliveryGroup === 'EVERYONE' && !job.review_approved) {
+          routeToReview = true;
+          throw new Error('Recipient now requires security review');
         }
       }
       const result = await sendMail(job);
@@ -363,13 +371,13 @@ export async function deliverNext(
   await transaction(pool, async (db) => {
     const current = await db.query('SELECT status,lock_token FROM outbox WHERE id=$1 FOR UPDATE', [job.id]);
     if (current.rows[0]?.lock_token !== job.lock_token) return;
-    const failed = !!error && (permanent || job.attempts >= 6),
+    const failed = !!error && !routeToReview && (permanent || job.attempts >= 6),
       next = new Date(
         Math.max(retryNotBefore, Date.now() + Math.min(3600000, 60000 * 2 ** (job.attempts - 1))),
       );
     await db.query(
       'UPDATE outbox SET status=$2,next_attempt=$3,error=$4,provider_id=$5,locked_at=NULL,lock_token=NULL,updated_at=now() WHERE id=$1',
-      [job.id, error ? (failed ? 'FAILED' : 'QUEUED') : 'ACCEPTED', next, error || null, providerId || null],
+      [job.id, routeToReview ? 'REVIEW' : error ? (failed ? 'FAILED' : 'QUEUED') : 'ACCEPTED', next, routeToReview ? null : error || null, providerId || null],
     );
     if (job.channel === 'email') {
       const log = await get<EmailDeliveryLog>(db, 'emailLogs', job.id);
@@ -377,10 +385,10 @@ export async function deliverNext(
         await put(db, 'emailLogs', job.id, {
           ...log,
           provider: emailProvider || log.provider,
-          status: error ? (failed ? 'FAILED' : 'RETRYING') : 'ACCEPTED',
+          status: routeToReview ? 'REVIEW_REQUIRED' : error ? (failed ? 'FAILED' : 'RETRYING') : 'ACCEPTED',
           attemptCount: job.attempts,
-          errorMessage: error || undefined,
-          nextRetryTime: error && !failed ? next.toISOString() : null,
+          errorMessage: routeToReview ? undefined : error || undefined,
+          nextRetryTime: routeToReview ? null : error && !failed ? next.toISOString() : null,
           sentAt: error ? '' : new Date().toISOString(),
         });
     } else {
@@ -417,7 +425,7 @@ export async function deliverNext(
     if (advisory) {
       const totals = (
         await db.query(
-          "SELECT count(*) FILTER(WHERE status='FAILED')::int AS failed,count(*) FILTER(WHERE status IN ('QUEUED','SENDING'))::int AS pending FROM outbox WHERE advisory_id=$1",
+          "SELECT count(*) FILTER(WHERE status='FAILED')::int AS failed,count(*) FILTER(WHERE status IN ('REVIEW','QUEUED','SENDING'))::int AS pending FROM outbox WHERE advisory_id=$1",
           [advisory.id],
         )
       ).rows[0];

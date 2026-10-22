@@ -20,7 +20,8 @@ export type NotificationStatus =
   | 'NOT_APPLICABLE'
   | 'SUPPRESSED_VEX_NOT_AFFECTED'
   | 'DELIVERED'
-  | 'DELIVERY_FAILED';
+  | 'DELIVERY_FAILED'
+  | 'SECURITY_REJECTED';
 
 export type FindingStatus =
   'MONITORED' | 'REMEDIATION_AVAILABLE' | 'PATCH_APPLIED' | 'RESOLVED' | 'FALSE_POSITIVE';
@@ -287,6 +288,8 @@ export interface EmailRecipient {
   name: string;
   email: string;
   role: string;
+  /** Legacy recipients without a group continue to receive automatic delivery. */
+  deliveryGroup?: 'SECURITY_TEAM' | 'EVERYONE';
   subscriptionTier: 'ALL_SEVERITIES' | 'CRITICAL_HIGH_ONLY' | 'CISA_KEV_ONLY';
   enabled: boolean;
   deliverySuccessRate: number;
@@ -322,7 +325,8 @@ export interface EmailDeliveryLog {
   advisoryId: string;
   subject: string;
   provider: 'Mailgun' | 'Mailtrap' | 'SendGrid' | 'Postmark' | 'SMTP_Relay' | 'Local_Mock';
-  status: 'QUEUED' | 'ACCEPTED' | 'DELIVERED' | 'BOUNCED' | 'RETRYING' | 'FAILED' | 'CANCELLED';
+  status:
+    'REVIEW_REQUIRED' | 'QUEUED' | 'ACCEPTED' | 'DELIVERED' | 'BOUNCED' | 'RETRYING' | 'FAILED' | 'CANCELLED';
   attemptCount: number;
   retrySchedule: string[];
   nextRetryTime: string | null;
@@ -335,11 +339,13 @@ export interface EmailQueueItem {
   recipientEmail: string;
   advisoryId: string;
   subject: string;
-  status: 'QUEUED' | 'SENDING' | 'FAILED';
+  status: 'REVIEW' | 'QUEUED' | 'SENDING' | 'FAILED';
   attempts: number;
-  nextAttemptAt: string;
+  nextAttemptAt: string | null;
   createdAt: string;
   error: string | null;
+  preview?: string;
+  cveIds?: string[];
 }
 
 export interface AuditLog {

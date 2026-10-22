@@ -44,6 +44,7 @@ export const RecipientsView: React.FC = () => {
     name: '',
     email: '',
     role: '',
+    deliveryGroup: 'SECURITY_TEAM' as NonNullable<EmailRecipient['deliveryGroup']>,
     subscriptionTier: 'CRITICAL_HIGH_ONLY' as EmailRecipient['subscriptionTier'],
     enabled: true,
   });
@@ -86,6 +87,7 @@ export const RecipientsView: React.FC = () => {
       name: emailForm.name.trim(),
       email: emailForm.email.trim(),
       role: emailForm.role.trim() || 'Security Engineer',
+      deliveryGroup: emailForm.deliveryGroup,
       subscriptionTier: emailForm.subscriptionTier,
       enabled: emailForm.enabled,
     });
@@ -96,6 +98,7 @@ export const RecipientsView: React.FC = () => {
         name: '',
         email: '',
         role: '',
+        deliveryGroup: 'SECURITY_TEAM',
         subscriptionTier: 'CRITICAL_HIGH_ONLY',
         enabled: true,
       });
@@ -236,7 +239,7 @@ export const RecipientsView: React.FC = () => {
                     <th className="py-3 px-4">Recipient Name</th>
                     <th className="py-3 px-4">Email Address</th>
                     <th className="py-3 px-4">Role / Team</th>
-                    <th className="py-3 px-4">Subscription Tier</th>
+                    <th className="py-3 px-4">Delivery / filter</th>
                     <th className="py-3 px-4">Success Rate</th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4 text-right">Actions</th>
@@ -261,6 +264,15 @@ export const RecipientsView: React.FC = () => {
                         <td className="py-3 px-4 font-mono text-zinc-300">{r.email}</td>
                         <td className="py-3 px-4 text-zinc-400">{r.role}</td>
                         <td className="py-3 px-4">
+                          <span
+                            className={`mb-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                              r.deliveryGroup === 'EVERYONE'
+                                ? 'border-amber-500/30 bg-amber-500/10 text-amber-300 light:text-amber-700'
+                                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 light:text-emerald-700'
+                            }`}
+                          >
+                            {r.deliveryGroup === 'EVERYONE' ? 'SECURITY REVIEW' : 'AUTO · SECURITY TEAM'}
+                          </span>
                           <span
                             className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
                               r.subscriptionTier === 'ALL_SEVERITIES'
@@ -453,10 +465,11 @@ export const RecipientsView: React.FC = () => {
 
             <h2 className="text-base font-bold text-zinc-100 mb-1 flex items-center gap-2">
               <Mail className="w-4 h-4 text-zinc-300" />
-              Add Security Email Recipient
+              Add Email Recipient
             </h2>
             <p className="text-xs text-zinc-400 mb-4">
-              Register a team member or distribution group to receive autonomous security bulletins.
+              Security team recipients are sent alerts automatically. Everyone recipients are held for
+              security-team review before delivery.
             </p>
 
             {errorMsg && (
@@ -500,6 +513,26 @@ export const RecipientsView: React.FC = () => {
                   onChange={(e) => setEmailForm({ ...emailForm, role: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
                 />
+              </div>
+
+              <div>
+                <label className="block text-zinc-400 mb-1 font-mono">Notification group</label>
+                <select
+                  value={emailForm.deliveryGroup}
+                  onChange={(e) =>
+                    setEmailForm({
+                      ...emailForm,
+                      deliveryGroup: e.target.value as NonNullable<EmailRecipient['deliveryGroup']>,
+                    })
+                  }
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                >
+                  <option value="SECURITY_TEAM">Security team · send automatically</option>
+                  <option value="EVERYONE">Everyone · require security review</option>
+                </select>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500">
+                  Review-required alerts stay queued until an authorized operator approves them.
+                </p>
               </div>
 
               <div>

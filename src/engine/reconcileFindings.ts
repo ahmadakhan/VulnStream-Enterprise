@@ -16,7 +16,7 @@ export function reconcileFindings(
     if (notificationStatus !== 'REVIEW_REQUIRED' && old.advisoryId) {
       notificationStatus = old.autoDispatchedAt
         ? 'AUTO_DISPATCHED'
-        : ['QUEUED_FOR_DISPATCH', 'DELIVERY_FAILED'].includes(old.notificationStatus)
+        : ['QUEUED_FOR_DISPATCH', 'DELIVERY_FAILED', 'SECURITY_REJECTED'].includes(old.notificationStatus)
           ? old.notificationStatus
           : 'DELIVERY_FAILED';
     }

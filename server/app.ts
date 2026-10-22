@@ -35,6 +35,50 @@ function publicState(data: AppState): AppState {
     },
   };
 }
+async function refreshAdvisoryDeliveryStatus(db: pg.Pool | import('pg').PoolClient, advisoryId: string) {
+  const advisory = await get<Advisory>(db, 'advisories', advisoryId);
+  if (!advisory) return;
+  const totals = (
+    await db.query(
+      `SELECT count(*) FILTER(WHERE status='FAILED')::int AS failed,
+        count(*) FILTER(WHERE status IN ('REVIEW','QUEUED','SENDING'))::int AS pending,
+        count(*) FILTER(WHERE status='ACCEPTED')::int AS accepted,
+        count(*) FILTER(WHERE status='REJECTED')::int AS rejected
+       FROM outbox WHERE advisory_id=$1`,
+      [advisoryId],
+    )
+  ).rows[0];
+  advisory.deliveryStatus = Number(totals.pending)
+    ? 'PENDING'
+    : Number(totals.failed)
+      ? 'FAILED'
+      : Number(totals.accepted)
+        ? 'ACCEPTED'
+        : 'DRAFT';
+  await put(db, 'advisories', advisory.id, advisory);
+  const notificationStatus = Number(totals.pending)
+    ? 'QUEUED_FOR_DISPATCH'
+    : Number(totals.failed)
+      ? 'DELIVERY_FAILED'
+      : Number(totals.accepted)
+        ? 'AUTO_DISPATCHED'
+        : Number(totals.rejected)
+          ? 'SECURITY_REJECTED'
+          : null;
+  if (notificationStatus)
+    for (const findingId of advisory.findingIds) {
+      const finding = await get<any>(db, 'findings', findingId);
+      if (finding && finding.advisoryId === advisory.id)
+        await put(db, 'findings', findingId, {
+          ...finding,
+          notificationStatus,
+          autoDispatchedAt:
+            notificationStatus === 'AUTO_DISPATCHED'
+              ? finding.autoDispatchedAt || new Date().toISOString()
+              : null,
+        });
+    }
+}
 export function createApp(pool: pg.Pool, config: Config, request: Requester = createRequester(config)) {
   const app = express();
   app.disable('x-powered-by');
@@ -203,10 +247,12 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
     asyncRoute(async (_req, res) => {
       const rows = await pool.query(
         `SELECT id, payload->>'recipientEmail' AS "recipientEmail", advisory_id AS "advisoryId",
-          payload->>'subject' AS subject, status, attempts, next_attempt AS "nextAttemptAt",
-          created_at AS "createdAt", error
+          payload->>'subject' AS subject, status, attempts,
+          CASE WHEN status='REVIEW' THEN NULL ELSE next_attempt END AS "nextAttemptAt",
+          created_at AS "createdAt", error, left(payload->>'text', 4000) AS preview,
+          payload->'cveIds' AS "cveIds"
          FROM outbox
-         WHERE channel='email' AND status IN ('QUEUED','SENDING','FAILED')
+         WHERE channel='email' AND status IN ('REVIEW','QUEUED','SENDING','FAILED')
          ORDER BY created_at DESC, id DESC LIMIT 1000`,
       );
       res.json(rows.rows);
@@ -432,6 +478,72 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         );
       });
       res.status(202).json({ success: true, statusCode: 202, signature: 'Pending worker delivery' });
+    }),
+  );
+  app.post(
+    '/api/email/:id/approve',
+    requireRole('ADMIN', 'OPERATOR'),
+    asyncRoute(async (req, res) => {
+      await transaction(pool, async (db) => {
+        const row = await db.query(
+          "UPDATE outbox SET status='QUEUED',review_approved=true,next_attempt=now(),error=NULL,updated_at=now() WHERE id=$1 AND channel='email' AND status='REVIEW' RETURNING advisory_id",
+          [req.params.id],
+        );
+        if (!row.rowCount) throw new HttpError(409, 'Only notifications awaiting review can be approved');
+        const id = String(req.params.id);
+        const log = await get<any>(db, 'emailLogs', id);
+        if (log)
+          await put(db, 'emailLogs', id, {
+            ...log,
+            status: 'QUEUED',
+            nextRetryTime: new Date().toISOString(),
+            errorMessage: undefined,
+          });
+        await appendAudit(
+          db,
+          'Email notification approved',
+          `Delivery ${id}`,
+          req.operator!.username,
+          'EMAIL',
+          'INFO',
+          req.ip || '',
+        );
+        await refreshAdvisoryDeliveryStatus(db, String(row.rows[0].advisory_id));
+      });
+      res.json({ success: true });
+    }),
+  );
+  app.post(
+    '/api/email/:id/reject',
+    requireRole('ADMIN', 'OPERATOR'),
+    asyncRoute(async (req, res) => {
+      await transaction(pool, async (db) => {
+        const row = await db.query(
+          "UPDATE outbox SET status='REJECTED',error='Rejected during security review',updated_at=now() WHERE id=$1 AND channel='email' AND status='REVIEW' RETURNING advisory_id",
+          [req.params.id],
+        );
+        if (!row.rowCount) throw new HttpError(409, 'Only notifications awaiting review can be rejected');
+        const id = String(req.params.id);
+        const log = await get<any>(db, 'emailLogs', id);
+        if (log)
+          await put(db, 'emailLogs', id, {
+            ...log,
+            status: 'CANCELLED',
+            nextRetryTime: null,
+            errorMessage: 'Rejected during security review',
+          });
+        await appendAudit(
+          db,
+          'Email notification rejected',
+          `Delivery ${id}`,
+          req.operator!.username,
+          'EMAIL',
+          'WARNING',
+          req.ip || '',
+        );
+        await refreshAdvisoryDeliveryStatus(db, String(row.rows[0].advisory_id));
+      });
+      res.json({ success: true });
     }),
   );
   app.post(

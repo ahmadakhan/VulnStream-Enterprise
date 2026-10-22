@@ -257,6 +257,8 @@ function useApplication() {
       )) || { success: false, statusCode: 0, signature: '' },
     resendNotification: (cveId: string, reason: string) => call('/resend', { cveId, reason }),
     retryEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/retry`),
+    approveEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/approve`),
+    rejectEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/reject`),
     listEmailQueue: () => safely(() => request<EmailQueueItem[]>('/email-queue')),
     deleteEmailQueueItem: (id: string) => call(`/email/${encodeURIComponent(id)}`, {}, 'DELETE'),
     isPipelineRunning: !!activeExecution,

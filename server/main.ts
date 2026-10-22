@@ -13,7 +13,7 @@ pool.on('error', (error) =>
   console.error(JSON.stringify({ level: 'error', event: 'database-connection', code: (error as any).code })),
 );
 if (config.NODE_ENV === 'production') {
-  const version = await pool.query('SELECT version FROM schema_migrations WHERE version=3');
+  const version = await pool.query('SELECT version FROM schema_migrations WHERE version=4');
   if (!version.rowCount) throw new Error('Required migration missing');
 } else await migrate(pool);
 // Upgrade existing installations once; the marker makes later operator deletions persist.
@@ -81,7 +81,7 @@ const cleanup = setInterval(() => {
     .query(
       `DELETE FROM sessions WHERE expires_at<now();
        DELETE FROM login_attempts WHERE window_start<now()-interval '1 day';
-       DELETE FROM outbox WHERE status IN ('ACCEPTED', 'FAILED') AND updated_at < now() - interval '30 days';
+       DELETE FROM outbox WHERE status IN ('ACCEPTED', 'FAILED', 'REJECTED') AND updated_at < now() - interval '30 days';
        DELETE FROM operational_events WHERE occurred_at < now() - interval '90 days';`,
     )
     .catch(report('session-cleanup'));

@@ -99,6 +99,7 @@ export const recipientSchema = z.object({
     .max(254)
     .transform((s) => s.toLowerCase()),
   role: shortText,
+  deliveryGroup: z.enum(['SECURITY_TEAM', 'EVERYONE']).default('SECURITY_TEAM'),
   subscriptionTier: z.enum(['ALL_SEVERITIES', 'CRITICAL_HIGH_ONLY', 'CISA_KEV_ONLY']),
   enabled: z.boolean(),
 });
