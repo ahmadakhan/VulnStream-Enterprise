@@ -361,8 +361,18 @@ export interface AuditLog {
   hash: string;
 }
 
-export const EMAIL_PROVIDERS = ['SMTP', 'MAILGUN', 'MAILTRAP', 'SENDGRID', 'POSTMARK'] as const;
+export const SMTP_EMAIL_PROVIDERS = ['SMTP_CUSTOM', 'MAILEROO_SMTP', 'LETTR_SMTP', 'MAILJET_SMTP'] as const;
+export const EMAIL_PROVIDERS = [
+  'SMTP',
+  ...SMTP_EMAIL_PROVIDERS,
+  'MAILGUN',
+  'MAILTRAP',
+  'SENDGRID',
+  'POSTMARK',
+] as const;
 export type EmailProvider = (typeof EMAIL_PROVIDERS)[number];
+export const isSmtpEmailProvider = (provider: EmailProvider) =>
+  provider === 'SMTP' || (SMTP_EMAIL_PROVIDERS as readonly string[]).includes(provider);
 export interface EmailConfiguration {
   provider: EmailProvider;
   fromEmail: string;
@@ -370,6 +380,13 @@ export interface EmailConfiguration {
   /** Encrypted in storage; always blank in browser state. */
   apiKey: string;
   hasApiKey?: boolean;
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecurity: 'IMPLICIT_TLS' | 'STARTTLS';
+  smtpUsername: string;
+  /** Encrypted in storage; always blank in browser state. */
+  smtpPassword: string;
+  hasSmtpPassword?: boolean;
   mailgunDomain: string;
   mailgunRegion: 'US' | 'EU';
   mailtrapMode: 'LIVE' | 'SANDBOX';

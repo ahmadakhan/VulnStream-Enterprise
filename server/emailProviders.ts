@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import type { EmailConfiguration, EmailDeliveryLog } from '../src/types';
+import { isSmtpEmailProvider, type EmailConfiguration, type EmailDeliveryLog } from '../src/types';
 import type { Job } from './delivery';
 import type { Requester } from './network';
 
 export const EMAIL_PROVIDER_LABELS: Record<EmailConfiguration['provider'], EmailDeliveryLog['provider']> = {
   SMTP: 'SMTP_Relay',
+  SMTP_CUSTOM: 'SMTP_Relay',
+  MAILEROO_SMTP: 'SMTP_Relay',
+  LETTR_SMTP: 'SMTP_Relay',
+  MAILJET_SMTP: 'SMTP_Relay',
   MAILGUN: 'Mailgun',
   MAILTRAP: 'Mailtrap',
   SENDGRID: 'SendGrid',
@@ -28,9 +32,20 @@ export function emailEndpoint(config: EmailConfiguration): string | null {
 }
 export function emailIsConfigured(
   config: EmailConfiguration,
-  env: { SMTP_HOST: string; SMTP_FROM: string },
+  env: { SMTP_HOST: string; SMTP_FROM: string; EGRESS_ALLOWED_HOSTS?: string },
 ): boolean {
   if (config.provider === 'SMTP') return !!env.SMTP_HOST && !!(config.fromEmail || env.SMTP_FROM);
+  if (isSmtpEmailProvider(config.provider)) {
+    const allowedHosts = (env.EGRESS_ALLOWED_HOSTS || '').split(',').map((host) => host.trim().toLowerCase());
+    const needsAuth = config.provider !== 'SMTP_CUSTOM';
+    return (
+      !!config.fromEmail &&
+      !!config.smtpHost &&
+      allowedHosts.includes(config.smtpHost.toLowerCase()) &&
+      (!needsAuth || (!!config.smtpUsername && !!config.smtpPassword)) &&
+      (needsAuth || (!!config.smtpUsername === !!config.smtpPassword))
+    );
+  }
   return (
     !!config.fromEmail &&
     !!config.apiKey &&

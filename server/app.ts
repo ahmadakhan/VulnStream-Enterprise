@@ -27,7 +27,13 @@ function publicState(data: AppState): AppState {
     ...data,
     feeds: data.feeds.map((f) => ({ ...f, authSecretKey: undefined })),
     webhooks: data.webhooks.map((w) => ({ ...w, url: '[configured on server]', secretToken: '' })),
-    emailConfig: { ...data.emailConfig, apiKey: '', hasApiKey: !!data.emailConfig.apiKey },
+    emailConfig: {
+      ...data.emailConfig,
+      apiKey: '',
+      hasApiKey: !!data.emailConfig.apiKey,
+      smtpPassword: '',
+      hasSmtpPassword: !!data.emailConfig.smtpPassword,
+    },
     settings: {
       ...data.settings,
       webhookSigningSecret: '',

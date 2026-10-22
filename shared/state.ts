@@ -20,6 +20,7 @@ import type {
 import { DEFAULT_TEMPLATE_CUSTOMIZATION, compileCustomizedTemplate } from '../src/utils/templateCompiler';
 export const DEFAULT_EMAIL_CONFIG: EmailConfiguration = {
   provider: 'SMTP', fromEmail: '', fromName: 'VulnStream', apiKey: '',
+  smtpHost: '', smtpPort: 587, smtpSecurity: 'STARTTLS', smtpUsername: '', smtpPassword: '',
   mailgunDomain: '', mailgunRegion: 'US', mailtrapMode: 'LIVE', mailtrapInboxId: '',
   postmarkMessageStream: 'outbound',
 };

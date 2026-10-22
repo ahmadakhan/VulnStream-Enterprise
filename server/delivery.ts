@@ -13,6 +13,7 @@ import type { Db } from './db';
 import { createRequester, type Requester } from './network';
 import { EMAIL_PROVIDER_LABELS, EmailProviderError, emailIsConfigured, sendProviderEmail } from './emailProviders';
 import { decrypt } from './secrets';
+import { isSmtpEmailProvider } from '../src/types';
 import type {
   Advisory,
   Finding,
@@ -87,7 +88,7 @@ export function createMailSender(config: Config, db?: Db, request: Requester = c
   return async (job) => {
     const saved = (db && await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
     if (!emailIsConfigured(saved, config)) throw new Error('Email provider is not configured');
-    if (saved.provider !== 'SMTP') {
+    if (!isSmtpEmailProvider(saved.provider)) {
       const token = decrypt(saved.apiKey, config.ENCRYPTION_KEY, `email-provider:${saved.provider}`);
       if (!token) throw new Error('Email provider token is missing');
       const provider = EMAIL_PROVIDER_LABELS[saved.provider];
@@ -100,8 +101,26 @@ export function createMailSender(config: Config, db?: Db, request: Requester = c
       }
     }
     const fromEmail = saved.fromEmail || config.SMTP_FROM;
-    if (!transporter || !fromEmail) throw new Error('SMTP is not configured');
-    const result = await transporter.sendMail({
+    const smtpPassword = saved.provider === 'SMTP'
+      ? config.SMTP_PASSWORD
+      : decrypt(saved.smtpPassword, config.ENCRYPTION_KEY, `email-smtp:${saved.provider}`);
+    const smtpTransport = saved.provider === 'SMTP'
+      ? transporter
+      : nodemailer.createTransport({
+          host: saved.smtpHost,
+          port: saved.smtpPort,
+          secure: saved.smtpSecurity === 'IMPLICIT_TLS',
+          requireTLS: saved.smtpSecurity === 'STARTTLS',
+          auth: saved.smtpUsername ? { user: saved.smtpUsername, pass: smtpPassword } : undefined,
+          connectionTimeout: 10000,
+          greetingTimeout: 10000,
+          socketTimeout: 20000,
+          dnsTimeout: 5000,
+          disableFileAccess: true,
+          disableUrlAccess: true,
+        });
+    if (!smtpTransport || !fromEmail) throw new Error('SMTP is not configured');
+    const result = await smtpTransport.sendMail({
       from: { address: fromEmail, name: saved.fromName },
       to: job.payload.recipientEmail,
       subject: job.payload.subject,

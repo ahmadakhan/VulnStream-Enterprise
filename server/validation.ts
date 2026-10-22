@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { FEED_TYPES, EMAIL_PROVIDERS } from '../src/types';
+import { FEED_TYPES, EMAIL_PROVIDERS, SMTP_EMAIL_PROVIDERS } from '../src/types';
 import { parseCPE23 } from '../src/utils/cpeMatcher';
 export const shortText = z.string().trim().min(1).max(200);
 export const idSchema = z.string().min(1).max(150);
@@ -184,6 +184,11 @@ export const emailConfigSchema = z.object({
   fromEmail: z.union([z.email().max(254), z.literal('')]),
   fromName: z.string().trim().max(100).regex(/^[^\r\n]*$/),
   apiKey: z.string().trim().max(4096).regex(/^[^\r\n]*$/).default(''),
+  smtpHost: z.string().trim().toLowerCase().max(253).regex(/^$|^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/).default(''),
+  smtpPort: z.number().int().min(1).max(65535).default(587),
+  smtpSecurity: z.enum(['IMPLICIT_TLS', 'STARTTLS']).default('STARTTLS'),
+  smtpUsername: z.string().trim().max(254).regex(/^[^\r\n]*$/).default(''),
+  smtpPassword: z.string().max(4096).regex(/^[^\r\n]*$/).default(''),
   mailgunDomain: z.string().trim().toLowerCase().max(253).regex(/^$|^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/),
   mailgunRegion: z.enum(['US', 'EU']),
   mailtrapMode: z.enum(['LIVE', 'SANDBOX']),
@@ -192,6 +197,13 @@ export const emailConfigSchema = z.object({
 }).superRefine((value, ctx) => {
   if (value.provider !== 'SMTP' && !value.fromEmail)
     ctx.addIssue({ code: 'custom', path: ['fromEmail'], message: 'A verified sender email is required' });
+  if ((SMTP_EMAIL_PROVIDERS as readonly string[]).includes(value.provider)) {
+    if (!value.smtpHost)
+      ctx.addIssue({ code: 'custom', path: ['smtpHost'], message: 'SMTP host is required' });
+    const presetRequiresAuth = value.provider !== 'SMTP_CUSTOM';
+    if (presetRequiresAuth && !value.smtpUsername)
+      ctx.addIssue({ code: 'custom', path: ['smtpUsername'], message: 'SMTP username is required' });
+  }
   if (value.provider === 'MAILGUN' && !value.mailgunDomain)
     ctx.addIssue({ code: 'custom', path: ['mailgunDomain'], message: 'Mailgun sending domain is required' });
   if (value.provider === 'MAILTRAP' && value.mailtrapMode === 'SANDBOX' && !value.mailtrapInboxId)

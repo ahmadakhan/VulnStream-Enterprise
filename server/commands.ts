@@ -20,7 +20,7 @@ import { emailConfigSchema } from './validation';
 import { emailEndpoint } from './emailProviders';
 import { compileCustomizedTemplate } from '../src/utils/templateCompiler';
 import type { Config } from './config';
-import type { AppSettings, Finding, EmailConfiguration } from '../src/types';
+import { isSmtpEmailProvider, type AppSettings, type Finding, type EmailConfiguration } from '../src/types';
 
 export interface CommandRequest {
   action: string;
@@ -189,15 +189,29 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
   } else if (action === 'email.configure') {
     const input = emailConfigSchema.parse(data);
     const old = (await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
-    const apiKey = input.provider === 'SMTP' ? '' : input.apiKey
+    const smtpProvider = isSmtpEmailProvider(input.provider);
+    const apiKey = smtpProvider ? '' : input.apiKey
       ? encrypt(input.apiKey, config.ENCRYPTION_KEY, `email-provider:${input.provider}`)
       : old.provider === input.provider ? old.apiKey : '';
-    if (input.provider !== 'SMTP' && !apiKey)
+    const smtpPassword = smtpProvider && input.provider !== 'SMTP' ? input.smtpPassword
+      ? encrypt(input.smtpPassword, config.ENCRYPTION_KEY, `email-smtp:${input.provider}`)
+      : old.provider === input.provider ? old.smtpPassword : '' : '';
+    if (!smtpProvider && !apiKey)
       throw new HttpError(400, 'Enter an API token for the selected provider');
+    if (smtpProvider && input.provider !== 'SMTP') {
+      const allowedHosts = config.EGRESS_ALLOWED_HOSTS.split(',').map((host) => host.trim().toLowerCase());
+      if (!allowedHosts.includes(input.smtpHost))
+        throw new HttpError(400, `Add ${input.smtpHost} to EGRESS_ALLOWED_HOSTS before configuring this SMTP host`);
+      const presetRequiresAuth = input.provider !== 'SMTP_CUSTOM';
+      if (presetRequiresAuth && (!input.smtpUsername || !smtpPassword))
+        throw new HttpError(400, 'SMTP username and password or API secret are required');
+      if (!presetRequiresAuth && Boolean(input.smtpUsername) !== Boolean(smtpPassword))
+        throw new HttpError(400, 'Provide both SMTP username and password, or leave both blank');
+    }
     const endpoint = emailEndpoint(input);
     if (endpoint && !config.EGRESS_ALLOWED_HOSTS.split(',').map((host) => host.trim().toLowerCase()).includes(new URL(endpoint).hostname))
       throw new HttpError(400, `Allow ${new URL(endpoint).hostname} in EGRESS_ALLOWED_HOSTS before configuring this provider`);
-    await put(db, 'emailConfig', 'main', { ...input, apiKey });
+    await put(db, 'emailConfig', 'main', { ...input, apiKey, smtpPassword });
   } else if (action === 'settings.save') {
     const old = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
     await put(

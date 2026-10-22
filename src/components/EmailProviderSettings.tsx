@@ -1,30 +1,61 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, KeyRound, Mail, Save, Send } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { EMAIL_PROVIDERS, type EmailConfiguration } from '../types';
+import { EMAIL_PROVIDERS, isSmtpEmailProvider, type EmailConfiguration, type EmailProvider } from '../types';
 
-const names = {
-  SMTP: 'SMTP relay',
+const names: Record<EmailProvider, string> = {
+  SMTP: 'SMTP relay (deployment settings)',
+  SMTP_CUSTOM: 'Custom SMTP host',
+  MAILEROO_SMTP: 'Maileroo SMTP',
+  LETTR_SMTP: 'Lettr SMTP',
+  MAILJET_SMTP: 'Mailjet SMTP',
   MAILGUN: 'Mailgun',
   MAILTRAP: 'Mailtrap',
   SENDGRID: 'SendGrid',
   POSTMARK: 'Postmark',
 };
-const guides = {
+const guides: Partial<Record<EmailProvider, string>> = {
+  MAILEROO_SMTP: 'https://maileroo.com/docs/smtp-relay/server-configuration',
+  LETTR_SMTP: 'https://lettr.com/glossary/smtp/',
+  MAILJET_SMTP: 'https://dev.mailjet.com/docs/smtp-relay/configuration',
   MAILGUN: 'https://documentation.mailgun.com/docs/mailgun/user-manual/sending-messages/send-http',
   MAILTRAP: 'https://docs.mailtrap.io/email-api-smtp/setup',
   SENDGRID: 'https://www.twilio.com/docs/sendgrid/for-developers/sending-email/api-getting-started',
   POSTMARK: 'https://postmarkapp.com/developer/get-started',
 };
+const smtpPresets: Partial<
+  Record<EmailProvider, Pick<EmailConfiguration, 'smtpHost' | 'smtpPort' | 'smtpSecurity' | 'smtpUsername'>>
+> = {
+  SMTP_CUSTOM: { smtpHost: '', smtpPort: 587, smtpSecurity: 'STARTTLS', smtpUsername: '' },
+  MAILEROO_SMTP: { smtpHost: 'smtp.maileroo.com', smtpPort: 587, smtpSecurity: 'STARTTLS', smtpUsername: '' },
+  LETTR_SMTP: { smtpHost: 'smtp.lettr.com', smtpPort: 465, smtpSecurity: 'IMPLICIT_TLS', smtpUsername: 'lettr' },
+  MAILJET_SMTP: { smtpHost: 'in-v3.mailjet.com', smtpPort: 587, smtpSecurity: 'STARTTLS', smtpUsername: '' },
+};
 export function EmailProviderSettings() {
   const { emailConfig, configureEmailProvider, sendTestEmail, pending } = useApp();
-  const [form, setForm] = useState<EmailConfiguration>({ ...emailConfig, apiKey: '' });
+  const [form, setForm] = useState<EmailConfiguration>({
+    ...emailConfig,
+    apiKey: '',
+    smtpHost: emailConfig.smtpHost || '',
+    smtpPort: emailConfig.smtpPort || 587,
+    smtpSecurity: emailConfig.smtpSecurity || 'STARTTLS',
+    smtpUsername: emailConfig.smtpUsername || '',
+    smtpPassword: '',
+  });
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState('');
   const [testEmail, setTestEmail] = useState('');
   const savedVersion = JSON.stringify(emailConfig);
   useEffect(() => {
-    setForm({ ...emailConfig, apiKey: '' });
+    setForm({
+      ...emailConfig,
+      apiKey: '',
+      smtpHost: emailConfig.smtpHost || '',
+      smtpPort: emailConfig.smtpPort || 587,
+      smtpSecurity: emailConfig.smtpSecurity || 'STARTTLS',
+      smtpUsername: emailConfig.smtpUsername || '',
+      smtpPassword: '',
+    });
     setDirty(false);
   }, [savedVersion]);
   const update = (value: Partial<EmailConfiguration>) => {
@@ -32,7 +63,9 @@ export function EmailProviderSettings() {
     setDirty(true);
     setMessage('');
   };
-  const hasSavedToken = form.provider === emailConfig.provider && emailConfig.hasApiKey;
+  const hasSavedToken = !isSmtpEmailProvider(form.provider) && form.provider === emailConfig.provider && emailConfig.hasApiKey;
+  const hasSavedSmtpPassword = form.provider === emailConfig.provider && emailConfig.hasSmtpPassword;
+  const smtpProvider = isSmtpEmailProvider(form.provider);
   return (
     <section className="ui-card space-y-5" aria-labelledby="email-settings-heading">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -59,7 +92,7 @@ export function EmailProviderSettings() {
           event.preventDefault();
           setMessage('');
           if (await configureEmailProvider(form)) {
-            setForm((old) => ({ ...old, apiKey: '' }));
+            setForm((old) => ({ ...old, apiKey: '', smtpPassword: '' }));
             setDirty(false);
             setMessage(`${names[form.provider]} configuration saved.`);
           }
@@ -72,15 +105,44 @@ export function EmailProviderSettings() {
               id="email-provider"
               className="ui-field"
               value={form.provider}
-              onChange={(event) =>
-                update({ provider: event.target.value as EmailConfiguration['provider'], apiKey: '' })
-              }
+              onChange={(event) => {
+                const provider = event.target.value as EmailProvider;
+                const savedSmtpSettings = provider === emailConfig.provider
+                  ? {
+                      smtpHost: emailConfig.smtpHost || '',
+                      smtpPort: emailConfig.smtpPort || 587,
+                      smtpSecurity: emailConfig.smtpSecurity || 'STARTTLS',
+                      smtpUsername: emailConfig.smtpUsername || '',
+                    }
+                  : {};
+                update({
+                  provider,
+                  apiKey: '',
+                  smtpPassword: '',
+                  ...(smtpPresets[provider] || {
+                    smtpHost: '',
+                    smtpPort: 587,
+                    smtpSecurity: 'STARTTLS' as const,
+                    smtpUsername: '',
+                  }),
+                  ...savedSmtpSettings,
+                });
+              }}
             >
-              {EMAIL_PROVIDERS.map((provider) => (
-                <option key={provider} value={provider}>
-                  {names[provider]}
-                </option>
-              ))}
+              <optgroup label="SMTP">
+                {EMAIL_PROVIDERS.filter(isSmtpEmailProvider).map((provider) => (
+                  <option key={provider} value={provider}>
+                    {names[provider]}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Email API">
+                {EMAIL_PROVIDERS.filter((provider) => !isSmtpEmailProvider(provider)).map((provider) => (
+                  <option key={provider} value={provider}>
+                    {names[provider]}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </label>
           <label htmlFor="email-from-name">
@@ -112,7 +174,7 @@ export function EmailProviderSettings() {
               Use a sender address verified with your provider.
             </span>
           </label>
-          {form.provider !== 'SMTP' && (
+          {!smtpProvider && (
             <label htmlFor="email-api-key" className="sm:col-span-2">
               {form.provider === 'POSTMARK' ? 'Server API token' : 'API token'}
               <input
@@ -215,21 +277,117 @@ export function EmailProviderSettings() {
               </span>
             </label>
           )}
+          {smtpProvider && form.provider !== 'SMTP' && (
+            <>
+              <label htmlFor="smtp-host">
+                SMTP host
+                <input
+                  id="smtp-host"
+                  className="ui-field"
+                  value={form.smtpHost}
+                  readOnly={form.provider !== 'SMTP_CUSTOM'}
+                  required
+                  placeholder="smtp.example.com"
+                  onChange={(event) => update({ smtpHost: event.target.value })}
+                />
+                {form.provider === 'SMTP_CUSTOM' && (
+                  <span className="ui-description mt-1.5 block">
+                    Custom SMTP hosts must be included in the server EGRESS_ALLOWED_HOSTS allowlist.
+                  </span>
+                )}
+              </label>
+              <label htmlFor="smtp-port">
+                SMTP port
+                <input
+                  id="smtp-port"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  className="ui-field"
+                  value={form.smtpPort}
+                  required
+                  onChange={(event) => update({ smtpPort: Number(event.target.value) })}
+                />
+              </label>
+              <label htmlFor="smtp-security">
+                SMTP encryption
+                <select
+                  id="smtp-security"
+                  className="ui-field"
+                  value={form.smtpSecurity}
+                  onChange={(event) => update({ smtpSecurity: event.target.value as EmailConfiguration['smtpSecurity'] })}
+                >
+                  <option value="STARTTLS">STARTTLS</option>
+                  <option value="IMPLICIT_TLS">Implicit TLS</option>
+                </select>
+              </label>
+              <label htmlFor="smtp-username">
+                SMTP username
+                <input
+                  id="smtp-username"
+                  className="ui-field"
+                  autoComplete="username"
+                  value={form.smtpUsername}
+                  required={form.provider !== 'SMTP_CUSTOM'}
+                  placeholder={form.provider === 'MAILJET_SMTP' ? 'Mailjet API key' : 'SMTP username'}
+                  onChange={(event) => update({ smtpUsername: event.target.value })}
+                />
+              </label>
+              <label htmlFor="smtp-password" className="sm:col-span-2">
+                SMTP password or API secret
+                <input
+                  id="smtp-password"
+                  type="password"
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  className="ui-field"
+                  value={form.smtpPassword}
+                  maxLength={4096}
+                  required={!hasSavedSmtpPassword && form.provider !== 'SMTP_CUSTOM'}
+                  placeholder={hasSavedSmtpPassword ? 'Credential saved — leave blank to keep it' : 'Enter SMTP password or provider secret'}
+                  onChange={(event) => update({ smtpPassword: event.target.value })}
+                />
+                <span className="ui-description mt-1.5 flex items-center gap-1.5">
+                  <KeyRound className="h-3 w-3" />
+                  Encrypted on the server. Saved credentials are never displayed.
+                </span>
+              </label>
+              {form.provider === 'MAILJET_SMTP' && (
+                <p className="ui-description sm:col-span-2">
+                  Enter your Mailjet API key as the username and its secret key as the password.
+                </p>
+              )}
+              {form.provider === 'LETTR_SMTP' && (
+                <p className="ui-description sm:col-span-2">
+                  Lettr uses the username “lettr” and your Lettr API key as the password.
+                </p>
+              )}
+              {form.provider === 'MAILEROO_SMTP' && (
+                <p className="ui-description sm:col-span-2">
+                  Maileroo expects the SMTP account email address as the username.
+                </p>
+              )}
+            </>
+          )}
         </div>
         {form.provider === 'SMTP' ? (
           <p className="ui-description rounded-xl border border-zinc-700 light:border-zinc-200 bg-zinc-950 light:bg-zinc-50 p-3">
             SMTP host, port, and credentials use the deployment’s SMTP configuration. Connections require TLS.
           </p>
-        ) : (
+        ) : guides[form.provider] ? (
           <p className="ui-description">
             <a
               className="underline underline-offset-4"
               href={guides[form.provider]}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
             >
               {names[form.provider]} setup guide ↗
             </a>
+          </p>
+        ) : (
+          <p className="ui-description">
+            Custom SMTP requires a host permitted by the server EGRESS_ALLOWED_HOSTS allowlist. Use STARTTLS or implicit TLS.
           </p>
         )}
         <div className="ui-actions">
