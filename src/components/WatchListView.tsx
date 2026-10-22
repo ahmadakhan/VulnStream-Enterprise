@@ -68,6 +68,7 @@ export const WatchListView: React.FC = () => {
   // Form State
   const [vendorInput, setVendorInput] = useState('');
   const [customProductInput, setCustomProductInput] = useState('');
+  const [additionalProductInput, setAdditionalProductInput] = useState('');
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [cpePart, setCpePart] = useState<'a' | 'o' | 'h'>('a');
   const [versionInput, setVersionInput] = useState('*');
@@ -135,7 +136,14 @@ export const WatchListView: React.FC = () => {
         const addedCpe = buildStrictCpe23(product.part, vendorInput, product.normalizedId, versionInput, targetHwInput);
         return editingItem.cpes.includes(addedCpe) ? [] : [{ product: product.name, cpe: addedCpe, part: product.part }];
       });
-      return [...current, ...additions];
+      const customAddition = additionalProductInput.trim()
+        ? [{
+            product: additionalProductInput.trim(),
+            cpe: buildStrictCpe23(cpePart, vendorInput, additionalProductInput, versionInput, targetHwInput),
+            part: cpePart,
+          }]
+        : [];
+      return [...current, ...additions, ...customAddition];
     }
     const list: Array<{ product: string; cpe: string; part: 'a' | 'o' | 'h' }> = [];
     const v = vendorInput.trim() || 'vendor';
@@ -166,6 +174,7 @@ export const WatchListView: React.FC = () => {
     vendorInput,
     selectedProductIds,
     customProductInput,
+    additionalProductInput,
     cpePart,
     versionInput,
     targetHwInput,
@@ -191,6 +200,7 @@ export const WatchListView: React.FC = () => {
   const handleOpenAdd = () => {
     setVendorInput('');
     setCustomProductInput('');
+    setAdditionalProductInput('');
     setSelectedProductIds([]);
     setCpePart('a');
     setVersionInput('*');
@@ -208,6 +218,7 @@ export const WatchListView: React.FC = () => {
     const parsed = parseCPE23(item.cpes[0] || '');
     setVendorInput(parsed.isValid ? parsed.vendor : item.vendor);
     setCustomProductInput(parsed.isValid ? parsed.product : item.product);
+    setAdditionalProductInput('');
     setSelectedProductIds([]);
     setCpePart((parsed.part === 'o' || parsed.part === 'h' ? parsed.part : 'a') as 'a' | 'o' | 'h');
     setVersionInput(parsed.version || '*');
@@ -281,6 +292,22 @@ export const WatchListView: React.FC = () => {
           active: true,
         }];
       });
+      if (additionalProductInput.trim()) {
+        const addedCpe = buildStrictCpe23(cpePart, vendorInput, additionalProductInput, versionInput, targetHwInput);
+        if (!editingItem.cpes.includes(addedCpe) && addedCpe !== cpe) {
+          productsToAdd.push({
+            vendor: vendorInput.trim(),
+            product: additionalProductInput.trim(),
+            version: versionInput,
+            cpes: [addedCpe],
+            targetHw: targetHwInput !== '*' ? targetHwInput : undefined,
+            assetTag: `${assetTagInput.trim() || editingItem.assetTag}-new`,
+            ownerGroup: ownerGroupInput.trim() || 'Unassigned',
+            notes: notesInput.trim(),
+            active: true,
+          });
+        }
+      }
       if (productsToAdd.length) {
         const imported = await bulkImportWatchlist(productsToAdd);
         if (imported.errors.length) return;
@@ -947,6 +974,21 @@ export const WatchListView: React.FC = () => {
                   <p className="mt-1 text-zinc-500">
                     Change the product fields or expression to update this asset. Select catalog products above to add separate monitored products.
                   </p>
+                </div>
+              )}
+
+              {editingItem && (
+                <div>
+                  <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                    Add Another Custom Product
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. internal_gateway"
+                    value={additionalProductInput}
+                    onChange={(e) => setAdditionalProductInput(e.target.value)}
+                    className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
+                  />
                 </div>
               )}
 
