@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { runVulnerabilityPipeline } from '../engine/pipelineEngine';
 import { Pagination } from './Pagination';
+import { editedWatchlistCpe } from '../utils/watchlist';
 
 export const WatchListView: React.FC = () => {
   const {
@@ -114,11 +115,21 @@ export const WatchListView: React.FC = () => {
     return getCatalogProductsForVendor(vendorInput);
   }, [vendorInput]);
 
+  const editedCpe = () => editingItem ? editedWatchlistCpe(editingItem, {
+    cpeExpression: cpeExpressionInput,
+    vendor: vendorInput,
+    product: customProductInput,
+    part: cpePart,
+    version: versionInput,
+    targetHw: targetHwInput,
+  }) : cpeExpressionInput.trim();
+
   // Dynamically generated Strict CPE 2.3 expressions
   const generatedCpes = useMemo(() => {
     if (editingItem) {
-      return cpeExpressionInput.trim()
-        ? [{ product: 'Edited CPE', cpe: cpeExpressionInput.trim(), part: cpePart }]
+      const cpe = editedCpe();
+      return cpe
+        ? [{ product: 'Edited CPE', cpe, part: cpePart }]
         : [];
     }
     const list: Array<{ product: string; cpe: string; part: 'a' | 'o' | 'h' }> = [];
@@ -156,6 +167,10 @@ export const WatchListView: React.FC = () => {
     catalogProducts,
     editingItem,
     cpeExpressionInput,
+    vendorInput,
+    customProductInput,
+    versionInput,
+    targetHwInput,
   ]);
 
   const filteredAssets = watchlist.filter((item) => {
@@ -231,9 +246,9 @@ export const WatchListView: React.FC = () => {
 
     // If editing existing single item
     if (editingItem) {
-      const parsedCpe = parseCPE23(cpeExpressionInput.trim());
+      const cpe = editedCpe();
+      const parsedCpe = parseCPE23(cpe);
       if (!parsedCpe.isValid) return;
-      const cpe = cpeExpressionInput.trim();
       const saved = await updateWatchlistItem({
         ...editingItem,
         vendor: parsedCpe.vendor,

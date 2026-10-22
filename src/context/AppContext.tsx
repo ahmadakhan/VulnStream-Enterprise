@@ -260,7 +260,11 @@ function useApplication() {
       });
       return result;
     });
-  const save = async (action: string, data: unknown, id?: string) => !!(await command(action, data, id));
+  const save = async (action: string, data: unknown, id?: string) => {
+    const saved = !!(await command(action, data, id));
+    if (saved) await refresh();
+    return saved;
+  };
   const call = async <T,>(url: string, body: unknown = {}) =>
     safely(async () => {
       const result = await request<T>(url, body);
@@ -332,11 +336,11 @@ function useApplication() {
     addWatchlistItem: (item: Omit<WatchListItem, 'id' | 'createdAt'>) => save('asset.save', item),
     updateWatchlistItem: (item: WatchListItem) => save('asset.save', item, item.id),
     deleteWatchlistItem: (id: string) => command('asset.delete', undefined, id),
-    bulkImportWatchlist: async (items: unknown[]) =>
-      (await command('asset.import', items)) || {
-        imported: 0,
-        errors: ['Import failed. See the error banner.'],
-      },
+    bulkImportWatchlist: async (items: unknown[]) => {
+      const result = await command('asset.import', items);
+      if (result && !result.errors?.length) await refresh();
+      return result || { imported: 0, errors: ['Import failed. See the error banner.'] };
+    },
     addCustomCve: (cve: NormalizedCVE) => save('cve.save', cve),
     updateFindingStatus: (id: string, status: Finding['status'], note?: string) =>
       command('finding.status', { status, note }, id),

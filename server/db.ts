@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { emptyState, type AppState } from '../shared/state';
 import { chainAuditLogs } from '../src/utils/cryptoChain';
 import type { AuditLog } from '../src/types';
+import { orderWatchlist } from '../src/utils/watchlist';
 export type Db = pg.Pool | PoolClient;
 export const createPool = (url: string) =>
   new pg.Pool({
@@ -154,6 +155,10 @@ export async function state(db: Db): Promise<AppState> {
     else if (row.kind === 'emailConfig') snapshot.emailConfig = row.data;
     else if (row.kind === 'template') Object.assign(snapshot, row.data);
   }
+  // Keep inventory position tied to original creation time. PostgreSQL record
+  // updates change updated_at, so using the generic query order made edits jump
+  // to the top of the monitored-products table.
+  snapshot.watchlist = orderWatchlist(snapshot.watchlist);
   // Saved branding is authoritative; regenerate HTML with the current layout so
   // existing installations receive layout fixes without losing customization.
   snapshot.advisoryTemplate = compileCustomizedTemplate(snapshot.templateCustomization);
