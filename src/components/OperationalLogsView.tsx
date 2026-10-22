@@ -51,6 +51,11 @@ const AuditTrailView: React.FC = () => {
     return matchesSearch && matchesCategory && matchesLevel;
   });
 
+  useEffect(() => {
+    const lastPage = Math.max(1, Math.ceil(filteredLogs.length / pageSize));
+    if (currentPage > lastPage) setCurrentPage(lastPage);
+  }, [currentPage, filteredLogs.length, pageSize]);
+
   const paginatedLogs = filteredLogs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleExportJson = () => {
@@ -87,15 +92,19 @@ const AuditTrailView: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight flex items-center gap-2">
-            <FileCode2 className="w-5 h-5 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
-            Operational &amp; Ingestion Audit Trail
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            Integrity &amp; accountability
+          </p>
+          <h1 className="mt-1 flex items-center gap-2.5 text-2xl font-semibold tracking-tight text-zinc-100 light:text-zinc-900">
+            <span className="grid h-9 w-9 place-items-center rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-indigo-300 light:text-indigo-700">
+              <FileCode2 className="h-4 w-4" />
+            </span>
+            Audit trail
           </h1>
-          <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Server audit trail (latest 500 entries). Verification checks content and links in this window.
-            Keep external checkpoints to detect wholesale replacement.
+          <p className="mt-2 max-w-2xl text-sm text-zinc-400 light:text-zinc-600">
+            Review administrative actions and verify the retained server-side record chain.
           </p>
         </div>
 
@@ -103,69 +112,88 @@ const AuditTrailView: React.FC = () => {
           <button
             onClick={handleVerifyChain}
             disabled={verifyingChain}
-            className="text-xs px-3 py-1.5 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 dark:hover:bg-zinc-700 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 font-medium transition flex items-center space-x-1.5"
+            className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3.5 py-2.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 disabled:opacity-60 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100"
           >
             {verifyingChain ? (
-              <RotateCw className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+              <RotateCw className="h-3.5 w-3.5 animate-spin text-zinc-400" />
             ) : chainVerified === true ? (
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
             ) : chainVerified === false ? (
-              <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+              <AlertTriangle className="h-3.5 w-3.5 text-rose-400" />
             ) : (
-              <ShieldCheck className="w-3.5 h-3.5 text-zinc-400" />
+              <ShieldCheck className="h-3.5 w-3.5 text-zinc-400" />
             )}
-            <span>
-              {verifyingChain
-                ? 'Verifying SHA-256 Chain...'
-                : chainVerified === true
-                  ? 'Retained Chain Valid'
-                  : 'Verify Hash Chain'}
-            </span>
+            <span>{verifyingChain ? 'Verifying chain…' : 'Verify chain'}</span>
           </button>
           <button
             onClick={handleExportCsv}
-            className="text-xs px-3 py-1.5 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 dark:hover:bg-zinc-700 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 font-medium transition flex items-center space-x-1"
+            className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3.5 py-2.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100"
           >
-            <Download className="w-3.5 h-3.5" />
+            <Download className="h-3.5 w-3.5" />
             <span>Export CSV</span>
           </button>
           <button
             onClick={handleExportJson}
-            className="text-xs px-3 py-1.5 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 dark:hover:bg-zinc-700 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 font-medium transition flex items-center space-x-1"
+            className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3.5 py-2.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100"
           >
-            <Download className="w-3.5 h-3.5" />
+            <Download className="h-3.5 w-3.5" />
             <span>Export JSON</span>
           </button>
         </div>
       </div>
 
-      {/* Filter Bar */}
-      <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm transition-colors">
-        <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
-          <input
-            type="text"
-            placeholder="Search logs by event, details, IP, or actor..."
-            value={searchTerm}
-            onChange={(e) => {
-              setSearchTerm(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 placeholder-zinc-500 focus:outline-none focus:border-zinc-600 transition"
-          />
+      {chainVerified !== null && !verifyingChain && (
+        <div
+          role="status"
+          className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 text-xs ${chainVerified ? 'border-emerald-500/20 bg-emerald-500/[0.06] text-emerald-300 light:text-emerald-800' : 'border-rose-500/25 bg-rose-500/[0.06] text-rose-300 light:text-rose-800'}`}
+        >
+          {chainVerified ? (
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+          ) : (
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          )}
+          <div>
+            <p className="font-semibold">
+              {chainVerified ? 'Retained chain verified' : 'Audit chain verification failed'}
+            </p>
+            <p className="mt-0.5 opacity-80">
+              The check covers the retained audit window of up to 500 entries.
+            </p>
+          </div>
         </div>
+      )}
 
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          {/* Category Filter */}
-          <div className="flex items-center space-x-1.5 text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-            <span>Category:</span>
+      {/* Filter Bar */}
+      <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-4 shadow-sm transition-colors light:border-zinc-200 light:bg-white">
+        <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <Filter className="h-3.5 w-3.5" />
+          Filter retained entries
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_220px_180px]">
+          <div className="relative min-w-0">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-zinc-500" />
+            <input
+              type="text"
+              aria-label="Search audit trail"
+              placeholder="Search event, details, IP, or actor"
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 py-2.5 pl-9 pr-3 text-xs text-zinc-100 placeholder-zinc-500 transition focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900"
+            />
+          </div>
+
+          <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
+            Category
             <select
               value={categoryFilter}
               onChange={(e) => {
                 setCategoryFilter(e.target.value);
                 setCurrentPage(1);
               }}
-              className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-2.5 py-1 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 focus:outline-none"
+              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-xs text-zinc-200 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-800"
             >
               <option value="ALL">All Categories</option>
               <option value="PIPELINE">Pipeline</option>
@@ -174,33 +202,41 @@ const AuditTrailView: React.FC = () => {
               <option value="WATCHLIST">Watch-List</option>
               <option value="EMAIL">Email Dispatch</option>
             </select>
-          </div>
+          </label>
 
-          {/* Level Filter */}
-          <div className="flex items-center space-x-1.5 text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-            <span>Level:</span>
+          <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
+            Severity
             <select
               value={levelFilter}
               onChange={(e) => {
                 setLevelFilter(e.target.value);
                 setCurrentPage(1);
               }}
-              className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-2.5 py-1 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 focus:outline-none"
+              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-xs text-zinc-200 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-800"
             >
               <option value="ALL">All Levels</option>
               <option value="INFO">Info</option>
               <option value="WARNING">Warning</option>
               <option value="ERROR">Error</option>
             </select>
-          </div>
+          </label>
         </div>
       </div>
 
       {/* Logs Table */}
-      <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
+      <div className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/70 px-4 py-3.5 light:border-zinc-200 sm:px-5">
+          <div>
+            <h2 className="text-sm font-semibold">Retained entries</h2>
+            <p className="mt-0.5 text-[11px] text-zinc-500">Newest records first</p>
+          </div>
+          <span className="rounded-full border border-zinc-700/80 bg-zinc-950/60 px-2.5 py-1 text-[11px] tabular-nums text-zinc-400 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-600">
+            {filteredLogs.length.toLocaleString()} matches
+          </span>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
+          <table className="w-full min-w-[900px] text-left text-xs">
+            <thead className="border-b border-zinc-800/80 bg-zinc-950/80 font-mono text-[10px] uppercase tracking-wider text-zinc-500 light:border-zinc-200 light:bg-zinc-100 light:text-zinc-600">
               <tr>
                 <th className="py-3 px-4">Timestamp (UTC)</th>
                 <th className="py-3 px-4">Category</th>
@@ -210,52 +246,73 @@ const AuditTrailView: React.FC = () => {
                 <th className="py-3 px-4 text-right">Source IP</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200 font-mono">
-              {paginatedLogs.map((log) => (
-                <tr
-                  key={log.id}
-                  className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition"
-                >
-                  <td className="py-2.5 px-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-[11px]">
-                    {new Date(log.timestamp).toISOString().replace('T', ' ').slice(0, 19)}
-                  </td>
-                  <td className="py-2.5 px-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 text-[11px]">
-                    {log.category}
-                  </td>
-                  <td className="py-2.5 px-4">
-                    <span className="text-[10px] px-2 py-0.2 rounded-full font-medium bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300">
-                      {log.level}
+            <tbody className="divide-y divide-zinc-800/60 font-mono light:divide-zinc-200">
+              {paginatedLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-14 text-center font-sans">
+                    <span className="mx-auto grid h-10 w-10 place-items-center rounded-full border border-zinc-800 bg-zinc-950 text-zinc-500 light:border-zinc-200 light:bg-zinc-50">
+                      <Search className="h-4 w-4" />
                     </span>
-                  </td>
-                  <td className="py-2.5 px-4 font-sans max-w-md">
-                    <div className="font-semibold text-zinc-200 dark:text-zinc-200 light:text-zinc-900 text-xs">
-                      {log.event}
-                    </div>
-                    <div className="text-[11px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-0.5 line-clamp-2">
-                      {log.details}
-                    </div>
-                  </td>
-                  <td className="py-2.5 px-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px]">
-                    {log.actor}
-                  </td>
-                  <td className="py-2.5 px-4 text-right text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-[11px]">
-                    {log.ipAddress}
+                    <p className="mt-3 text-sm font-medium text-zinc-300 light:text-zinc-700">
+                      No audit entries found
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">Try changing the search or filters.</p>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                paginatedLogs.map((log) => (
+                  <tr key={log.id} className="transition hover:bg-zinc-800/25 light:hover:bg-zinc-50">
+                    <td className="whitespace-nowrap px-4 py-3.5 text-[11px] text-zinc-400 light:text-zinc-600">
+                      {new Intl.DateTimeFormat(undefined, {
+                        dateStyle: 'medium',
+                        timeStyle: 'medium',
+                        timeZone: 'UTC',
+                      }).format(new Date(log.timestamp))}{' '}
+                      <span className="text-zinc-600">UTC</span>
+                    </td>
+                    <td className="px-4 py-3.5 text-[11px] text-zinc-300 light:text-zinc-700">
+                      <span className="rounded-md border border-zinc-700/70 bg-zinc-800/60 px-2 py-1 light:border-zinc-200 light:bg-zinc-100">
+                        {log.category}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span
+                        className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold ${log.level === 'ERROR' ? 'border-rose-500/20 bg-rose-500/10 text-rose-400 light:text-rose-700' : log.level === 'WARNING' ? 'border-amber-500/20 bg-amber-500/10 text-amber-400 light:text-amber-700' : 'border-blue-500/20 bg-blue-500/10 text-blue-300 light:text-blue-700'}`}
+                      >
+                        {log.level}
+                      </span>
+                    </td>
+                    <td className="max-w-xl px-4 py-3.5 font-sans">
+                      <div className="text-xs font-semibold text-zinc-200 light:text-zinc-900">
+                        {log.event}
+                      </div>
+                      <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-zinc-400 light:text-zinc-600">
+                        {log.details}
+                      </div>
+                    </td>
+                    <td className="max-w-40 truncate px-4 py-3.5 text-[11px] text-zinc-400 light:text-zinc-600">
+                      {log.actor}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3.5 text-right text-[11px] text-zinc-400 light:text-zinc-600">
+                      {log.ipAddress}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
 
-        {/* Pagination */}
-        <Pagination
-          currentPage={currentPage}
-          totalItems={filteredLogs.length}
-          pageSize={pageSize}
-          onPageChange={setCurrentPage}
-          onPageSizeChange={setPageSize}
-          pageSizeOptions={[10, 25, 50]}
-        />
+        <div className="border-t border-zinc-800/70 light:border-zinc-200">
+          <Pagination
+            currentPage={currentPage}
+            totalItems={filteredLogs.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[10, 25, 50]}
+          />
+        </div>
       </div>
     </div>
   );
@@ -263,7 +320,7 @@ const AuditTrailView: React.FC = () => {
 
 export const OperationalLogsView: React.FC = () => {
   const { fetchEvents } = useApp();
-  const [tab, setTab] = useState('events');
+  const [tab, setTab] = useState<'events' | 'audit'>('events');
   const [category, setCategory] = useState('');
   const [level, setLevel] = useState('');
   const [query, setQuery] = useState('');
@@ -309,11 +366,25 @@ export const OperationalLogsView: React.FC = () => {
   }, [tab, category, level, query, runId, cursor, refresh]);
   return (
     <div className="space-y-6">
-      <div className="flex gap-2">
-        <button onClick={() => setTab('events')} aria-pressed={tab === 'events'} className="btn-secondary">
+      <div
+        className="inline-flex rounded-xl border border-zinc-800 bg-zinc-950/70 p-1 light:border-zinc-200 light:bg-white"
+        role="tablist"
+        aria-label="System logs views"
+      >
+        <button
+          role="tab"
+          aria-selected={tab === 'events'}
+          onClick={() => setTab('events')}
+          className={`rounded-lg px-3.5 py-2 text-xs font-medium transition ${tab === 'events' ? 'bg-zinc-800 text-zinc-100 shadow-sm light:bg-blue-50 light:text-blue-800' : 'text-zinc-400 hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'}`}
+        >
           Operational events
         </button>
-        <button onClick={() => setTab('audit')} aria-pressed={tab === 'audit'} className="btn-secondary">
+        <button
+          role="tab"
+          aria-selected={tab === 'audit'}
+          onClick={() => setTab('audit')}
+          className={`rounded-lg px-3.5 py-2 text-xs font-medium transition ${tab === 'audit' ? 'bg-zinc-800 text-zinc-100 shadow-sm light:bg-blue-50 light:text-blue-800' : 'text-zinc-400 hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'}`}
+        >
           Audit trail
         </button>
       </div>
@@ -321,189 +392,252 @@ export const OperationalLogsView: React.FC = () => {
         <AuditTrailView />
       ) : (
         <>
-          <div>
-            <h2 className="text-2xl font-semibold">Operational events</h2>
-            <p className="text-sm text-slate-500 mt-2">
-              Pipeline, feeds, matching, delivery, system health and issues. Search includes structured
-              context; newest events appear first.
-            </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                System &amp; audit
+              </p>
+              <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-100 light:text-zinc-900">
+                Operational events
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm text-zinc-400 light:text-zinc-600">
+                Pipeline, feeds, matching, delivery, system health, and issues. Search includes structured
+                event context.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-zinc-500">
+              {loading && <RotateCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+              <span>{loading ? 'Loading events…' : `${events.length} events in this view`}</span>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-3 items-end">
-            <label className="flex flex-col gap-1 flex-1 min-w-48">
-              Search events
-              <input
-                aria-label="Search operational events"
-                maxLength={200}
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
+          <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-4 shadow-sm light:border-zinc-200 light:bg-white">
+            <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              <Filter className="h-3.5 w-3.5" />
+              Search and filter
+            </div>
+            <div className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_190px_160px_minmax(220px,0.8fr)_auto]">
+              <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
+                Search events
+                <input
+                  aria-label="Search operational events"
+                  maxLength={200}
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setCursor('');
+                  }}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900"
+                  placeholder="Code, message or context"
+                />
+              </label>
+              <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
+                Category
+                <select
+                  value={category}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-xs text-zinc-200 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-800"
+                  onChange={(e) => {
+                    setCategory(e.target.value);
+                    setCursor('');
+                  }}
+                >
+                  <option value="">All categories</option>
+                  {EVENT_CATEGORIES.map((item) => (
+                    <option key={item}>{item}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
+                Level
+                <select
+                  value={level}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-xs text-zinc-200 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-800"
+                  onChange={(e) => {
+                    setLevel(e.target.value);
+                    setCursor('');
+                  }}
+                >
+                  <option value="">All levels</option>
+                  {['INFO', 'WARNING', 'ERROR'].map((item) => (
+                    <option key={item}>{item}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
+                Execution ID
+                <input
+                  aria-label="Filter by execution ID"
+                  value={runId}
+                  placeholder="Execution UUID"
+                  maxLength={36}
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900"
+                  onChange={(e) => {
+                    setRunId(e.target.value);
+                    setCursor('');
+                  }}
+                />
+              </label>
+              <button
+                className="inline-flex h-[38px] items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-3.5 text-xs font-medium text-zinc-100 transition hover:bg-zinc-700 light:border-zinc-300 light:bg-zinc-100 light:text-zinc-800 light:hover:bg-zinc-200"
+                disabled={loading}
+                onClick={() => {
                   setCursor('');
-                }}
-                className="w-full"
-                placeholder="Code, message or context"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              Category
-              <select
-                value={category}
-                onChange={(e) => {
-                  setCategory(e.target.value);
-                  setCursor('');
+                  setRefresh((value) => value + 1);
                 }}
               >
-                <option value="">All categories</option>
-                {EVENT_CATEGORIES.map((item) => (
-                  <option key={item}>{item}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1">
-              Level
-              <select
-                value={level}
-                onChange={(e) => {
-                  setLevel(e.target.value);
-                  setCursor('');
-                }}
-              >
-                <option value="">All levels</option>
-                {['INFO', 'WARNING', 'ERROR'].map((item) => (
-                  <option key={item}>{item}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1">
-              Execution ID
-              <input
-                aria-label="Filter by execution ID"
-                value={runId}
-                placeholder="Execution UUID"
-                maxLength={36}
-                onChange={(e) => {
-                  setRunId(e.target.value);
-                  setCursor('');
-                }}
-              />
-            </label>
-            <button
-              className="btn-secondary"
-              onClick={() => {
-                setCursor('');
-                setRefresh((value) => value + 1);
-              }}
-            >
-              Refresh
-            </button>
+                <RotateCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
           </div>
           {error && (
-            <p role="alert" className="text-red-500">
-              {error}
-            </p>
+            <div
+              role="alert"
+              className="flex items-start gap-2.5 rounded-xl border border-rose-500/20 bg-rose-500/[0.06] px-4 py-3 text-xs text-rose-300 light:text-rose-800"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-semibold">Could not load operational events</p>
+                <p className="mt-0.5 opacity-80">{error}</p>
+              </div>
+            </div>
           )}
           <div aria-busy={loading} className="space-y-3">
             {events.length === 0 && !loading && !error && (
               <p className="p-8 text-center text-slate-500">No matching events.</p>
             )}
             {events.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full table-fixed text-left text-xs">
-                  <colgroup>
-                    <col style={{ width: '11%' }} />
-                    <col style={{ width: '11%' }} />
-                    <col style={{ width: '10%' }} />
-                    <col style={{ width: '12%' }} />
-                    <col style={{ width: '32%' }} />
-                    <col style={{ width: '24%' }} />
-                  </colgroup>
-                  <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
-                    <tr>
-                      <th className="py-3 px-4">Timestamp (UTC)</th>
-                      <th className="py-3 px-4">Category</th>
-                      <th className="py-3 px-4">Level</th>
-                      <th className="py-3 px-4">Code</th>
-                      <th className="py-3 px-4">Message &amp; Error Details</th>
-                      <th className="py-3 px-4">Execution ID</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200 font-mono">
-                    {events.map((event) => (
-                      <tr
-                        key={event.id}
-                        className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition"
-                      >
-                        <td className="py-2.5 px-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-[11px]">
-                          {new Date(event.timestamp).toISOString().replace('T', ' ').slice(0, 19)}
-                        </td>
-                        <td className="py-2.5 px-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 text-[11px]">
-                          {event.category}
-                        </td>
-                        <td className="py-2.5 px-4">
-                          <span className={`text-[10px] px-2 py-0.2 rounded-full font-medium border ${
-                            event.level === 'ERROR'
-                              ? 'bg-red-900/30 text-red-400 border-red-800'
-                              : event.level === 'WARNING'
-                                ? 'bg-amber-900/30 text-amber-400 border-amber-800'
-                                : 'bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border-zinc-700 dark:border-zinc-700 light:border-zinc-300'
-                          }`}>
-                            {event.level}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-4 font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-800 text-[11px]">
-                          {event.code}
-                        </td>
-                        <td className="py-2.5 px-4 max-w-xs">
-                          <div className="font-semibold text-zinc-200 dark:text-zinc-200 light:text-zinc-900 text-xs">
-                            {event.message}
-                          </div>
-                          {event.level === 'ERROR' && (
-                            <div className="mt-1 space-y-1">
-                              {event.context?.error !== undefined && (
-                                <pre className="text-[10px] text-red-400 bg-red-950/20 border border-red-900/30 rounded p-1.5 whitespace-pre-wrap break-all overflow-hidden">
-                                  {String(event.context.error as unknown as string)}
-                                </pre>
-                              )}
-                              {event.context?.errorType !== undefined && (
-                                <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-                                  Error Type: <span className="text-red-400 font-medium">{event.context.errorType as string}</span>
-                                </div>
-                              )}
-                              {event.context?.component !== undefined && (
-                                <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-                                  Component: <span className="text-zinc-300 font-medium">{event.context.component as string}</span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          {event.context && Object.keys(event.context).length > 0 &&
-                           !(event.level === 'ERROR' && (event.context?.error || event.context?.errorType || event.context?.component)) && (
-                            <details className="mt-1">
-                              <summary className="cursor-pointer text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[10px]">
-                                Context
-                              </summary>
-                              <pre className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 whitespace-pre-wrap break-all">
-                                {JSON.stringify(event.context, null, 2)}
-                              </pre>
-                             </details>
-                           )}
-                         </td>
-                        <td className="py-2.5 px-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono text-[10px] truncate">
-                          {event.runId || '-'}
-                        </td>
+              <div className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1080px] table-fixed text-left text-xs">
+                    <colgroup>
+                      <col style={{ width: '11%' }} />
+                      <col style={{ width: '11%' }} />
+                      <col style={{ width: '10%' }} />
+                      <col style={{ width: '12%' }} />
+                      <col style={{ width: '32%' }} />
+                      <col style={{ width: '24%' }} />
+                    </colgroup>
+                    <thead className="border-b border-zinc-800/80 bg-zinc-950/80 font-mono text-[10px] uppercase tracking-wider text-zinc-500 light:border-zinc-200 light:bg-zinc-100 light:text-zinc-600">
+                      <tr>
+                        <th className="py-3 px-4">Timestamp (UTC)</th>
+                        <th className="py-3 px-4">Category</th>
+                        <th className="py-3 px-4">Level</th>
+                        <th className="py-3 px-4">Code</th>
+                        <th className="py-3 px-4">Message &amp; Error Details</th>
+                        <th className="py-3 px-4">Execution ID</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/60 font-mono light:divide-zinc-200">
+                      {events.map((event) => (
+                        <tr key={event.id} className="transition hover:bg-zinc-800/25 light:hover:bg-zinc-50">
+                          <td className="whitespace-nowrap px-4 py-3.5 text-[11px] text-zinc-400 light:text-zinc-600">
+                            {new Intl.DateTimeFormat(undefined, {
+                              dateStyle: 'medium',
+                              timeStyle: 'medium',
+                              timeZone: 'UTC',
+                            }).format(new Date(event.timestamp))}{' '}
+                            <span className="text-zinc-600">UTC</span>
+                          </td>
+                          <td className="px-4 py-3.5 text-[11px] text-zinc-300 light:text-zinc-700">
+                            <span className="rounded-md border border-zinc-700/70 bg-zinc-800/60 px-2 py-1 light:border-zinc-200 light:bg-zinc-100">
+                              {event.category}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span
+                              className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                                event.level === 'ERROR'
+                                  ? 'border-rose-500/20 bg-rose-500/10 text-rose-400 light:text-rose-700'
+                                  : event.level === 'WARNING'
+                                    ? 'border-amber-500/20 bg-amber-500/10 text-amber-400 light:text-amber-700'
+                                    : 'border-blue-500/20 bg-blue-500/10 text-blue-300 light:text-blue-700'
+                              }`}
+                            >
+                              {event.level}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 font-mono text-[11px] text-zinc-300 light:text-zinc-700">
+                            <span className="rounded-md bg-zinc-800/70 px-1.5 py-1 light:bg-zinc-100">
+                              {event.code}
+                            </span>
+                          </td>
+                          <td className="max-w-xs px-4 py-3.5 font-sans">
+                            <div className="text-xs font-semibold text-zinc-200 light:text-zinc-900">
+                              {event.message}
+                            </div>
+                            {event.level === 'ERROR' && (
+                              <div className="mt-1 space-y-1">
+                                {event.context?.error !== undefined && (
+                                  <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-rose-500/15 bg-rose-950/20 p-2 text-[10px] text-rose-300 light:text-rose-800">
+                                    {String(event.context.error as unknown as string)}
+                                  </pre>
+                                )}
+                                {event.context?.errorType !== undefined && (
+                                  <div className="text-[10px] text-zinc-400 light:text-zinc-600">
+                                    Error type{' '}
+                                    <span className="font-medium text-rose-300 light:text-rose-700">
+                                      {event.context.errorType as string}
+                                    </span>
+                                  </div>
+                                )}
+                                {event.context?.component !== undefined && (
+                                  <div className="text-[10px] text-zinc-400 light:text-zinc-600">
+                                    Component{' '}
+                                    <span className="font-medium text-zinc-300 light:text-zinc-800">
+                                      {event.context.component as string}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {event.context &&
+                              Object.keys(event.context).length > 0 &&
+                              !(
+                                event.level === 'ERROR' &&
+                                (event.context?.error || event.context?.errorType || event.context?.component)
+                              ) && (
+                                <details className="mt-1">
+                                  <summary className="cursor-pointer text-[10px] font-medium text-blue-300 underline decoration-blue-300/30 underline-offset-2 light:text-blue-700">
+                                    View event context
+                                  </summary>
+                                  <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-950/70 p-2 text-[10px] text-zinc-400 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-600">
+                                    {JSON.stringify(event.context, null, 2)}
+                                  </pre>
+                                </details>
+                              )}
+                          </td>
+                          <td className="truncate px-4 py-3.5 font-mono text-[10px] text-zinc-400 light:text-zinc-600">
+                            {event.runId || '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
-          <div className="flex gap-3">
-            <button className="btn-secondary" disabled={!cursor || loading} onClick={() => setCursor('')}>
-              Latest events
-            </button>
-            <button className="btn-secondary" disabled={!next || loading} onClick={() => setCursor(next!)}>
-              Older events
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800/70 bg-zinc-900/30 px-4 py-3 light:border-zinc-200 light:bg-white/70">
+            <p className="text-[11px] text-zinc-500">
+              {cursor ? 'Viewing an older page' : 'Showing the latest events'}
+            </p>
+            <div className="flex gap-2">
+              <button
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 light:border-zinc-300 light:text-zinc-700 light:hover:bg-zinc-100"
+                disabled={!cursor || loading}
+                onClick={() => setCursor('')}
+              >
+                <RotateCw className="h-3.5 w-3.5" />
+                Latest
+              </button>
+              <button
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 light:border-zinc-300 light:text-zinc-700 light:hover:bg-zinc-100"
+                disabled={!next || loading}
+                onClick={() => setCursor(next!)}
+              >
+                Older events <span aria-hidden="true">→</span>
+              </button>
+            </div>
           </div>
         </>
       )}
