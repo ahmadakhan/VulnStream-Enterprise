@@ -60,6 +60,7 @@ export const WatchListView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const [deleteFeedback, setDeleteFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [editingItem, setEditingItem] = useState<WatchListItem | null>(null);
   const [deletingAsset, setDeletingAsset] = useState<WatchListItem | null>(null);
@@ -1327,8 +1328,14 @@ export const WatchListView: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  deleteWatchlistItem(deletingAsset.id);
+                onClick={async () => {
+                  const result = await deleteWatchlistItem(deletingAsset.id);
+                  if (result) {
+                    setDeleteFeedback({ type: 'success', message: `Removed ${deletingAsset.vendor} ${deletingAsset.product} (${deletingAsset.assetTag}) from monitored inventory.` });
+                    setTimeout(() => setDeleteFeedback(null), 5000);
+                  } else {
+                    setDeleteFeedback({ type: 'error', message: 'Failed to remove product from inventory. Please try again.' });
+                  }
                   setDeletingAsset(null);
                 }}
                 className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
