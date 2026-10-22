@@ -217,7 +217,10 @@ export const FindingsView: React.FC = () => {
                                 className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-300 underline decoration-cyan-500/60 underline-offset-4 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-2 light:text-cyan-700 light:hover:text-cyan-800"
                               >
                                 {finding.cveId}
-                                <ExternalLink className="h-3 w-3 opacity-70" aria-hidden="true" />
+                                <span className="rounded border border-cyan-300/30 bg-cyan-950/70 px-1.5 py-0.5 font-sans text-[9px] font-bold uppercase tracking-wide text-cyan-100 light:border-cyan-700/30 light:bg-cyan-100 light:text-cyan-800">
+                                  NVD source
+                                </span>
+                                <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                               </a>
                               {isKev && (
                                 <span title="CISA KEV Catalog">
@@ -345,7 +348,10 @@ export const FindingsView: React.FC = () => {
                     className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 font-mono text-base font-bold text-cyan-300 underline decoration-cyan-500/60 underline-offset-4 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-2 light:text-cyan-700 light:hover:text-cyan-800"
                   >
                     {selectedFinding.cveId}
-                    <ExternalLink className="h-3 w-3 opacity-70" aria-hidden="true" />
+                    <span className="rounded border border-cyan-300/30 bg-cyan-950/70 px-1.5 py-0.5 font-sans text-[9px] font-bold uppercase tracking-wide text-cyan-100 light:border-cyan-700/30 light:bg-cyan-100 light:text-cyan-800">
+                      NVD source
+                    </span>
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                   </a>
                   {selectedFinding.cve.cisaKev.isKev && (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/40 text-amber-300 border border-amber-800/80 flex items-center gap-1 font-semibold">
