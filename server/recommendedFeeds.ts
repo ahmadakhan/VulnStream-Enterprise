@@ -9,6 +9,8 @@ export const RECOMMENDED_FEEDS = [
     url:'https://isc.sans.edu/rssfeed.xml', authType:'NONE' as const, rateLimitPerMin:1, enabled:false, vendorSeed:true },
   { id:'feed-msrc-rss', name:'Microsoft Security Response Center Updates', type:'RSS_ATOM' as const,
     url:'https://api.msrc.microsoft.com/update-guide/rss', authType:'NONE' as const, rateLimitPerMin:1, enabled:false, vendorSeed:true },
+  { id:'feed-fortiguard-psirt', name:'Fortinet FortiGuard PSIRT Security Advisories', type:'RSS_ATOM' as const,
+    url:'https://filestore.fortinet.com/fortiguard/rss/ir.xml', authType:'NONE' as const, rateLimitPerMin:1, enabled:false, vendorSeed:true },
   {
     id: 'feed-opencve',
     name: 'OpenCVE CVE Enrichment',

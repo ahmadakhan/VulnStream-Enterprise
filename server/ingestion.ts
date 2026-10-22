@@ -9,6 +9,7 @@ import type { Config } from './config';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { normalizeCveId } from '../src/utils/deduplicator';
+import { paceConcurrent } from './concurrency';
 export interface IngestResult {
   sourceId?: string;
   syncState?: IngestionState;
@@ -460,19 +461,28 @@ export async function ingestFeed(
       if (records.size > 500) throw new Error('OpenCVE window exceeds 500 CVEs; reduce ingestion window');
       if (next) await sleep(Math.max(1000, 60000 / feed.rateLimitPerMin));
     }
-    const cves: NormalizedCVE[] = [];
-    let requests = 0;
-    for (const [id] of records) {
-      if (requests++) await sleep(Math.max(1000, 60000 / feed.rateLimitPerMin));
-      const detailUrl = new URL(`${listPath}/${encodeURIComponent(id)}`, listUrl.origin);
-      detailUrl.searchParams.set('include', 'nvd_cpe_configurations');
-      const { data } = await json(detailUrl.href, false, { timeoutMs: 25000, maxResponseBytes: 4 * 1024 * 1024 }, true);
-      if (!data || normalizeCveId(data.cve_id) !== id) throw new Error('OpenCVE detail response did not match requested CVE');
-      const cve = normalizeOpenCve(data, feed.id);
-      // A detail can advance while pagination is in flight; import its newest revision.
-      cves.push(cve);
-      revisions[id] = cve.modifiedDate;
-    }
+    // One detail request per changed CVE is unavoidable, but they need not be
+    // fully serialized: pace dispatch at the configured rate while letting
+    // several responses be in flight at once, so network latency overlaps
+    // instead of stacking on top of every wait (see paceConcurrent).
+    const fetched = await paceConcurrent(
+      [...records.keys()],
+      Math.max(1000, 60000 / feed.rateLimitPerMin),
+      8,
+      sleep,
+      async (id) => {
+        const detailUrl = new URL(`${listPath}/${encodeURIComponent(id)}`, listUrl.origin);
+        detailUrl.searchParams.set('include', 'nvd_cpe_configurations');
+        const { data } = await json(detailUrl.href, false, { timeoutMs: 25000, maxResponseBytes: 4 * 1024 * 1024 }, true);
+        if (!data || normalizeCveId(data.cve_id) !== id) throw new Error('OpenCVE detail response did not match requested CVE');
+        const cve = normalizeOpenCve(data, feed.id);
+        revisions[id] = cve.modifiedDate;
+        return cve;
+      },
+    );
+    const cves = fetched.filter(
+      (cve) => Date.parse(cve.modifiedDate) >= start.getTime() && Date.parse(cve.modifiedDate) <= end.getTime(),
+    );
     return { cves, count: cves.length, syncState: { cursor: end.toISOString(), hasMore, revisions } };
   }
   if (feed.type === 'VULNCHECK_KEV') {

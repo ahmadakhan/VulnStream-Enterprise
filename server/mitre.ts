@@ -4,7 +4,11 @@ import type { IngestResult } from './ingestion';
 import { cveSchema } from './validation';
 import { normalizeCveId } from '../src/utils/deduplicator';
 import { parseCPE23 } from '../src/utils/cpeMatcher';
+import { paceConcurrent } from './concurrency';
 import { z } from 'zod';
+/** In-flight per-CVE detail fetches; overlaps network latency without
+ * exceeding the feed's configured request rate (see paceConcurrent). */
+const DETAIL_FETCH_CONCURRENCY = 8;
 import { ingestionWindow, recentRevisions, type IngestionState } from './ingestionState';
 
 export const MITRE_DELTA_URL = 'https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/deltaLog.json';
@@ -55,6 +59,11 @@ export async function ingestMitre(feed: ThreatFeed, scopeHours: number, request:
   if (index.status === 304 && state.indexEtag) return { cves: [], count: 0, notModified: true, syncState: state };
   if (index.status !== 200) throw new Error(`MITRE CVE returned HTTP ${index.status}`);
   const parse = (body: string) => { try { return JSON.parse(body); } catch { throw new Error('MITRE CVE returned invalid JSON'); } };
+  const readJson = async (url: string, maxBytes: number): Promise<any> => {
+    const { status, body } = await request(url, { timeoutMs: 60000, maxResponseBytes: maxBytes });
+    if (status !== 200) throw new Error(`MITRE CVE returned HTTP ${status}`);
+    return parse(body);
+  };
   const { start, end } = ingestionWindow(scopeHours, state);
   const changes = z.array(z.object({
     fetchTime: z.string(),
@@ -81,40 +90,33 @@ export async function ingestMitre(feed: ThreatFeed, scopeHours: number, request:
     }
   }
   if (ids.size > 5000) throw new Error('MITRE window exceeds 5,000 unique CVEs; reduce ingestion scope');
-  const cves: NormalizedCVE[] = [], withdrawals: NonNullable<IngestResult['withdrawals']> = [];
   const sorted = [...ids].sort();
-  let next = 0, gate = Promise.resolve(), first = true, stopped = false;
-  // Overlap network latency while spacing ALL starts, including across workers.
-  const pace = () => {
-    const ready = gate.then(async () => { if (!first) await sleep(60000 / feed.rateLimitPerMin); first = false; });
-    gate = ready.catch(() => {});
-    return ready;
-  };
-  const worker = async () => {
-    while (next < sorted.length && !stopped) {
-      const id = sorted[next++];
-      await pace();
-      if (stopped) return;
+  type DetailResult = { cve: NormalizedCVE | null; withdrawnId: string; modifiedDate: string };
+  // One request per changed CVE is unavoidable (the delta log has no bulk detail
+  // endpoint), but requests no longer need to be fully serialized: pace dispatch
+  // at the configured rate while letting several responses be in flight at once,
+  // so each fetch's network latency overlaps instead of stacking on every wait.
+  const fetched = await paceConcurrent(
+    sorted,
+    60000 / feed.rateLimitPerMin,
+    DETAIL_FETCH_CONCURRENCY,
+    sleep,
+    async (id): Promise<DetailResult> => {
       const [, year, sequence] = id.split('-');
+      // Construct paths from validated IDs; never follow URLs supplied inside feed content.
       const bucket = `${sequence.slice(0, -3)}xxx`;
-      // Never follow URLs supplied inside feed content.
       const url = `https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/${year}/${bucket}/${id}.json`;
-      const response = await request(url, { timeoutMs: 60000, maxResponseBytes: 4 * 1024 * 1024 });
-      if (response.status !== 200) throw new Error(`MITRE CVE returned HTTP ${response.status}`);
-      const record = parse(response.body);
+      const record = await readJson(url, 4 * 1024 * 1024);
       if (normalizeCveId(record?.cveMetadata?.cveId) !== id) throw new Error('MITRE response did not match requested CVE');
-      const cve = normalizeMitre(record, feed.id);
-      const modified = timestamp(record.cveMetadata.dateUpdated || record.cveMetadata.datePublished);
-      if (cve) cves.push(cve);
-      else withdrawals.push({ cveId: id, modifiedDate: modified });
-      revisions[id] = modified;
-    }
-  };
-  const workers = await Promise.allSettled(Array.from({ length: Math.min(3, sorted.length) }, async () => {
-    try { await worker(); } catch (error) { stopped = true; throw error; }
-  }));
-  const failed = workers.find(result => result.status === 'rejected');
-  if (failed?.status === 'rejected') throw failed.reason;
+      return { cve: normalizeMitre(record, feed.id), withdrawnId: id, modifiedDate: timestamp(record.cveMetadata.dateUpdated || record.cveMetadata.datePublished) };
+    },
+  );
+  const cves: NormalizedCVE[] = [], withdrawals: NonNullable<IngestResult['withdrawals']> = [];
+  for (const result of fetched) {
+    if (result.cve) cves.push(result.cve);
+    else withdrawals.push({ cveId: result.withdrawnId, modifiedDate: result.modifiedDate });
+    revisions[result.withdrawnId] = result.modifiedDate;
+  }
   // Do not advance beyond the latest published index, or install its validator
   // until this run has fully consumed it (important during multi-day catch-up).
   const cursor = new Date(Math.max(Date.parse(state.cursor || '') || 0, Math.min(end.getTime(), newestFetch))).toISOString();

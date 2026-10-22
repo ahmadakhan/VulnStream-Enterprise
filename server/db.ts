@@ -17,6 +17,7 @@ export const createPool = (url: string) =>
   });
 export async function migrate(pool: pg.Pool) {
   const client = await pool.connect();
+  let failed = false;
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(800001)');
@@ -30,10 +31,15 @@ export async function migrate(pool: pg.Pool) {
       await client.query(await readFile(new URL('./migrations/002_operational_events.sql', import.meta.url), 'utf8'));
     await client.query('COMMIT');
   } catch (e) {
-    await client.query('ROLLBACK');
+    failed = true;
+    // A failure here may mean the connection itself is broken (e.g. the BEGIN
+    // never completed); do not let a secondary ROLLBACK error mask the real cause.
+    await client.query('ROLLBACK').catch(() => {});
     throw e;
   } finally {
-    client.release();
+    // Passing the failure tells the pool to destroy a possibly-broken connection
+    // instead of recycling it back into the pool for the next caller.
+    client.release(failed);
   }
 }
 export async function transaction<T>(
@@ -42,6 +48,7 @@ export async function transaction<T>(
   client?: PoolClient,
 ): Promise<T> {
   const db = client || (await pool.connect());
+  let failed = false;
   try {
     await db.query('BEGIN');
     // Serializes state mutation and audit append; network I/O is never done here.
@@ -50,10 +57,16 @@ export async function transaction<T>(
     await db.query('COMMIT');
     return result;
   } catch (error) {
-    await db.query('ROLLBACK');
+    failed = true;
+    // ROLLBACK can itself fail when the connection is already broken; swallow
+    // that secondary failure so the caller sees the original, more useful error.
+    await db.query('ROLLBACK').catch(() => {});
     throw error;
   } finally {
-    if (!client) db.release();
+    // Release with the failure flag so a connection left in a bad state by a
+    // transport-level error is destroyed rather than returned to the pool,
+    // where a future caller would otherwise inherit an unusable connection.
+    if (!client) db.release(failed);
   }
 }
 export async function put(db: Db, kind: string, id: string, data: unknown) {
