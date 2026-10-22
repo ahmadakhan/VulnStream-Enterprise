@@ -221,7 +221,11 @@ function useApplication() {
       ),
     health: () => safely(() => request<SystemHealth>('/health')),
     ntpSyncStatus: { synchronized: false, driftMs: 0, lastChecked: '' },
-    toggleFeedEnabled: (id: string) => command('feed.toggle', undefined, id),
+    toggleFeedEnabled: async (id: string) => {
+      const result = await command('feed.toggle', undefined, id);
+      if (result?.success) await refresh();
+      return result?.success || false;
+    },
     addFeed: (
       feed: Omit<
         ThreatFeed,
@@ -229,7 +233,11 @@ function useApplication() {
       >,
     ) => save('feed.save', feed),
     updateFeed: (feed: ThreatFeed) => save('feed.save', feed, feed.id),
-    deleteFeed: (id: string) => command('feed.delete', undefined, id),
+    deleteFeed: async (id: string) => {
+      const result = await command('feed.delete', undefined, id);
+      if (result?.success) await refresh();
+      return result?.success || false;
+    },
     testFeedConnectivity: async (id: string) =>
       (await call<{ success: boolean; latency: number; error?: string }>(
         `/feeds/${encodeURIComponent(id)}/test`,
