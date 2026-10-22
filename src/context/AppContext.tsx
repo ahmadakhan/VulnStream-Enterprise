@@ -236,6 +236,11 @@ function useApplication() {
       )) || { success: false, latency: 0, error: 'Connectivity test failed' },
     addWatchlistItem: (item: Omit<WatchListItem, 'id' | 'createdAt'>) => save('asset.save', item),
     updateWatchlistItem: (item: WatchListItem) => save('asset.save', item, item.id),
+    setWatchlistItemActive: async (id: string, active: boolean) => {
+      const updated = !!(await command('asset.setActive', { active }, id));
+      if (updated) await refresh();
+      return updated;
+    },
     deleteWatchlistItem: (id: string) => command('asset.delete', undefined, id),
     bulkImportWatchlist: async (items: unknown[]) => {
       const result = await command('asset.import', items);

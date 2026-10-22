@@ -47,6 +47,7 @@ export const WatchListView: React.FC = () => {
     watchlist,
     addWatchlistItem,
     updateWatchlistItem,
+    setWatchlistItemActive,
     deleteWatchlistItem,
     bulkImportWatchlist,
     cveData,
@@ -62,6 +63,7 @@ export const WatchListView: React.FC = () => {
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [editingItem, setEditingItem] = useState<WatchListItem | null>(null);
   const [deletingAsset, setDeletingAsset] = useState<WatchListItem | null>(null);
+  const [togglingAssetId, setTogglingAssetId] = useState<string | null>(null);
 
   // Pagination for inventory table
   const [currentPage, setCurrentPage] = useState(1);
@@ -791,18 +793,45 @@ export const WatchListView: React.FC = () => {
                           {asset.ownerGroup}
                         </td>
 
-                        {/* Protection Status (Uniform for all products) */}
+                        {/* Matching status and enable / disable control */}
                         <td className="py-3 px-4">
-                          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950/40 text-emerald-300 border border-emerald-800/60 font-mono">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            <span>
-                              {asset.active
-                                ? settings.schedulerEnabled
-                                  ? 'Scheduled matching'
-                                  : 'Manual matching'
-                                : 'Inactive'}
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold border font-mono ${
+                              asset.active
+                                ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/60'
+                                : 'bg-zinc-900 text-zinc-400 border-zinc-700 light:bg-zinc-100 light:text-zinc-600 light:border-zinc-300'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${asset.active ? 'bg-emerald-500' : 'bg-zinc-500'}`} />
+                              <span>
+                                {asset.active
+                                  ? settings.schedulerEnabled
+                                    ? 'Matching enabled'
+                                    : 'Manual matching'
+                                  : 'Matching disabled'}
+                              </span>
                             </span>
-                          </span>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={asset.active}
+                              aria-label={`${asset.active ? 'Disable' : 'Enable'} vulnerability matching for ${asset.assetTag}`}
+                              disabled={togglingAssetId === asset.id}
+                              onClick={async () => {
+                                setTogglingAssetId(asset.id);
+                                try {
+                                  await setWatchlistItemActive(asset.id, !asset.active);
+                                } finally {
+                                  setTogglingAssetId(null);
+                                }
+                              }}
+                              className={`w-9 h-5 shrink-0 flex items-center rounded-full p-0.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-60 ${
+                                asset.active ? 'bg-emerald-600 justify-end' : 'bg-zinc-700 justify-start light:bg-zinc-300'
+                              }`}
+                              title={asset.active ? 'Disable matching for this product' : 'Enable matching for this product'}
+                            >
+                              <span className="w-4 h-4 rounded-full bg-white shadow-sm" />
+                            </button>
+                          </div>
                         </td>
 
                         {/* Actions */}
