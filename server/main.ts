@@ -100,3 +100,21 @@ async function shutdown() {
 }
 process.on('SIGTERM', () => void shutdown());
 process.on('SIGINT', () => void shutdown());
+// Node terminates the process immediately on an unhandled rejection/exception
+// with no listener registered. That would skip shutdown() entirely, leaving the
+// HTTP server and any in-flight pipeline/outbox work to die mid-transaction
+// without the structured event log entry operators rely on to diagnose it.
+// PostgreSQL releases the session-level pipeline advisory lock when the
+// connection closes, so a crash here is still safe for the next worker to
+// recover from; this handler only makes the failure visible and gives
+// in-flight work a chance at a clean stop before the process exits.
+const fatal = (event: string) => (error: unknown) => {
+  report(event)(error);
+  // If a graceful SIGTERM/SIGINT shutdown is already under way, let its own
+  // 30-second deadline govern the exit instead of racing it with a second,
+  // immediate process.exit here.
+  if (stopping) return;
+  void shutdown().finally(() => process.exit(1));
+};
+process.on('unhandledRejection', fatal('unhandled-rejection'));
+process.on('uncaughtException', fatal('uncaught-exception'));

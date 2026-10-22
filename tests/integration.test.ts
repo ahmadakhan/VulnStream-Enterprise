@@ -183,7 +183,7 @@ test('NVD uses bounded large-page requests and honors rate-limit retries', async
   assert.equal(headers.length, 1);
   assert.equal(headers[0]['If-None-Match'], undefined);
   assert.deepEqual(requestLimits, [
-    { timeoutMs: 60000, socketTimeoutMs: 30000, maxResponseBytes: 16 * 1024 * 1024 },
+    { timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: 16 * 1024 * 1024 },
   ]);
 
   const retryDelays: number[] = [];

@@ -1,6 +1,7 @@
 import type { ThreatFeed, NormalizedCVE, IntelligenceArticle } from '../src/types';
 import { ingestMitre } from './mitre';
-import { parseSyndication } from './rss';
+import { ingestionWindow, recentRevisions, type IngestionState } from './ingestionState';
+import { parseSyndication, RSS_MAX_BYTES } from './rss';
 import type { Requester, RequestOptions, ResponseData } from './network';
 import { cveSchema } from './validation';
 import { decrypt } from './secrets';
@@ -8,8 +9,10 @@ import type { Config } from './config';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { normalizeCveId } from '../src/utils/deduplicator';
+import { paceConcurrent } from './concurrency';
 export interface IngestResult {
   sourceId?: string;
+  syncState?: IngestionState;
   cves: NormalizedCVE[];
   articles?: IntelligenceArticle[];
   warnings?: string[];
@@ -24,9 +27,8 @@ export interface IngestResult {
   etag?: string;
   notModified?: boolean;
   /** End of the fully fetched source window; persisted only after the whole pipeline commits. */
-  sourceCheckpoint?: string;
 }
-export interface IngestContext {
+export interface IngestContext extends IngestionState {
   /** Last fully committed source checkpoint for the same source configuration. */
   checkpoint?: string;
   /** Latest cached CVE revision times, keyed by canonical CVE ID. */
@@ -199,7 +201,9 @@ export async function ingestFeed(
   const headers: Record<string, string> = {};
   const nvdInterval = Math.max(60000 / feed.rateLimitPerMin, feed.authType === 'API_KEY' ? 700 : 6500);
   if (feed.authType !== 'NONE') {
-    const secret = decrypt(feed.authSecretKey || '', config.ENCRYPTION_KEY, `feed:${feed.id}`);
+    let secret: string;
+    try { secret = decrypt(feed.authSecretKey || '', config.ENCRYPTION_KEY, `feed:${feed.id}`); }
+    catch { throw new Error('Stored feed credentials could not be decrypted; re-enter the secret or restore the original encryption key'); }
     if (!secret) throw new Error('Feed credentials are not configured');
     if (feed.authType === 'API_KEY') headers.apiKey = secret;
     else
@@ -217,8 +221,8 @@ export async function ingestFeed(
       try {
         response = await request(url, { headers, ...requestOptions });
       } catch (error) {
-        const timedOut = error instanceof Error && /timed out|timeout/i.test(error.message);
-        if (!retryTransient || !timedOut || attempt >= 2) throw error;
+        const transient = error instanceof Error && (/timed out|timeout|^aborted$|socket hang up|premature close/i.test(error.message) || ['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'UND_ERR_SOCKET'].includes((error as NodeJS.ErrnoException).code || ''));
+        if (!retryTransient || !transient || attempt >= 2) throw error;
         await sleep(Math.max(nvdInterval, 2000 * (attempt + 1)));
         continue;
       }
@@ -263,15 +267,17 @@ export async function ingestFeed(
   if (feed.type === 'MITRE_CVE') return ingestMitre(feed, scopeHours, request, sleep, context);
   if (feed.type === 'RSS_ATOM') {
     const response = await request(feed.url, { headers: { ...headers, accept:'application/rss+xml, application/atom+xml, application/xml, text/xml',
-      ...(feed.etag ? { 'If-None-Match':feed.etag } : {}) }, timeoutMs:25000, maxResponseBytes:2*1024*1024 });
+      ...(feed.etag ? { 'If-None-Match':feed.etag } : {}) }, timeoutMs:25000, maxResponseBytes:RSS_MAX_BYTES });
     if (response.status === 304 && feed.etag) return { cves:[], count:0, notModified:true, etag:feed.etag };
     if (response.status !== 200) throw new Error(`RSS/Atom source returned HTTP ${response.status}`);
     const result = parseSyndication(response.body, feed.id, scopeHours);
     return { cves:[], ...result, count:result.articles.length, etag:typeof response.headers.etag === 'string' ? response.headers.etag : undefined };
   }
   if (feed.type === 'NVD_API') {
-    const end = new Date(),
-      start = getIngestionWindowStart(end, scopeHours, context.checkpoint);
+    // NVD API key is recommended: without one, rate limits are 5 req/30s and
+    // responses can exceed 60s for large windows. Configure authType='API_KEY'
+    // with the encrypted key and rateLimitPerMin=100 for 50 req/30s throughput.
+    const { start, end, hasMore } = ingestionWindow(scopeHours, context);
     if (end.getTime() - start.getTime() > 120 * 24 * 3600000)
       throw new Error('NVD checkpoint exceeds the 120-day API limit; a bounded re-baseline is required');
     const cves: NormalizedCVE[] = [];
@@ -284,13 +290,13 @@ export async function ingestFeed(
       url.searchParams.set('lastModStartDate', start.toISOString());
       url.searchParams.set('lastModEndDate', end.toISOString());
       url.searchParams.set('startIndex', String(offset));
-      url.searchParams.set('resultsPerPage', '1000');
+      url.searchParams.set('resultsPerPage', '500');
       // Each page has a distinct URL and the time window moves on every run;
       // a single feed-level ETag cannot safely validate this paginated query.
       const { data } = await json(
         url.href,
         false,
-        { timeoutMs: 60000, socketTimeoutMs: 30000, maxResponseBytes: 16 * 1024 * 1024 },
+        { timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: 16 * 1024 * 1024 },
         true,
       );
       if (data === undefined) throw new Error('NVD returned an unexpected conditional response');
@@ -336,7 +342,7 @@ export async function ingestFeed(
       if (!page.vulnerabilities.length) throw new Error('NVD pagination stopped before completion');
       await sleep(nvdInterval);
     }
-    return { cves, count: rawCount, withdrawals, sourceCheckpoint: end.toISOString() };
+    return { cves, count: rawCount, withdrawals, syncState: { cursor: end.toISOString(), hasMore } };
   }
   if (feed.type === 'CISA_KEV') {
     const { data: rawData, etag } = await json(feed.url);
@@ -382,7 +388,13 @@ export async function ingestFeed(
   }
   if (feed.type === 'EPSS_API') {
     const epss: Record<string, NormalizedCVE['epss']> = {};
-    const scope = [...new Set(targetCveIds.map(normalizeCveId).filter((id): id is string => !!id))].sort();
+    const requested = [...new Set(targetCveIds.map(normalizeCveId).filter((id): id is string => !!id))].sort();
+    const cacheValid = Date.parse(context.epssExpiresAt || '') > Date.now();
+    const priorScope = new Set(cacheValid ? context.epssScope : []);
+    const scope = requested.filter(id => !priorScope.has(id));
+    if (requested.length && !scope.length) return { cves: [], count: 0, notModified: true, syncState: context };
+    const epssSync = { epssScope: [...new Set([...priorScope, ...scope])],
+      epssExpiresAt: cacheValid ? context.epssExpiresAt : new Date(Date.now() + 3600000).toISOString() };
     const batches: string[][] = [];
     for (const id of scope) {
       if (id.length > 1900) throw new Error('CVE identifier exceeds EPSS request limit');
@@ -441,12 +453,12 @@ export async function ingestFeed(
         if (!rows.length) throw new Error('EPSS pagination stopped before completion');
       }
     }
-    return { cves: [], epss, epssScope: scope, count };
+    return { cves: [], epss, epssScope: scope, count, syncState: epssSync };
   }
   if (feed.type === 'OPENCVE_API') {
     if (feed.authType !== 'BEARER') throw new Error('OpenCVE API v2 requires an organization Bearer token');
-    const end = new Date();
-    const start = getIngestionWindowStart(end, scopeHours, context.checkpoint);
+    const { start, end, hasMore } = ingestionWindow(scopeHours, context);
+    const revisions = recentRevisions(context.revisions || {}, start);
     const base = new URL(feed.url);
     const listUrl = new URL(base);
     listUrl.search = '';
@@ -471,7 +483,7 @@ export async function ingestFeed(
         if (!id || typeof row.updated_at !== 'string' || !Number.isFinite(Date.parse(row.updated_at)))
           throw new Error('OpenCVE returned a malformed CVE record');
         const updated = Date.parse(row.updated_at);
-        if (updated >= start.getTime() && updated <= end.getTime()) {
+        if (updated >= start.getTime() && updated <= end.getTime() && !(Date.parse(revisions[id] || '') >= updated)) {
           const previous = records.get(id);
           if (!previous || updated > Date.parse(previous.updated_at)) records.set(id, row);
         }
@@ -480,39 +492,47 @@ export async function ingestFeed(
       if (records.size > 500) throw new Error('OpenCVE window exceeds 500 CVEs; reduce ingestion window');
       if (next) await sleep(Math.max(1000, 60000 / feed.rateLimitPerMin));
     }
-    const cves: NormalizedCVE[] = [];
-    let requests = 0;
-    for (const [id, row] of records) {
-      const cachedModified = Date.parse(context.knownCveModifiedAt?.get(id) || '');
-      const listedModified = Date.parse(row.updated_at);
-      if (Number.isFinite(cachedModified) && Number.isFinite(listedModified) && cachedModified >= listedModified)
-        continue;
-      if (requests++) await sleep(Math.max(1000, 60000 / feed.rateLimitPerMin));
-      const detailUrl = new URL(`${listPath}/${encodeURIComponent(id)}`, listUrl.origin);
-      detailUrl.searchParams.set('include', 'nvd_cpe_configurations');
-      const { data } = await json(detailUrl.href, false, { timeoutMs: 25000, maxResponseBytes: 4 * 1024 * 1024 }, true);
-      if (!data || normalizeCveId(data.cve_id) !== id) throw new Error('OpenCVE detail response did not match requested CVE');
-      const cve = normalizeOpenCve(data, feed.id);
-      if (Date.parse(cve.modifiedDate) >= start.getTime() && Date.parse(cve.modifiedDate) <= end.getTime()) cves.push(cve);
-    }
-    return { cves, count: cves.length, sourceCheckpoint: end.toISOString() };
+// One detail request per changed CVE is unavoidable, but paced concurrent
+    // requests overlap network latency while respecting the configured rate.
+    const fetched = await paceConcurrent(
+      [...records.keys()], Math.max(1000, 60000 / feed.rateLimitPerMin), 8, sleep,
+      async (id) => {
+        const cachedModified = Date.parse(context.knownCveModifiedAt?.get(id) || '');
+        const listedModified = Date.parse(records.get(id)?.updated_at || '');
+        if (Number.isFinite(cachedModified) && Number.isFinite(listedModified) && cachedModified >= listedModified) return null;
+        const detailUrl = new URL(`${listPath}/${encodeURIComponent(id)}`, listUrl.origin);
+        detailUrl.searchParams.set('include', 'nvd_cpe_configurations');
+        const { data } = await json(detailUrl.href, false, { timeoutMs: 25000, maxResponseBytes: 4 * 1024 * 1024 }, true);
+        if (!data || normalizeCveId(data.cve_id) !== id) throw new Error('OpenCVE detail response did not match requested CVE');
+        const cve = normalizeOpenCve(data, feed.id);
+        revisions[id] = cve.modifiedDate;
+        return cve;
+      },
+    );
+    const cves = fetched.filter((cve): cve is NormalizedCVE => !!cve && Date.parse(cve.modifiedDate) >= start.getTime() && Date.parse(cve.modifiedDate) <= end.getTime());
+    return { cves, count: cves.length, syncState: { cursor: end.toISOString(), hasMore, revisions } };
   }
   if (feed.type === 'VULNCHECK_KEV') {
     if (feed.authType !== 'BEARER') throw new Error('VulnCheck KEV requires a Bearer API token');
     const url = new URL(feed.url);
     if (!url.pathname.replace(/\/$/, '').endsWith('/v3/index/vulncheck-kev'))
       throw new Error('VulnCheck endpoint must target /v3/index/vulncheck-kev');
+    const { start, end, hasMore } = ingestionWindow(scopeHours, context);
+    url.searchParams.set('lastModStartDate', start.toISOString().slice(0, 10));
+    url.searchParams.set('lastModEndDate', end.toISOString().slice(0, 10));
     const exploited: Record<string, true> = {};
-    const seenRecords = new Set<string>();
+    const seenCursors = new Set<string>();
     let cursor: string | undefined;
-    let count = 0;
-    for (let pageNo = 0; pageNo < 100; pageNo++) {
+    for (let pageNo = 0; pageNo < 300; pageNo++) {
       const pageUrl = new URL(url);
-      pageUrl.searchParams.set('limit', '300');
+      // Own pagination parameters; inherited start_cursor/page values can restart a session.
+      for (const key of ['cursor', 'start_cursor', 'page']) pageUrl.searchParams.delete(key);
+      pageUrl.searchParams.set('limit', '100');
       if (cursor) pageUrl.searchParams.set('cursor', cursor);
       else pageUrl.searchParams.set('start_cursor', '');
       const { data: page } = await json(pageUrl.href, false, { timeoutMs: 30000, maxResponseBytes: 8 * 1024 * 1024 }, true);
       if (!page || !Array.isArray(page.data)) throw new Error('Invalid VulnCheck KEV response');
+      if (page.data.length > 100) throw new Error('VulnCheck KEV exceeded the requested page size');
       for (const row of page.data) {
         const record = row?.source || row;
         if (!Array.isArray(record?.cve)) throw new Error('VulnCheck KEV record has no CVE identifiers');
@@ -521,19 +541,17 @@ export async function ingestFeed(
           if (!id) throw new Error('VulnCheck KEV returned an invalid CVE identifier');
           exploited[id] = true;
         }
-        const key = String(row?.id || record?.date_added || JSON.stringify(record.cve));
-        if (seenRecords.has(key)) throw new Error('VulnCheck KEV returned a duplicate record');
-        seenRecords.add(key);
-        count++;
+        // Multiple records may share dates, IDs, or CVEs; the CVE set is authoritative.
       }
       const nextCursor = page._meta?.next_cursor;
       if (typeof nextCursor !== 'string' || !nextCursor) break;
-      if (nextCursor === cursor) throw new Error('VulnCheck KEV cursor did not advance');
+      if (seenCursors.has(nextCursor)) throw new Error('VulnCheck KEV cursor did not advance or repeated a previous cursor');
+      seenCursors.add(nextCursor);
       cursor = nextCursor;
-      if (pageNo === 99) throw new Error('VulnCheck KEV pagination exceeded 30,000 records');
+      if (pageNo === 299) throw new Error('VulnCheck KEV pagination exceeded 30,000 records');
       await sleep(Math.max(1000, 60000 / feed.rateLimitPerMin));
     }
-    return { cves: [], exploited, count };
+    return { cves: [], exploited, count: Object.keys(exploited).length, syncState: { cursor: end.toISOString(), hasMore } };
   }
   if (feed.type === 'JSON_SEARCH_API') {
     const { data, etag } = await json(feed.url);

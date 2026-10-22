@@ -395,3 +395,9 @@ export function useApp() {
   if (!value) throw new Error('useApp requires AppProvider');
   return value;
 }
+
+if (import.meta && import.meta.hot) {
+  import.meta.hot.accept(() => {
+    window.location.reload();
+  });
+}

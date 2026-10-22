@@ -152,15 +152,15 @@ test('NVD resumes from an overlapping checkpoint and avoids normalizing cached r
     [],
     undefined,
     {
-      checkpoint: checkpoint.toISOString(),
+      cursor: checkpoint.toISOString(),
       knownCveModifiedAt: new Map([['CVE-2026-12345', '2026-10-20T00:00:00.000Z']]),
     },
   );
   const url = new URL(requestedUrl);
-  assert.equal(Date.parse(url.searchParams.get('lastModStartDate')!), checkpoint.getTime() - 15 * 60 * 1000);
+  assert.equal(Date.parse(url.searchParams.get('lastModStartDate')!), checkpoint.getTime() - 10 * 60 * 1000);
   assert.equal(result.count, 1);
   assert.equal(result.cves.length, 0);
-  assert.ok(result.sourceCheckpoint);
+  assert.ok(result.syncState?.cursor);
 });
 
 test('EPSS fetches only requested inventory CVEs in bounded batches', async () => {

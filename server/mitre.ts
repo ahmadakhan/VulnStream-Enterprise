@@ -1,10 +1,15 @@
 import type { NormalizedCVE, ThreatFeed } from '../src/types';
 import type { Requester } from './network';
-import { getIngestionWindowStart, type IngestContext, type IngestResult } from './ingestion';
+import { type IngestContext, type IngestResult } from './ingestion';
 import { cveSchema } from './validation';
 import { normalizeCveId } from '../src/utils/deduplicator';
 import { parseCPE23 } from '../src/utils/cpeMatcher';
+import { paceConcurrent } from './concurrency';
 import { z } from 'zod';
+/** In-flight per-CVE detail fetches; overlaps network latency without
+ * exceeding the feed's configured request rate (see paceConcurrent). */
+const DETAIL_FETCH_CONCURRENCY = 8;
+import { ingestionWindow, recentRevisions, type IngestionState } from './ingestionState';
 
 export const MITRE_DELTA_URL = 'https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/deltaLog.json';
 const timestamp = (value: unknown): string => {
@@ -47,31 +52,33 @@ export function normalizeMitre(record: any, feedId: string): NormalizedCVE | nul
   });
 }
 
-export async function ingestMitre(
-  feed: ThreatFeed,
-  scopeHours: number,
-  request: Requester,
-  sleep: (ms: number) => Promise<unknown>,
-  context: IngestContext = {},
-): Promise<IngestResult> {
+export async function ingestMitre(feed: ThreatFeed, scopeHours: number, request: Requester, sleep: (ms: number) => Promise<unknown>, state: IngestContext = {}): Promise<IngestResult> {
   if (feed.url !== MITRE_DELTA_URL || feed.authType !== 'NONE') throw new Error('MITRE CVE requires the official cvelistV5 deltaLog.json endpoint without authentication');
-  const readJson = async (url: string, maxResponseBytes: number) => {
-    const response = await request(url, { timeoutMs: 60000, maxResponseBytes });
-    if (response.status !== 200) throw new Error(`MITRE CVE returned HTTP ${response.status}`);
-    try { return JSON.parse(response.body); } catch { throw new Error('MITRE CVE returned invalid JSON'); }
+  const index = await request(feed.url, { timeoutMs: 60000, maxResponseBytes: 64 * 1024 * 1024,
+    headers: state.indexEtag ? { 'If-None-Match': state.indexEtag } : {} });
+  if (index.status === 304 && state.indexEtag) return { cves: [], count: 0, notModified: true, syncState: state };
+  if (index.status !== 200) throw new Error(`MITRE CVE returned HTTP ${index.status}`);
+  const parse = (body: string) => { try { return JSON.parse(body); } catch { throw new Error('MITRE CVE returned invalid JSON'); } };
+  const readJson = async (url: string, maxBytes: number): Promise<any> => {
+    const { status, body } = await request(url, { timeoutMs: 60000, maxResponseBytes: maxBytes });
+    if (status !== 200) throw new Error(`MITRE CVE returned HTTP ${status}`);
+    return parse(body);
   };
-  // The upstream rolling delta log covers at most 30 days; it is not a full historical dump.
-  const end = new Date();
-  const start = getIngestionWindowStart(end, scopeHours, context.checkpoint, 720);
+  const { start, end, hasMore } = ingestionWindow(scopeHours, state);
   const changes = z.array(z.object({
     fetchTime: z.string(),
     new: z.array(z.object({ cveId: z.string(), dateUpdated: z.string() })),
     updated: z.array(z.object({ cveId: z.string(), dateUpdated: z.string() })),
     error: z.array(z.unknown()).optional(),
-  })).min(1).max(20000).parse(await readJson(feed.url, 64 * 1024 * 1024));
+  })).min(1).max(20000).parse(parse(index.body));
+  const revisions = recentRevisions(state.revisions || {}, start);
   const ids = new Set<string>();
   const warnings: string[] = [];
-  if (scopeHours > 720) warnings.push('MITRE incremental history is limited to 30 days; older CVEs require a historical import');
+  if (scopeHours > 720 && !state.cursor) warnings.push('MITRE incremental history is limited to 30 days; older CVEs require a historical import');
+  const fetchTimes = changes.map(entry => Date.parse(timestamp(entry.fetchTime)));
+  const newestFetch = Math.max(...fetchTimes), oldestFetch = Math.min(...fetchTimes);
+  if (state.cursor && Date.parse(state.cursor) < oldestFetch - 3600000)
+    throw new Error('MITRE checkpoint predates available delta history; historical recovery is required');
   for (const entry of changes) {
     const fetched = Date.parse(timestamp(entry.fetchTime));
     if (fetched >= start.getTime() && fetched <= end.getTime() && entry.error?.length) throw new Error('MITRE delta log reports upstream record errors; retry later');
@@ -79,51 +86,42 @@ export async function ingestMitre(
       const updated = Date.parse(timestamp(row.dateUpdated));
       const id = normalizeCveId(row.cveId);
       if (!id) throw new Error('MITRE delta log contains an invalid CVE identifier');
-      if (updated >= start.getTime() && updated <= end.getTime()) {
-        const knownTimes = [context.knownCveModifiedAt?.get(id), context.knownWithdrawalAt?.get(id)]
-          .map((value) => Date.parse(value || ''))
-          .filter(Number.isFinite);
-        const known = knownTimes.length ? Math.max(...knownTimes) : NaN;
-        if (!Number.isFinite(known) || updated > known) ids.add(id);
-      }
+      const knownTimes = [state.knownCveModifiedAt?.get(id), state.knownWithdrawalAt?.get(id), revisions[id]]
+        .map((value) => Date.parse(value || '')).filter(Number.isFinite);
+      const known = knownTimes.length ? Math.max(...knownTimes) : NaN;
+      if (updated >= start.getTime() && updated <= end.getTime() && (!Number.isFinite(known) || updated > known)) ids.add(id);
     }
   }
   if (ids.size > 5000) throw new Error('MITRE window exceeds 5,000 unique CVEs; reduce ingestion scope');
-  const cves: NormalizedCVE[] = [], withdrawals: NonNullable<IngestResult['withdrawals']> = [];
-  const sortedIds = [...ids].sort();
-  const records = new Array<NormalizedCVE | null>(sortedIds.length);
-  const rejected: NonNullable<IngestResult['withdrawals']> = [];
-  let nextIndex = 0;
-  let nextRequestAt = Date.now();
-  const concurrency = Math.min(4, sortedIds.length);
-  const interval = 60000 / feed.rateLimitPerMin;
-  const worker = async () => {
-    while (true) {
-      const index = nextIndex++;
-      if (index >= sortedIds.length) return;
-      const wait = Math.max(0, nextRequestAt - Date.now());
-      nextRequestAt = Math.max(Date.now(), nextRequestAt) + interval;
-      if (wait) await sleep(wait);
-      const id = sortedIds[index];
+  const sorted = [...ids].sort();
+  type DetailResult = { cve: NormalizedCVE | null; withdrawnId: string; modifiedDate: string };
+  // One request per changed CVE is unavoidable (the delta log has no bulk detail
+  // endpoint), but requests no longer need to be fully serialized: pace dispatch
+  // at the configured rate while letting several responses be in flight at once,
+  // so each fetch's network latency overlaps instead of stacking on every wait.
+  const fetched = await paceConcurrent(
+    sorted,
+    60000 / feed.rateLimitPerMin,
+    DETAIL_FETCH_CONCURRENCY,
+    sleep,
+    async (id): Promise<DetailResult> => {
       const [, year, sequence] = id.split('-');
       // Construct paths from validated IDs; never follow URLs supplied inside feed content.
       const bucket = `${sequence.slice(0, -3)}xxx`;
       const url = `https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/${year}/${bucket}/${id}.json`;
       const record = await readJson(url, 4 * 1024 * 1024);
-      if (normalizeCveId(record?.cveMetadata?.cveId) !== id)
-        throw new Error('MITRE response did not match requested CVE');
-      const cve = normalizeMitre(record, feed.id);
-      records[index] = cve;
-      if (!cve) rejected.push({ cveId: id, modifiedDate: timestamp(record.cveMetadata.dateUpdated) });
-    }
-  };
-  const settled = await Promise.allSettled(Array.from({ length: concurrency }, worker));
-  const failed = settled.find((result) => result.status === 'rejected');
-  if (failed?.status === 'rejected') throw failed.reason;
-  for (const record of records) if (record) cves.push(record);
-  withdrawals.push(...rejected);
-  const checkpointCovered = !context.checkpoint || end.getTime() - Date.parse(context.checkpoint) <= 30 * 24 * 3600000;
-  if (!checkpointCovered)
-    warnings.push('Saved MITRE checkpoint is older than the rolling 30-day delta log; a source re-baseline is required and the checkpoint was not advanced');
-  return { cves, withdrawals, count: sortedIds.length, warnings, ...(checkpointCovered ? { sourceCheckpoint: end.toISOString() } : {}) };
+      if (normalizeCveId(record?.cveMetadata?.cveId) !== id) throw new Error('MITRE response did not match requested CVE');
+      return { cve: normalizeMitre(record, feed.id), withdrawnId: id, modifiedDate: timestamp(record.cveMetadata.dateUpdated || record.cveMetadata.datePublished) };
+    },
+  );
+  const cves: NormalizedCVE[] = [], withdrawals: NonNullable<IngestResult['withdrawals']> = [];
+  for (const result of fetched) {
+    if (result.cve) cves.push(result.cve);
+    else withdrawals.push({ cveId: result.withdrawnId, modifiedDate: result.modifiedDate });
+    revisions[result.withdrawnId] = result.modifiedDate;
+  }
+  // Only move the cursor through delta entries confirmed by this completed run.
+  const cursor = new Date(Math.max(Date.parse(state.cursor || '') || 0, Math.min(end.getTime(), newestFetch))).toISOString();
+  return { cves: cves.sort((a, b) => a.cveId.localeCompare(b.cveId)), withdrawals, count: sorted.length, warnings,
+    syncState: { cursor, hasMore: end.getTime() < newestFetch, revisions, indexEtag: end.getTime() >= newestFetch && typeof index.headers.etag === 'string' ? index.headers.etag : undefined } };
 }
