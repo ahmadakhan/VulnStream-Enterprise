@@ -176,6 +176,7 @@ export const FindingsView: React.FC = () => {
                 <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
                   <tr>
                     <th className="py-3 px-3.5">CVE Identifier</th>
+                    <th className="py-3 px-3.5">Source</th>
                     <th className="py-3 px-3.5">Monitored Product</th>
                     <th className="py-3 px-3.5">CVSS / EPSS</th>
                     <th className="py-3 px-3.5">Exploit Risk</th>
@@ -186,7 +187,7 @@ export const FindingsView: React.FC = () => {
                 <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
                   {paginatedFindings.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-zinc-500 text-xs">
+                      <td colSpan={7} className="py-8 text-center text-zinc-500 text-xs">
                         No product vulnerabilities match the current filter.
                       </td>
                     </tr>
@@ -217,9 +218,6 @@ export const FindingsView: React.FC = () => {
                                 className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-300 underline decoration-cyan-500/60 underline-offset-4 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-2 light:text-cyan-700 light:hover:text-cyan-800"
                               >
                                 {finding.cveId}
-                                <span className="rounded border border-cyan-300/30 bg-cyan-950/70 px-1.5 py-0.5 font-sans text-[9px] font-bold uppercase tracking-wide text-cyan-100 light:border-cyan-700/30 light:bg-cyan-100 light:text-cyan-800">
-                                  NVD source
-                                </span>
                                 <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                               </a>
                               {isKev && (
@@ -231,6 +229,21 @@ export const FindingsView: React.FC = () => {
                             <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600 line-clamp-1 max-w-[160px]">
                               {finding.cve.title}
                             </div>
+                          </td>
+
+                          {/* CVE Source */}
+                          <td className="py-3 px-3.5">
+                            <a
+                              href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(finding.cveId)}`}
+                              aria-label={`Open source record for ${finding.cveId} on NVD`}
+                              title={`Open ${finding.cveId} on the NVD source page`}
+                              onClick={(event) => event.stopPropagation()}
+                              style={cveLinkStyle}
+                              className="inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 py-1 text-[11px] font-semibold underline underline-offset-2 transition-colors hover:brightness-110 focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-2"
+                            >
+                              Open NVD
+                              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                            </a>
                           </td>
 
                           {/* Matched Product */}
@@ -348,9 +361,6 @@ export const FindingsView: React.FC = () => {
                     className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 font-mono text-base font-bold text-cyan-300 underline decoration-cyan-500/60 underline-offset-4 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-2 light:text-cyan-700 light:hover:text-cyan-800"
                   >
                     {selectedFinding.cveId}
-                    <span className="rounded border border-cyan-300/30 bg-cyan-950/70 px-1.5 py-0.5 font-sans text-[9px] font-bold uppercase tracking-wide text-cyan-100 light:border-cyan-700/30 light:bg-cyan-100 light:text-cyan-800">
-                      NVD source
-                    </span>
                     <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                   </a>
                   {selectedFinding.cve.cisaKev.isKev && (
