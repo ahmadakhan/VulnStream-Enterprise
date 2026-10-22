@@ -51,6 +51,7 @@ export function SettingsView() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('VIEWER');
+  const [accountMessage, setAccountMessage] = useState('');
   const admin = session?.role === 'ADMIN';
 
   const reloadUsers = async () => {
@@ -313,10 +314,27 @@ export function SettingsView() {
             className="grid gap-4 rounded-xl border border-zinc-800/80 bg-zinc-950/25 p-4 sm:grid-cols-2 lg:grid-cols-[1.1fr_1.1fr_0.8fr_auto] lg:items-end light:border-zinc-200 light:bg-zinc-50"
             onSubmit={async (e) => {
               e.preventDefault();
+              if (!username.trim() || !password || !role) {
+                setAccountMessage('Username, password, and role are required.');
+                return;
+              }
+              if (password.length < 14) {
+                setAccountMessage('Password must be at least 14 characters.');
+                return;
+              }
+              if (!/^[a-zA-Z0-9._@-]{3,100}$/.test(username)) {
+                setAccountMessage('Username can only contain letters, numbers, periods, underscores, at signs, and hyphens.');
+                return;
+              }
+              setAccountMessage('');
               if (await createUser({ username, password, role })) {
                 setUsername('');
                 setPassword('');
+                setRole('VIEWER');
                 await reloadUsers();
+                setAccountMessage('Operator created successfully.');
+              } else {
+                setAccountMessage('Failed to create operator.');
               }
             }}
           >
@@ -328,7 +346,10 @@ export function SettingsView() {
                 autoComplete="username"
                 className={field}
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  setAccountMessage('');
+                }}
               />
             </label>
             <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
@@ -341,12 +362,22 @@ export function SettingsView() {
                 maxLength={128}
                 className={field}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setAccountMessage('');
+                }}
               />
             </label>
             <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
               Access role
-              <select className={field} value={role} onChange={(e) => setRole(e.target.value)}>
+              <select
+                className={field}
+                value={role}
+                onChange={(e) => {
+                  setRole(e.target.value);
+                  setAccountMessage('');
+                }}
+              >
                 <option>VIEWER</option>
                 <option>OPERATOR</option>
                 <option>ADMIN</option>
@@ -356,6 +387,14 @@ export function SettingsView() {
               <Plus className="h-3.5 w-3.5" aria-hidden="true" />
               Create account
             </button>
+            {accountMessage && (
+              <p
+                role="status"
+                className={`text-xs sm:col-span-2 lg:col-span-4 ${accountMessage.includes('successfully') ? 'text-emerald-400 light:text-emerald-700' : 'text-rose-400 light:text-rose-700'}`}
+              >
+                {accountMessage}
+              </p>
+            )}
           </form>
 
           <div>
