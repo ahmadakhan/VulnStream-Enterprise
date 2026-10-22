@@ -103,7 +103,7 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       assert.ok(Date.parse(requestedEnd) - Date.parse(requestedStart) >= 86399000);
       assert.notEqual((await get<any>(pool, 'feedCursors', source.id)).fingerprint, committed.fingerprint);
     });
-    await t.test('outstanding checkpoints automatically catch up with scheduling disabled', async () => {
+    await t.test('disabled scheduler leaves catch-up work queued until scheduling is enabled', async () => {
       await reset();
       await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: false });
       const source = { id: 'catchup', name: 'NVD catch-up', type: 'NVD_API', url: 'https://example.com/nvd', authType: 'NONE', rateLimitPerMin: 600, enabled: true };
@@ -114,6 +114,9 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       const cursor = await get<any>(pool, 'feedCursors', source.id);
       const old = Date.now() - 72 * 3600000;
       await save('feedCursors', source.id, { ...cursor, cursor: new Date(old).toISOString(), hasMore: true });
+      assert.equal(await processPipeline(pool, config, request), false);
+      assert.equal((await get<any>(pool, 'feedCursors', source.id)).cursor, new Date(old).toISOString());
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: true });
       assert.equal(await processPipeline(pool, config, request), true);
       const next = await get<any>(pool, 'feedCursors', source.id);
       assert.ok(Date.parse(next.cursor) > old);

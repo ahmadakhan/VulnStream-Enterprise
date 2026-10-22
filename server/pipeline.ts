@@ -200,9 +200,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           !(Date.parse(feed.circuitOpenUntil || '') > Date.now());
       });
       if (
-        catchupDue || configuredFeeds.some((feed) => recoveryDue(feed)) ||
-        (settings.schedulerEnabled &&
-        (!last || Date.now() - new Date(last).getTime() >= settings.schedulerIntervalMinutes * 60000))
+        settings.schedulerEnabled &&
+        (catchupDue || configuredFeeds.some((feed) => recoveryDue(feed)) ||
+          !last || Date.now() - new Date(last).getTime() >= settings.schedulerIntervalMinutes * 60000)
       )
         execution = await queueRun(pool, undefined, 'scheduler');
     }

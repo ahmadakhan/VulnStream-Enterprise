@@ -135,7 +135,7 @@ function useApplication() {
           emailLogs: INITIAL_EMAIL_LOGS,
           auditLogs: INITIAL_AUDIT_LOGS,
           executions: [],
-          settings: { ...INITIAL_SETTINGS, schedulerEnabled: true },
+          settings: { ...INITIAL_SETTINGS, schedulerEnabled: false },
           advisoryTemplate: INITIAL_ADVISORY_TEMPLATE,
         };
         try { localStorage.setItem('vulnstream_state', JSON.stringify(defaultState)); } catch {}

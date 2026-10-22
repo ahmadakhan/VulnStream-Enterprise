@@ -706,7 +706,7 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
 export const INITIAL_SETTINGS: AppSettings = {
   scopeHours: 24,
   schedulerIntervalMinutes: 60,
-  schedulerEnabled: true,
+  schedulerEnabled: false,
   advisoryPrefix: 'ADV-2026-',
   autoDispatchEnabled: true,
   digestBatchingEnabled: true,
