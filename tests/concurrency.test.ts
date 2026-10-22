@@ -31,12 +31,15 @@ test('paceConcurrent overlaps latency: wall time is far less than serial sleep+l
 
 test('paceConcurrent never dispatches faster than the configured interval', async () => {
   const dispatchTimes: number[] = [];
-  await paceConcurrent(Array.from({ length: 10 }, (_, i) => i), 20, 5, realSleep, async () => {
+  const interval = 50;
+  await paceConcurrent(Array.from({ length: 10 }, (_, i) => i), interval, 5, realSleep, async () => {
     dispatchTimes.push(Date.now());
   });
   dispatchTimes.sort((a, b) => a - b);
-  for (let i = 1; i < dispatchTimes.length; i++)
-    assert.ok(dispatchTimes[i] - dispatchTimes[i - 1] >= 18, 'dispatches must not be closer than the paced interval');
+  for (let i = 1; i < dispatchTimes.length; i++) {
+    const gap = dispatchTimes[i] - dispatchTimes[i - 1];
+    assert.ok(gap >= interval - 5, `dispatches ${gap}ms apart with ${interval}ms interval`);
+  }
 });
 
 test('paceConcurrent fails closed: stops dispatching after the first error and rethrows it', async () => {
