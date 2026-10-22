@@ -208,7 +208,7 @@ export const FindingsView: React.FC = () => {
                                 aria-label={`Open ${finding.cveId} on NVD`}
                                 title="Open the source CVE record on NVD"
                                 onClick={(event) => event.stopPropagation()}
-                                className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4 light:text-blue-700 light:hover:text-blue-800"
+                                className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-300 underline decoration-cyan-500/60 underline-offset-4 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-2 light:text-cyan-700 light:hover:text-cyan-800"
                               >
                                 {finding.cveId}
                                 <ExternalLink className="h-3 w-3 opacity-70" aria-hidden="true" />
@@ -335,7 +335,7 @@ export const FindingsView: React.FC = () => {
                     href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(selectedFinding.cveId)}`}
                     aria-label={`Open ${selectedFinding.cveId} on NVD`}
                     title="Open the source CVE record on NVD"
-                    className="inline-flex items-center gap-1 font-mono text-base font-bold text-blue-400 hover:underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4 light:text-blue-700"
+                    className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 font-mono text-base font-bold text-cyan-300 underline decoration-cyan-500/60 underline-offset-4 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-2 light:text-cyan-700 light:hover:text-cyan-800"
                   >
                     {selectedFinding.cveId}
                     <ExternalLink className="h-3 w-3 opacity-70" aria-hidden="true" />
