@@ -351,7 +351,14 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           feed.type === 'NVD_API'
             ? { headers, timeoutMs: 25000, socketTimeoutMs: 20000, maxResponseBytes: 256 * 1024 }
             : feed.type === 'MITRE_CVE'
-              ? { headers, timeoutMs: 60000, maxResponseBytes: 64 * 1024 * 1024 }
+              ? { headers, timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: 64 * 1024 * 1024 }
+            : feed.type === 'OPENCVE_API'
+              ? {
+                  headers,
+                  timeoutMs: (feed.requestTimeoutSeconds || 60) * 1000,
+                  socketTimeoutMs: Math.min((feed.requestTimeoutSeconds || 60) * 1000, 30000),
+                  maxResponseBytes: 4 * 1024 * 1024,
+                }
               : feed.type === 'RSS_ATOM'
                 ? { headers, timeoutMs: 25000, maxResponseBytes: RSS_MAX_BYTES }
                 : { headers };

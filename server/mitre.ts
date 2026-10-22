@@ -54,13 +54,13 @@ export function normalizeMitre(record: any, feedId: string): NormalizedCVE | nul
 
 export async function ingestMitre(feed: ThreatFeed, scopeHours: number, request: Requester, sleep: (ms: number) => Promise<unknown>, state: IngestContext = {}): Promise<IngestResult> {
   if (feed.url !== MITRE_DELTA_URL || feed.authType !== 'NONE') throw new Error('MITRE CVE requires the official cvelistV5 deltaLog.json endpoint without authentication');
-  const index = await request(feed.url, { timeoutMs: 60000, maxResponseBytes: 64 * 1024 * 1024,
+  const index = await requestJson(request, feed.url, { timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: 64 * 1024 * 1024,
     headers: state.indexEtag ? { 'If-None-Match': state.indexEtag } : {} });
   if (index.status === 304 && state.indexEtag) return { cves: [], count: 0, notModified: true, syncState: state };
   if (index.status !== 200) throw new Error(`MITRE CVE returned HTTP ${index.status}`);
   const parse = (body: string) => { try { return JSON.parse(body); } catch { throw new Error('MITRE CVE returned invalid JSON'); } };
   const readJson = async (url: string, maxBytes: number): Promise<any> => {
-    const { status, body } = await request(url, { timeoutMs: 60000, maxResponseBytes: maxBytes });
+    const { status, body } = await requestJson(request, url, { timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: maxBytes });
     if (status !== 200) throw new Error(`MITRE CVE returned HTTP ${status}`);
     return parse(body);
   };
@@ -124,4 +124,25 @@ export async function ingestMitre(feed: ThreatFeed, scopeHours: number, request:
   const cursor = new Date(Math.max(Date.parse(state.cursor || '') || 0, Math.min(end.getTime(), newestFetch))).toISOString();
   return { cves: cves.sort((a, b) => a.cveId.localeCompare(b.cveId)), withdrawals, count: sorted.length, warnings,
     syncState: { cursor, hasMore: end.getTime() < newestFetch, revisions, indexEtag: end.getTime() >= newestFetch && typeof index.headers.etag === 'string' ? index.headers.etag : undefined } };
+}
+
+/** Retry transient upstream stalls without advancing the source cursor. */
+async function requestJson(request: Requester, url: string, options: Parameters<Requester>[1]) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const response = await request(url, options);
+      if (![429, 502, 503, 504].includes(response.status) || attempt >= 2) return response;
+      const raw = response.headers['retry-after'];
+      const retryAfter = Array.isArray(raw) ? raw[0] : raw;
+      const seconds = retryAfter ? Number(retryAfter) : NaN;
+      const date = retryAfter ? Date.parse(retryAfter) : NaN;
+      const requestedDelay = Number.isFinite(seconds) ? seconds * 1000 : Number.isFinite(date) ? date - Date.now() : 0;
+      if (requestedDelay > 60000) throw new Error(`MITRE requested a ${Math.ceil(requestedDelay / 1000)} second retry delay; defer to a later run`);
+      await new Promise((resolve) => setTimeout(resolve, Math.max(2000 * (attempt + 1), requestedDelay)));
+    } catch (error) {
+      const transient = error instanceof Error && (/timed out|timeout|^aborted$|socket hang up|premature close/i.test(error.message) || ['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'UND_ERR_SOCKET'].includes((error as NodeJS.ErrnoException).code || ''));
+      if (!transient || attempt >= 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)));
+    }
+  }
 }

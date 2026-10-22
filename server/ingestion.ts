@@ -487,7 +487,7 @@ export async function ingestFeed(
       visited.add(pageUrl.href);
       pageUrl.searchParams.set('page_size', '100');
       pageUrl.searchParams.set('q', updatedQuery);
-      const { data: page } = await json(pageUrl.href, false, { timeoutMs: 25000, maxResponseBytes: 4 * 1024 * 1024 }, true);
+      const { data: page } = await json(pageUrl.href, false, { timeoutMs: 60000, socketTimeoutMs: 30000, maxResponseBytes: 4 * 1024 * 1024 }, true);
       if (!page || !Array.isArray(page.results) || page.results.length > 100 || !Number.isInteger(page.count) || page.count < page.results.length)
         throw new Error('Invalid OpenCVE pagination response');
       for (const row of page.results) {
@@ -514,7 +514,7 @@ export async function ingestFeed(
         if (Number.isFinite(cachedModified) && Number.isFinite(listedModified) && cachedModified >= listedModified) return null;
         const detailUrl = new URL(`${listPath}/${encodeURIComponent(id)}`, listUrl.origin);
         detailUrl.searchParams.set('include', 'nvd_cpe_configurations');
-        const { data } = await json(detailUrl.href, false, { timeoutMs: 25000, maxResponseBytes: 4 * 1024 * 1024 }, true);
+        const { data } = await json(detailUrl.href, false, { timeoutMs: 60000, socketTimeoutMs: 30000, maxResponseBytes: 4 * 1024 * 1024 }, true);
         if (!data || normalizeCveId(data.cve_id) !== id) throw new Error('OpenCVE detail response did not match requested CVE');
         const cve = normalizeOpenCve(data, feed.id);
         revisions[id] = cve.modifiedDate;

@@ -101,6 +101,8 @@ export function createRequester(config: Config): Requester {
     const url = new URL(value),
       selected = await resolvePublic(url, allowlist);
     return new Promise((resolve, reject) => {
+      let deadline: ReturnType<typeof setTimeout>;
+      const clearDeadline = () => clearTimeout(deadline);
       // Connect to the validated IP while preserving TLS hostname verification and SNI.
       const request = https.request(
         url,
@@ -122,16 +124,18 @@ export function createRequester(config: Config): Requester {
               return;
             }
             resolve({ status, body, headers: response.headers });
-          }, reject);
+          }, reject).finally(clearDeadline);
         },
       );
-      const deadline = setTimeout(
+      deadline = setTimeout(
         () => request.destroy(new Error('Outbound request timed out')),
         options.timeoutMs ?? 20000,
       );
-      request.on('close', () => clearTimeout(deadline));
       request.on('timeout', () => request.destroy(new Error('Outbound request timed out')));
-      request.on('error', reject);
+      request.on('error', (error) => {
+        clearDeadline();
+        reject(error);
+      });
       if (options.body) request.write(options.body);
       request.end();
     });

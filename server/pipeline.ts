@@ -285,7 +285,14 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             continue;
           }
           const start = Date.now();
-          const deadline = start + config.FEED_MAX_DURATION_SECONDS * 1000;
+          // MITRE can return up to 5,000 delta records; at its documented feed
+          // pacing that bootstrap needs over 40 minutes for detail retrieval.
+          // Give that source enough time to finish atomically while preserving
+          // the configured limit for all other feeds.
+          const maxDurationSeconds = feed.type === 'MITRE_CVE'
+            ? Math.max(config.FEED_MAX_DURATION_SECONDS, 3600)
+            : config.FEED_MAX_DURATION_SECONDS;
+          const deadline = start + maxDurationSeconds * 1000;
           const sourceCheckpoint = async () => {
             await checkpoint();
             if (Date.now() >= deadline) throw new Error('Feed ingestion exceeded its configured duration limit');
