@@ -2,20 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Settings2, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
 import { EmailProviderSettings } from './EmailProviderSettings';
-import { DEFAULT_SETTINGS } from '../../shared/state';
 const field = 'ui-field';
 export function SettingsView() {
   const { settings, updateSettings, changePassword, session, listUsers, createUser, updateUser, pending } =
     useApp();
-  const safeSettings = {
-    ...DEFAULT_SETTINGS,
-    ...(settings || {}),
-    securityPolicy: {
-      ...DEFAULT_SETTINGS.securityPolicy,
-      ...(settings?.securityPolicy || {}),
-    },
-  };
-  const [form, setForm] = useState(safeSettings),
+  const [form, setForm] = useState(settings),
     [message, setMessage] = useState(''),
     [currentPassword, setCurrentPassword] = useState(''),
     [newPassword, setNewPassword] = useState('');
@@ -24,27 +15,9 @@ export function SettingsView() {
     [password, setPassword] = useState(''),
     [role, setRole] = useState('VIEWER');
   const admin = session?.role === 'ADMIN';
-
-  useEffect(() => {
-    if (settings) {
-      setForm((prev) => ({
-        ...DEFAULT_SETTINGS,
-        ...prev,
-        ...settings,
-        securityPolicy: {
-          ...DEFAULT_SETTINGS.securityPolicy,
-          ...(prev?.securityPolicy || {}),
-          ...(settings?.securityPolicy || {}),
-        },
-      }));
-    }
-  }, [settings]);
-
   const reloadUsers = async () => {
-    try {
-      const result = await listUsers();
-      if (Array.isArray(result)) setUsers(result);
-    } catch {}
+    const result = await listUsers();
+    if (result) setUsers(result);
   };
   useEffect(() => {
     if (admin) void reloadUsers();
@@ -90,7 +63,7 @@ export function SettingsView() {
                 max={2880}
                 required
                 className={field}
-                value={form.scopeHours ?? 24}
+                value={form.scopeHours}
                 onChange={(e) => setForm({ ...form, scopeHours: Number(e.target.value) })}
               />
             </label>
@@ -102,7 +75,7 @@ export function SettingsView() {
                 max={10080}
                 required
                 className={field}
-                value={form.schedulerIntervalMinutes ?? 60}
+                value={form.schedulerIntervalMinutes}
                 onChange={(e) => setForm({ ...form, schedulerIntervalMinutes: Number(e.target.value) })}
               />
             </label>
@@ -112,7 +85,7 @@ export function SettingsView() {
                 required
                 pattern="[A-Za-z0-9_-]{1,30}"
                 className={field}
-                value={form.advisoryPrefix || 'ADV-'}
+                value={form.advisoryPrefix}
                 onChange={(e) => setForm({ ...form, advisoryPrefix: e.target.value })}
               />
             </label>
@@ -124,15 +97,11 @@ export function SettingsView() {
                 max={60}
                 required
                 className={field}
-                value={form.securityPolicy?.sessionTimeoutMins ?? 30}
+                value={form.securityPolicy.sessionTimeoutMins}
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    securityPolicy: {
-                      ...DEFAULT_SETTINGS.securityPolicy,
-                      ...(form.securityPolicy || {}),
-                      sessionTimeoutMins: Number(e.target.value),
-                    },
+                    securityPolicy: { ...form.securityPolicy, sessionTimeoutMins: Number(e.target.value) },
                   })
                 }
               />
@@ -141,7 +110,7 @@ export function SettingsView() {
           <label className="ui-check-row">
             <input
               type="checkbox"
-              checked={!!form.schedulerEnabled}
+              checked={form.schedulerEnabled}
               onChange={(e) => setForm({ ...form, schedulerEnabled: e.target.checked })}
             />{' '}
             Enable server scheduler
@@ -149,7 +118,7 @@ export function SettingsView() {
           <label className="ui-check-row">
             <input
               type="checkbox"
-              checked={!!form.autoDispatchEnabled}
+              checked={form.autoDispatchEnabled}
               onChange={(e) => setForm({ ...form, autoDispatchEnabled: e.target.checked })}
             />{' '}
             Automatically queue confirmed correlations to enabled recipients and webhooks
@@ -204,7 +173,7 @@ export function SettingsView() {
             type="password"
             autoComplete="new-password"
             required
-            minLength={safeSettings.securityPolicy?.minPasswordLen ?? 14}
+            minLength={settings.securityPolicy.minPasswordLen}
             maxLength={128}
             className={field}
             value={newPassword}
@@ -274,7 +243,7 @@ export function SettingsView() {
             </button>
           </form>
           <ul className="space-y-3">
-            {Array.isArray(users) && users.map((user) => (
+            {users.map((user) => (
               <li key={user.id} className="flex flex-wrap gap-4 items-center border-t border-zinc-700 pt-3">
                 <span>{user.username}</span>
                 <span>{user.role}</span>

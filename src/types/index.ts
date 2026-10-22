@@ -212,8 +212,6 @@ export interface ThreatFeed {
   circuitOpenUntil?: string | null;
 }
 
-export type RecipientGroup = 'SECURITY' | 'EVERYONE';
-
 export interface Advisory {
   id: string;
   title: string;
@@ -228,14 +226,6 @@ export interface Advisory {
   affectedSystems: string[];
   isDigestBatch?: boolean;
   vendorLink?: string;
-  targetGroup?: RecipientGroup;
-  sentToSecurity?: boolean;
-  sentToSecurityAt?: string | null;
-  securityReviewed?: boolean;
-  reviewedBy?: string | null;
-  reviewedAt?: string | null;
-  sentToEveryone?: boolean;
-  sentToEveryoneAt?: string | null;
 }
 
 export interface PipelinePhase {
@@ -292,7 +282,6 @@ export interface EmailRecipient {
   subscriptionTier: 'ALL_SEVERITIES' | 'CRITICAL_HIGH_ONLY' | 'CISA_KEV_ONLY';
   enabled: boolean;
   deliverySuccessRate: number;
-  group?: RecipientGroup;
 }
 
 export interface WebhookEndpoint {
@@ -395,9 +384,6 @@ export interface AppSettings {
     domain: string;
     fromEmail: string;
   };
-  dailyDigestEnabled?: boolean;
-  dailyDigestTime?: string;
-  lastDailyDigestSentAt?: string | null;
 }
 
 export interface SystemHealth {

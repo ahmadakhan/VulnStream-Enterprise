@@ -3,9 +3,7 @@ import { CheckCircle2, KeyRound, Mail, Save, Send } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { EMAIL_PROVIDERS, type EmailConfiguration } from '../types';
 
-import { DEFAULT_EMAIL_CONFIG } from '../../shared/state';
-
-const names: Record<string, string> = {
+const names = {
   SMTP: 'SMTP relay',
   MAILGUN: 'Mailgun',
   MAILTRAP: 'Mailtrap',
@@ -20,25 +18,21 @@ const guides = {
 };
 export function EmailProviderSettings() {
   const { emailConfig, configureEmailProvider, sendTestEmail, pending } = useApp();
-  const safeConfig = { ...DEFAULT_EMAIL_CONFIG, ...(emailConfig || {}) };
-  const [form, setForm] = useState<EmailConfiguration>({ ...safeConfig, apiKey: '' });
+  const [form, setForm] = useState<EmailConfiguration>({ ...emailConfig, apiKey: '' });
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState('');
   const [testEmail, setTestEmail] = useState('');
   const savedVersion = JSON.stringify(emailConfig);
   useEffect(() => {
-    if (emailConfig) {
-      setForm({ ...DEFAULT_EMAIL_CONFIG, ...emailConfig, apiKey: '' });
-      setDirty(false);
-    }
+    setForm({ ...emailConfig, apiKey: '' });
+    setDirty(false);
   }, [savedVersion]);
   const update = (value: Partial<EmailConfiguration>) => {
     setForm((old) => ({ ...old, ...value }));
     setDirty(true);
     setMessage('');
   };
-  const currentProvider = emailConfig?.provider || 'SMTP';
-  const hasSavedToken = form.provider === currentProvider && !!emailConfig?.hasApiKey;
+  const hasSavedToken = form.provider === emailConfig.provider && emailConfig.hasApiKey;
   return (
     <section className="ui-card space-y-5" aria-labelledby="email-settings-heading">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -56,7 +50,7 @@ export function EmailProviderSettings() {
           </div>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 light:border-zinc-200 px-2.5 py-1 text-[11px] text-zinc-400">
-          <CheckCircle2 className="h-3.5 w-3.5" /> Active: {names[currentProvider] || 'SMTP relay'}
+          <CheckCircle2 className="h-3.5 w-3.5" /> Active: {names[emailConfig.provider]}
         </span>
       </div>
       <form
