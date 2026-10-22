@@ -30,6 +30,8 @@ export async function migrate(pool: pg.Pool) {
       await client.query(await readFile(new URL('./migrations/001_initial.sql', import.meta.url), 'utf8'));
     if (!(await client.query('SELECT version FROM schema_migrations WHERE version=2')).rowCount)
       await client.query(await readFile(new URL('./migrations/002_operational_events.sql', import.meta.url), 'utf8'));
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=3')).rowCount)
+      await client.query(await readFile(new URL('./migrations/003_record_creation_order.sql', import.meta.url), 'utf8'));
     await client.query('COMMIT');
   } catch (e) {
     failed = true;
@@ -98,7 +100,10 @@ export async function get<T>(db: Db, kind: string, id: string): Promise<T | unde
 }
 export async function list<T>(db: Db, kind: string): Promise<T[]> {
   return (
-    await db.query('SELECT data FROM records WHERE kind=$1 ORDER BY updated_at DESC,id', [kind])
+    await db.query(
+      "SELECT data FROM records WHERE kind=$1 ORDER BY CASE WHEN kind='feeds' THEN created_at ELSE updated_at END DESC,id",
+      [kind],
+    )
   ).rows.map((r) => r.data);
 }
 export async function remove(db: Db, kind: string, id: string) {
@@ -145,7 +150,7 @@ export async function state(db: Db): Promise<AppState> {
   ];
   // Internal source snapshots and dispatch ledgers are not browser state.
   const rows = await db.query(
-    'SELECT kind,data FROM records WHERE kind=ANY($1::text[]) ORDER BY updated_at DESC,id',
+    "SELECT kind,data FROM records WHERE kind=ANY($1::text[]) ORDER BY CASE WHEN kind='feeds' THEN created_at ELSE updated_at END DESC,id",
     [kinds],
   );
   for (const row of rows.rows) {

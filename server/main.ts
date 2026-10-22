@@ -13,7 +13,7 @@ pool.on('error', (error) =>
   console.error(JSON.stringify({ level: 'error', event: 'database-connection', code: (error as any).code })),
 );
 if (config.NODE_ENV === 'production') {
-  const version = await pool.query('SELECT version FROM schema_migrations WHERE version=2');
+  const version = await pool.query('SELECT version FROM schema_migrations WHERE version=3');
   if (!version.rowCount) throw new Error('Required migration missing');
 } else await migrate(pool);
 // Upgrade existing installations once; the marker makes later operator deletions persist.
