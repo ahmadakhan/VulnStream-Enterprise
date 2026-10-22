@@ -467,6 +467,13 @@ export async function ingestFeed(
     const records = new Map<string, any>();
     let next: string | null = listUrl.href;
     const visited = new Set<string>();
+    // OpenCVE's advanced-search date filters accept calendar dates. An
+    // inclusive `updated<=YYYY-MM-DD` may stop at midnight at the start of
+    // that day, dropping the rest of the frozen ingestion window while still
+    // advancing its checkpoint. Use the next calendar day as an exclusive
+    // upper bound, then retain the exact timestamp filter below.
+    const endExclusive = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate() + 1));
+    const updatedQuery = `updated>=${start.toISOString().slice(0, 10)} AND updated<${endExclusive.toISOString().slice(0, 10)}`;
     for (let pageNo = 0; next; pageNo++) {
       if (pageNo >= 100) throw new Error('OpenCVE query exceeds 10,000 records; reduce ingestion window');
       const pageUrl = new URL(next);
@@ -474,9 +481,9 @@ export async function ingestFeed(
         throw new Error('OpenCVE returned an invalid pagination URL');
       visited.add(pageUrl.href);
       pageUrl.searchParams.set('page_size', '100');
-      pageUrl.searchParams.set('q', `updated>=${start.toISOString().slice(0, 10)} AND updated<=${end.toISOString().slice(0, 10)}`);
+      pageUrl.searchParams.set('q', updatedQuery);
       const { data: page } = await json(pageUrl.href, false, { timeoutMs: 25000, maxResponseBytes: 4 * 1024 * 1024 }, true);
-      if (!page || !Array.isArray(page.results) || !Number.isInteger(page.count) || page.count < page.results.length)
+      if (!page || !Array.isArray(page.results) || page.results.length > 100 || !Number.isInteger(page.count) || page.count < page.results.length)
         throw new Error('Invalid OpenCVE pagination response');
       for (const row of page.results) {
         const id = normalizeCveId(row?.cve_id);

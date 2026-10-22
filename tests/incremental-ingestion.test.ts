@@ -76,7 +76,12 @@ test('OpenCVE lists changed records but does not fetch unchanged details within 
   let details = 0;
   const request = async (raw: string) => {
     const url = new URL(raw);
-    if (url.pathname.endsWith('/cves')) return response({ count: 1, next: null, results: [{ cve_id: 'CVE-2026-98001', updated_at: date }] });
+    if (url.pathname.endsWith('/cves')) {
+      const query = url.searchParams.get('q') || '';
+      assert.match(query, /updated>=\d{4}-\d{2}-\d{2} AND updated<\d{4}-\d{2}-\d{2}/);
+      assert.doesNotMatch(query, /updated<=/);
+      return response({ count: 1, next: null, results: [{ cve_id: 'CVE-2026-98001', updated_at: date }] });
+    }
     details++;
     return response({ cve_id: 'CVE-2026-98001', created_at: date, updated_at: date, description: 'Example vulnerability' });
   };

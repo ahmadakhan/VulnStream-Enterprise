@@ -29,21 +29,21 @@ export async function paceConcurrent<T, R>(
     while (nextIndex < items.length) {
       if (failure) return;
       const i = nextIndex++;
-      // Recheck after sleeping: timers can wake late or bunch together when
-      // the event loop is busy. Reserve synchronously immediately before the
-      // request so a delayed wakeup cannot dispatch a burst.
-      while (true) {
-        const wait = nextAllowedDispatch - Date.now();
-        if (wait > 0) {
-          await sleep(wait);
-          if (failure) return;
-          continue;
-        }
-        nextAllowedDispatch = Date.now() + intervalMs;
-        break;
-      }
-      if (failure) return;
       try {
+        // Recheck after sleeping: timers can wake late or bunch together when
+        // the event loop is busy. Reserve synchronously immediately before the
+        // request so a delayed wakeup cannot dispatch a burst.
+        while (true) {
+          const wait = nextAllowedDispatch - Date.now();
+          if (wait > 0) {
+            await sleep(wait);
+            if (failure) return;
+            continue;
+          }
+          nextAllowedDispatch = Date.now() + intervalMs;
+          break;
+        }
+        if (failure) return;
         results[i] = await fn(items[i], i);
       } catch (error) {
         if (!failure) failure = { error };
@@ -51,7 +51,10 @@ export async function paceConcurrent<T, R>(
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, worker));
+  // Await every worker after cancellation/deadline errors too. Returning on the
+  // first rejected worker would let already sleeping workers dispatch requests
+  // after the caller has considered this batch failed.
+  await Promise.allSettled(Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, worker));
   if (failure) throw failure.error;
   return results;
 }

@@ -59,6 +59,21 @@ test('paceConcurrent fails closed: stops dispatching after the first error and r
   assert.ok(dispatched < items.length, `expected early abort, dispatched ${dispatched}/${items.length}`);
 });
 
+test('paceConcurrent drains workers and stops dispatching when pacing sleep fails', async () => {
+  let dispatched = 0;
+  const requestSleep = async () => {
+    throw new Error('pipeline stopped');
+  };
+  await assert.rejects(
+    paceConcurrent(Array.from({ length: 20 }, (_, i) => i), 100, 4, requestSleep, async () => {
+      dispatched++;
+      await realSleep(10);
+    }),
+    /pipeline stopped/,
+  );
+  assert.equal(dispatched, 1, 'sleep failure must prevent queued work from being dispatched');
+});
+
 test('paceConcurrent with concurrency 1 behaves like a serial paced loop', async () => {
   const seen: number[] = [];
   const result = await paceConcurrent([1, 2, 3], 0, 1, realSleep, async (item) => {
