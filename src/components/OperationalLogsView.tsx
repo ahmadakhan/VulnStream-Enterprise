@@ -456,13 +456,27 @@ export const OperationalLogsView: React.FC = () => {
                           <div className="font-semibold text-zinc-200 dark:text-zinc-200 light:text-zinc-900 text-xs">
                             {event.message}
                           </div>
-                          {event.level === 'ERROR' && event.context?.error !== undefined && (
-                            <pre className="mt-1 text-[10px] text-red-400 bg-red-950/20 border border-red-900/30 rounded p-1.5 whitespace-pre-wrap break-all overflow-hidden">
-                              {String(event.context.error as unknown as string)}
-                            </pre>
+                          {event.level === 'ERROR' && (
+                            <div className="mt-1 space-y-1">
+                              {event.context?.error !== undefined && (
+                                <pre className="text-[10px] text-red-400 bg-red-950/20 border border-red-900/30 rounded p-1.5 whitespace-pre-wrap break-all overflow-hidden">
+                                  {String(event.context.error as unknown as string)}
+                                </pre>
+                              )}
+                              {event.context?.errorType !== undefined && (
+                                <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                                  Error Type: <span className="text-red-400 font-medium">{event.context.errorType as string}</span>
+                                </div>
+                              )}
+                              {event.context?.component !== undefined && (
+                                <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                                  Component: <span className="text-zinc-300 font-medium">{event.context.component as string}</span>
+                                </div>
+                              )}
+                            </div>
                           )}
                           {event.context && Object.keys(event.context).length > 0 &&
-                           !(event.level === 'ERROR' && event.context?.error) && (
+                           !(event.level === 'ERROR' && (event.context?.error || event.context?.errorType || event.context?.component)) && (
                             <details className="mt-1">
                               <summary className="cursor-pointer text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[10px]">
                                 Context
@@ -470,9 +484,9 @@ export const OperationalLogsView: React.FC = () => {
                               <pre className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 whitespace-pre-wrap break-all">
                                 {JSON.stringify(event.context, null, 2)}
                               </pre>
-                            </details>
-                          )}
-                        </td>
+                             </details>
+                           )}
+                         </td>
                         <td className="py-2.5 px-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono text-[10px] truncate">
                           {event.runId || '-'}
                         </td>
