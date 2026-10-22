@@ -203,7 +203,18 @@ export const FindingsView: React.FC = () => {
                           {/* CVE ID */}
                           <td className="py-3 px-3.5">
                             <div className="font-mono font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 flex items-center space-x-1.5">
-                              <span>{finding.cveId}</span>
+                              <a
+                                href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(finding.cveId)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={`Open ${finding.cveId} on NVD (new tab)`}
+                                title="Open the source CVE record on NVD"
+                                onClick={(event) => event.stopPropagation()}
+                                className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4 light:text-blue-700 light:hover:text-blue-800"
+                              >
+                                {finding.cveId}
+                                <ExternalLink className="h-3 w-3 opacity-70" aria-hidden="true" />
+                              </a>
                               {isKev && (
                                 <span title="CISA KEV Catalog">
                                   <Flame className="w-3.5 h-3.5 text-amber-500/80" />
@@ -322,9 +333,17 @@ export const FindingsView: React.FC = () => {
             <div className="flex items-start justify-between border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 pb-3">
               <div>
                 <div className="flex items-center space-x-2">
-                  <span className="font-mono text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900">
+                  <a
+                    href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(selectedFinding.cveId)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Open ${selectedFinding.cveId} on NVD (new tab)`}
+                    title="Open the source CVE record on NVD"
+                    className="inline-flex items-center gap-1 font-mono text-base font-bold text-blue-400 hover:underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4 light:text-blue-700"
+                  >
                     {selectedFinding.cveId}
-                  </span>
+                    <ExternalLink className="h-3 w-3 opacity-70" aria-hidden="true" />
+                  </a>
                   {selectedFinding.cve.cisaKev.isKev && (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/40 text-amber-300 border border-amber-800/80 flex items-center gap-1 font-semibold">
                       <Flame className="w-3 h-3 text-amber-500" />
