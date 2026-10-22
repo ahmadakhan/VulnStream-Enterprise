@@ -106,7 +106,16 @@ export const AlertedCVEsView: React.FC = () => {
                   className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition"
                 >
                   <td className="py-3 px-4 font-mono font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 text-sm">
-                    {item.cveId}
+                    <a
+                      href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(item.cveId)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Open ${item.cveId} on NVD (new tab)`}
+                      title="View the canonical CVE record on NVD"
+                      className="hover:text-blue-400 hover:underline focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4 rounded"
+                    >
+                      {item.cveId}
+                    </a>
                   </td>
                   <td className="py-3 px-4 font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-800">
                     {item.advisoryId}
