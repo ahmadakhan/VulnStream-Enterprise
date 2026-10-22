@@ -171,7 +171,6 @@ export const FindingsView: React.FC = () => {
                 <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
                   <tr>
                     <th className="py-3 px-3.5">CVE Identifier</th>
-                    <th className="py-3 px-3.5">Source</th>
                     <th className="py-3 px-3.5">Monitored Product</th>
                     <th className="py-3 px-3.5">CVSS / EPSS</th>
                     <th className="py-3 px-3.5">Exploit Risk</th>
@@ -182,7 +181,7 @@ export const FindingsView: React.FC = () => {
                 <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
                   {paginatedFindings.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-zinc-500 text-xs">
+                      <td colSpan={6} className="py-8 text-center text-zinc-500 text-xs">
                         No product vulnerabilities match the current filter.
                       </td>
                     </tr>
@@ -214,7 +213,6 @@ export const FindingsView: React.FC = () => {
                                 className="font-mono font-semibold text-blue-400 light:text-blue-700 text-sm hover:underline underline-offset-4 rounded focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4"
                               >
                                 {finding.cveId}
-                                <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                               </a>
                               {isKev && (
                                 <span title="CISA KEV Catalog">
@@ -225,22 +223,6 @@ export const FindingsView: React.FC = () => {
                             <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600 line-clamp-1 max-w-[160px]">
                               {finding.cve.title}
                             </div>
-                          </td>
-
-                          {/* CVE Source */}
-                          <td className="py-3 px-3.5">
-                            <a
-                              href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(finding.cveId)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label={`Open source record for ${finding.cveId} on NVD (new tab)`}
-                              title={`Open ${finding.cveId} on the NVD source page in a new tab`}
-                              onClick={(event) => event.stopPropagation()}
-                              className="inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap font-mono font-semibold text-blue-400 light:text-blue-700 text-sm hover:underline underline-offset-4 rounded focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4"
-                            >
-                              Open NVD
-                              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                            </a>
                           </td>
 
                           {/* Matched Product */}
@@ -359,7 +341,6 @@ export const FindingsView: React.FC = () => {
                     className="inline-flex items-center gap-1 font-mono font-semibold text-blue-400 light:text-blue-700 text-base hover:underline underline-offset-4 rounded focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4"
                   >
                     {selectedFinding.cveId}
-                    <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                   </a>
                   {selectedFinding.cve.cisaKev.isKev && (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/40 text-amber-300 border border-amber-800/80 flex items-center gap-1 font-semibold">
