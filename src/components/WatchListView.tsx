@@ -128,9 +128,14 @@ export const WatchListView: React.FC = () => {
   const generatedCpes = useMemo(() => {
     if (editingItem) {
       const cpe = editedCpe();
-      return cpe
-        ? [{ product: 'Edited CPE', cpe, part: cpePart }]
-        : [];
+      const current = cpe ? [{ product: 'Current product', cpe, part: parseCPE23(cpe).part as 'a' | 'o' | 'h' }] : [];
+      const additions = selectedProductIds.flatMap((id) => {
+        const product = catalogProducts.find((entry) => entry.normalizedId === id);
+        if (!product) return [];
+        const addedCpe = buildStrictCpe23(product.part, vendorInput, product.normalizedId, versionInput, targetHwInput);
+        return editingItem.cpes.includes(addedCpe) ? [] : [{ product: product.name, cpe: addedCpe, part: product.part }];
+      });
+      return [...current, ...additions];
     }
     const list: Array<{ product: string; cpe: string; part: 'a' | 'o' | 'h' }> = [];
     const v = vendorInput.trim() || 'vendor';
@@ -167,10 +172,6 @@ export const WatchListView: React.FC = () => {
     catalogProducts,
     editingItem,
     cpeExpressionInput,
-    vendorInput,
-    customProductInput,
-    versionInput,
-    targetHwInput,
   ]);
 
   const filteredAssets = watchlist.filter((item) => {
@@ -261,7 +262,30 @@ export const WatchListView: React.FC = () => {
         ownerGroup: ownerGroupInput.trim() || 'Unassigned',
         notes: notesInput.trim(),
       });
-      if (saved) setShowAddModal(false);
+      if (!saved) return;
+
+      const productsToAdd = selectedProductIds.flatMap((id, index) => {
+        const product = catalogProducts.find((entry) => entry.normalizedId === id);
+        if (!product) return [];
+        const addedCpe = buildStrictCpe23(product.part, vendorInput, product.normalizedId, versionInput, targetHwInput);
+        if (editingItem.cpes.includes(addedCpe) || addedCpe === cpe) return [];
+        return [{
+          vendor: vendorInput.trim(),
+          product: product.name,
+          version: versionInput,
+          cpes: [addedCpe],
+          targetHw: targetHwInput !== '*' ? targetHwInput : undefined,
+          assetTag: `${assetTagInput.trim() || editingItem.assetTag}-${index + 1}`,
+          ownerGroup: ownerGroupInput.trim() || 'Unassigned',
+          notes: notesInput.trim(),
+          active: true,
+        }];
+      });
+      if (productsToAdd.length) {
+        const imported = await bulkImportWatchlist(productsToAdd);
+        if (imported.errors.length) return;
+      }
+      setShowAddModal(false);
       return;
     }
 
@@ -914,14 +938,14 @@ export const WatchListView: React.FC = () => {
                     required
                     value={cpeExpressionInput}
                     onChange={(e) => setCpeExpressionInput(e.target.value)}
-                    aria-invalid={!parseCPE23(cpeExpressionInput.trim()).isValid}
+                    aria-invalid={!parseCPE23(editedCpe()).isValid}
                     className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
                   />
-                  {!parseCPE23(cpeExpressionInput.trim()).isValid && (
+                  {!parseCPE23(editedCpe()).isValid && (
                     <p className="mt-1 text-rose-400">Enter a valid CPE 2.3 expression before saving.</p>
                   )}
                   <p className="mt-1 text-zinc-500">
-                    This expression is used for matching; its vendor, product, version, and target hardware are saved with the asset.
+                    Change the product fields or expression to update this asset. Select catalog products above to add separate monitored products.
                   </p>
                 </div>
               )}
@@ -1039,7 +1063,7 @@ export const WatchListView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={!vendorInput.trim() || (Boolean(editingItem) && !parseCPE23(cpeExpressionInput.trim()).isValid)}
+                  disabled={!vendorInput.trim() || (Boolean(editingItem) && !parseCPE23(editedCpe()).isValid)}
                   className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition disabled:opacity-50 shadow-sm"
                 >
                   {editingItem
