@@ -1,6 +1,6 @@
-import type { WatchListItem } from '../types';
-import { buildStrictCpe23 } from '../data/vendorCatalog';
-import { parseCPE23 } from './cpeMatcher';
+import type { WatchListItem } from '../types/index.ts';
+import { buildStrictCpe23 } from '../data/vendorCatalog.ts';
+import { parseCPE23 } from './cpeMatcher.ts';
 
 export function orderWatchlist(items: WatchListItem[]): WatchListItem[] {
   return [...items].sort((a, b) => {

@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { FEED_TYPES, EMAIL_PROVIDERS, SMTP_EMAIL_PROVIDERS } from '../src/types';
-import { parseCPE23 } from '../src/utils/cpeMatcher';
+import { FEED_TYPES, EMAIL_PROVIDERS, SMTP_EMAIL_PROVIDERS } from '../src/types/index.ts';
+import { parseCPE23 } from '../src/utils/cpeMatcher.ts';
 export const shortText = z.string().trim().min(1).max(200);
 export const idSchema = z.string().min(1).max(150);
 const strings = z.array(z.string().max(2000)).max(100);
@@ -268,11 +268,9 @@ export const settingsSchema = z.object({
   }),
 });
 export class HttpError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
+  constructor(status: number, message: string) {
     super(message);
+    this.status = status;
   }
 }
 

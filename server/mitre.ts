@@ -1,9 +1,9 @@
-import type { NormalizedCVE, ThreatFeed } from '../src/types';
+import type { NormalizedCVE, ThreatFeed } from '../src/types/index.ts';
 import type { Requester } from './network';
 import { type IngestContext, type IngestResult } from './ingestion';
 import { cveSchema } from './validation';
 import { normalizeCveId } from '../src/utils/deduplicator';
-import { parseCPE23 } from '../src/utils/cpeMatcher';
+import { parseCPE23 } from '../src/utils/cpeMatcher.ts';
 import { paceConcurrent } from './concurrency';
 import { z } from 'zod';
 /** In-flight per-CVE detail fetches; overlaps network latency without

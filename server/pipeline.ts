@@ -3,7 +3,7 @@ import { mergeArticles, matchIntelligence } from '../src/utils/intelligenceMatch
 import type pg from 'pg';
 import { randomUUID, createHash } from 'node:crypto';
 import { get, list, put, putMany, transaction, appendAudit, pipelineState } from './db';
-import { DEFAULT_SETTINGS } from '../shared/state';
+import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import type {
   AppSettings,
   PipelineExecution,
@@ -12,7 +12,7 @@ import type {
   Finding,
   NormalizedCVE,
   WatchListItem,
-} from '../src/types';
+} from '../src/types/index.ts';
 import { mergeCveRecords, normalizeCveId, stableJson } from '../src/utils/deduplicator';
 import { reconcileFindings } from '../src/engine/reconcileFindings';
 import { determineExploitRisk, runVulnerabilityPipeline } from '../src/engine/pipelineEngine';

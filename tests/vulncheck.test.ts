@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ingestFeed } from '../server/ingestion';
-import { loadConfig } from '../server/config';
-import { encrypt } from '../server/secrets';
-import type { ThreatFeed } from '../src/types';
+import { loadConfig } from '../server/config.ts';
+import { encrypt } from '../server/secrets.ts';
+import type { ThreatFeed } from '../src/types/index.ts';
 const config = loadConfig({ NODE_ENV: 'test', DATABASE_URL: 'postgres://unused', APP_ORIGIN: 'http://localhost', ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64') });
 const source: ThreatFeed = { id: 'vulncheck', name: 'VulnCheck', type: 'VULNCHECK_KEV', url: 'https://api.vulncheck.com/v3/index/vulncheck-kev', authType: 'BEARER', authSecretKey: encrypt('test-token', config.ENCRYPTION_KEY, 'feed:vulncheck'), enabled: true, rateLimitPerMin: 60, healthStatus: 'UNTESTED', lastSync: null, itemCountLastRun: 0, latencyMs: 0, vendorSeed: false, ssrfValidated: false };
 const response = (data: unknown) => ({ status: 200, headers: {}, body: JSON.stringify(data) });

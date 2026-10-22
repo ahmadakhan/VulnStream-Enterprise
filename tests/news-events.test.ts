@@ -4,10 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { parseSyndication } from '../server/rss';
 import { matchIntelligence, mergeArticles } from '../src/utils/intelligenceMatcher';
 import { redactEventContext, writeEvent, readEvents } from '../server/events';
-import { createPool, migrate, put, state } from '../server/db';
+import { createPool, migrate, put, state } from '../server/db.ts';
 import { queueRun, processPipeline } from '../server/pipeline';
-import { loadConfig } from '../server/config';
-import type { WatchListItem, NormalizedCVE, Finding } from '../src/types';
+import { loadConfig } from '../server/config.ts';
+import type { WatchListItem, NormalizedCVE, Finding } from '../src/types/index.ts';
 const now = new Date('2026-10-21T12:00:00Z');
 const rss = (items: string) => `<rss version="2.0"><channel><title>Security</title>${items}</channel></rss>`;
 const item = (

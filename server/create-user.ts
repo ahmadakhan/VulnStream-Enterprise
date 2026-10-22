@@ -1,7 +1,7 @@
 import { loadConfig } from './config';
 import { createPool, migrate } from './db';
 import { createUser } from './auth';
-import type { Role } from '../shared/state';
+import type { Role } from '../shared/state.ts';
 const [username, role = 'ADMIN'] = process.argv.slice(2);
 if (!username) {
   console.error('Usage: npm run operator:create -- USERNAME [ADMIN|OPERATOR|VIEWER] < password-file');

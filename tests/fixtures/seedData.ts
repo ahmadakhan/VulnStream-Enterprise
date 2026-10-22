@@ -11,8 +11,8 @@ import {
   AppSettings,
   WebhookEndpoint,
   WebhookDeliveryLog,
-} from '../../src/types';
-import { quickHash } from '../../src/utils/cryptoChain';
+} from '../../src/types/index.ts';
+import { quickHash } from '../../src/utils/cryptoChain.ts';
 
 export const INITIAL_FEEDS: ThreatFeed[] = [
   {
@@ -735,6 +735,14 @@ export const INITIAL_SETTINGS: AppSettings = {
     apiKey: 'key-pbkdf2-encrypted-prod-mailgun-49f9...',
     domain: 'mg.vulnstream.internal',
     fromEmail: 'security-advisories@vulnstream.internal',
+  },
+  retentionConfig: {
+    enabled: false,
+    retentionHours: 24,
+    cleanupIntervalMinutes: 60,
+    maxArchivedRecords: 10000,
+    autoCleanup: true,
+    retentionMode: 'rolling',
   },
 };
 

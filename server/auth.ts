@@ -5,8 +5,8 @@ import { z } from 'zod';
 import type { Config } from './config';
 import { checkPassword, passwordHash, randomToken, tokenHash, secureEqual } from './secrets';
 import { transaction, appendAudit, get } from './db';
-import { DEFAULT_SETTINGS, type Role } from '../shared/state';
-import type { AppSettings } from '../src/types';
+import { DEFAULT_SETTINGS, type Role } from '../shared/state.ts';
+import type { AppSettings } from '../src/types/index.ts';
 import { HttpError } from './validation';
 export interface Operator {
   id: string;

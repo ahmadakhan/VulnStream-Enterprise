@@ -1,15 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, randomBytes } from 'node:crypto';
-import { createPool, migrate, transaction, put, putMany, list, get } from '../server/db';
+import { createPool, migrate, transaction, put, putMany, list, get } from '../server/db.ts';
 import { queueRun, processPipeline, stopRun } from '../server/pipeline';
 import { deliverNext, queueAdvisory } from '../server/delivery';
-import { loadConfig } from '../server/config';
-import { DEFAULT_SETTINGS } from '../shared/state';
+import { loadConfig } from '../server/config.ts';
+import { DEFAULT_SETTINGS } from '../shared/state/state.ts';
 import { MITRE_DELTA_URL } from '../server/mitre';
 import { mitreRecord, mitreDelta } from './fixtures/mitre';
-import { applyCommand } from '../server/commands';
-import type { Finding, NormalizedCVE, WatchListItem } from '../src/types';
+import { applyCommand } from '../server/commands.ts';
+import type { Finding, NormalizedCVE, WatchListItem } from '../src/types/index.ts';
 const database = process.env.TEST_DATABASE_URL;
 const cpe = (version: string) => `cpe:2.3:a:example:widget:${version}:*:*:*:*:*:*:*`;
 const asset = (version = '1.5'): WatchListItem => ({

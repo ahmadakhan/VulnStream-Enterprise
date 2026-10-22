@@ -2,8 +2,8 @@ import { writeEvent } from './events';
 import { advisoryEmail } from './advisoryEmail';
 import type pg from 'pg';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
-import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state';
-import type { WatchListItem, NormalizedCVE } from '../src/types';
+import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
+import type { WatchListItem, NormalizedCVE } from '../src/types/index.ts';
 import { randomUUID, createHmac, createHash } from 'node:crypto';
 import { stableJson } from '../src/utils/deduplicator';
 import nodemailer from 'nodemailer';
@@ -13,7 +13,7 @@ import type { Db } from './db';
 import { createRequester, type Requester } from './network';
 import { EMAIL_PROVIDER_LABELS, EmailProviderError, emailIsConfigured, sendProviderEmail } from './emailProviders';
 import { decrypt } from './secrets';
-import { isSmtpEmailProvider } from '../src/types';
+import { isSmtpEmailProvider } from '../src/types/index.ts';
 import type {
   Advisory,
   Finding,
@@ -23,7 +23,7 @@ import type {
   WebhookDeliveryLog,
   AlertedCVE,
   EmailConfiguration,
-} from '../src/types';
+} from '../src/types/index.ts';
 export interface Job {
   id: string;
   dedupe_key: string;

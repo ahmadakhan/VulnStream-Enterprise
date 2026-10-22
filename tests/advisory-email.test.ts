@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { advisoryEmail } from '../server/advisoryEmail';
-import type { Advisory } from '../src/types';
+import type { Advisory } from '../src/types/index.ts';
 const advisory: Advisory = { id: 'SECURITY-12345', title: 'Widget vulnerability', severity: 'HIGH',
   cveIds: ['CVE-2026-98001'], findingIds: ['finding'], createdDate: new Date().toISOString(),
   deliveryStatus: 'PENDING', recipientCount: 1, executiveSummary: 'Investigate widget',

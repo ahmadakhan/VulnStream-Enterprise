@@ -1,4 +1,4 @@
-import type { ThreatFeed, NormalizedCVE, IntelligenceArticle } from '../src/types';
+import type { ThreatFeed, NormalizedCVE, IntelligenceArticle } from '../src/types/index.ts';
 import { ingestMitre } from './mitre';
 import { ingestionWindow, recentRevisions, type IngestionState } from './ingestionState';
 import { parseSyndication, RSS_MAX_BYTES } from './rss';

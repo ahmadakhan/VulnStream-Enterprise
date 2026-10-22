@@ -1,4 +1,4 @@
-import type { ThreatFeed } from '../src/types';
+import type { ThreatFeed } from '../src/types/index.ts';
 
 /** Persistent cooldowns survive restarts; only enabled, failed sources trigger recovery. */
 export function recoveryDue(feed: ThreatFeed, now = Date.now()): boolean {

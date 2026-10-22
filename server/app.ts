@@ -15,13 +15,13 @@ import type { Requester, ResponseData } from './network';
 import { queueRun, stopRun, renderAdvisory } from './pipeline';
 import { enqueue, queueAdvisory } from './delivery';
 import { advisoryEmail } from './advisoryEmail';
-import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state';
+import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
 import { emailIsConfigured } from './emailProviders';
 import { parseSyndication, RSS_MAX_BYTES } from './rss';
 import { readEvents, writeEvent } from './events';
-import type { AppState } from '../shared/state';
-import type { AppSettings, ThreatFeed, WebhookEndpoint, Advisory, TemplateCustomization, EmailConfiguration } from '../src/types';
-import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler';
+import type { AppState } from '../shared/state.ts';
+import type { AppSettings, ThreatFeed, WebhookEndpoint, Advisory, TemplateCustomization, EmailConfiguration } from '../src/types/index.ts';
+import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler/templateCompiler.ts';
 function publicState(data: AppState): AppState {
   return {
     ...data,

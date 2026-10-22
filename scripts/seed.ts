@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { loadConfig } from '../server/config';
-import { createPool, get, transaction } from '../server/db';
-import { applyCommand } from '../server/commands';
-import { RECOMMENDED_FEEDS } from '../server/recommendedFeeds';
-import { INITIAL_WATCHLIST } from '../tests/fixtures/seedData';
+import { loadConfig } from '../server/config.ts';
+import { createPool, get, transaction } from '../server/db.ts';
+import { applyCommand } from '../server/commands.ts';
+import { RECOMMENDED_FEEDS } from '../server/recommendedFeeds.ts';
+import { INITIAL_WATCHLIST } from '../tests/fixtures/seedData.ts';
 
 const config = loadConfig();
 const pool = createPool(config.DATABASE_URL);

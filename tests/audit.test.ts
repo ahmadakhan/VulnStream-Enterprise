@@ -1,11 +1,11 @@
-import { generateCPE23 } from '../src/utils/cpeMatcher';
-import { buildStrictCpe23 } from '../src/data/vendorCatalog';
-import type { NormalizedCVE, WatchListItem } from '../src/types';
+import { generateCPE23 } from '../src/utils/cpeMatcher/cpeMatcher.ts';
+import { buildStrictCpe23 } from '../src/data/vendorCatalog/vendorCatalog.ts';
+import type { NormalizedCVE, WatchListItem } from '../src/types/index.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
-import { matchCPE, matchPurl, matchesWatchlistItem, parseCPE23 } from '../src/utils/cpeMatcher';
-import { compareVersions } from '../src/utils/versionComparator';
+import { matchCPE, matchPurl, matchesWatchlistItem, parseCPE23 } from '../src/utils/cpeMatcher/cpeMatcher.ts';
+import { compareVersions } from '../src/utils/versionComparator/versionComparator.ts';
 import { mergeCveRecords } from '../src/utils/deduplicator';
 import { quickHash, generateHmacSignature } from '../src/utils/cryptoChain';
 import { runVulnerabilityPipeline, validateSsrfSafety } from '../src/engine/pipelineEngine';
@@ -123,7 +123,7 @@ test('correlation canonicalizes output without fabricating delivery or mutating 
 
 import { chainAuditLogs, verifyAuditChain } from '../src/utils/cryptoChain';
 import { INITIAL_AUDIT_LOGS } from './fixtures/seedData';
-import { compileCustomizedTemplate, DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler';
+import { compileCustomizedTemplate, DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler/templateCompiler.ts';
 test('audit verification detects changed content and reordered records', () => {
   const logs = chainAuditLogs(INITIAL_AUDIT_LOGS);
   assert.equal(verifyAuditChain(logs), true);

@@ -2,15 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import supertest from 'supertest';
-import { DEFAULT_EMAIL_CONFIG } from '../shared/state';
-import { EmailProviderError, sendProviderEmail } from '../server/emailProviders';
+import { DEFAULT_EMAIL_CONFIG } from '../shared/state/state.ts';
+import { EmailProviderError, sendProviderEmail } from '../server/emailProviders.ts';
 import { createMailSender, deliverNext, type Job } from '../server/delivery';
-import { createPool, migrate, get, list } from '../server/db';
+import { createPool, migrate, get, list } from '../server/db.ts';
 import { createApp } from '../server/app';
 import { createUser } from '../server/auth';
-import { loadConfig } from '../server/config';
-import { decrypt } from '../server/secrets';
-import type { EmailConfiguration, EmailDeliveryLog } from '../src/types';
+import { loadConfig } from '../server/config.ts';
+import { decrypt } from '../server/secrets.ts';
+import type { EmailConfiguration, EmailDeliveryLog } from '../src/types/index.ts';
 
 const token = 'test-provider-token';
 const job: Job = {

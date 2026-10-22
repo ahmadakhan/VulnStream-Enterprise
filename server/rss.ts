@@ -1,6 +1,6 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { createHash } from 'node:crypto';
-import type { IntelligenceArticle } from '../src/types';
+import type { IntelligenceArticle } from '../src/types/index.ts';
 
 export const RSS_MAX_BYTES = 8 * 1024 * 1024;
 export const RSS_MAX_ENTRIES = 10000;

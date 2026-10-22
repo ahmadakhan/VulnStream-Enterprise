@@ -1,11 +1,11 @@
-import { compileCustomizedTemplate } from '../src/utils/templateCompiler';
+import { compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
 import pg, { type PoolClient } from 'pg';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { emptyState, type AppState } from '../shared/state';
-import { chainAuditLogs } from '../src/utils/cryptoChain';
-import type { AuditLog } from '../src/types';
-import { orderWatchlist } from '../src/utils/watchlist';
+import { emptyState, type AppState } from '../shared/state.ts';
+import { chainAuditLogs } from '../src/utils/cryptoChain.ts';
+import type { AuditLog } from '../src/types.ts';
+import { orderWatchlist } from '../src/utils/watchlist.ts';
 export type Db = pg.Pool | PoolClient;
 export const createPool = (url: string) =>
   new pg.Pool({

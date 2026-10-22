@@ -1,4 +1,4 @@
-import { TemplateCustomization } from '../types';
+import { TemplateCustomization } from '../types/index.ts';
 
 export const DEFAULT_TEMPLATE_CUSTOMIZATION: TemplateCustomization = {
   fontFamily: 'sans',

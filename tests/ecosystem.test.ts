@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ingestFeed, normalizeNvd } from '../server/ingestion';
-import { loadConfig } from '../server/config';
+import { loadConfig } from '../server/config.ts';
 import { mergeCveRecords } from '../src/utils/deduplicator';
-import { matchesWatchlistItem } from '../src/utils/cpeMatcher';
+import { matchesWatchlistItem } from '../src/utils/cpeMatcher/cpeMatcher.ts';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
-import { DEFAULT_SETTINGS } from '../shared/state';
-import { cveSchema } from '../server/validation';
-import type { NormalizedCVE, ThreatFeed, WatchListItem } from '../src/types';
+import { DEFAULT_SETTINGS } from '../shared/state/state.ts';
+import { cveSchema } from '../server/validation.ts';
+import type { NormalizedCVE, ThreatFeed, WatchListItem } from '../src/types/index.ts';
 
 const config = loadConfig({
   NODE_ENV: 'test',

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { WatchListItem } from '../src/types';
-import { editedWatchlistCpe, orderWatchlist } from '../src/utils/watchlist';
+import type { WatchListItem } from '../src/types/index.ts';
+import { editedWatchlistCpe, orderWatchlist } from '../src/utils/watchlist/watchlist.ts';
 
 const item = (id: string, createdAt: string, product = 'widget'): WatchListItem => ({
   id,

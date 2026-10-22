@@ -3,7 +3,7 @@
  * Spec: NIST IR 7695 & Package URL (purl-spec)
  */
 
-import { NvdVersionRange, canCompareRange, isVersionInNvdRange } from './versionComparator';
+import { NvdVersionRange, canCompareRange, isVersionInNvdRange } from './versionComparator.ts';
 
 export interface ParsedCPE {
   prefix: string; // cpe:2.3

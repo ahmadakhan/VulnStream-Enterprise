@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { recoveryAt, recoveryDue, shouldStartAutomaticRun } from '../server/feedRecovery';
-import { feedSchema } from '../server/validation';
+import { feedSchema } from '../server/validation.ts';
 import { ingestFeed } from '../server/ingestion';
-import type { ThreatFeed } from '../src/types';
-import { loadConfig } from '../server/config';
+import type { ThreatFeed } from '../src/types/index.ts';
+import { loadConfig } from '../server/config.ts';
 const feed = { id: 'source', name: 'Source', type: 'JSON_SEARCH_API', url: 'https://example.com/feed', authType: 'NONE', rateLimitPerMin: 60, enabled: true, healthStatus: 'DOWN', recoveryDelayMinutes: 2 } as ThreatFeed;
 test('failed sources recover at their persisted deadline and back off to one hour', () => {
   const now = Date.now();

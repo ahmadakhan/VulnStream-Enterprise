@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { Db } from './db';
-import { get, list, put, remove, appendAudit } from './db';
+import type { Db } from './db.ts';
+import { get, list, put, remove, appendAudit } from './db.ts';
 import {
   feedSchema,
   feedImportSchema,
@@ -13,14 +13,14 @@ import {
   settingsSchema,
   templateSchema,
   HttpError,
-} from './validation';
-import { encrypt, randomToken } from './secrets';
-import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state';
-import { emailConfigSchema } from './validation';
-import { emailEndpoint } from './emailProviders';
-import { compileCustomizedTemplate } from '../src/utils/templateCompiler';
+} from './validation.ts';
+import { encrypt, randomToken } from './secrets.ts';
+import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
+import { emailConfigSchema } from './validation.ts';
+import { emailEndpoint } from './emailProviders.ts';
+import { compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
 import type { Config } from './config';
-import { isSmtpEmailProvider, type AppSettings, type Finding, type EmailConfiguration } from '../src/types';
+import { isSmtpEmailProvider, type AppSettings, type Finding, type EmailConfiguration } from '../src/types/index.ts';
 
 export interface CommandRequest {
   action: string;

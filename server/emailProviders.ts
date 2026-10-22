@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { isSmtpEmailProvider, type EmailConfiguration, type EmailDeliveryLog } from '../src/types';
+import { isSmtpEmailProvider, type EmailConfiguration, type EmailDeliveryLog } from '../src/types/index.ts';
 import type { Job } from './delivery';
 import type { Requester } from './network';
 
@@ -58,13 +58,11 @@ export function emailIsConfigured(
   );
 }
 export class EmailProviderError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-    public retryAt = 0,
-    public provider?: EmailDeliveryLog['provider'],
-  ) {
+  constructor(message: string, status: number, retryAt = 0, provider?: EmailDeliveryLog['provider']) {
     super(message);
+    this.status = status;
+    this.retryAt = retryAt;
+    this.provider = provider;
   }
 }
 

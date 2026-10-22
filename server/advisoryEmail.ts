@@ -1,4 +1,4 @@
-import type { Advisory } from '../src/types';
+import type { Advisory } from '../src/types/index.ts';
 
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, ch =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
