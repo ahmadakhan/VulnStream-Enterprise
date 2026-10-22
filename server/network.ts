@@ -1,5 +1,8 @@
 import https from 'node:https';
 import { lookup } from 'node:dns/promises';
+import { pipeline } from 'node:stream/promises';
+import { Transform, Writable, type Readable } from 'node:stream';
+import { createGunzip } from 'node:zlib';
 import ipaddr from 'ipaddr.js';
 import type { Config } from './config';
 export function publicAddress(address: string): boolean {
@@ -49,6 +52,43 @@ export interface RequestOptions {
   /** Maximum accepted response body size. */
   maxResponseBytes?: number;
 }
+/** Read a response stream with independent wire and decompressed size limits. */
+export async function readResponseBody(
+  response: Readable,
+  contentEncoding: string | undefined,
+  maxResponseBytes: number,
+): Promise<string> {
+  const encoding = (contentEncoding || 'identity').trim().toLowerCase();
+  if (!['identity', 'gzip', 'x-gzip'].includes(encoding)) {
+    response.destroy();
+    throw new Error(`Unsupported response content encoding: ${encoding}`);
+  }
+  const limiter = (label: string) => {
+    let size = 0;
+    return new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        size += chunk.length;
+        if (size > maxResponseBytes) callback(new Error(`${label} exceeds configured ${maxResponseBytes}-byte limit`));
+        else callback(null, chunk);
+      },
+    });
+  };
+  const chunks: Buffer[] = [];
+  const sink = new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      chunks.push(Buffer.from(chunk));
+      callback();
+    },
+  });
+  await pipeline(
+    response,
+    limiter('Response transfer'),
+    ...(encoding === 'identity' ? [] : [createGunzip()]),
+    limiter('Decoded response'),
+    sink,
+  );
+  return Buffer.concat(chunks).toString('utf8');
+}
 export type Requester = (
   url: string,
   options?: RequestOptions,
@@ -66,7 +106,7 @@ export function createRequester(config: Config): Requester {
         url,
         {
           method: options.method || 'GET',
-          headers: { 'user-agent': 'VulnStream/1.0', accept: 'application/json', ...options.headers },
+          headers: { 'user-agent': 'VulnStream/1.0', accept: 'application/json', 'accept-encoding': 'gzip', ...options.headers },
           lookup: ((_host: string, opts: any, cb: any) =>
             opts?.all ? cb(null, [selected]) : cb(null, selected.address, selected.family)) as any,
           agent: false,
@@ -74,26 +114,15 @@ export function createRequester(config: Config): Requester {
           maxHeaderSize: 16384,
         },
         (response) => {
-          let bytes = 0;
-          const chunks: Buffer[] = [];
           const maxResponseBytes = options.maxResponseBytes ?? 8 * 1024 * 1024;
-          response.on('data', (chunk: Buffer) => {
-            bytes += chunk.length;
-            if (bytes > maxResponseBytes) {
-              response.destroy(new Error(`Response exceeds configured ${maxResponseBytes}-byte limit`));
-              return;
-            }
-            chunks.push(chunk);
-          });
-          response.on('error', reject);
-          response.on('end', () => {
+          void readResponseBody(response, response.headers['content-encoding'], maxResponseBytes).then((body) => {
             const status = response.statusCode || 0;
             if (status >= 300 && status < 400 && status !== 304) {
               reject(new Error('Redirects are not permitted'));
               return;
             }
-            resolve({ status, body: Buffer.concat(chunks).toString('utf8'), headers: response.headers });
-          });
+            resolve({ status, body, headers: response.headers });
+          }, reject);
         },
       );
       const deadline = setTimeout(
