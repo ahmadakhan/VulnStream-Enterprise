@@ -402,37 +402,85 @@ export const OperationalLogsView: React.FC = () => {
             </p>
           )}
           <div aria-busy={loading} className="space-y-3">
-            {events.map((event) => (
-              <article key={event.id} className="p-4 rounded-xl border border-slate-500/20 bg-slate-500/5">
-                <div className="flex flex-wrap gap-3 text-xs text-slate-500">
-                  <time>{new Date(event.timestamp).toLocaleString()}</time>
-                  <span>{event.category}</span>
-                  <span
-                    className={
-                      event.level === 'ERROR'
-                        ? 'text-red-500'
-                        : event.level === 'WARNING'
-                          ? 'text-amber-500'
-                          : ''
-                    }
-                  >
-                    {event.level}
-                  </span>
-                  <code>{event.code}</code>
-                </div>
-                <p className="mt-2 font-medium">{event.message}</p>
-                <details className="mt-2 text-sm">
-                  <summary className="cursor-pointer">
-                    Context{event.runId ? ` · Execution ${event.runId}` : ''}
-                  </summary>
-                  <pre className="mt-2 whitespace-pre-wrap break-all text-xs">
-                    {JSON.stringify(event.context, null, 2)}
-                  </pre>
-                </details>
-              </article>
-            ))}
-            {!events.length && !loading && !error && (
+            {events.length === 0 && !loading && !error && (
               <p className="p-8 text-center text-slate-500">No matching events.</p>
+            )}
+            {events.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full table-fixed text-left text-xs">
+                  <colgroup>
+                    <col style={{ width: '11%' }} />
+                    <col style={{ width: '11%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '12%' }} />
+                    <col style={{ width: '32%' }} />
+                    <col style={{ width: '24%' }} />
+                  </colgroup>
+                  <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
+                    <tr>
+                      <th className="py-3 px-4">Timestamp (UTC)</th>
+                      <th className="py-3 px-4">Category</th>
+                      <th className="py-3 px-4">Level</th>
+                      <th className="py-3 px-4">Code</th>
+                      <th className="py-3 px-4">Message &amp; Error Details</th>
+                      <th className="py-3 px-4">Execution ID</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200 font-mono">
+                    {events.map((event) => (
+                      <tr
+                        key={event.id}
+                        className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition"
+                      >
+                        <td className="py-2.5 px-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-[11px]">
+                          {new Date(event.timestamp).toISOString().replace('T', ' ').slice(0, 19)}
+                        </td>
+                        <td className="py-2.5 px-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 text-[11px]">
+                          {event.category}
+                        </td>
+                        <td className="py-2.5 px-4">
+                          <span className={`text-[10px] px-2 py-0.2 rounded-full font-medium border ${
+                            event.level === 'ERROR'
+                              ? 'bg-red-900/30 text-red-400 border-red-800'
+                              : event.level === 'WARNING'
+                                ? 'bg-amber-900/30 text-amber-400 border-amber-800'
+                                : 'bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border-zinc-700 dark:border-zinc-700 light:border-zinc-300'
+                          }`}>
+                            {event.level}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4 font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-800 text-[11px]">
+                          {event.code}
+                        </td>
+                        <td className="py-2.5 px-4 max-w-xs">
+                          <div className="font-semibold text-zinc-200 dark:text-zinc-200 light:text-zinc-900 text-xs">
+                            {event.message}
+                          </div>
+                          {event.level === 'ERROR' && event.context?.error !== undefined && (
+                            <pre className="mt-1 text-[10px] text-red-400 bg-red-950/20 border border-red-900/30 rounded p-1.5 whitespace-pre-wrap break-all overflow-hidden">
+                              {String(event.context.error as unknown as string)}
+                            </pre>
+                          )}
+                          {event.context && Object.keys(event.context).length > 0 &&
+                           !(event.level === 'ERROR' && event.context?.error) && (
+                            <details className="mt-1">
+                              <summary className="cursor-pointer text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-[10px]">
+                                Context
+                              </summary>
+                              <pre className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 whitespace-pre-wrap break-all">
+                                {JSON.stringify(event.context, null, 2)}
+                              </pre>
+                            </details>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono text-[10px] truncate">
+                          {event.runId || '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
           <div className="flex gap-3">
