@@ -205,9 +205,7 @@ export const FindingsView: React.FC = () => {
                             <div className="font-mono font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 flex items-center space-x-1.5">
                               <a
                                 href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(finding.cveId)}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                aria-label={`Open ${finding.cveId} on NVD (new tab)`}
+                                aria-label={`Open ${finding.cveId} on NVD`}
                                 title="Open the source CVE record on NVD"
                                 onClick={(event) => event.stopPropagation()}
                                 className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 hover:underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4 light:text-blue-700 light:hover:text-blue-800"
@@ -335,9 +333,7 @@ export const FindingsView: React.FC = () => {
                 <div className="flex items-center space-x-2">
                   <a
                     href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(selectedFinding.cveId)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`Open ${selectedFinding.cveId} on NVD (new tab)`}
+                    aria-label={`Open ${selectedFinding.cveId} on NVD`}
                     title="Open the source CVE record on NVD"
                     className="inline-flex items-center gap-1 font-mono text-base font-bold text-blue-400 hover:underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4 light:text-blue-700"
                   >
