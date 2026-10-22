@@ -15,6 +15,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { Pagination } from './Pagination';
+import { copyText } from '../utils/clipboard';
 
 const CveCacheView: React.FC = () => {
   const { cveData, settings } = useApp();
@@ -76,11 +77,12 @@ const CveCacheView: React.FC = () => {
 
   const paginatedCves = filteredCves.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-  const handleCopyJson = () => {
+  const handleCopyJson = async () => {
     if (inspectCve) {
-      navigator.clipboard.writeText(JSON.stringify(inspectCve, null, 2));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (await copyText(JSON.stringify(inspectCve, null, 2))) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
     }
   };
 

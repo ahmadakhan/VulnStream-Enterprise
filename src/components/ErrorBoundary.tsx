@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Copy, Check, ShieldAlert } from 'lucide-react';
+import { copyText } from '../utils/clipboard';
 
 interface Props {
   children: ReactNode;
@@ -10,6 +11,7 @@ interface State {
   error: Error | null;
   errorInfo: ErrorInfo | null;
   copied: boolean;
+  copyFailed: boolean;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -20,6 +22,7 @@ export class ErrorBoundary extends Component<Props, State> {
       error: null,
       errorInfo: null,
       copied: false,
+      copyFailed: false,
     };
   }
 
@@ -33,7 +36,7 @@ export class ErrorBoundary extends Component<Props, State> {
     console.error('[VulnStream Enterprise ErrorBoundary]', error, errorInfo);
   }
 
-  handleCopyDiagnostics = () => {
+  handleCopyDiagnostics = async () => {
     const diagnosticPayload = {
       timestamp: new Date().toISOString(),
       error: this.state.error?.toString(),
@@ -42,9 +45,9 @@ export class ErrorBoundary extends Component<Props, State> {
       userAgent: navigator.userAgent,
     };
 
-    navigator.clipboard.writeText(JSON.stringify(diagnosticPayload, null, 2));
-    this.setState({ copied: true });
-    setTimeout(() => this.setState({ copied: false }), 2000);
+    const copied = await copyText(JSON.stringify(diagnosticPayload, null, 2));
+    this.setState({ copied, copyFailed: !copied });
+    setTimeout(() => this.setState({ copied: false, copyFailed: false }), 2500);
   };
 
   handleResetState = () => {
@@ -76,13 +79,15 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
 
             <p className="text-xs text-zinc-300 leading-relaxed mb-4">
-              An unexpected component error occurred. VulnStream isolated the execution tree to prevent state corruption.
-              You can copy diagnostics for SecOps engineering or reload the runtime.
+              An unexpected component error occurred. VulnStream isolated the execution tree to prevent state
+              corruption. You can copy diagnostics for SecOps engineering or reload the runtime.
             </p>
 
             {this.state.error && (
               <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 mb-4 font-mono text-xs text-red-400 overflow-x-auto max-h-36">
-                <div className="font-bold mb-1">{this.state.error.name}: {this.state.error.message}</div>
+                <div className="font-bold mb-1">
+                  {this.state.error.name}: {this.state.error.message}
+                </div>
                 {this.state.errorInfo?.componentStack && (
                   <pre className="text-[10px] text-zinc-500 whitespace-pre-wrap">
                     {this.state.errorInfo.componentStack}
@@ -104,8 +109,18 @@ export class ErrorBoundary extends Component<Props, State> {
                 onClick={this.handleCopyDiagnostics}
                 className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-xs flex items-center space-x-1.5 transition"
               >
-                {this.state.copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{this.state.copied ? 'Diagnostics Copied' : 'Copy Diagnostics'}</span>
+                {this.state.copied ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {this.state.copied
+                    ? 'Diagnostics Copied'
+                    : this.state.copyFailed
+                      ? 'Copy failed; select details above'
+                      : 'Copy Diagnostics'}
+                </span>
               </button>
 
               <button

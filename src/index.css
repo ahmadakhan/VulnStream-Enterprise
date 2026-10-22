@@ -164,6 +164,15 @@ main :is(input, select, textarea):disabled {
 main :is(input, textarea)[readonly] { background-color: var(--ui-subtle); }
 main :is(input, select, textarea)[aria-invalid="true"] { border-color: #e36c7b; }
 main textarea { min-height: 104px; resize: vertical; }
+/* Route views own the semantic page heading. Keep its scale and supporting copy consistent. */
+main h1 {
+  color: var(--ui-text);
+  font-size: clamp(1.25rem, 1.45vw, 1.5rem);
+  font-weight: 650;
+  letter-spacing: -.03em;
+  line-height: 1.25;
+}
+main h1 + p { max-width: 48rem; color: var(--ui-muted); font-size: 13px; line-height: 1.65; }
 main select {
   appearance: none;
   padding-inline: 12px 36px;
@@ -268,6 +277,9 @@ main table td { vertical-align: middle; }
 .ui-check-row input { margin-top: 2px; }
 .ui-section-icon { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border-radius: 11px; color: var(--ui-accent); background: var(--ui-focus); }
 @media (max-width: 640px) { .ui-card { padding: 18px; } }
+@media (max-width: 640px) {
+  main :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) { font-size: 16px; }
+}
 
 .dark main table thead { position: sticky; top: 0; z-index: 1; }
 

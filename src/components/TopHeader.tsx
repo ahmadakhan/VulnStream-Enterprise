@@ -79,9 +79,12 @@ export const TopHeader: React.FC = () => {
             <div className="text-[10px] font-mono text-zinc-500 uppercase font-semibold tracking-wider">
               {meta.section}
             </div>
-            <h1 className="text-sm sm:text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight truncate">
+            <div
+              className="text-sm sm:text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight truncate"
+              aria-hidden="true"
+            >
               {meta.title}
-            </h1>
+            </div>
           </div>
         </div>
 
@@ -90,7 +93,9 @@ export const TopHeader: React.FC = () => {
           {/* Status chips */}
           <div className="hidden lg:flex items-center space-x-2 text-xs">
             <div className="flex items-center space-x-1.5 bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-2.5 py-1 rounded-full text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
-              <span className={`w-1.5 h-1.5 rounded-full ${feeds.some((feed) => feed.enabled) ? 'bg-emerald-500' : 'bg-zinc-500'}`} />
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${feeds.some((feed) => feed.enabled) ? 'bg-emerald-500' : 'bg-zinc-500'}`}
+              />
               <span className="text-[11px] font-mono">
                 {feeds.filter((f) => f.enabled).length} Feeds Enabled
               </span>
@@ -163,7 +168,10 @@ export const TopHeader: React.FC = () => {
             </div>
 
             {scopeDropdownOpen && (
-              <div id="pipeline-scope-options" className="absolute right-0 mt-2 w-48 bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-xl shadow-xl py-1 z-50 text-xs">
+              <div
+                id="pipeline-scope-options"
+                className="absolute right-0 mt-2 w-48 bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-xl shadow-xl py-1 z-50 text-xs"
+              >
                 <div className="px-3 py-1.5 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider font-mono">
                   Timeline Window
                 </div>

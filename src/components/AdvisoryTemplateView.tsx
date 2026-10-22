@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
+import { copyText } from '../utils/clipboard';
 import {
   FileCode,
   Send,
@@ -110,13 +111,14 @@ export const AdvisoryTemplateView: React.FC = () => {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const handleCopyRawHtml = () => {
-    navigator.clipboard.writeText(getRenderedHtml());
-    setCopiedHtml(true);
-    setTimeout(() => setCopiedHtml(false), 2000);
+  const handleCopyRawHtml = async () => {
+    if (await copyText(getRenderedHtml())) {
+      setCopiedHtml(true);
+      setTimeout(() => setCopiedHtml(false), 2000);
+    }
   };
 
   // Preview-only examples; never substitute an unverified real remediation command.
@@ -165,10 +167,11 @@ export const AdvisoryTemplateView: React.FC = () => {
     }
   };
 
-  const handleCopyToken = (token: string) => {
-    navigator.clipboard.writeText(token);
-    setCopiedToken(token);
-    setTimeout(() => setCopiedToken(null), 1800);
+  const handleCopyToken = async (token: string) => {
+    if (await copyText(token)) {
+      setCopiedToken(token);
+      setTimeout(() => setCopiedToken(null), 1800);
+    }
   };
 
   return (
@@ -1003,7 +1006,8 @@ export const AdvisoryTemplateView: React.FC = () => {
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
             <h3 className="text-sm font-bold text-zinc-100 mb-2">Apply professional default?</h3>
             <p className="text-xs text-zinc-400 leading-relaxed mb-6">
-              Replace the preview with the professional navy-and-white preset. Save the template to apply it to future notifications.
+              Replace the preview with the professional navy-and-white preset. Save the template to apply it
+              to future notifications.
             </p>
             <div className="flex justify-end space-x-2">
               <button

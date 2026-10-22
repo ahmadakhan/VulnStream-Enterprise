@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { Advisory } from '../types';
 import { FileText, Download, Printer, Copy, Check, Send, X, ShieldAlert } from 'lucide-react';
 import { Pagination } from './Pagination';
+import { copyText } from '../utils/clipboard';
 
 export const AdvisoriesView: React.FC = () => {
   const { advisories } = useApp();
@@ -15,7 +16,7 @@ export const AdvisoriesView: React.FC = () => {
 
   const paginatedAdvisories = advisories.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-  const handleCopyMarkdown = (adv: Advisory) => {
+  const handleCopyMarkdown = async (adv: Advisory) => {
     const md = `# PRODUCT SECURITY ADVISORY: ${adv.id}
 **Title:** ${adv.title}
 **Severity:** ${adv.severity}
@@ -37,9 +38,10 @@ ${adv.remediationInstructions}
 ---
 *Autonomous Product Vulnerability Notification — VulnStream Platform.*`;
 
-    navigator.clipboard.writeText(md);
-    setCopied(adv.id);
-    setTimeout(() => setCopied(null), 2000);
+    if (await copyText(md)) {
+      setCopied(adv.id);
+      setTimeout(() => setCopied(null), 2000);
+    }
   };
 
   const handleDownloadHtmlPdf = (original: Advisory) => {
@@ -114,7 +116,7 @@ ${adv.remediationInstructions}
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const handlePrintInPage = () => {

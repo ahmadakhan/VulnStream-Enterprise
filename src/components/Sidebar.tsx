@@ -42,7 +42,9 @@ export const Sidebar: React.FC = () => {
   } = useApp();
 
   const activeFindingsCount = findings.filter(
-    f => f.status !== 'RESOLVED' && f.status !== 'FALSE_POSITIVE'
+    (f) =>
+      !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status) &&
+      f.notificationStatus !== 'NOT_APPLICABLE',
   ).length;
 
   const sessionMins = Math.floor(sessionTimeRemainingSec / 60);

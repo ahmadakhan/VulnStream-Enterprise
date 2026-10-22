@@ -39,8 +39,8 @@ export const DashboardView: React.FC = () => {
       !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status) &&
       f.notificationStatus !== 'NOT_APPLICABLE',
   );
-  const kevFindings = findings.filter((f) => f.cve.cisaKev.isKev);
-  const criticalFindings = findings.filter((f) => f.cve.cvss.severity === 'CRITICAL');
+  const kevFindings = activeVulnerabilities.filter((f) => f.cve.cisaKev.isKev);
+  const criticalFindings = activeVulnerabilities.filter((f) => f.cve.cvss.severity === 'CRITICAL');
   const deliveredEmails = emailLogs.filter((e) => ['ACCEPTED', 'DELIVERED'].includes(e.status)).length;
 
   const totalCpesCount = watchlist.reduce((acc, curr) => acc + curr.cpes.length, 0);
@@ -58,7 +58,9 @@ export const DashboardView: React.FC = () => {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center space-x-2 text-xs font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1">
-              <span className={`w-2 h-2 rounded-full ${settings.schedulerEnabled ? 'bg-emerald-500' : 'bg-zinc-500'}`} />
+              <span
+                className={`w-2 h-2 rounded-full ${settings.schedulerEnabled ? 'bg-emerald-500' : 'bg-zinc-500'}`}
+              />
               <span>
                 SCHEDULER {settings.schedulerEnabled ? 'ENABLED' : 'DISABLED'} • CPE &amp; PURL CORRELATION
               </span>
@@ -67,9 +69,9 @@ export const DashboardView: React.FC = () => {
               Product Vulnerability Tracking &amp; Notification System
             </h1>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 max-w-2xl mt-1 leading-relaxed">
-              Ingest configured NVD, CISA KEV, FIRST EPSS, OpenCVE, VulnCheck KEV and normalized JSON feeds, correlate them with inventory,
-              and queue notifications when automatic dispatch is enabled. Review uncertain applicability
-              before remediation.
+              Ingest configured NVD, CISA KEV, FIRST EPSS, OpenCVE, VulnCheck KEV and normalized JSON feeds,
+              correlate them with inventory, and queue notifications when automatic dispatch is enabled.
+              Review uncertain applicability before remediation.
             </p>
           </div>
           <div className="flex items-center space-x-2.5 shrink-0">
@@ -86,10 +88,12 @@ export const DashboardView: React.FC = () => {
       {/* ALL KPI Cards CLICKABLE with direct navigation */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {/* 1. Monitored Products -> Watchlist */}
-        <div
+        <button
+          type="button"
           onClick={() => setActiveTab('watchlist')}
-          className="group cursor-pointer bg-zinc-900/40 dark:bg-zinc-900/40 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 hover:border-zinc-600 dark:hover:border-zinc-600 light:hover:border-zinc-400 hover:bg-zinc-900/70 transition shadow-sm"
+          className="group w-full cursor-pointer rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-4 text-left shadow-sm transition hover:border-zinc-600 hover:bg-zinc-900/70 dark:border-zinc-800/80 dark:bg-zinc-900/40 dark:hover:border-zinc-600 light:border-zinc-200 light:bg-white light:hover:border-zinc-400"
           title="Click to view and manage Monitored Products"
+          aria-label={`View ${watchlist.length} monitored products`}
         >
           <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-xs mb-1.5">
             <span className="group-hover:text-zinc-200 transition">Products</span>
@@ -100,13 +104,15 @@ export const DashboardView: React.FC = () => {
             <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-300 group-hover:translate-x-0.5 transition" />
           </div>
           <div className="text-[11px] text-zinc-500 mt-1 font-medium">{totalCpesCount} Strict CPEs</div>
-        </div>
+        </button>
 
         {/* 2. Active Vulnerabilities -> Findings */}
-        <div
+        <button
+          type="button"
           onClick={() => setActiveTab('findings')}
-          className="group cursor-pointer bg-zinc-900/40 dark:bg-zinc-900/40 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 hover:border-zinc-600 dark:hover:border-zinc-600 light:hover:border-zinc-400 hover:bg-zinc-900/70 transition shadow-sm"
+          className="group w-full cursor-pointer rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-4 text-left shadow-sm transition hover:border-zinc-600 hover:bg-zinc-900/70 dark:border-zinc-800/80 dark:bg-zinc-900/40 dark:hover:border-zinc-600 light:border-zinc-200 light:bg-white light:hover:border-zinc-400"
           title="Click to review correlated product vulnerabilities"
+          aria-label={`Review ${activeVulnerabilities.length} active vulnerabilities`}
         >
           <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-xs mb-1.5">
             <span className="group-hover:text-zinc-200 transition">Vulnerabilities</span>
@@ -119,13 +125,15 @@ export const DashboardView: React.FC = () => {
           <div className="text-[11px] text-zinc-500 mt-1 font-medium">
             {criticalFindings.length} Critical Impact
           </div>
-        </div>
+        </button>
 
         {/* 3. CISA KEV In Wild -> Findings */}
-        <div
+        <button
+          type="button"
           onClick={() => setActiveTab('findings')}
-          className="group cursor-pointer bg-zinc-900/40 dark:bg-zinc-900/40 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 hover:border-amber-600/60 dark:hover:border-amber-600/60 light:hover:border-amber-400 hover:bg-zinc-900/70 transition shadow-sm"
+          className="group w-full cursor-pointer rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-4 text-left shadow-sm transition hover:border-amber-600/60 hover:bg-zinc-900/70 dark:border-zinc-800/80 dark:bg-zinc-900/40 dark:hover:border-amber-600/60 light:border-zinc-200 light:bg-white light:hover:border-amber-400"
           title="Click to view CISA KEV actively exploited items"
+          aria-label={`Review ${kevFindings.length} active CISA KEV vulnerabilities`}
         >
           <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-xs mb-1.5">
             <span className="group-hover:text-amber-400 transition">CISA KEV</span>
@@ -136,13 +144,15 @@ export const DashboardView: React.FC = () => {
             <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-amber-300 group-hover:translate-x-0.5 transition" />
           </div>
           <div className="text-[11px] text-amber-500/80 mt-1 font-medium">Active in Wild</div>
-        </div>
+        </button>
 
         {/* 4. Automated Notifications -> Email / Webhook Log */}
-        <div
+        <button
+          type="button"
           onClick={() => setActiveTab('emails')}
-          className="group cursor-pointer bg-zinc-900/40 dark:bg-zinc-900/40 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 hover:border-emerald-600/60 dark:hover:border-emerald-600/60 light:hover:border-emerald-400 hover:bg-zinc-900/70 transition shadow-sm"
+          className="group w-full cursor-pointer rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-4 text-left shadow-sm transition hover:border-emerald-600/60 hover:bg-zinc-900/70 dark:border-zinc-800/80 dark:bg-zinc-900/40 dark:hover:border-emerald-600/60 light:border-zinc-200 light:bg-white light:hover:border-emerald-400"
           title="Click to view automated email & notification log"
+          aria-label={`View ${deliveredEmails} accepted notifications`}
         >
           <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-xs mb-1.5">
             <span className="group-hover:text-emerald-400 transition">Auto-Dispatched</span>
@@ -153,13 +163,15 @@ export const DashboardView: React.FC = () => {
             <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-emerald-300 group-hover:translate-x-0.5 transition" />
           </div>
           <div className="text-[11px] text-zinc-500 mt-1 font-medium">Provider Accepted</div>
-        </div>
+        </button>
 
         {/* 5. Threat Feeds -> Threat Feeds View */}
-        <div
+        <button
+          type="button"
           onClick={() => setActiveTab('feeds')}
-          className="group cursor-pointer bg-zinc-900/40 dark:bg-zinc-900/40 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 hover:border-zinc-600 dark:hover:border-zinc-600 light:hover:border-zinc-400 hover:bg-zinc-900/70 transition shadow-sm"
+          className="group w-full cursor-pointer rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-4 text-left shadow-sm transition hover:border-zinc-600 hover:bg-zinc-900/70 dark:border-zinc-800/80 dark:bg-zinc-900/40 dark:hover:border-zinc-600 light:border-zinc-200 light:bg-white light:hover:border-zinc-400"
           title="Click to inspect and manage Threat Feeds"
+          aria-label={`Inspect ${feeds.length} threat feeds`}
         >
           <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-xs mb-1.5">
             <span className="group-hover:text-zinc-200 transition">Threat Feeds</span>
@@ -172,13 +184,15 @@ export const DashboardView: React.FC = () => {
             <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-300 group-hover:translate-x-0.5 transition" />
           </div>
           <div className="text-[11px] text-zinc-500 mt-1 font-medium">SSRF Guard Active</div>
-        </div>
+        </button>
 
         {/* 6. Generated Advisories -> Advisories View */}
-        <div
+        <button
+          type="button"
           onClick={() => setActiveTab('advisories')}
-          className="group cursor-pointer bg-zinc-900/40 dark:bg-zinc-900/40 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 hover:border-zinc-600 dark:hover:border-zinc-600 light:hover:border-zinc-400 hover:bg-zinc-900/70 transition shadow-sm"
+          className="group w-full cursor-pointer rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-4 text-left shadow-sm transition hover:border-zinc-600 hover:bg-zinc-900/70 dark:border-zinc-800/80 dark:bg-zinc-900/40 dark:hover:border-zinc-600 light:border-zinc-200 light:bg-white light:hover:border-zinc-400"
           title="Click to view generated security advisories"
+          aria-label={`View ${advisories.length} generated advisories`}
         >
           <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-xs mb-1.5">
             <span className="group-hover:text-zinc-200 transition">Advisories</span>
@@ -189,7 +203,7 @@ export const DashboardView: React.FC = () => {
             <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-300 group-hover:translate-x-0.5 transition" />
           </div>
           <div className="text-[11px] text-zinc-500 mt-1 font-medium">Generated &amp; Logged</div>
-        </div>
+        </button>
       </div>
 
       {/* Two Column Section: Correlated Vulnerabilities + Monitored Product Protection Telemetry */}
@@ -213,15 +227,17 @@ export const DashboardView: React.FC = () => {
           </div>
 
           <div className="space-y-2.5">
-            {findings.slice(0, 4).map((finding) => {
+            {activeVulnerabilities.slice(0, 4).map((finding) => {
               const isKev = finding.cve.cisaKev.isKev;
 
               return (
-                <div
+                <button
+                  type="button"
                   key={finding.id}
                   onClick={() => handleSelectFinding(finding)}
-                  className="p-3.5 rounded-xl border border-zinc-800/70 dark:border-zinc-800/70 light:border-zinc-200 bg-zinc-950/40 dark:bg-zinc-950/40 light:bg-zinc-50 hover:bg-zinc-900/60 dark:hover:bg-zinc-900/60 light:hover:bg-zinc-100 hover:border-zinc-700 dark:hover:border-zinc-700 light:hover:border-zinc-400 transition cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm"
+                  className="w-full p-3.5 rounded-xl border border-zinc-800/70 dark:border-zinc-800/70 light:border-zinc-200 bg-zinc-950/40 dark:bg-zinc-950/40 light:bg-zinc-50 hover:bg-zinc-900/60 dark:hover:bg-zinc-900/60 light:hover:bg-zinc-100 hover:border-zinc-700 dark:hover:border-zinc-700 light:hover:border-zinc-400 transition cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm text-left"
                   title="Click to inspect vulnerability playbook"
+                  aria-label={`Inspect ${finding.cveId} affecting ${finding.matchedAssetName}`}
                 >
                   <div className="space-y-1">
                     <div className="flex items-center space-x-2">
@@ -273,7 +289,7 @@ export const DashboardView: React.FC = () => {
                           : 'Notification pending'}
                     </div>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -290,9 +306,11 @@ export const DashboardView: React.FC = () => {
             </div>
 
             <div className="space-y-3">
-              <div
+              <button
+                type="button"
                 onClick={() => setActiveTab('watchlist')}
-                className="cursor-pointer p-3 rounded-xl bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 hover:border-zinc-700 transition"
+                className="w-full cursor-pointer p-3 rounded-xl bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 hover:border-zinc-700 transition text-left"
+                aria-label={`Open product inventory: ${watchlist.length} assets`}
               >
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-medium flex items-center gap-2">
@@ -306,11 +324,13 @@ export const DashboardView: React.FC = () => {
                 <div className="text-[11px] text-zinc-500 light:text-zinc-600 mt-1 pl-6">
                   All enterprise software products treated with uniform priority.
                 </div>
-              </div>
+              </button>
 
-              <div
+              <button
+                type="button"
                 onClick={() => setActiveTab('watchlist')}
-                className="cursor-pointer p-3 rounded-xl bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 hover:border-zinc-700 transition"
+                className="w-full cursor-pointer p-3 rounded-xl bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 hover:border-zinc-700 transition text-left"
+                aria-label={`Open product inventory: ${totalCpesCount} CPE identifiers`}
               >
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-medium flex items-center gap-2">
@@ -324,11 +344,13 @@ export const DashboardView: React.FC = () => {
                 <div className="text-[11px] text-zinc-500 light:text-zinc-600 mt-1 pl-6">
                   Precise component matching across Vendor, Product, and SemVer ranges.
                 </div>
-              </div>
+              </button>
 
-              <div
+              <button
+                type="button"
                 onClick={() => setActiveTab('watchlist')}
-                className="cursor-pointer p-3 rounded-xl bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 hover:border-zinc-700 transition"
+                className="w-full cursor-pointer p-3 rounded-xl bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 hover:border-zinc-700 transition text-left"
+                aria-label={`Open product inventory: ${totalPurlsCount} package URLs`}
               >
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-medium flex items-center gap-2">
@@ -342,11 +364,13 @@ export const DashboardView: React.FC = () => {
                 <div className="text-[11px] text-zinc-500 light:text-zinc-600 mt-1 pl-6">
                   Maven, NPM, PyPI, and Golang dependency signatures.
                 </div>
-              </div>
+              </button>
 
-              <div
+              <button
+                type="button"
                 onClick={() => setActiveTab('pipeline')}
-                className="cursor-pointer p-3 rounded-xl bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 hover:border-zinc-700 transition"
+                className="w-full cursor-pointer p-3 rounded-xl bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 hover:border-zinc-700 transition text-left"
+                aria-label={`Open pipeline executions; scheduler ${settings.schedulerEnabled ? 'enabled' : 'disabled'}`}
               >
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-medium flex items-center gap-2">
@@ -360,7 +384,7 @@ export const DashboardView: React.FC = () => {
                 <div className="text-[11px] text-zinc-500 light:text-zinc-600 mt-1 pl-6">
                   Server scheduler • Configure interval in Settings.
                 </div>
-              </div>
+              </button>
             </div>
           </div>
 
@@ -402,11 +426,13 @@ export const DashboardView: React.FC = () => {
             { phase: '4. Product Match', desc: 'Strict component matching & PURL', targetTab: 'watchlist' },
             { phase: '5. Auto-Dispatch', desc: 'Durable SMTP & webhook outbox', targetTab: 'emails' },
           ].map((step, idx) => (
-            <div
+            <button
+              type="button"
               key={idx}
               onClick={() => setActiveTab(step.targetTab)}
-              className="group cursor-pointer bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 border border-zinc-800/70 dark:border-zinc-800/70 light:border-zinc-200 rounded-xl p-3 hover:border-zinc-600 dark:hover:border-zinc-600 light:hover:border-zinc-400 hover:bg-zinc-900/60 dark:hover:bg-zinc-900/60 light:hover:bg-zinc-100 transition relative shadow-sm"
+              className="group w-full cursor-pointer bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 border border-zinc-800/70 dark:border-zinc-800/70 light:border-zinc-200 rounded-xl p-3 hover:border-zinc-600 dark:hover:border-zinc-600 light:hover:border-zinc-400 hover:bg-zinc-900/60 dark:hover:bg-zinc-900/60 light:hover:bg-zinc-100 transition relative shadow-sm text-left"
               title={`Click to open ${step.phase}`}
+              aria-label={`Open ${step.phase}: ${step.desc}`}
             >
               <div className="text-[10px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-500 flex items-center justify-between">
                 <span>PHASE {idx + 1}</span>
@@ -418,7 +444,7 @@ export const DashboardView: React.FC = () => {
               <div className="text-[11px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1 leading-snug">
                 {step.desc}
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </div>
