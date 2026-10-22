@@ -22,7 +22,12 @@ import { Pagination } from './Pagination';
 import { copyText } from '../utils/clipboard';
 
 export const FindingsView: React.FC = () => {
-  const { findings, selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification } = useApp();
+  const { findings, selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification, theme } = useApp();
+  const cveLinkStyle = {
+    color: theme === 'dark' ? '#67e8f9' : '#0e7490',
+    backgroundColor: theme === 'dark' ? 'rgba(8, 145, 178, 0.2)' : 'rgba(8, 145, 178, 0.1)',
+    borderColor: theme === 'dark' ? 'rgba(34, 211, 238, 0.55)' : 'rgba(14, 116, 144, 0.4)',
+  };
 
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState('ALL');
@@ -208,6 +213,7 @@ export const FindingsView: React.FC = () => {
                                 aria-label={`Open ${finding.cveId} on NVD`}
                                 title="Open the source CVE record on NVD"
                                 onClick={(event) => event.stopPropagation()}
+                                style={cveLinkStyle}
                                 className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-300 underline decoration-cyan-500/60 underline-offset-4 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-2 light:text-cyan-700 light:hover:text-cyan-800"
                               >
                                 {finding.cveId}
@@ -335,6 +341,7 @@ export const FindingsView: React.FC = () => {
                     href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(selectedFinding.cveId)}`}
                     aria-label={`Open ${selectedFinding.cveId} on NVD`}
                     title="Open the source CVE record on NVD"
+                    style={cveLinkStyle}
                     className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 font-mono text-base font-bold text-cyan-300 underline decoration-cyan-500/60 underline-offset-4 transition-colors hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-2 light:text-cyan-700 light:hover:text-cyan-800"
                   >
                     {selectedFinding.cveId}
