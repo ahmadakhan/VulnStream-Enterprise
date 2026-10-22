@@ -13,6 +13,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { Pagination } from './Pagination';
+import { CveLink } from './CveLink';
 
 export const AlertedCVEsView: React.FC = () => {
   const { alertedCves, resendNotification } = useApp();
@@ -106,16 +107,7 @@ export const AlertedCVEsView: React.FC = () => {
                   className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition"
                 >
                   <td className="py-3 px-4 font-mono font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 text-sm">
-                    <a
-                      href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(item.cveId)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label={`Open ${item.cveId} on NVD (new tab)`}
-                      title="View the canonical CVE record on NVD"
-                      className="hover:text-blue-400 hover:underline focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4 rounded"
-                    >
-                      {item.cveId}
-                    </a>
+                    <CveLink cveId={item.cveId} />
                   </td>
                   <td className="py-3 px-4 font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-800">
                     {item.advisoryId}
@@ -181,7 +173,7 @@ export const AlertedCVEsView: React.FC = () => {
 
             <h3 className="text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-1 flex items-center gap-2">
               <Send className="w-4 h-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
-              Resend Notification: {selectedCve.cveId}
+              Resend Notification: <CveLink cveId={selectedCve.cveId} />
             </h3>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
               Dispatches an updated vulnerability notice for this product to the security distribution list.

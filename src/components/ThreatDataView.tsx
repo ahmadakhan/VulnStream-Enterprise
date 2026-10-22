@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { copyText } from '../utils/clipboard';
+import { CveLink } from './CveLink';
 
 const CveCacheView: React.FC = () => {
   const { cveData, settings } = useApp();
@@ -257,16 +258,7 @@ const CveCacheView: React.FC = () => {
                     {/* Canonical CVE */}
                     <td className="py-3 px-4">
                       <div className="flex items-center space-x-2">
-                        <a
-                          href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cve.cveId)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          aria-label={`Open ${cve.cveId} on NVD (new tab)`}
-                          title="View the canonical CVE record on NVD"
-                          className="font-mono font-semibold text-blue-400 light:text-blue-700 text-sm hover:underline underline-offset-4 rounded focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4"
-                        >
-                          {cve.cveId}
-                        </a>
+                        <CveLink cveId={cve.cveId} />
                         {cve.cisaKev.isKev && (
                           <span className="bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 px-2 py-0.2 rounded-full font-mono text-[10px] font-medium flex items-center gap-1">
                             <Flame className="w-3 h-3 text-amber-500" />
@@ -406,7 +398,7 @@ const CveCacheView: React.FC = () => {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono flex items-center gap-2">
                 <FileJson className="w-5 h-5 text-zinc-400" />
-                Normalized Ingestion Record: {inspectCve.cveId}
+                Normalized Ingestion Record: <CveLink cveId={inspectCve.cveId} />
               </h2>
               <button
                 onClick={handleCopyJson}
@@ -496,14 +488,22 @@ export const ThreatDataView: React.FC = () => {
               </p>
               <p className="text-sm">{article.summary}</p>
               <p className="text-xs text-slate-500">
-                {article.cveIds.join(' · ') || 'No explicit CVE reference'}
+                {article.cveIds.length
+                  ? article.cveIds.map((cveId, index) => (
+                      <React.Fragment key={cveId}>
+                        {index > 0 && ' · '}
+                        <CveLink cveId={cveId} />
+                      </React.Fragment>
+                    ))
+                  : 'No explicit CVE reference'}
               </p>
               {intelligenceMatches
                 .filter((match) => match.articleIds.includes(article.id))
                 .map((match) => (
                   <div key={match.id} className="border-l-2 border-blue-500 pl-3 text-sm">
                     <p className="font-medium">
-                      {match.assetName} · {match.cveId || 'CVE unassigned'} ·{' '}
+                      {match.assetName} ·{' '}
+                      {match.cveId ? <CveLink cveId={match.cveId} /> : 'CVE unassigned'} ·{' '}
                       {match.status === 'CORROBORATED' ? 'Corroborated' : 'Review required'}
                     </p>
                     <p className="text-slate-500">{match.evidence}</p>

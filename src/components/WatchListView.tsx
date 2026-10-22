@@ -40,6 +40,7 @@ import {
 import { runVulnerabilityPipeline } from '../engine/pipelineEngine';
 import { Pagination } from './Pagination';
 import { editedWatchlistCpe } from '../utils/watchlist';
+import { CveLink } from './CveLink';
 
 export const WatchListView: React.FC = () => {
   const {
@@ -645,7 +646,7 @@ export const WatchListView: React.FC = () => {
               {simResults.matchedCves.map((result) => (
                 <article key={result.cve.cveId} className="border border-zinc-700 rounded p-3">
                   <h3 className="font-semibold">
-                    {result.cve.cveId} — {result.cve.title}
+                    <CveLink cveId={result.cve.cveId} /> — {result.cve.title}
                   </h3>
                   <p>
                     {result.autoAction} · {result.method}

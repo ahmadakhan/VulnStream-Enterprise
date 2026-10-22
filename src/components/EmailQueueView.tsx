@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { EmailQueueItem } from '../types';
+import { CveLink } from './CveLink';
 
 const panel =
   'rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white';
@@ -400,7 +401,13 @@ export function EmailQueueView() {
             </div>
             {reviewing.cveIds?.length ? (
               <p className="mt-4 text-xs text-zinc-400">
-                CVEs: <span className="font-mono">{reviewing.cveIds.join(', ')}</span>
+                CVEs: {' '}
+                {reviewing.cveIds.map((cveId, index) => (
+                  <React.Fragment key={cveId}>
+                    {index > 0 && ', '}
+                    <CveLink cveId={cveId} />
+                  </React.Fragment>
+                ))}
               </p>
             ) : null}
             <pre className="mt-4 max-h-[45vh] overflow-auto whitespace-pre-wrap rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 text-xs leading-relaxed text-zinc-300 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-700">

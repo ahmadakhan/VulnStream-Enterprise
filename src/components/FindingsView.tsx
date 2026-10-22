@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { copyText } from '../utils/clipboard';
+import { CveLink } from './CveLink';
 
 export const FindingsView: React.FC = () => {
   const { findings, selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification } = useApp();
@@ -203,17 +204,7 @@ export const FindingsView: React.FC = () => {
                           {/* CVE ID */}
                           <td className="py-3 px-3.5">
                             <div className="font-mono font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 flex items-center space-x-1.5">
-                              <a
-                                href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(finding.cveId)}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                aria-label={`Open ${finding.cveId} on NVD (new tab)`}
-                                title="View the canonical CVE record on NVD"
-                                onClick={(event) => event.stopPropagation()}
-                                className="font-mono font-semibold text-blue-400 light:text-blue-700 text-sm hover:underline underline-offset-4 rounded focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4"
-                              >
-                                {finding.cveId}
-                              </a>
+                              <CveLink cveId={finding.cveId} />
                               {isKev && (
                                 <span title="CISA KEV Catalog">
                                   <Flame className="w-3.5 h-3.5 text-amber-500/80" />
@@ -332,16 +323,7 @@ export const FindingsView: React.FC = () => {
             <div className="flex items-start justify-between border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 pb-3">
               <div>
                 <div className="flex items-center space-x-2">
-                  <a
-                    href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(selectedFinding.cveId)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`Open ${selectedFinding.cveId} on NVD (new tab)`}
-                    title="View the canonical CVE record on NVD"
-                    className="inline-flex items-center gap-1 font-mono font-semibold text-blue-400 light:text-blue-700 text-base hover:underline underline-offset-4 rounded focus-visible:outline-2 focus-visible:outline-blue-500 focus-visible:outline-offset-4"
-                  >
-                    {selectedFinding.cveId}
-                  </a>
+                  <CveLink cveId={selectedFinding.cveId} className="text-base" />
                   {selectedFinding.cve.cisaKev.isKev && (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/40 text-amber-300 border border-amber-800/80 flex items-center gap-1 font-semibold">
                       <Flame className="w-3 h-3 text-amber-500" />
@@ -594,7 +576,7 @@ export const FindingsView: React.FC = () => {
 
             <h3 className="text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-1 flex items-center gap-2">
               <Send className="w-4 h-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
-              Resend Notification: {selectedFinding?.cveId}
+              Resend Notification: {selectedFinding && <CveLink cveId={selectedFinding.cveId} />}
             </h3>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
               Dispatches an updated alert for this product vulnerability with re-alert tracking.

@@ -4,6 +4,7 @@ import { Advisory } from '../types';
 import { FileText, Download, Printer, Copy, Check, Send, X, ShieldAlert } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { copyText } from '../utils/clipboard';
+import { CveLink } from './CveLink';
 
 export const AdvisoriesView: React.FC = () => {
   const { advisories } = useApp();
@@ -27,7 +28,7 @@ export const AdvisoriesView: React.FC = () => {
 ${adv.executiveSummary}
 
 ## Affected Vulnerabilities
-${adv.cveIds.map((c) => `- ${c}`).join('\n')}
+${adv.cveIds.map((c) => `- [${c}](https://nvd.nist.gov/vuln/detail/${encodeURIComponent(c)})`).join('\n')}
 
 ## Monitored Systems
 ${adv.affectedSystems.map((s) => `- ${s}`).join('\n')}
@@ -90,7 +91,7 @@ ${adv.remediationInstructions}
 
   <div class="section">
     <div class="section-title">2. Correlated Products &amp; CVEs</div>
-    <p style="font-size: 13px;"><strong>CVE Identifiers:</strong> <span class="mono">${adv.cveIds.join(', ')}</span></p>
+    <p style="font-size: 13px;"><strong>CVE Identifiers:</strong> ${adv.cveIds.map((cveId) => `<a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cveId)}" target="_blank" rel="noopener noreferrer" style="font-family: monospace; font-weight: 600; color: #2563eb; margin-right: 8px;">${cveId}</a>`).join('')}</p>
     <p style="font-size: 13px;"><strong>Impacted Systems:</strong></p>
     <ul style="font-size: 13px;">
       ${adv.affectedSystems.map((s) => `<li>${s}</li>`).join('')}
@@ -197,9 +198,9 @@ ${adv.remediationInstructions}
                   {adv.cveIds.map((cve) => (
                     <span
                       key={cve}
-                      className="text-[10px] font-mono bg-zinc-900 dark:bg-zinc-900 light:bg-white text-zinc-300 dark:text-zinc-300 light:text-zinc-800 px-1.5 py-0.5 rounded border border-zinc-800 dark:border-zinc-800 light:border-zinc-300"
+                      className="px-1.5 py-0.5"
                     >
-                      {cve}
+                      <CveLink cveId={cve} className="text-[10px]" />
                     </span>
                   ))}
                 </div>
@@ -297,7 +298,13 @@ ${adv.remediationInstructions}
                 </h4>
                 <div className="bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50 p-3 rounded-xl border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 space-y-1 text-zinc-300 dark:text-zinc-300 light:text-zinc-800">
                   <div>
-                    <strong>CVEs:</strong> {activeModalAdvisory.cveIds.join(', ')}
+                    <strong>CVEs:</strong>{' '}
+                    {activeModalAdvisory.cveIds.map((cve, index) => (
+                      <React.Fragment key={cve}>
+                        {index > 0 && ', '}
+                        <CveLink cveId={cve} />
+                      </React.Fragment>
+                    ))}
                   </div>
                   <div>
                     <strong>Monitored Products:</strong> {activeModalAdvisory.affectedSystems.join(', ')}

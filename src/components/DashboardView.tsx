@@ -20,6 +20,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { Finding } from '../types';
+import { CveLink } from './CveLink';
 
 export const DashboardView: React.FC = () => {
   const {
@@ -231,19 +232,13 @@ export const DashboardView: React.FC = () => {
               const isKev = finding.cve.cisaKev.isKev;
 
               return (
-                <button
-                  type="button"
+                <div
                   key={finding.id}
-                  onClick={() => handleSelectFinding(finding)}
-                  className="w-full p-3.5 rounded-xl border border-zinc-800/70 dark:border-zinc-800/70 light:border-zinc-200 bg-zinc-950/40 dark:bg-zinc-950/40 light:bg-zinc-50 hover:bg-zinc-900/60 dark:hover:bg-zinc-900/60 light:hover:bg-zinc-100 hover:border-zinc-700 dark:hover:border-zinc-700 light:hover:border-zinc-400 transition cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm text-left"
-                  title="Click to inspect vulnerability playbook"
-                  aria-label={`Inspect ${finding.cveId} affecting ${finding.matchedAssetName}`}
+                  className="w-full p-3.5 rounded-xl border border-zinc-800/70 dark:border-zinc-800/70 light:border-zinc-200 bg-zinc-950/40 dark:bg-zinc-950/40 light:bg-zinc-50 hover:bg-zinc-900/60 dark:hover:bg-zinc-900/60 light:hover:bg-zinc-100 hover:border-zinc-700 dark:hover:border-zinc-700 light:hover:border-zinc-400 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm text-left"
                 >
                   <div className="space-y-1">
                     <div className="flex items-center space-x-2">
-                      <span className="font-mono font-bold text-sm text-zinc-100 dark:text-zinc-100 light:text-zinc-900">
-                        {finding.cveId}
-                      </span>
+                      <CveLink cveId={finding.cveId} />
                       {isKev && (
                         <span className="text-[10px] font-medium bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 px-2 py-0.5 rounded-full flex items-center gap-1">
                           <Flame className="w-3 h-3 text-amber-500" />
@@ -288,8 +283,16 @@ export const DashboardView: React.FC = () => {
                           ? 'Provider accepted notification'
                           : 'Notification pending'}
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectFinding(finding)}
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-zinc-400 hover:text-zinc-100 light:text-zinc-600 light:hover:text-zinc-900"
+                      aria-label={`Inspect ${finding.cveId} affecting ${finding.matchedAssetName}`}
+                    >
+                      Inspect <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
