@@ -57,6 +57,7 @@ export const WatchListView: React.FC = () => {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [saveFeedback, setSaveFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [editingItem, setEditingItem] = useState<WatchListItem | null>(null);
   const [deletingAsset, setDeletingAsset] = useState<WatchListItem | null>(null);
@@ -199,6 +200,7 @@ export const WatchListView: React.FC = () => {
   const paginatedAssets = filteredAssets.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleOpenAdd = () => {
+    setSaveFeedback(null);
     setVendorInput('');
     setCustomProductInput('');
     setAdditionalProductInput('');
@@ -217,6 +219,7 @@ export const WatchListView: React.FC = () => {
   };
 
   const handleOpenEdit = (item: WatchListItem) => {
+    setSaveFeedback(null);
     const parsed = parseCPE23(item.cpes[0] || '');
     setVendorInput(parsed.isValid ? parsed.vendor : item.vendor);
     setCustomProductInput(parsed.isValid ? parsed.product : item.product);
@@ -252,7 +255,11 @@ export const WatchListView: React.FC = () => {
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!vendorInput.trim()) return;
+    setSaveFeedback(null);
+    if (!vendorInput.trim()) {
+      setSaveFeedback({ type: 'error', message: 'Enter a vendor before saving.' });
+      return;
+    }
 
     const purlList = purlInput
       .split('\n')
@@ -263,23 +270,22 @@ export const WatchListView: React.FC = () => {
     if (editingItem) {
       const cpe = editedCpe();
       const parsedCpe = parseCPE23(cpe);
-      if (!parsedCpe.isValid) return;
-      const saved = await updateWatchlistItem({
-        ...editingItem,
-        vendor: parsedCpe.vendor,
-        product: parsedCpe.product,
-        version: parsedCpe.version,
-        cpes: [cpe, ...additionalCpes],
-        purls: purlList.length > 0 ? purlList : undefined,
-        targetHw: parsedCpe.targetHw !== '*' ? parsedCpe.targetHw : undefined,
-        assetTag: assetTagInput.trim() || editingItem.assetTag,
-        ownerGroup: ownerGroupInput.trim() || 'Unassigned',
-        notes: notesInput.trim(),
-      });
-      if (!saved) return;
+      if (!parsedCpe.isValid) {
+        setSaveFeedback({ type: 'error', message: 'Enter a valid CPE 2.3 expression before saving.' });
+        return;
+      }
 
-      const productsToAdd = selectedProductIds.flatMap((id, index) => {
-        const product = catalogProducts.find((entry) => entry.normalizedId === id);
+      const selectedCatalogProducts = selectedProductIds.map((id) =>
+        catalogProducts.find((entry) => entry.normalizedId === id),
+      );
+      if (selectedCatalogProducts.some((product) => !product)) {
+        setSaveFeedback({
+          type: 'error',
+          message: 'The vendor changed after selection. Reselect the catalog products for the current vendor.',
+        });
+        return;
+      }
+      const productsToAdd = selectedCatalogProducts.flatMap((product, index) => {
         if (!product) return [];
         const addedCpe = buildStrictCpe23(product.part, vendorInput, product.normalizedId, versionInput, targetHwInput);
         if (editingItem.cpes.includes(addedCpe) || addedCpe === cpe) return [];
@@ -313,8 +319,44 @@ export const WatchListView: React.FC = () => {
       }
       if (productsToAdd.length) {
         const imported = await bulkImportWatchlist(productsToAdd);
-        if (imported.errors.length) return;
+        if (!imported.success || imported.errors.length) {
+          setSaveFeedback({
+            type: 'error',
+            message: imported.errors.join('; ') || 'Selected catalog products could not be added.',
+          });
+          return;
+        }
       }
+
+      const saved = await updateWatchlistItem({
+        ...editingItem,
+        vendor: parsedCpe.vendor,
+        product: parsedCpe.product,
+        version: parsedCpe.version,
+        cpes: [cpe, ...additionalCpes],
+        purls: purlList.length > 0 ? purlList : undefined,
+        targetHw: parsedCpe.targetHw !== '*' ? parsedCpe.targetHw : undefined,
+        assetTag: assetTagInput.trim() || editingItem.assetTag,
+        ownerGroup: ownerGroupInput.trim() || 'Unassigned',
+        notes: notesInput.trim(),
+      });
+      if (!saved) {
+        setSaveFeedback({
+          type: 'error',
+          message: productsToAdd.length
+            ? `Added ${productsToAdd.length} selected product(s), but could not save changes to the current asset.`
+            : 'Could not save changes to the current asset.',
+        });
+        return;
+      }
+      setSaveFeedback({
+        type: 'success',
+        message: productsToAdd.length
+          ? `Saved the asset and added ${productsToAdd.length} product(s).`
+          : selectedProductIds.length
+            ? 'Asset changes saved; the selected catalog product(s) were already attached to this asset.'
+            : 'Asset changes saved.',
+      });
       setShowAddModal(false);
       return;
     }
@@ -1121,6 +1163,18 @@ export const WatchListView: React.FC = () => {
               </div>
 
               {/* Buttons */}
+              {saveFeedback && (
+                <div
+                  role={saveFeedback.type === 'error' ? 'alert' : 'status'}
+                  className={`rounded-lg border px-3 py-2 text-sm ${
+                    saveFeedback.type === 'error'
+                      ? 'border-rose-800 bg-rose-950/40 text-rose-300'
+                      : 'border-emerald-800 bg-emerald-950/40 text-emerald-300'
+                  }`}
+                >
+                  {saveFeedback.message}
+                </div>
+              )}
               <div className="flex justify-end space-x-2 pt-3 border-t border-zinc-800 dark:border-zinc-800 light:border-zinc-200">
                 <button
                   type="button"
@@ -1135,7 +1189,9 @@ export const WatchListView: React.FC = () => {
                   className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition disabled:opacity-50 shadow-sm"
                 >
                   {editingItem
-                    ? 'Save Changes'
+                    ? selectedProductIds.length > 0 || additionalProductInput.trim()
+                      ? `Save Changes + Add ${selectedProductIds.length + (additionalProductInput.trim() ? 1 : 0)} Product(s)`
+                      : 'Save Changes'
                     : selectedProductIds.length > 1
                       ? `Register All (${selectedProductIds.length}) Products`
                       : 'Register Product'}
