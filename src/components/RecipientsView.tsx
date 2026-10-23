@@ -254,15 +254,15 @@ export const RecipientsView: React.FC = () => {
                     </tr>
                   ) : (
                     filteredRecipients.map((r) => (
-                      <tr key={r.id} className="hover:bg-zinc-800/30 transition">
-                        <td className="py-3 px-4 font-semibold text-zinc-100 flex items-center space-x-2">
-                          <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700/60 flex items-center justify-center text-[10px] text-zinc-300">
+                      <tr key={r.id} className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition">
+                        <td className="py-3 px-4 font-semibold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 flex items-center space-x-2">
+                          <div className="w-6 h-6 rounded-full bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 border border-zinc-700/60 dark:border-zinc-700/60 light:border-zinc-300 flex items-center justify-center text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
                             {r.name.slice(0, 1)}
                           </div>
                           <span>{r.name}</span>
                         </td>
-                        <td className="py-3 px-4 font-mono text-zinc-300">{r.email}</td>
-                        <td className="py-3 px-4 text-zinc-400">{r.role}</td>
+                        <td className="py-3 px-4 font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-700">{r.email}</td>
+                        <td className="py-3 px-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600">{r.role}</td>
                         <td className="py-3 px-4">
                           <span
                             className={`mb-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
@@ -276,16 +276,16 @@ export const RecipientsView: React.FC = () => {
                           <span
                             className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
                               r.subscriptionTier === 'ALL_SEVERITIES'
-                                ? 'bg-zinc-800 text-zinc-200 border-zinc-600'
+                                ? 'bg-zinc-800 text-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 light:bg-zinc-200 light:text-zinc-800 border-zinc-600 dark:border-zinc-600 light:border-zinc-400'
                                 : r.subscriptionTier === 'CISA_KEV_ONLY'
-                                  ? 'bg-zinc-800/80 text-zinc-100 border-zinc-500 font-bold'
-                                  : 'bg-zinc-900 text-zinc-300 border-zinc-700'
+                                  ? 'bg-zinc-800/80 dark:bg-zinc-800/80 light:bg-zinc-300 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 border-zinc-500 dark:border-zinc-500 light:border-zinc-400 font-bold'
+                                  : 'bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-100 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 border-zinc-700 dark:border-zinc-700 light:border-zinc-300'
                             }`}
                           >
                             {r.subscriptionTier.replace(/_/g, ' ')}
                           </span>
                         </td>
-                        <td className="py-3 px-4 font-mono text-zinc-300">
+                        <td className="py-3 px-4 font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
                           {r.deliverySuccessRate.toFixed(1)}%
                         </td>
                         <td className="py-3 px-4">
@@ -293,8 +293,8 @@ export const RecipientsView: React.FC = () => {
                             onClick={() => toggleRecipientEnabled(r.id)}
                             className={`px-2 py-0.5 rounded-full text-[10px] font-mono border transition ${
                               r.enabled
-                                ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/60'
-                                : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+                                ? 'bg-emerald-950/40 text-emerald-300 light:text-emerald-700 border-emerald-800/60'
+                                : 'bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-100 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 border-zinc-800 dark:border-zinc-800 light:border-zinc-300'
                             }`}
                           >
                             {r.enabled ? 'ACTIVE' : 'MUTED'}
@@ -336,39 +336,39 @@ export const RecipientsView: React.FC = () => {
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-800/60">
+                <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
                   {filteredWebhooks.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-zinc-500">
+                      <td colSpan={7} className="py-8 text-center text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
                         No webhooks configured. Register a Slack, Teams, or SIEM webhook above.
                       </td>
                     </tr>
                   ) : (
                     filteredWebhooks.map((w) => (
-                      <tr key={w.id} className="hover:bg-zinc-800/30 transition">
-                        <td className="py-3 px-4 font-semibold text-zinc-100 flex items-center space-x-2">
-                          <Webhook className="w-3.5 h-3.5 text-zinc-400" />
+                      <tr key={w.id} className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition">
+                        <td className="py-3 px-4 font-semibold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 flex items-center space-x-2">
+                          <Webhook className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-400 light:text-zinc-500" />
                           <span>{w.name}</span>
                         </td>
                         <td className="py-3 px-4">
-                          <span className="font-mono text-[11px] bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800 text-zinc-300">
+                          <span className="font-mono text-[11px] bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 px-2 py-0.5 rounded border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
                             {w.provider}
                           </span>
                         </td>
-                        <td className="py-3 px-4 font-mono text-zinc-400 max-w-xs truncate" title={w.url}>
+                        <td className="py-3 px-4 font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 max-w-xs truncate" title={w.url}>
                           {w.url}
                         </td>
-                        <td className="py-3 px-4 font-mono text-[10px] text-zinc-300">
+                        <td className="py-3 px-4 font-mono text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
                           {w.events.join(', ')}
                         </td>
-                        <td className="py-3 px-4 font-mono text-zinc-300">{w.deliveryCount} sent</td>
+                        <td className="py-3 px-4 font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-700">{w.deliveryCount} sent</td>
                         <td className="py-3 px-4">
                           <button
                             onClick={() => toggleWebhookEnabled(w.id)}
                             className={`px-2 py-0.5 rounded-full text-[10px] font-mono border transition ${
                               w.enabled
-                                ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/60'
-                                : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+                                ? 'bg-emerald-950/40 text-emerald-300 light:text-emerald-700 border-emerald-800/60'
+                                : 'bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-100 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 border-zinc-800 dark:border-zinc-800 light:border-zinc-300'
                             }`}
                           >
                             {w.enabled ? 'ENABLED' : 'PAUSED'}
@@ -378,7 +378,7 @@ export const RecipientsView: React.FC = () => {
                           <div className="flex items-center justify-end space-x-2">
                             <button
                               onClick={() => handleRunWebhookTest(w)}
-                              className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-medium transition flex items-center space-x-1"
+                              className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-200 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 text-[11px] font-medium transition flex items-center space-x-1"
                               title="Send Test Ping"
                             >
                               <Send className="w-3 h-3" />
@@ -386,8 +386,8 @@ export const RecipientsView: React.FC = () => {
                             </button>
                             <button
                               onClick={() => setDeletingWebhookId(w.id)}
-                              className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-red-400 transition"
-                              title="Delete"
+                            className="p-1 rounded hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 text-zinc-400 dark:text-zinc-400 light:text-zinc-500 hover:text-red-400 transition"
+                            title="Delete"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>

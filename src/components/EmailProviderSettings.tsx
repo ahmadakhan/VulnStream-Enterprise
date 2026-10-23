@@ -69,7 +69,7 @@ export function EmailProviderSettings() {
           event.preventDefault();
           setMessage('');
           if (await configureEmailProvider(form)) {
-            setForm((old) => ({ ...old, apiKey: '', smtpPassword: '' }));
+            setForm((old) => ({ ...old, apiKey: '', smtpPassword: '', mailjetApiSecret: '' }));
             setDirty(false);
             setMessage(`${methodName(form.provider)} configuration saved.`);
           }

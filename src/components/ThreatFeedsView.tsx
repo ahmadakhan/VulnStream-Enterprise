@@ -367,7 +367,7 @@ export const ThreatFeedsView: React.FC = () => {
                       </button>
                       <button
                         onClick={() => setDeletingFeed(feed)}
-                        className="p-1 text-zinc-400 hover:text-red-400 transition"
+                        className="p-1 text-zinc-400 hover:text-red-400 dark:text-zinc-400 dark:hover:text-red-400 light:text-zinc-600 light:hover:text-red-500 transition"
                         title="Delete Feed"
                         aria-label={`Delete ${feed.name}`}
                       >

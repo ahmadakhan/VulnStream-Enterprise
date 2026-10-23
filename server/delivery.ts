@@ -93,7 +93,7 @@ export function createMailSender(config: Config, db?: Db, request: Requester = c
       if (!token) throw new Error('Email provider token is missing');
       const provider = EMAIL_PROVIDER_LABELS[saved.provider];
       try {
-        const id = await sendProviderEmail(saved, token, job, request);
+        const id = await sendProviderEmail(saved, token, job, request, config.MAILJET_SANDBOX_MODE === 'true');
         return { id, provider };
       } catch (error) {
         if (error instanceof EmailProviderError) { error.provider = provider; throw error; }

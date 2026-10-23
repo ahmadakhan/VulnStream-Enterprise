@@ -14,6 +14,7 @@ const schema = z.object({
   SMTP_FROM: z.union([z.email(), z.literal('')]).default(''),
   FEED_MAX_DURATION_SECONDS: z.coerce.number().int().min(1).max(7200).default(1800),
   WORKER_ENABLED: z.enum(['true', 'false']).default('true'),
+  MAILJET_SANDBOX_MODE: z.enum(['true', 'false']).default('false'),
 });
 export type Config = z.infer<typeof schema>;
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {

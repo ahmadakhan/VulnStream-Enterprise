@@ -242,8 +242,6 @@ export const emailConfigSchema = z.object({
     ctx.addIssue({ code: 'custom', path: ['mailgunDomain'], message: 'Mailgun sending domain is required' });
   if (value.provider === 'MAILTRAP' && value.mailtrapMode === 'SANDBOX' && !value.mailtrapInboxId)
     ctx.addIssue({ code: 'custom', path: ['mailtrapInboxId'], message: 'Mailtrap sandbox inbox ID is required' });
-  if (value.provider === 'MAILJET_API' && !value.mailjetApiSecret)
-    ctx.addIssue({ code: 'custom', path: ['mailjetApiSecret'], message: 'Mailjet API secret is required' });
 });
 export const settingsSchema = z.object({
   scopeHours: z.number().int().min(1).max(2880),

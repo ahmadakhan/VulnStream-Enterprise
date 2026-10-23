@@ -213,6 +213,8 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
           : '';
     if (!smtpProvider && !apiKey)
       throw new HttpError(400, 'Enter an API token for the selected provider');
+    if (input.provider === 'MAILJET_API' && !input.mailjetApiSecret && !mailjetApiSecret)
+      throw new HttpError(400, 'Enter your Mailjet API secret');
     if (smtpProvider && input.smtpHost) {
       const allowedHosts = config.EGRESS_ALLOWED_HOSTS.split(',').map((host) => host.trim().toLowerCase());
       if (!allowedHosts.includes(input.smtpHost))

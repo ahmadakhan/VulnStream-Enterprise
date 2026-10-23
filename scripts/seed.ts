@@ -1,3 +1,5 @@
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { loadConfig } from '../server/config.ts';
 import { createPool, get, transaction } from '../server/db.ts';
@@ -5,8 +7,26 @@ import { applyCommand } from '../server/commands.ts';
 import { RECOMMENDED_FEEDS } from '../server/recommendedFeeds.ts';
 import { INITIAL_WATCHLIST } from '../tests/fixtures/seedData.ts';
 
+// Load .env file if environment variables are not already set, so the seed
+// script works from a plain `npm run seed` invocation without manual export.
+const envPath = join(process.cwd(), '.env');
+if (existsSync(envPath)) {
+  const envContent = readFileSync(envPath, 'utf8');
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const value = trimmed.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+    if (!(key in process.env)) process.env[key] = value;
+  }
+}
+
 const config = loadConfig();
 const pool = createPool(config.DATABASE_URL);
+
+const shouldSeed = process.env.SEED === '1' || process.env.SEED === 'true';
 
 /** Only seed adapters whose response contracts are implemented and verified. */
 const feedPayload = [
@@ -62,6 +82,18 @@ const feedPayload = [
   },
   ...RECOMMENDED_FEEDS,
 ];
+
+if (!shouldSeed) {
+  // No SEED env variable — report current database contents and exit.
+  // Seeding only happens when explicitly requested via SEED=1 npm run seed.
+  const feeds = await get<any[]>(pool, 'feeds', '*');
+  const feedRows = (await pool.query('SELECT id FROM records WHERE kind=$1', ['feeds'])).rows;
+  const watchlistRows = (await pool.query('SELECT id FROM records WHERE kind=$1', ['watchlist'])).rows;
+  console.log(`Database has ${feedRows.length} feeds and ${watchlistRows.length} monitored products.`);
+  console.log('Set SEED=1 to apply seed fixtures.');
+  await pool.end();
+  process.exit(0);
+}
 
 try {
   await transaction(pool, async (db) => {

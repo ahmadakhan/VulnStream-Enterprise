@@ -69,7 +69,7 @@ export const TopHeader: React.FC = () => {
           <button
             type="button"
             onClick={() => setMobileNavOpen(!mobileNavOpen)}
-            className="md:hidden shrink-0 p-2 rounded-lg text-zinc-300 hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-zinc-400"
+            className="md:hidden shrink-0 p-2 rounded-lg text-zinc-300 dark:text-zinc-300 light:text-zinc-700 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-zinc-400"
             aria-label={mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
             aria-expanded={mobileNavOpen}
             aria-controls="primary-navigation"

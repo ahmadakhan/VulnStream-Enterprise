@@ -79,6 +79,7 @@ export async function sendProviderEmail(
   token: string,
   job: Job,
   request: Requester,
+  sandboxMode = false,
 ): Promise<string> {
   const endpoint = emailEndpoint(config);
   if (!endpoint) throw new Error('Select an API email provider');
@@ -149,13 +150,17 @@ export async function sendProviderEmail(
     delete headers.Authorization;
     headers.Authorization = `Basic ${Buffer.from(`${token}:${config.mailjetApiSecret}`).toString('base64')}`;
     body = JSON.stringify({
-      FromEmail: config.fromEmail,
-      FromName: config.fromName || undefined,
-      Subject: subject,
-      TextPart: text,
-      HTMLPart: html,
-      Recipients: [{ Email: recipientEmail }],
-      Headers: [{ Name: 'X-VulnStream-Delivery-ID', Value: job.id }],
+      SandboxMode: sandboxMode,
+      Messages: [
+        {
+          From: { Email: config.fromEmail, ...(config.fromName ? { Name: config.fromName } : {}) },
+          To: [{ Email: recipientEmail }],
+          Subject: subject,
+          TextPart: text,
+          HTMLPart: html,
+          Headers: [{ Name: 'X-VulnStream-Delivery-ID', Value: job.id }],
+        },
+      ],
     });
   } else {
     body = JSON.stringify({
@@ -231,10 +236,13 @@ export async function sendProviderEmail(
     data.message_ids[0]
   )
     return data.message_ids[0];
-  if (config.provider === 'MAILJET_API' && Array.isArray(data.Sent) && data.Sent.length > 0) {
-    const msg = data.Sent[0];
-    if (typeof msg.MessageID === 'string' && msg.MessageID) return msg.MessageID;
-    if (typeof msg.Email === 'string' && msg.Email) return msg.Email;
+  if (config.provider === 'MAILJET_API' && Array.isArray(data.Messages) && data.Messages.length > 0) {
+    const msg = data.Messages[0];
+    if (Array.isArray(msg.To) && msg.To.length > 0) {
+      if (typeof msg.To[0].MessageID === 'string' && msg.To[0].MessageID) return msg.To[0].MessageID;
+      if (typeof msg.To[0].Email === 'string' && msg.To[0].Email) return msg.To[0].Email;
+    }
+    if (typeof msg.ID === 'string' && msg.ID) return msg.ID;
   }
   throw new EmailProviderError(`${provider} did not confirm message acceptance`, 502);
 }
