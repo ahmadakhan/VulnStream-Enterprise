@@ -33,6 +33,8 @@ function publicState(data: AppState): AppState {
       hasApiKey: !!data.emailConfig.apiKey,
       smtpPassword: '',
       hasSmtpPassword: !!data.emailConfig.smtpPassword,
+      mailjetApiSecret: '',
+      hasMailjetApiSecret: !!data.emailConfig.mailjetApiSecret,
     },
     settings: {
       ...data.settings,

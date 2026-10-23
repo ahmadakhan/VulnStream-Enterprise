@@ -24,7 +24,7 @@ export const DEFAULT_EMAIL_CONFIG: EmailConfiguration = {
   apiEndpoint: '', apiHeaderKey: 'Authorization', apiAuthPrefix: 'Bearer', apiSourceDomain: '',
   smtpHost: '', smtpPort: 587, smtpSecurity: 'STARTTLS', smtpUsername: '', smtpPassword: '',
   mailgunDomain: '', mailgunRegion: 'US', mailtrapMode: 'LIVE', mailtrapInboxId: '',
-  postmarkMessageStream: 'outbound',
+  postmarkMessageStream: 'outbound', mailjetApiSecret: '',
 };
 export const DEFAULT_SETTINGS: AppSettings = {
   scopeHours: 24,

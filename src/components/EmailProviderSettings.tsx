@@ -3,11 +3,17 @@ import { CheckCircle2, KeyRound, Mail, Save, Send } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { isSmtpEmailProvider, type EmailConfiguration, type EmailProvider } from '../types';
 
-const methodName = (provider: EmailProvider) => isSmtpEmailProvider(provider) ? 'SMTP' : 'Email API';
+const methodName = (provider: EmailProvider) =>
+  isSmtpEmailProvider(provider)
+    ? 'SMTP'
+    : provider === 'MAILJET_API'
+      ? 'Mailjet API'
+      : 'Email API';
 const initialForm = (configuration: EmailConfiguration): EmailConfiguration => ({
   ...configuration,
-  provider: isSmtpEmailProvider(configuration.provider) ? configuration.provider : 'API',
+  provider: isSmtpEmailProvider(configuration.provider) ? configuration.provider : configuration.provider,
   apiKey: '',
+  mailjetApiSecret: '',
   apiEndpoint: configuration.apiEndpoint || '',
   apiHeaderKey: configuration.apiHeaderKey || 'Authorization',
   apiAuthPrefix: configuration.apiAuthPrefix ?? 'Bearer',
@@ -36,9 +42,11 @@ export function EmailProviderSettings() {
     setMessage('');
   };
   const isSmtp = isSmtpEmailProvider(form.provider);
+  const isMailjet = form.provider === 'MAILJET_API';
   const isGmailSmtp = form.smtpHost.trim().toLowerCase() === 'smtp.gmail.com';
   const hasSavedApiKey = form.provider === emailConfig.provider && !!emailConfig.hasApiKey;
   const hasSavedSmtpPassword = form.provider === emailConfig.provider && !!emailConfig.hasSmtpPassword;
+  const hasSavedMailjetSecret = form.provider === emailConfig.provider && !!emailConfig.hasMailjetApiSecret;
 
   return (
     <section className="ui-card space-y-5" aria-labelledby="email-settings-heading">
@@ -73,13 +81,15 @@ export function EmailProviderSettings() {
             <select
               id="email-provider"
               className="ui-field"
-              value={isSmtp ? 'SMTP' : 'API'}
+              value={isSmtp ? 'SMTP' : isMailjet ? 'MAILJET_API' : 'API'}
               onChange={(event) => {
-                const provider = event.target.value === 'SMTP' ? 'SMTP' : 'API';
-                update({ provider, apiKey: '', smtpPassword: '' });
+                const value = event.target.value;
+                const provider = value === 'SMTP' ? 'SMTP' : value === 'MAILJET_API' ? 'MAILJET_API' : 'API';
+                update({ provider, apiKey: '', smtpPassword: '', mailjetApiSecret: '' });
               }}
             >
               <option value="SMTP">SMTP</option>
+              <option value="MAILJET_API">Mailjet API</option>
               <option value="API">Email API</option>
             </select>
           </label>
@@ -159,6 +169,32 @@ export function EmailProviderSettings() {
               </>}
               <p className="ui-description sm:col-span-2">
                 Gmail configuration: host smtp.gmail.com; use your full Gmail address and generated 16-character App Password. Port 587 uses STARTTLS (recommended); port 465 uses implicit TLS. SMTP also supports Maileroo, Lettr, Mailjet, and other relays.
+              </p>
+            </>
+          ) : isMailjet ? (
+            <>
+              <label htmlFor="email-mailjet-api-key" className="sm:col-span-2">
+                Mailjet API Key
+                <input id="email-mailjet-api-key" type="password" autoComplete="new-password" spellCheck={false}
+                  className="ui-field" value={form.apiKey} maxLength={4096} required={!hasSavedApiKey}
+                  placeholder={hasSavedApiKey ? 'API Key saved — leave blank to keep it' : 'Mailjet API Key (MJ_APIKEY_PUBLIC)'}
+                  onChange={(event) => update({ apiKey: event.target.value })} />
+                <span className="ui-description mt-1.5 flex items-center gap-1.5">
+                  <KeyRound className="h-3 w-3" /> Encrypted on the server. Saved keys are never displayed.
+                </span>
+              </label>
+              <label htmlFor="email-mailjet-api-secret" className="sm:col-span-2">
+                Mailjet API Secret
+                <input id="email-mailjet-api-secret" type="password" autoComplete="new-password" spellCheck={false}
+                  className="ui-field" value={form.mailjetApiSecret} maxLength={4096} required={!hasSavedMailjetSecret}
+                  placeholder={hasSavedMailjetSecret ? 'API Secret saved — leave blank to keep it' : 'Mailjet API Secret (MJ_APIKEY_PRIVATE)'}
+                  onChange={(event) => update({ mailjetApiSecret: event.target.value })} />
+                <span className="ui-description mt-1.5 flex items-center gap-1.5">
+                  <KeyRound className="h-3 w-3" /> Encrypted on the server. Sent as Basic auth password.
+                </span>
+              </label>
+              <p className="ui-description sm:col-span-2">
+                The endpoint is fixed to https://api.mailjet.com/v3.1/send. Ensure the hostname is in EGRESS_ALLOWED_HOSTS.
               </p>
             </>
           ) : (

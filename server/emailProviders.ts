@@ -14,6 +14,7 @@ export const EMAIL_PROVIDER_LABELS: Record<EmailConfiguration['provider'], Email
   MAILTRAP: 'Mailtrap',
   SENDGRID: 'SendGrid',
   POSTMARK: 'Postmark',
+  MAILJET_API: 'Mailjet',
 };
 export function emailEndpoint(config: EmailConfiguration): string | null {
   switch (config.provider) {
@@ -29,6 +30,8 @@ export function emailEndpoint(config: EmailConfiguration): string | null {
       return 'https://api.sendgrid.com/v3/mail/send';
     case 'POSTMARK':
       return 'https://api.postmarkapp.com/email';
+    case 'MAILJET_API':
+      return 'https://api.mailjet.com/v3.1/send';
     default:
       return null;
   }
@@ -54,7 +57,8 @@ export function emailIsConfigured(
     !!config.apiKey &&
     (config.provider !== 'API' || !!config.apiEndpoint) &&
     (config.provider !== 'MAILGUN' || !!config.mailgunDomain) &&
-    (config.provider !== 'MAILTRAP' || config.mailtrapMode !== 'SANDBOX' || !!config.mailtrapInboxId)
+    (config.provider !== 'MAILTRAP' || config.mailtrapMode !== 'SANDBOX' || !!config.mailtrapInboxId) &&
+    (config.provider !== 'MAILJET_API' || !!config.mailjetApiSecret)
   );
 }
 export class EmailProviderError extends Error {
@@ -141,6 +145,18 @@ export async function sendProviderEmail(
       Metadata: { delivery_id: job.id },
       Headers: [{ Name: 'X-VulnStream-Delivery-ID', Value: job.id }],
     });
+  } else if (config.provider === 'MAILJET_API') {
+    delete headers.Authorization;
+    headers.Authorization = `Basic ${Buffer.from(`${token}:${config.mailjetApiSecret}`).toString('base64')}`;
+    body = JSON.stringify({
+      FromEmail: config.fromEmail,
+      FromName: config.fromName || undefined,
+      Subject: subject,
+      TextPart: text,
+      HTMLPart: html,
+      Recipients: [{ Email: recipientEmail }],
+      Headers: [{ Name: 'X-VulnStream-Delivery-ID', Value: job.id }],
+    });
   } else {
     body = JSON.stringify({
       from: { email: config.fromEmail, name: config.fromName },
@@ -215,5 +231,10 @@ export async function sendProviderEmail(
     data.message_ids[0]
   )
     return data.message_ids[0];
+  if (config.provider === 'MAILJET_API' && Array.isArray(data.Sent) && data.Sent.length > 0) {
+    const msg = data.Sent[0];
+    if (typeof msg.MessageID === 'string' && msg.MessageID) return msg.MessageID;
+    if (typeof msg.Email === 'string' && msg.Email) return msg.Email;
+  }
   throw new EmailProviderError(`${provider} did not confirm message acceptance`, 502);
 }

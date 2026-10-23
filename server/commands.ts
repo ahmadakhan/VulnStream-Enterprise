@@ -205,6 +205,12 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     const smtpPassword = smtpProvider && (input.provider !== 'SMTP' || !!input.smtpHost) ? input.smtpPassword
       ? encrypt(input.smtpPassword, config.ENCRYPTION_KEY, `email-smtp:${input.provider}`)
       : old.provider === input.provider ? old.smtpPassword : '' : '';
+    const mailjetApiSecret =
+      input.provider === 'MAILJET_API' && input.mailjetApiSecret
+        ? encrypt(input.mailjetApiSecret, config.ENCRYPTION_KEY, `email-mailjet:${input.provider}`)
+        : old.provider === input.provider
+          ? old.mailjetApiSecret
+          : '';
     if (!smtpProvider && !apiKey)
       throw new HttpError(400, 'Enter an API token for the selected provider');
     if (smtpProvider && input.smtpHost) {
@@ -220,7 +226,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     const endpoint = emailEndpoint(input);
     if (endpoint && !config.EGRESS_ALLOWED_HOSTS.split(',').map((host) => host.trim().toLowerCase()).includes(new URL(endpoint).hostname))
       throw new HttpError(400, `Allow ${new URL(endpoint).hostname} in EGRESS_ALLOWED_HOSTS before configuring this provider`);
-    await put(db, 'emailConfig', 'main', { ...input, apiKey, smtpPassword });
+    await put(db, 'emailConfig', 'main', { ...input, apiKey, smtpPassword, mailjetApiSecret });
   } else if (action === 'settings.save') {
     const old = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
     await put(

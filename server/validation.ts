@@ -208,6 +208,7 @@ export const emailConfigSchema = z.object({
   mailtrapMode: z.enum(['LIVE', 'SANDBOX']),
   mailtrapInboxId: z.string().max(20).regex(/^$|^[1-9]\d*$/),
   postmarkMessageStream: z.string().trim().max(100).regex(/^[a-zA-Z0-9_-]+$/),
+  mailjetApiSecret: z.string().trim().max(4096).regex(/^[^\r\n]*$/).default(''),
 }).superRefine((value, ctx) => {
   if (value.provider !== 'SMTP' && !value.fromEmail)
     ctx.addIssue({ code: 'custom', path: ['fromEmail'], message: 'A verified sender email is required' });
@@ -241,6 +242,8 @@ export const emailConfigSchema = z.object({
     ctx.addIssue({ code: 'custom', path: ['mailgunDomain'], message: 'Mailgun sending domain is required' });
   if (value.provider === 'MAILTRAP' && value.mailtrapMode === 'SANDBOX' && !value.mailtrapInboxId)
     ctx.addIssue({ code: 'custom', path: ['mailtrapInboxId'], message: 'Mailtrap sandbox inbox ID is required' });
+  if (value.provider === 'MAILJET_API' && !value.mailjetApiSecret)
+    ctx.addIssue({ code: 'custom', path: ['mailjetApiSecret'], message: 'Mailjet API secret is required' });
 });
 export const settingsSchema = z.object({
   scopeHours: z.number().int().min(1).max(2880),

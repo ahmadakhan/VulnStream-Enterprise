@@ -339,7 +339,7 @@ export interface EmailDeliveryLog {
   recipientEmail: string;
   advisoryId: string;
   subject: string;
-  provider: 'Mailgun' | 'Mailtrap' | 'SendGrid' | 'Postmark' | 'Custom API' | 'SMTP_Relay' | 'Local_Mock';
+  provider: 'Mailgun' | 'Mailtrap' | 'SendGrid' | 'Postmark' | 'Custom API' | 'SMTP_Relay' | 'Local_Mock' | 'Mailjet';
   status:
     'REVIEW_REQUIRED' | 'QUEUED' | 'ACCEPTED' | 'DELIVERED' | 'BOUNCED' | 'RETRYING' | 'FAILED' | 'CANCELLED';
   attemptCount: number;
@@ -385,6 +385,7 @@ export const EMAIL_PROVIDERS = [
   'MAILTRAP',
   'SENDGRID',
   'POSTMARK',
+  'MAILJET_API',
 ] as const;
 export type EmailProvider = (typeof EMAIL_PROVIDERS)[number];
 export const isSmtpEmailProvider = (provider: EmailProvider) =>
@@ -408,11 +409,13 @@ export interface EmailConfiguration {
   /** Encrypted in storage; always blank in browser state. */
   smtpPassword: string;
   hasSmtpPassword?: boolean;
+  hasMailjetApiSecret?: boolean;
   mailgunDomain: string;
   mailgunRegion: 'US' | 'EU';
   mailtrapMode: 'LIVE' | 'SANDBOX';
   mailtrapInboxId: string;
   postmarkMessageStream: string;
+  mailjetApiSecret: string;
 }
 
 export interface RetentionConfig {
