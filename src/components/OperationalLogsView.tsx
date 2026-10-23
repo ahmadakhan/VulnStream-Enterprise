@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   RotateCw,
   Cpu,
+  LogOut,
 } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { csvCell } from '../utils/csv';
@@ -433,6 +434,16 @@ export const OperationalLogsView: React.FC = () => {
             </div>
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               {loading && <RotateCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+              {events.length > 0 && !loading && error === '' && (
+                <>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-rose-500/20 bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-medium text-rose-300 light:text-rose-700">
+                    {events.filter((e) => e.level === 'ERROR').length} errors
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 light:text-amber-700">
+                    {events.filter((e) => e.level === 'WARNING').length} warnings
+                  </span>
+                </>
+              )}
               <span>{loading ? 'Loading events…' : `${events.length} events in this view`}</span>
             </div>
           </div>
@@ -529,7 +540,11 @@ export const OperationalLogsView: React.FC = () => {
           )}
           <div aria-busy={loading} className="space-y-3">
             {events.length === 0 && !loading && !error && (
-              <p className="p-8 text-center text-slate-500">No matching events.</p>
+              <div className="p-8 text-center text-zinc-500">
+                <LogOut className="mx-auto h-6 w-6" />
+                <p className="mt-3 text-sm font-medium text-zinc-300 light:text-zinc-700">No matching events.</p>
+                <p className="mt-1 text-xs text-zinc-600">Adjust your search or filters to see results.</p>
+              </div>
             )}
             {events.length > 0 && (
               <div className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white">
@@ -636,8 +651,15 @@ export const OperationalLogsView: React.FC = () => {
                                 </details>
                               )}
                           </td>
-                          <td className="truncate px-4 py-3.5 font-mono text-[10px] text-zinc-400 light:text-zinc-600">
-                            {event.runId || '-'}
+                          <td className="truncate px-4 py-3.5 font-mono text-[11px] text-zinc-400 light:text-zinc-600">
+                            {event.runId ? (
+                              <span className="inline-flex items-center gap-1">
+                                <Cpu className="h-3 w-3 text-indigo-400 light:text-indigo-600" />
+                                {event.runId}
+                              </span>
+                            ) : (
+                              '—'
+                            )}
                           </td>
                         </tr>
                       ))}
