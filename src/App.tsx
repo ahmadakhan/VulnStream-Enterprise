@@ -20,8 +20,8 @@ import { EmailQueueView } from './components/EmailQueueView';
 import { OperationalLogsView } from './components/OperationalLogsView';
 import { SystemHealthView } from './components/SystemHealthView';
 import { SettingsView } from './components/SettingsView';
-
 import { ArchiveRetentionView } from './components/ArchiveRetentionView';
+import { AliasesView } from './components/AliasesView';
 
 export const MainContent: React.FC = () => {
   const { activeTab } = useApp();
@@ -44,6 +44,7 @@ export const MainContent: React.FC = () => {
       {activeTab === 'health' && <SystemHealthView />}
       {activeTab === 'settings' && <SettingsView />}
       {activeTab === 'archive' && <ArchiveRetentionView />}
+      {activeTab === 'aliases' && <AliasesView />}
     </main>
   );
 };

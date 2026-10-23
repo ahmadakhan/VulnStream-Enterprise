@@ -23,6 +23,7 @@ import {
   KeyRound,
   RotateCw,
   Archive,
+  Tags,
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
@@ -94,6 +95,7 @@ export const Sidebar: React.FC = () => {
       items: [
         { id: 'logs', label: 'Logs & Audit', icon: FileCode2 },
         { id: 'health', label: 'System Health', icon: Cpu },
+        { id: 'aliases', label: 'Alias Thesaurus', icon: Tags },
         { id: 'settings', label: 'Settings', icon: Settings },
       ],
     },

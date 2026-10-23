@@ -16,6 +16,7 @@ import type {
   EmailConfiguration,
   IntelligenceArticle,
   IntelligenceMatch,
+  AliasEntry,
 } from '../src/types/index.ts';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION, compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
 export const DEFAULT_EMAIL_CONFIG: EmailConfiguration = {
@@ -73,6 +74,7 @@ export interface AppState {
   intelligenceMatches: IntelligenceMatch[];
   templateCustomization: TemplateCustomization;
   advisoryTemplate: string;
+  aliases: AliasEntry[];
 }
 export const emptyState = (): AppState => ({
   feeds: [],
@@ -89,6 +91,7 @@ export const emptyState = (): AppState => ({
   emailLogs: [],
   auditLogs: [],
   executions: [],
+  aliases: [],
   settings: structuredClone(DEFAULT_SETTINGS),
   emailConfig: { ...DEFAULT_EMAIL_CONFIG },
   templateCustomization: { ...DEFAULT_TEMPLATE_CUSTOMIZATION },

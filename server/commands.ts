@@ -10,6 +10,7 @@ import {
   recipientSchema,
   webhookSchema,
   cveSchema,
+  aliasSchema,
   settingsSchema,
   templateSchema,
   HttpError,
@@ -160,6 +161,14 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     }
     await appendAudit(db, 'Watchlist imported', `${imported} assets`, actor, 'WATCHLIST', 'INFO', ipAddress);
     return { success: true, imported, errors };
+  } else if (action === 'alias.save') {
+    const input = aliasSchema.parse(data),
+      old = await checkExisting('aliases');
+    await put(db, 'aliases', newId, { ...input, id: newId, createdAt: old?.createdAt || now });
+  } else if (action === 'alias.delete') {
+    if (!id) throw new HttpError(400, 'Record ID required');
+    if (!(await get<any>(db, 'aliases', id))) throw new HttpError(404, 'Record not found');
+    await remove(db, 'aliases', id);
   } else if (action === 'recipient.save') {
     const input = recipientSchema.parse(data);
     await checkExisting('recipients');

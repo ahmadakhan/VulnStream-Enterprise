@@ -4,7 +4,7 @@ import type { NormalizedCVE, WatchListItem } from '../src/types/index.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
-import { matchCPE, matchPurl, matchesWatchlistItem, parseCPE23 } from '../src/utils/cpeMatcher.ts';
+import { matchCPE, matchPurl, matchesWatchlistItem, matchProductWithAliases, matchVendorWithAliases, buildAliasMap, parseCPE23 } from '../src/utils/cpeMatcher.ts';
 import { compareVersions } from '../src/utils/versionComparator.ts';
 import { mergeCveRecords } from '../src/utils/deduplicator';
 import { quickHash, generateHmacSignature } from '../src/utils/cryptoChain';
@@ -215,6 +215,74 @@ test('strict CPE does not equate different products through marketing aliases', 
     ).matched,
     false,
   );
+});
+test('the alias thesaurus fallback does not equate GlobalProtect with PAN-OS either', () => {
+  // GlobalProtect (VPN client) and PAN-OS (firewall OS) are separate Palo Alto
+  // products with independent CVE histories. The free-text fallback is excluded
+  // by giving no matching text, isolating this to the alias-thesaurus path.
+  assert.equal(
+    matchesWatchlistItem(
+      [],
+      'paloaltonetworks',
+      'globalprotect',
+      ['cpe:2.3:o:paloaltonetworks:pan_os:10.2.0:*:*:*:*:*:*:*'],
+      'unrelated advisory title',
+      'unrelated advisory body',
+    ).matched,
+    false,
+  );
+});
+test('the alias thesaurus still resolves genuine formatting variants of the same product', () => {
+  assert.equal(matchProductWithAliases('pan_os', 'panos'), true);
+});
+test('operator-managed custom aliases add to the built-in thesaurus without being required for defaults', () => {
+  // Built-in resolution still works with no custom aliases supplied.
+  assert.equal(matchProductWithAliases('pan_os', 'panos'), true);
+  // A custom alias not present in the built-in table is honored once supplied.
+  assert.equal(matchProductWithAliases('acme_widget', 'widget_pro'), false);
+  assert.equal(
+    matchProductWithAliases('acme_widget', 'widget_pro', { acme_widget: ['widget_pro'] }),
+    true,
+  );
+  assert.equal(
+    matchVendorWithAliases('acme', 'acme_corp', { acme: ['acme_corp'] }),
+    true,
+  );
+});
+test('custom aliases extend an existing canonical key rather than replacing its built-in aliases', () => {
+  // 'panos' is a built-in alias of pan_os; adding a custom alias for the same
+  // canonical must not drop the built-in one.
+  assert.equal(matchProductWithAliases('pan_os', 'panos', { pan_os: ['pan-os-extra'] }), true);
+  assert.equal(matchProductWithAliases('pan_os', 'pan-os-extra', { pan_os: ['pan-os-extra'] }), true);
+});
+test('buildAliasMap scopes rows to VENDOR or PRODUCT and merges repeated canonical keys', () => {
+  const rows = [
+    { scope: 'VENDOR' as const, canonical: 'acme', aliases: ['acme corp'] },
+    { scope: 'PRODUCT' as const, canonical: 'widget', aliases: ['widget-pro'] },
+    { scope: 'VENDOR' as const, canonical: 'acme', aliases: ['acme, inc.'] },
+  ];
+  assert.deepEqual(buildAliasMap(rows, 'VENDOR'), { acme: ['acme corp', 'acme, inc.'] });
+  assert.deepEqual(buildAliasMap(rows, 'PRODUCT'), { widget: ['widget-pro'] });
+});
+test('the alias-thesaurus match step in matchesWatchlistItem honors custom aliases end to end', () => {
+  const result = matchesWatchlistItem(
+    [],
+    'acme',
+    'widgetpro',
+    ['cpe:2.3:a:acme:widget:3.0:*:*:*:*:*:*:*'],
+    'unrelated advisory title',
+    'unrelated advisory body',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    true,
+    {},
+    { widget: ['widgetpro'] },
+  );
+  assert.equal(result.matched, true);
+  assert.equal(result.method, 'VENDOR_PRODUCT_ALIAS');
 });
 test('empty per-CPE details fall back to supplied CPE matches', () => {
   const { cve, asset, settings } = fixture();

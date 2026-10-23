@@ -12,7 +12,9 @@ import type {
   Finding,
   NormalizedCVE,
   WatchListItem,
+  AliasEntry,
 } from '../src/types/index.ts';
+import { buildAliasMap } from '../src/utils/cpeMatcher';
 import { mergeCveRecords, normalizeCveId, stableJson } from '../src/utils/deduplicator';
 import { reconcileFindings } from '../src/engine/reconcileFindings';
 import { determineExploitRisk, runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
@@ -250,11 +252,18 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       await writeEvent(db, {category:'PIPELINE', code:'pipeline.started', message:'Pipeline started', runId:execution!.id});
     });
     const feeds = (await list<ThreatFeed>(pool, 'feeds')).filter((f) => f.enabled);
-    const [cachedCves, cachedWithdrawals, inventory] = await Promise.all([
+    const [cachedCves, cachedWithdrawals, inventory, aliasEntries] = await Promise.all([
       list<NormalizedCVE>(pool, 'cveData'),
       list<{ cveId: string; modifiedDate: string }>(pool, 'cveWithdrawals'),
       list<WatchListItem>(pool, 'watchlist'),
+      list<AliasEntry>(pool, 'aliases'),
     ]);
+    // Operator-managed additions to the built-in alias thesaurus (see cpeMatcher.ts
+    // DEFAULT_VENDOR_ALIASES/DEFAULT_PRODUCT_ALIASES); loaded once per run and reused
+    // for both the preliminary and final correlation passes below so a skipped
+    // re-correlation (the `reusableMatches` fast path) never silently drops them.
+    const vendorAliases = buildAliasMap(aliasEntries, 'VENDOR');
+    const productAliases = buildAliasMap(aliasEntries, 'PRODUCT');
     const canonicalCache = mergeCveRecords(cachedCves);
     const knownCveModifiedAt = new Map([...canonicalCache].map(([id, cve]) => [id, cve.modifiedDate]));
     const knownWithdrawalAt = new Map(cachedWithdrawals.map((entry) => [entry.cveId, entry.modifiedDate]));
@@ -420,6 +429,10 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       [],
       [],
       { ...DEFAULT_SETTINGS, scopeHours: 0 },
+      'Server worker',
+      false,
+      vendorAliases,
+      productAliases,
     );
     preliminaryCveSignature = matchingCveSignature(preliminaryCves);
     preliminaryInventorySignature = inventorySignature(inventory);
@@ -634,6 +647,8 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             settings,
             'Server worker',
             true,
+            vendorAliases,
+            productAliases,
           );
       // A wholly rejected stale bundle may be rebuilt from current matches. Never
       // automatically resend a bundle with any acceptance or an in-flight delivery.

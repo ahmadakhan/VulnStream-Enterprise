@@ -238,9 +238,15 @@ export function matchCPE(
 }
 
 /**
- * Enterprise Alias & Synonym Thesaurus
+ * Enterprise Alias & Synonym Thesaurus.
+ * These built-in tables are the code-reviewed baseline and are never mutated
+ * at runtime. Operator-managed custom aliases (the "Alias Thesaurus" admin
+ * page) are stored separately and merged on top at match time by
+ * matchVendorWithAliases/matchProductWithAliases — see their `customAliases`
+ * parameter. Exported so the admin UI can display the built-in baseline
+ * alongside what operators have added.
  */
-const VENDOR_ALIASES: Record<string, string[]> = {
+export const DEFAULT_VENDOR_ALIASES: Record<string, string[]> = {
   microsoft: ['msft', 'windows'],
   paloaltonetworks: ['palo_alto', 'panw', 'paloalto', 'unit42'],
   fortinet: ['fortiguard', 'fortios', 'fortinet_technologies'],
@@ -257,9 +263,13 @@ const VENDOR_ALIASES: Record<string, string[]> = {
   hashicorp: ['hashicorp_inc'],
 };
 
-const PRODUCT_ALIASES: Record<string, string[]> = {
+export const DEFAULT_PRODUCT_ALIASES: Record<string, string[]> = {
   http_server: ['httpd', 'apache2', 'apache_http_server'],
-  pan_os: ['panos', 'globalprotect'],
+  // GlobalProtect is Palo Alto's separate VPN client product, not a spelling
+  // variant of PAN-OS (the firewall OS) — the two have independent CVE
+  // histories, so they must not be aliased together. 'panos' is kept: it is
+  // only a formatting variant of the same pan_os product string.
+  pan_os: ['panos'],
   fortios: ['forti_os', 'fortigate'],
   ios_xe: ['ios-xe', 'cisco_ios_xe'],
   windows_server_2022: ['windows_server', 'win_server_2022'],
@@ -269,7 +279,42 @@ const PRODUCT_ALIASES: Record<string, string[]> = {
   express: ['expressjs'],
 };
 
-export function matchVendorWithAliases(assetVendor: string, vulnVendor: string): boolean {
+/** Merges operator-managed additions onto the built-in baseline. Custom
+ * entries only ever ADD aliases to a canonical key (or introduce a new
+ * canonical key); they cannot remove a built-in alias, so the reviewed
+ * baseline can't be silently broken from the admin page. */
+function mergeAliasTables(
+  base: Record<string, string[]>,
+  custom: Record<string, string[]>,
+): Record<string, string[]> {
+  if (!Object.keys(custom).length) return base;
+  const merged: Record<string, string[]> = { ...base };
+  for (const [canonical, extra] of Object.entries(custom))
+    merged[canonical] = [...new Set([...(merged[canonical] || []), ...extra])];
+  return merged;
+}
+
+/** Converts persisted operator-managed alias rows into the canonical -> aliases[]
+ * shape matchVendorWithAliases/matchProductWithAliases expect, scoped to one of
+ * VENDOR/PRODUCT and merging any rows that repeat the same canonical key. */
+export function buildAliasMap(
+  entries: { scope: 'VENDOR' | 'PRODUCT'; canonical: string; aliases: string[] }[],
+  scope: 'VENDOR' | 'PRODUCT',
+): Record<string, string[]> {
+  const map: Record<string, string[]> = {};
+  for (const entry of entries) {
+    if (entry.scope !== scope) continue;
+    const key = entry.canonical.toLowerCase().trim();
+    map[key] = [...new Set([...(map[key] || []), ...entry.aliases.map((a) => a.toLowerCase().trim())])];
+  }
+  return map;
+}
+
+export function matchVendorWithAliases(
+  assetVendor: string,
+  vulnVendor: string,
+  customAliases: Record<string, string[]> = {},
+): boolean {
   if (matchComponent(assetVendor, vulnVendor)) return true;
 
   const a = assetVendor.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -277,8 +322,8 @@ export function matchVendorWithAliases(assetVendor: string, vulnVendor: string):
 
   if (a === v) return true;
 
-  // Check aliases
-  for (const [canonical, aliases] of Object.entries(VENDOR_ALIASES)) {
+  // Check aliases (built-in baseline + any operator-managed custom aliases)
+  for (const [canonical, aliases] of Object.entries(mergeAliasTables(DEFAULT_VENDOR_ALIASES, customAliases))) {
     const group = [canonical, ...aliases].map((s) => s.replace(/[^a-z0-9]/g, ''));
     if (group.includes(a) && group.includes(v)) return true;
   }
@@ -286,7 +331,11 @@ export function matchVendorWithAliases(assetVendor: string, vulnVendor: string):
   return false;
 }
 
-export function matchProductWithAliases(assetProduct: string, vulnProduct: string): boolean {
+export function matchProductWithAliases(
+  assetProduct: string,
+  vulnProduct: string,
+  customAliases: Record<string, string[]> = {},
+): boolean {
   if (matchComponent(assetProduct, vulnProduct)) return true;
 
   const a = assetProduct.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -294,7 +343,7 @@ export function matchProductWithAliases(assetProduct: string, vulnProduct: strin
 
   if (a === v) return true;
 
-  for (const [canonical, aliases] of Object.entries(PRODUCT_ALIASES)) {
+  for (const [canonical, aliases] of Object.entries(mergeAliasTables(DEFAULT_PRODUCT_ALIASES, customAliases))) {
     const group = [canonical, ...aliases].map((s) => s.replace(/[^a-z0-9]/g, ''));
     if (group.includes(a) && group.includes(v)) return true;
   }
@@ -364,6 +413,8 @@ export function matchesWatchlistItem(
   assetTargetHw?: string,
   vulnTargetHw?: string,
   evaluatePackages = true,
+  customVendorAliases: Record<string, string[]> = {},
+  customProductAliases: Record<string, string[]> = {},
 ): MatchResult {
   let bestMatch: MatchResult | undefined;
   const retain = (candidate: MatchResult) => {
@@ -495,8 +546,8 @@ export function matchesWatchlistItem(
     const parsedVuln = parseCPE23(vulnCpe);
     if (parsedVuln.isValid) {
       if (
-        matchVendorWithAliases(normVendor, parsedVuln.vendor) &&
-        matchProductWithAliases(normProduct, parsedVuln.product)
+        matchVendorWithAliases(normVendor, parsedVuln.vendor, customVendorAliases) &&
+        matchProductWithAliases(normProduct, parsedVuln.product, customProductAliases)
       ) {
         return {
           matched: true,

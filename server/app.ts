@@ -667,7 +667,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         .parse(req.body);
       const { action, id, data } = command,
         actor = req.operator!.username;
-      const adminActions = ['feed', 'recipient', 'webhook', 'settings', 'template', 'email'];
+      const adminActions = ['feed', 'recipient', 'webhook', 'settings', 'template', 'email', 'alias'];
       if (adminActions.some((prefix) => action.startsWith(prefix)) && req.operator!.role !== 'ADMIN')
         throw new HttpError(403, 'Administrator role required');
       // Resolve URLs outside the database transaction. They are validated again at connection time.

@@ -283,6 +283,21 @@ export interface AlertedCVE {
   lastDispatchKey?: string;
 }
 
+/** An operator-managed addition to the matching engine's vendor/product alias
+ * thesaurus (see src/utils/cpeMatcher.ts DEFAULT_VENDOR_ALIASES/DEFAULT_PRODUCT_ALIASES
+ * for the built-in, code-reviewed baseline this only adds on top of). */
+export interface AliasEntry {
+  id: string;
+  /** Whether this maps vendor or product names. */
+  scope: 'VENDOR' | 'PRODUCT';
+  /** The normalized name a CVE's CPE/PURL vendor or product field actually uses. */
+  canonical: string;
+  /** Alternate names that should resolve to `canonical` during matching. */
+  aliases: string[];
+  notes?: string;
+  createdAt: string;
+}
+
 export interface EmailRecipient {
   id: string;
   name: string;

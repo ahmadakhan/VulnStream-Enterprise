@@ -15,6 +15,7 @@ import type {
   EmailConfiguration,
   SystemHealth,
   EmailQueueItem,
+  AliasEntry,
 } from '../types';
 import { compileCustomizedTemplate } from '../utils/templateCompiler';
 function useApplication() {
@@ -272,6 +273,13 @@ function useApplication() {
       (await call<{ success: boolean; statusCode: number; signature: string }>(
         `/webhooks/${encodeURIComponent(id)}/test`,
       )) || { success: false, statusCode: 0, signature: '' },
+    addAlias: (entry: Omit<AliasEntry, 'id' | 'createdAt'>) => save('alias.save', entry),
+    updateAlias: (entry: AliasEntry) => save('alias.save', entry, entry.id),
+    deleteAlias: async (id: string) => {
+      const result = await command('alias.delete', undefined, id);
+      if (result?.success) await refresh();
+      return result?.success || false;
+    },
     resendNotification: (cveId: string, reason: string) => call('/resend', { cveId, reason }),
     retryEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/retry`),
     approveEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/approve`),

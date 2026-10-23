@@ -66,6 +66,8 @@ export function runVulnerabilityPipeline(
   settings: AppSettings,
   _caller = 'Server worker',
   includeExistingCandidates = false,
+  vendorAliases: Record<string, string[]> = {},
+  productAliases: Record<string, string[]> = {},
 ): PipelineRunResult {
   const started = new Date(),
     known = new Set(existing.map((f) => `${normalizeCveId(f.cveId)}:${f.matchedAssetId}`));
@@ -159,6 +161,8 @@ export function runVulnerabilityPipeline(
           asset.targetHw,
           undefined,
           false,
+          vendorAliases,
+          productAliases,
         ),
       );
       if (asset.purls?.length && cve.purls?.length)

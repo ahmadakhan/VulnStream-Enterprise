@@ -92,6 +92,16 @@ export const watchlistImportSchema = z
     }),
   )
   .max(1000);
+export const aliasSchema = z.object({
+  scope: z.enum(['VENDOR', 'PRODUCT']),
+  canonical: shortText.transform((s) => s.toLowerCase()),
+  aliases: z
+    .array(shortText.transform((s) => s.toLowerCase()))
+    .min(1)
+    .max(50)
+    .refine((list) => new Set(list).size === list.length, 'Duplicate alias entries'),
+  notes: z.string().max(500).optional(),
+});
 export const recipientSchema = z.object({
   name: shortText,
   email: z
