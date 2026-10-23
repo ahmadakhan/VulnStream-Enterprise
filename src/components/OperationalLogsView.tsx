@@ -331,12 +331,11 @@ const AuditTrailView: React.FC = () => {
           timestamp={selectedLog.timestamp}
           onClose={() => setSelectedLog(null)}
           fields={[
-            { label: 'Details', value: selectedLog.details, block: true },
+            { label: 'Category', value: selectedLog.category, mono: true },
             { label: 'Actor', value: selectedLog.actor, mono: true },
             { label: 'Source IP', value: selectedLog.ipAddress, mono: true },
             { label: 'Entry ID', value: selectedLog.id, mono: true },
-            { label: 'Hash', value: selectedLog.hash, mono: true, block: true },
-            { label: 'Previous Hash', value: selectedLog.prevHash, mono: true, block: true },
+            { label: 'Details', value: selectedLog.details, block: true },
           ]}
         />
       )}
