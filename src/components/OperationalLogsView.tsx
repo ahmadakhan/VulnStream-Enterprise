@@ -10,16 +10,19 @@ import {
   CheckCircle2,
   AlertTriangle,
   RotateCw,
+  Cpu,
 } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { csvCell } from '../utils/csv';
 import { verifyAuditChain } from '../utils/cryptoChain';
+import { LogDetailModal } from './LogDetailModal';
 
 const AuditTrailView: React.FC = () => {
   const { auditLogs } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
+  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
 
   // Cryptographic Chain Verification State
   const [verifyingChain, setVerifyingChain] = useState(false);
@@ -261,7 +264,11 @@ const AuditTrailView: React.FC = () => {
                 </tr>
               ) : (
                 paginatedLogs.map((log) => (
-                  <tr key={log.id} className="transition hover:bg-zinc-800/25 light:hover:bg-zinc-50">
+                  <tr
+                    key={log.id}
+                    onClick={() => setSelectedLog(log)}
+                    className="cursor-pointer transition hover:bg-zinc-800/25 light:hover:bg-zinc-50"
+                  >
                     <td className="whitespace-nowrap px-4 py-3.5 text-[11px] text-zinc-400 light:text-zinc-600">
                       {new Intl.DateTimeFormat(undefined, {
                         dateStyle: 'medium',
@@ -314,6 +321,25 @@ const AuditTrailView: React.FC = () => {
           />
         </div>
       </div>
+
+      {selectedLog && (
+        <LogDetailModal
+          icon={<FileCode2 className="h-4 w-4" />}
+          eyebrow={selectedLog.category}
+          title={selectedLog.event}
+          level={selectedLog.level}
+          timestamp={selectedLog.timestamp}
+          onClose={() => setSelectedLog(null)}
+          fields={[
+            { label: 'Details', value: selectedLog.details, block: true },
+            { label: 'Actor', value: selectedLog.actor, mono: true },
+            { label: 'Source IP', value: selectedLog.ipAddress, mono: true },
+            { label: 'Entry ID', value: selectedLog.id, mono: true },
+            { label: 'Hash', value: selectedLog.hash, mono: true, block: true },
+            { label: 'Previous Hash', value: selectedLog.prevHash, mono: true, block: true },
+          ]}
+        />
+      )}
     </div>
   );
 };
@@ -331,6 +357,7 @@ export const OperationalLogsView: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [selectedEvent, setSelectedEvent] = useState<OperationalEvent | null>(null);
   useEffect(() => {
     if (tab !== 'events') return;
     let disposed = false;
@@ -529,7 +556,11 @@ export const OperationalLogsView: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-zinc-800/60 font-mono light:divide-zinc-200">
                       {events.map((event) => (
-                        <tr key={event.id} className="transition hover:bg-zinc-800/25 light:hover:bg-zinc-50">
+                        <tr
+                          key={event.id}
+                          onClick={() => setSelectedEvent(event)}
+                          className="cursor-pointer transition hover:bg-zinc-800/25 light:hover:bg-zinc-50"
+                        >
                           <td className="whitespace-nowrap px-4 py-3.5 text-[11px] text-zinc-400 light:text-zinc-600">
                             {new Intl.DateTimeFormat(undefined, {
                               dateStyle: 'medium',
@@ -596,7 +627,7 @@ export const OperationalLogsView: React.FC = () => {
                                 event.level === 'ERROR' &&
                                 (event.context?.error || event.context?.errorType || event.context?.component)
                               ) && (
-                                <details className="mt-1">
+                                <details className="mt-1" onClick={(e) => e.stopPropagation()}>
                                   <summary className="cursor-pointer text-[10px] font-medium text-blue-300 underline decoration-blue-300/30 underline-offset-2 light:text-blue-700">
                                     View event context
                                   </summary>
@@ -640,6 +671,29 @@ export const OperationalLogsView: React.FC = () => {
             </div>
           </div>
         </>
+      )}
+
+      {selectedEvent && (
+        <LogDetailModal
+          icon={<Cpu className="h-4 w-4" />}
+          eyebrow={selectedEvent.category}
+          title={selectedEvent.message}
+          level={selectedEvent.level}
+          timestamp={selectedEvent.timestamp}
+          onClose={() => setSelectedEvent(null)}
+          fields={[
+            { label: 'Code', value: selectedEvent.code, mono: true },
+            { label: 'Execution ID', value: selectedEvent.runId || '—', mono: true },
+            { label: 'Entry ID', value: selectedEvent.id, mono: true },
+            {
+              label: 'Context',
+              value: JSON.stringify(selectedEvent.context, null, 2),
+              mono: true,
+              block: true,
+              hidden: !selectedEvent.context || Object.keys(selectedEvent.context).length === 0,
+            },
+          ]}
+        />
       )}
     </div>
   );
