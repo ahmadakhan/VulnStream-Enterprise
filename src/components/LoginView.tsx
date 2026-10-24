@@ -24,7 +24,7 @@ export function LoginView() {
         <div className="login-brand-row">
           <div className="login-brand-mark"><ShieldCheck size={23} strokeWidth={1.8} /></div>
           <div>
-            <div className="login-brand-name">VulnStream</div>
+            <div className="login-brand-name">BA Threat Intel</div>
             <div className="login-brand-caption">THREAT INTELLIGENCE OPERATIONS</div>
           </div>
           <span className="login-edition">ENTERPRISE</span>
@@ -97,7 +97,7 @@ export function LoginView() {
       </section>
 
       <footer className="login-page-footer">
-        VulnStream Enterprise <span>·</span> Vulnerability intelligence and response
+        BA Threat Intel Enterprise <span>·</span> Vulnerability intelligence and response
       </footer>
     </main>
   );

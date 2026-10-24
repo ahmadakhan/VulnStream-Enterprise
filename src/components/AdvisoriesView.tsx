@@ -37,7 +37,7 @@ ${adv.affectedSystems.map((s) => `- ${s}`).join('\n')}
 ${adv.remediationInstructions}
 
 ---
-*Autonomous Product Vulnerability Notification — VulnStream Platform.*`;
+*Autonomous Product Vulnerability Notification — BA Threat Intel Platform.*`;
 
     if (await copyText(md)) {
       setCopied(adv.id);
@@ -104,7 +104,7 @@ ${adv.remediationInstructions}
   </div>
 
   <div class="footer">
-    VulnStream Autonomous Intelligence • Zero-Touch Alerting Service
+    BA Threat Intel Autonomous Intelligence • Zero-Touch Alerting Service
   </div>
 </body>
 </html>`;

@@ -140,7 +140,7 @@ export function createMailSender(config: Config, db?: Db, request: Requester = c
       text: job.payload.text,
       html: job.payload.html,
       messageId: `<${job.id}@${fromEmail.split('@').pop()}>`,
-      headers: { 'X-VulnStream-Delivery-ID': job.id },
+      headers: { 'X-BA-Threat-Intel-Delivery-ID': job.id },
     });
     if (
       !result.accepted?.some(

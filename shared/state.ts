@@ -20,7 +20,7 @@ import type {
 } from '../src/types/index.ts';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION, compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
 export const DEFAULT_EMAIL_CONFIG: EmailConfiguration = {
-  provider: 'SMTP', fromEmail: '', fromName: 'VulnStream', apiKey: '',
+  provider: 'SMTP', fromEmail: '', fromName: 'BA Threat Intel', apiKey: '',
   apiEndpoint: '', apiHeaderKey: 'Authorization', apiAuthPrefix: 'Bearer', apiSourceDomain: '',
   smtpHost: '', smtpPort: 587, smtpSecurity: 'STARTTLS', smtpUsername: '', smtpPassword: '',
   mailgunDomain: '', mailgunRegion: 'US', mailtrapMode: 'LIVE', mailtrapInboxId: '',

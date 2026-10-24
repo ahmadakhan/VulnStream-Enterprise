@@ -39,7 +39,7 @@ Use the encryption key corresponding to the backup. Restore tests must have exte
 
 Rotate database passwords using PostgreSQL role administration and update the protected environment together. Re-enter feed/webhook credentials to rotate them. Changing `ENCRYPTION_KEY` does not automatically re-encrypt existing values: retain the original key, disable scheduling/delivery, and plan a controlled re-encryption migration before rotation. Never discard the old key until backups no longer require it.
 
-SMTP uses TLS (implicit on 465, required STARTTLS otherwise), certificate validation and bounded timeouts. Generic webhooks carry `X-VulnStream-Signature`, `X-VulnStream-Timestamp` and `Idempotency-Key`; verify the HMAC over `timestamp + '.' + exact body` and reject stale timestamps at the receiver. Check the source for exact header casing (HTTP headers are case-insensitive). Slack/Teams payloads use their supported text format.
+SMTP uses TLS (implicit on 465, required STARTTLS otherwise), certificate validation and bounded timeouts. Generic webhooks carry `X-BA-Threat-Intel-Signature`, `X-BA-Threat-Intel-Timestamp` and `Idempotency-Key`; verify the HMAC over `timestamp + '.' + exact body` and reject stale timestamps at the receiver. Check the source for exact header casing (HTTP headers are case-insensitive). Slack/Teams payloads use their supported text format.
 
 Jobs retry transient failures up to six attempts with backoff; permanent 4xx responses except 408/429 fail immediately. Failed jobs can be explicitly retried. A crash after remote acceptance and before local commit can duplicate a delivery, even with durable storage. Do not describe `ACCEPTED` as delivered/read. Use provider telemetry for those claims.
 

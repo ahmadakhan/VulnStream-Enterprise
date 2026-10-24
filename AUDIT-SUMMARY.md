@@ -1,4 +1,4 @@
-# Deep Audit Summary — VulnStream Enterprise
+# Deep Audit Summary — BA Threat Intel Enterprise
 
 **Date:** 21 October 2026  
 **Scope:** Complete source code review — server, client, shared modules, engine, tests, deployment  
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-VulnStream Enterprise is a well-engineered, defense-in-depth vulnerability inventory correlation and advisory delivery platform. The codebase implements server-side authentication/authorization, encrypted secret storage, SSRF-hardened egress, atomic PostgreSQL transactions with advisory locks, SHA-256 chained audit logs, and a production Docker Compose deployment with non-root read-only runtime. TypeScript is used consistently with Zod schema validation at all API boundaries.
+BA Threat Intel Enterprise is a well-engineered, defense-in-depth vulnerability inventory correlation and advisory delivery platform. The codebase implements server-side authentication/authorization, encrypted secret storage, SSRF-hardened egress, atomic PostgreSQL transactions with advisory locks, SHA-256 chained audit logs, and a production Docker Compose deployment with non-root read-only runtime. TypeScript is used consistently with Zod schema validation at all API boundaries.
 
 **Overall impression:** Security-conscious architecture with explicit, documented boundaries and verified test coverage (37 unit + 42 page-verification + 51 pipeline-lifecycle tests all passing at last verification).
 

@@ -109,7 +109,7 @@ export function EmailProviderSettings() {
           <label htmlFor="email-from-name">
             Sender name
             <input id="email-from-name" className="ui-field" value={form.fromName} maxLength={100}
-              placeholder="VulnStream Security" onChange={(event) => update({ fromName: event.target.value })} />
+              placeholder="BA Threat Intel Security" onChange={(event) => update({ fromName: event.target.value })} />
           </label>
           <label htmlFor="email-from-address" className="sm:col-span-2">
             Sender email

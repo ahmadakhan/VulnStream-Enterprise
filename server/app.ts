@@ -600,7 +600,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           throw new HttpError(409, 'Configure an email provider in Settings before sending a test');
         const data = await state(db);
         const testAdvisory: Advisory = {
-          id: `${data.settings.advisoryPrefix}TEST`, title: 'VulnStream template test', severity: 'UNKNOWN',
+          id: `${data.settings.advisoryPrefix}TEST`, title: 'BA Threat Intel template test', severity: 'UNKNOWN',
           cveIds: [], findingIds: [], createdDate: new Date().toISOString(), deliveryStatus: 'PENDING',
           recipientCount: 1, executiveSummary: 'Requested template test. This is not a live vulnerability advisory.',
           affectedSystems: ['Example inventory asset'], remediationInstructions: 'Preview only; no remediation action is required.',
@@ -668,7 +668,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           'webhook',
           hook.id,
           'TEST',
-          { subject: 'VulnStream connection test', text: 'Requested VulnStream webhook test', cveIds: [] },
+          { subject: 'BA Threat Intel connection test', text: 'Requested BA Threat Intel webhook test', cveIds: [] },
           randomUUID(),
         );
         await appendAudit(

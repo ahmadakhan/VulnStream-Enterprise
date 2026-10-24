@@ -33,7 +33,7 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     this.setState({ errorInfo });
     // In production, send to remote telemetry endpoint
-    console.error('[VulnStream Enterprise ErrorBoundary]', error, errorInfo);
+    console.error('[BA Threat Intel Enterprise ErrorBoundary]', error, errorInfo);
   }
 
   handleCopyDiagnostics = async () => {
@@ -79,7 +79,7 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
 
             <p className="text-xs text-zinc-300 leading-relaxed mb-4">
-              An unexpected component error occurred. VulnStream isolated the execution tree to prevent state
+              An unexpected component error occurred. BA Threat Intel isolated the execution tree to prevent state
               corruption. You can copy diagnostics for SecOps engineering or reload the runtime.
             </p>
 

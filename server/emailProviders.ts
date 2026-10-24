@@ -94,7 +94,7 @@ export async function sendProviderEmail(
       `${config.provider === 'API' ? config.apiAuthPrefix : 'Bearer'}${config.provider === 'API' && !config.apiAuthPrefix ? '' : ' '}${token}`,
   };
   const { subject, text, html, recipientEmail } = job.payload;
-  const deliveryHeader = { 'X-VulnStream-Delivery-ID': job.id };
+  const deliveryHeader = { 'X-BA-Threat-Intel-Delivery-ID': job.id };
   let body: string;
   if (config.provider === 'API') {
     body = JSON.stringify({
@@ -114,7 +114,7 @@ export async function sendProviderEmail(
       to: recipientEmail,
       subject,
       text,
-      'h:X-VulnStream-Delivery-ID': job.id,
+      'h:X-BA-Threat-Intel-Delivery-ID': job.id,
       'h:Message-Id': `<${job.id}@${config.fromEmail.split('@')[1]}>`,
       'o:require-tls': 'yes',
       ...(html ? { html } : {}),
@@ -145,7 +145,7 @@ export async function sendProviderEmail(
       ...(html ? { HtmlBody: html } : {}),
       MessageStream: config.postmarkMessageStream,
       Metadata: { delivery_id: job.id },
-      Headers: [{ Name: 'X-VulnStream-Delivery-ID', Value: job.id }],
+      Headers: [{ Name: 'X-BA-Threat-Intel-Delivery-ID', Value: job.id }],
     });
   } else if (config.provider === 'MAILJET_API') {
     delete headers.Authorization;
@@ -159,7 +159,7 @@ export async function sendProviderEmail(
           Subject: subject,
           TextPart: text,
           HTMLPart: html,
-          Headers: [{ Name: 'X-VulnStream-Delivery-ID', Value: job.id }],
+          Headers: [{ Name: 'X-BA-Threat-Intel-Delivery-ID', Value: job.id }],
         },
       ],
     });

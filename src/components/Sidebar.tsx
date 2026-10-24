@@ -114,7 +114,7 @@ export const Sidebar: React.FC = () => {
           type="button"
           onClick={() => setActiveTab('dashboard')}
           className="flex items-center space-x-3 text-left cursor-pointer group"
-          aria-label="VulnStream dashboard"
+          aria-label="BA Threat Intel dashboard"
         >
           <div className="w-9 h-9 rounded-2xl bg-blue-500/15 border border-blue-400/25 flex items-center justify-center text-blue-200 shadow-sm transition group-hover:border-blue-400/50">
             <Shield className="w-4 h-4 text-blue-300" />
@@ -122,8 +122,7 @@ export const Sidebar: React.FC = () => {
           <div>
             <div className="flex items-center space-x-1.5">
               <span className="text-sm font-bold tracking-tight text-zinc-100 dark:text-zinc-100 light:text-zinc-900">
-                VulnStream
-                <span className="text-zinc-400 dark:text-zinc-400 light:text-zinc-500">Stream</span>
+                BA Threat Intel
               </span>
               <span className="text-[10px] font-semibold bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 px-1.5 py-0.2 rounded">
                 Auto

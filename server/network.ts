@@ -108,7 +108,7 @@ export function createRequester(config: Config): Requester {
         url,
         {
           method: options.method || 'GET',
-          headers: { 'user-agent': 'VulnStream/1.0', accept: 'application/json', 'accept-encoding': 'gzip', ...options.headers },
+          headers: { 'user-agent': 'BA-Threat-Intel/1.0', accept: 'application/json', 'accept-encoding': 'gzip', ...options.headers },
           lookup: ((_host: string, opts: any, cb: any) =>
             opts?.all ? cb(null, [selected]) : cb(null, selected.address, selected.family)) as any,
           agent: false,

@@ -1,4 +1,4 @@
-# VulnStream Enterprise — Production Readiness Audit
+# BA Threat Intel Enterprise — Production Readiness Audit
 
 **Audit date:** 2026-10-24  
 **Scope:** server, matching engine, pipeline, ingestion, delivery, authentication, validation, retention, and the affected React views.  
@@ -27,7 +27,7 @@ The full PostgreSQL run is now deterministic. Before this pass it failed intermi
 ### P0 — Pipeline advisory lock was database-wide, not schema-scoped
 **Files:** `server/db.ts:25`, `server/db.ts:32`, `server/db.ts:68`, `server/pipeline.ts:150`, `server/pipeline.ts:822`
 
-`pg_advisory_lock(800003)` is scoped to the database. Two VulnStream deployments sharing one PostgreSQL database (or parallel test schemas) blocked each other's pipelines for the whole run. A worker that could not acquire the lock returned `false`, leaving executions `RUNNING` and silently skipping ingestion.
+`pg_advisory_lock(800003)` is scoped to the database. Two BA Threat Intel deployments sharing one PostgreSQL database (or parallel test schemas) blocked each other's pipelines for the whole run. A worker that could not acquire the lock returned `false`, leaving executions `RUNNING` and silently skipping ingestion.
 
 The migration, state-transaction, and pipeline-worker locks now use the two-key form with `hashtext(COALESCE(current_schema(), current_database()))`. Same-schema workers still serialize; independent schemas no longer block each other. The lost-lock regression test now targets its own schema (`tests/pipeline-lifecycle.test.ts`).
 

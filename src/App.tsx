@@ -56,7 +56,7 @@ const Footer: React.FC = () => {
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
           <span className="font-semibold text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-            VulnStream Enterprise
+            BA Threat Intel Enterprise
           </span>
           <span>•</span>
           <span>PostgreSQL persistence</span>

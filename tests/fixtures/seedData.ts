@@ -786,7 +786,7 @@ export const INITIAL_ADVISORY_TEMPLATE = `<!DOCTYPE html>
     <p style="margin-top: 16px; font-size: 13px;"><strong>Vendor Advisory:</strong> <a href="{{vendor_link}}" style="color: #60a5fa; text-decoration: none;">{{vendor_link}}</a></p>
 
     <div class="footer">
-      Autonomous Product Vulnerability Notification — VulnStream Platform.
+      Autonomous Product Vulnerability Notification — BA Threat Intel Platform.
     </div>
   </div>
 </body>

@@ -1,4 +1,4 @@
-# VulnStream Enterprise
+# BA Threat Intel Enterprise
 
 Vulnerability inventory correlation and advisory delivery with a React interface, a Node.js API/worker, PostgreSQL persistence, server-side operator accounts, and Docker deployment. Runtime data starts empty. No sample telemetry or simulated delivery is used.
 

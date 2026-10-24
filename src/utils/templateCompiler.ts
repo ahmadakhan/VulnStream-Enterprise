@@ -126,7 +126,7 @@ ${section('Recommended response')}
 <a href="{{vendor_link}}" style="color:${config.accentColor};font-size:13px;line-height:22px;text-decoration:underline;">{{vendor_link}}</a>
 </td></tr>
 <tr><td class="section" style="padding:20px 32px;border-top:1px solid #cbd5e1;font-size:11px;line-height:18px;color:${config.fontColor};">
-<p style="margin:0 0 8px;font-weight:700;">VulnStream · Security Operations</p>
+<p style="margin:0 0 8px;font-weight:700;">BA Threat Intel · Security Operations</p>
 <p style="margin:0;">Generated from monitored inventory and threat intelligence. Validate applicability and follow your approved change process before remediation.</p>
 </td></tr>
 </table>
