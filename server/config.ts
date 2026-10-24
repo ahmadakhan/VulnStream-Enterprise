@@ -5,7 +5,7 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   APP_ORIGIN: z.url(),
   ENCRYPTION_KEY: z.string().regex(/^[A-Za-z0-9+/]{43}=$/, 'Must be a base64 encoded 32-byte key'),
-  EGRESS_ALLOWED_HOSTS: z.string().default('raw.githubusercontent.com,services.nvd.nist.gov,www.cisa.gov,api.first.org,app.opencve.io,api.vulncheck.com,www.bleepingcomputer.com,isc.sans.edu,api.msrc.microsoft.com,api.mailgun.net,api.eu.mailgun.net,send.api.mailtrap.io,sandbox.api.mailtrap.io,api.sendgrid.com,api.postmarkapp.com,smtp.maileroo.com,smtp.lettr.com,in-v3.mailjet.com,api.mailjet.com,smtp.gmail.com,www.fortiguard.com,filestore.fortinet.com'),
+  EGRESS_ALLOWED_HOSTS: z.string().default('raw.githubusercontent.com,services.nvd.nist.gov,www.cisa.gov,api.first.org,app.opencve.io,api.vulncheck.com,www.bleepingcomputer.com,isc.sans.edu,api.msrc.microsoft.com,api.mailgun.net,api.eu.mailgun.net,send.api.mailtrap.io,sandbox.api.mailtrap.io,api.sendgrid.com,smtp.sendgrid.net,api.postmarkapp.com,smtp.maileroo.com,smtp.lettr.com,in-v3.mailjet.com,api.mailjet.com,smtp.gmail.com,www.fortiguard.com,filestore.fortinet.com'),
   TRUST_PROXY: z.string().default(''),
   SMTP_HOST: z.string().default(''),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(465),

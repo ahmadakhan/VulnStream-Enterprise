@@ -10,6 +10,7 @@ export const EMAIL_PROVIDER_LABELS: Record<EmailConfiguration['provider'], Email
   MAILEROO_SMTP: 'SMTP_Relay',
   LETTR_SMTP: 'SMTP_Relay',
   MAILJET_SMTP: 'SMTP_Relay',
+  SENDGRID_SMTP: 'SMTP_Relay',
   MAILGUN: 'Mailgun',
   MAILTRAP: 'Mailtrap',
   SENDGRID: 'SendGrid',

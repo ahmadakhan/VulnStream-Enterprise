@@ -92,9 +92,19 @@ export function createMailSender(config: Config, db?: Db, request: Requester = c
     if (!isSmtpEmailProvider(saved.provider)) {
       const token = decrypt(saved.apiKey, config.ENCRYPTION_KEY, `email-provider:${saved.provider}`);
       if (!token) throw new Error('Email provider token is missing');
+      const mailjetSecret =
+        saved.provider === 'MAILJET_API'
+          ? decrypt(saved.mailjetApiSecret, config.ENCRYPTION_KEY, `email-mailjet:${saved.provider}`)
+          : saved.mailjetApiSecret;
       const provider = EMAIL_PROVIDER_LABELS[saved.provider];
       try {
-        const id = await sendProviderEmail(saved, token, job, request, config.MAILJET_SANDBOX_MODE === 'true');
+        const id = await sendProviderEmail(
+          { ...saved, mailjetApiSecret: mailjetSecret },
+          token,
+          job,
+          request,
+          config.MAILJET_SANDBOX_MODE === 'true',
+        );
         return { id, provider };
       } catch (error) {
         if (error instanceof EmailProviderError) { error.provider = provider; throw error; }

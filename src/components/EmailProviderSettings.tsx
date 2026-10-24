@@ -5,7 +5,9 @@ import { isSmtpEmailProvider, type EmailConfiguration, type EmailProvider } from
 
 const methodName = (provider: EmailProvider) =>
   isSmtpEmailProvider(provider)
-    ? 'SMTP'
+    ? provider === 'SENDGRID_SMTP'
+      ? 'SendGrid SMTP'
+      : 'SMTP'
     : provider === 'MAILJET_API'
       ? 'Mailjet API'
       : 'Email API';
@@ -18,10 +20,10 @@ const initialForm = (configuration: EmailConfiguration): EmailConfiguration => (
   apiHeaderKey: configuration.apiHeaderKey || 'Authorization',
   apiAuthPrefix: configuration.apiAuthPrefix ?? 'Bearer',
   apiSourceDomain: configuration.apiSourceDomain || '',
-  smtpHost: configuration.smtpHost || '',
+  smtpHost: configuration.smtpHost || (configuration.provider === 'SENDGRID_SMTP' ? 'smtp.sendgrid.net' : ''),
   smtpPort: configuration.smtpPort || 587,
   smtpSecurity: configuration.smtpSecurity || 'STARTTLS',
-  smtpUsername: configuration.smtpUsername || '',
+  smtpUsername: configuration.smtpUsername || (configuration.provider === 'SENDGRID_SMTP' ? 'apikey' : ''),
   smtpPassword: '',
 });
 
@@ -43,6 +45,7 @@ export function EmailProviderSettings() {
   };
   const isSmtp = isSmtpEmailProvider(form.provider);
   const isMailjet = form.provider === 'MAILJET_API';
+  const isSendGridSmtp = form.provider === 'SENDGRID_SMTP';
   const isGmailSmtp = form.smtpHost.trim().toLowerCase() === 'smtp.gmail.com';
   const hasSavedApiKey = form.provider === emailConfig.provider && !!emailConfig.hasApiKey;
   const hasSavedSmtpPassword = form.provider === emailConfig.provider && !!emailConfig.hasSmtpPassword;
@@ -78,17 +81,27 @@ export function EmailProviderSettings() {
         <div className="grid gap-4 sm:grid-cols-2">
           <label htmlFor="email-provider">
             Delivery method
-            <select
+               <select
               id="email-provider"
               className="ui-field"
-              value={isSmtp ? 'SMTP' : isMailjet ? 'MAILJET_API' : 'API'}
+              value={form.provider === 'SENDGRID_SMTP' ? 'SENDGRID_SMTP' : isSmtp ? 'SMTP' : isMailjet ? 'MAILJET_API' : 'API'}
               onChange={(event) => {
                 const value = event.target.value;
-                const provider = value === 'SMTP' ? 'SMTP' : value === 'MAILJET_API' ? 'MAILJET_API' : 'API';
-                update({ provider, apiKey: '', smtpPassword: '', mailjetApiSecret: '' });
+                const provider =
+                  value === 'SMTP' ? 'SMTP' : value === 'SENDGRID_SMTP' ? 'SENDGRID_SMTP' : value === 'MAILJET_API' ? 'MAILJET_API' : 'API';
+                update({
+                  provider,
+                  apiKey: '',
+                  smtpPassword: '',
+                  mailjetApiSecret: '',
+                  ...(value === 'SENDGRID_SMTP'
+                    ? { smtpHost: 'smtp.sendgrid.net', smtpPort: 587, smtpSecurity: 'STARTTLS' as const, smtpUsername: 'apikey' }
+                    : {}),
+                });
               }}
             >
               <option value="SMTP">SMTP</option>
+              <option value="SENDGRID_SMTP">SendGrid SMTP</option>
               <option value="MAILJET_API">Mailjet API</option>
               <option value="API">Email API</option>
             </select>
@@ -149,18 +162,18 @@ export function EmailProviderSettings() {
                   </select>
                 </label>
                 <label htmlFor="smtp-username">
-                  {isGmailSmtp ? 'Authentication username' : 'SMTP username'}
+                  {isGmailSmtp ? 'Authentication username' : isSendGridSmtp ? 'API key as username' : 'SMTP username'}
                   <input id="smtp-username" className="ui-field" autoComplete="username" value={form.smtpUsername}
-                    placeholder={isGmailSmtp ? 'yourusername@gmail.com' : 'SMTP username'}
+                    placeholder={isGmailSmtp ? 'yourusername@gmail.com' : isSendGridSmtp ? 'apikey' : 'SMTP username'}
                     onChange={(event) => update({ smtpUsername: event.target.value })} />
                 </label>
                 <label htmlFor="smtp-password" className="sm:col-span-2">
-                  {isGmailSmtp ? 'Authentication password' : 'SMTP password'}
+                  {isGmailSmtp ? 'Authentication password' : isSendGridSmtp ? 'API key' : 'SMTP password'}
                   <input id="smtp-password" type="password" autoComplete="new-password" spellCheck={false}
                     className="ui-field" value={form.smtpPassword} maxLength={4096}
                     required={!!form.smtpUsername && !hasSavedSmtpPassword}
                     placeholder={hasSavedSmtpPassword ? 'Credential saved — leave blank to keep it' :
-                      isGmailSmtp ? '16-character Gmail App Password' : 'Enter SMTP password'}
+                      isGmailSmtp ? '16-character Gmail App Password' : isSendGridSmtp ? 'Enter your SendGrid API key' : 'Enter SMTP password'}
                     onChange={(event) => update({ smtpPassword: event.target.value })} />
                   <span className="ui-description mt-1.5 flex items-center gap-1.5">
                     <KeyRound className="h-3 w-3" /> Encrypted on the server. Leave blank to keep a saved credential.
@@ -168,7 +181,7 @@ export function EmailProviderSettings() {
                 </label>
               </>}
               <p className="ui-description sm:col-span-2">
-                Gmail configuration: host smtp.gmail.com; use your full Gmail address and generated 16-character App Password. Port 587 uses STARTTLS (recommended); port 465 uses implicit TLS. SMTP also supports Maileroo, Lettr, Mailjet, and other relays.
+                Gmail configuration: host smtp.gmail.com; use your full Gmail address and generated 16-character App Password. Port 587 uses STARTTLS (recommended); port 465 uses implicit TLS. SMTP also supports SendGrid (username <code>apikey</code>), Maileroo, Lettr, Mailjet, and other relays.
               </p>
             </>
           ) : isMailjet ? (

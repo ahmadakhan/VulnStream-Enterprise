@@ -89,6 +89,33 @@ test('provider requests preserve recipients and body and validate native accepta
     });
   }
 });
+
+test('MAILJET_API uses Basic auth with decrypted token and secret', async () => {
+  const mailjetSecret = 'test-mailjet-secret';
+  const config = { ...configuration('MAILJET_API'), mailjetApiSecret: mailjetSecret };
+  const result = await sendProviderEmail(config, token, job, async (url, options) => {
+    assert.equal(url, 'https://api.mailjet.com/v3.1/send');
+    assert.equal(options?.method, 'POST');
+    const headers = options.headers!;
+    assert.equal(
+      headers.Authorization,
+      `Basic ${Buffer.from(`${token}:${mailjetSecret}`).toString('base64')}`,
+    );
+    const payload = JSON.parse(options.body!);
+    assert.deepEqual(payload.Messages[0].From, { Email: config.fromEmail, Name: config.fromName });
+    assert.equal(payload.Messages[0].To[0].Email, job.payload.recipientEmail);
+    assert.equal(payload.Messages[0].TextPart, job.payload.text);
+    return {
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        Messages: [{ To: [{ MessageID: 'mailjet-accepted-id' }], ID: 'fallback-id' }],
+      }),
+    };
+  });
+  assert.equal(result, 'mailjet-accepted-id');
+});
+
 test('region and sandbox settings select the correct fixed endpoints', async () => {
   await sendProviderEmail({ ...configuration('MAILGUN'), mailgunRegion: 'EU' }, token, job, async (url) => {
     assert.match(url, /^https:\/\/api\.eu\.mailgun\.net\//);

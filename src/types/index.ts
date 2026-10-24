@@ -376,7 +376,7 @@ export interface AuditLog {
   hash: string;
 }
 
-export const SMTP_EMAIL_PROVIDERS = ['SMTP_CUSTOM', 'MAILEROO_SMTP', 'LETTR_SMTP', 'MAILJET_SMTP'] as const;
+export const SMTP_EMAIL_PROVIDERS = ['SMTP_CUSTOM', 'MAILEROO_SMTP', 'LETTR_SMTP', 'MAILJET_SMTP', 'SENDGRID_SMTP'] as const;
 export const EMAIL_PROVIDERS = [
   'SMTP',
   'API',
