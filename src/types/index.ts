@@ -461,6 +461,26 @@ export interface RetentionPreview {
   scanned: number;
 }
 
+export interface CorrelationSimulationMatch {
+  cve: NormalizedCVE;
+  method: string;
+  confidence: number;
+  evidence: string;
+  autoAction: string;
+  suppressed: boolean;
+  suppressionReason?: string;
+}
+
+/** Result of the read-only matching simulator. The server evaluates the full
+ * CVE cache so the browser never has to download it to preview a match. */
+export interface CorrelationSimulation {
+  testedAt: string;
+  matchedCves: CorrelationSimulationMatch[];
+  totalScanned: number;
+  aliasExpanded: boolean;
+  intervalEvaluated: boolean;
+}
+
 export interface AppSettings {
   scopeHours: number;
   schedulerIntervalMinutes: number;

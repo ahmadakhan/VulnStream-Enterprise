@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { emptyState, type AppState, type SessionInfo } from '../../shared/state';
+import { emptyState, type AppState, type SessionInfo, type CollectionKind, type CollectionPage, type RetentionPreview } from '../../shared/state';
 import type {
   ThreatFeed,
   WatchListItem,
@@ -17,6 +17,7 @@ import type {
   EmailQueueItem,
   AliasEntry,
   RetentionRunResult,
+  CorrelationSimulation,
 } from '../types';
 import { compileCustomizedTemplate } from '../utils/templateCompiler';
 function useApplication() {
@@ -37,6 +38,7 @@ function useApplication() {
   });
   const [clock, setClock] = useState(Date.now()),
     [draft, setDraft] = useState<TemplateCustomization | null>(null),
+    [refreshVersion, setRefreshVersion] = useState(0),
     [pending, setPending] = useState(0);
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -76,7 +78,43 @@ function useApplication() {
     },
     [],
   );
-  const refresh = useCallback(async () => setSnapshot(await request<AppState>('/state')), [request]);
+  const refresh = useCallback(async () => {
+    setSnapshot(await request<AppState>('/state'));
+    // Signals bounded collection views to refetch their current page after a
+    // mutation or poll, without duplicating heavy collections in the snapshot.
+    setRefreshVersion((value) => value + 1);
+  }, [request]);
+  const fetchCollection = useCallback(
+    <T,>(
+      kind: CollectionKind,
+      query: {
+        page?: number;
+        pageSize?: number;
+        search?: string;
+        sort?: string;
+        order?: 'asc' | 'desc';
+        filters?: Record<string, unknown>;
+      } = {},
+    ): Promise<CollectionPage<T>> => {
+      const page = Math.max(1, Math.floor(query.page ?? 1));
+      const pageSize = Math.max(1, Math.floor(query.pageSize ?? 50));
+      const params = new URLSearchParams({
+        limit: String(pageSize),
+        offset: String((page - 1) * pageSize),
+      });
+      if (query.search) params.set('search', query.search);
+      if (query.sort) params.set('sort', query.sort);
+      if (query.order) params.set('order', query.order);
+      for (const [key, value] of Object.entries(query.filters ?? {})) {
+        if (value === undefined || value === null || value === '' || value === 'ALL') continue;
+        if (Array.isArray(value)) {
+          if (value.length) params.set(key, value.join(','));
+        } else params.set(key, String(value));
+      }
+      return request<CollectionPage<T>>(`/collections/${encodeURIComponent(kind)}?${params}`);
+    },
+    [request],
+  );
   const safely = useCallback(async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
     setPending((p) => p + 1);
     try {
@@ -192,6 +230,8 @@ function useApplication() {
     login,
     logout,
     refresh,
+    refreshVersion,
+    fetchCollection,
     selectedFinding: snapshot.findings.find((f) => f.id === selectedFinding?.id) || selectedFinding,
     setSelectedFinding,
     selectedAdvisory,
@@ -245,6 +285,22 @@ function useApplication() {
         `/feeds/${encodeURIComponent(id)}/test`,
       )) || { success: false, latency: 0, error: 'Connectivity test failed' },
     runRetentionCleanup: () => call<RetentionRunResult>('/retention/run'),
+    previewRetention: (policy: {
+      enabled: boolean;
+      retentionHours: number;
+      maxArchivedRecords: number;
+      retentionMode: 'strict' | 'rolling' | 'checkpoints';
+    }) => safely(() => request<RetentionPreview>('/retention/preview', policy)),
+    verifyAuditChainRemote: () => safely(() => request<{ verified: boolean }>('/audit/verify')),
+    simulateCorrelation: (asset: {
+      vendor: string;
+      product: string;
+      version?: string;
+      cpes: string[];
+      purls?: string[];
+      targetHw?: string;
+      assetTag?: string;
+    }) => safely(() => request<CorrelationSimulation>('/correlation/simulate', asset)),
     addWatchlistItem: (item: Omit<WatchListItem, 'id' | 'createdAt'>) => save('asset.save', item),
     updateWatchlistItem: (item: WatchListItem) => save('asset.save', item, item.id),
     toggleWatchlistItemActive: async (id: string) => {

@@ -196,6 +196,7 @@ export function runVulnerabilityPipeline(
           false,
           vendorAliases,
           productAliases,
+          asset.version,
         ),
       );
       if (asset.purls?.length && cve.purls?.length)

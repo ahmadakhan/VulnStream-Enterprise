@@ -19,12 +19,13 @@ import {
   Cpu,
 } from 'lucide-react';
 import { Pagination } from './Pagination';
+import { useCollection } from '../hooks/useCollection';
 import { copyText } from '../utils/clipboard';
 import { CveLink } from './CveLink';
-import { compareFindingsByRecency, formatCveDate } from '../utils/findingSort';
+import { formatCveDate } from '../utils/findingSort';
 
 export const FindingsView: React.FC = () => {
-  const { findings, selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification } = useApp();
+  const { selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification } = useApp();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState('ALL');
@@ -41,20 +42,12 @@ export const FindingsView: React.FC = () => {
   const [resendModalOpen, setResendModalOpen] = useState(false);
   const [resendReason, setResendReason] = useState('');
 
-  const filteredFindings = findings.filter((f) => {
-    const matchesSearch =
-      f.cveId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      f.matchedAssetName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      f.cve.title.toLowerCase().includes(searchTerm.toLowerCase());
-
-    const matchesSeverity = severityFilter === 'ALL' || f.cve.cvss.severity === severityFilter;
-
-    const matchesStatus = statusFilter === 'ALL' || f.status === statusFilter;
-
-    return matchesSearch && matchesSeverity && matchesStatus;
-  }).sort(compareFindingsByRecency);
-
-  const paginatedFindings = filteredFindings.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const { items: findings, total, reload } = useCollection<Finding>('findings', {
+    page: currentPage,
+    pageSize,
+    search: searchTerm,
+    filters: { severity: severityFilter, status: statusFilter },
+  });
 
   const handleCopy = async (text: string) => {
     if (await copyText(text)) {
@@ -76,6 +69,7 @@ export const FindingsView: React.FC = () => {
         ...selectedFinding,
         status: targetStatus,
       });
+      await reload();
     }
     setStatusModalOpen(false);
   };
@@ -85,6 +79,7 @@ export const FindingsView: React.FC = () => {
       if (!(await resendNotification(selectedFinding.cveId, resendReason))) return;
       setResendModalOpen(false);
       setResendReason('');
+      await reload();
     }
   };
 
@@ -183,14 +178,14 @@ export const FindingsView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
-                  {paginatedFindings.length === 0 ? (
+                  {findings.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="py-8 text-center text-zinc-500 text-xs">
                         No product vulnerabilities match the current filter.
                       </td>
                     </tr>
                   ) : (
-                    paginatedFindings.map((finding) => {
+                    findings.map((finding) => {
                       const isSelected = selectedFinding?.id === finding.id;
                       const isKev = finding.cve.cisaKev.isKev;
 
@@ -318,7 +313,7 @@ export const FindingsView: React.FC = () => {
             {/* Pagination Controls */}
             <Pagination
               currentPage={currentPage}
-              totalItems={filteredFindings.length}
+              totalItems={total}
               pageSize={pageSize}
               onPageChange={setCurrentPage}
               onPageSizeChange={setPageSize}

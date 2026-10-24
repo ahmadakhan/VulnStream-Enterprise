@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { NormalizedCVE } from '../types';
+import { NormalizedCVE, IntelligenceArticle, IntelligenceMatch } from '../types';
+import { useCollection } from '../hooks/useCollection';
 import {
   Database,
   Search,
@@ -114,7 +115,7 @@ const sourceBadgeClass =
   'rounded border border-zinc-800 bg-zinc-950 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400 light:border-zinc-300 light:bg-zinc-100 light:text-zinc-700';
 
 const CveCacheView: React.FC = () => {
-  const { cveData, settings, setActiveTab } = useApp();
+  const { counts, settings, setActiveTab } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [kevFilter, setKevFilter] = useState<'ALL' | 'KEV_ONLY'>('ALL');
   const [epssFilter, setEpssFilter] = useState<'ALL' | 'HIGH_EPSS'>('ALL');
@@ -130,51 +131,23 @@ const CveCacheView: React.FC = () => {
   const scopeHours = settings.scopeHours || 24;
   const now = Date.now();
   const scopeMillis = scopeHours * 60 * 60 * 1000;
-  const search = searchTerm.trim().toLowerCase();
+  const { items: cveData, total, loading } = useCollection<NormalizedCVE>('cveData', {
+    page: currentPage,
+    pageSize,
+    search: searchTerm,
+    sort: sortBy,
+    order: sortOrder,
+    filters: {
+      kev: kevFilter === 'KEV_ONLY',
+      epssMin: epssFilter === 'HIGH_EPSS' ? 0.4 : undefined,
+      dateFilter,
+      scopeHours,
+    },
+  });
 
-  const filteredCves = cveData
-    .filter((cve) => {
-      const matchesSearch =
-        !search ||
-        cve.cveId.toLowerCase().includes(search) ||
-        cve.title.toLowerCase().includes(search) ||
-        cve.sourceFeeds.some((source) => source.toLowerCase().includes(search)) ||
-        cve.cpeMatches.some((cpe) => cpe.toLowerCase().includes(search));
-
-      const matchesKev = kevFilter === 'ALL' || cve.cisaKev.isKev;
-      const matchesEpss = epssFilter === 'ALL' || cve.epss.score >= 0.4;
-
-      const pubTime = new Date(cve.publishedDate).getTime();
-      const modTime = new Date(cve.modifiedDate).getTime();
-
-      let matchesDate = true;
-      if (dateFilter === 'IN_SCOPE') {
-        matchesDate = now - pubTime <= scopeMillis || now - modTime <= scopeMillis;
-      } else if (dateFilter === 'RECENT_MODIFIED') {
-        matchesDate = now - modTime <= 7 * DAY_MS;
-      } else if (dateFilter === 'RECENT_PUBLISHED') {
-        matchesDate = now - pubTime <= 7 * DAY_MS;
-      }
-
-      return matchesSearch && matchesKev && matchesEpss && matchesDate;
-    })
-    .sort((a, b) => {
-      let comparison = 0;
-      if (sortBy === 'score') {
-        comparison = b.cvss.score - a.cvss.score;
-      } else if (sortBy === 'published') {
-        comparison = new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime();
-      } else {
-        comparison = new Date(b.modifiedDate).getTime() - new Date(a.modifiedDate).getTime();
-      }
-      return sortOrder === 'desc' ? comparison : -comparison;
-    });
-
-  const totalPages = Math.max(1, Math.ceil(filteredCves.length / pageSize));
-  const activePage = Math.min(currentPage, totalPages);
-  const paginatedCves = filteredCves.slice((activePage - 1) * pageSize, activePage * pageSize);
-  const startRecord = filteredCves.length === 0 ? 0 : (activePage - 1) * pageSize + 1;
-  const endRecord = Math.min(filteredCves.length, activePage * pageSize);
+  const totalCves = counts.cveData;
+  const startRecord = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const endRecord = Math.min(total, currentPage * pageSize);
   const hasActiveFilters =
     searchTerm.trim() !== '' || kevFilter !== 'ALL' || epssFilter !== 'ALL' || dateFilter !== 'ALL';
 
@@ -321,7 +294,7 @@ const CveCacheView: React.FC = () => {
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800/60 pt-3 text-[11px] text-zinc-500 light:border-zinc-200">
           <span>
-            {filteredCves.length === 0 ? (
+            {total === 0 ? (
               'No matching cached CVEs'
             ) : (
               <>
@@ -330,8 +303,8 @@ const CveCacheView: React.FC = () => {
                   {startRecord}–{endRecord}
                 </strong>{' '}
                 of{' '}
-                <strong className="font-mono text-zinc-300 light:text-zinc-800">{filteredCves.length}</strong>{' '}
-                {hasActiveFilters && <span className="text-zinc-500">({cveData.length} total)</span>}
+                <strong className="font-mono text-zinc-300 light:text-zinc-800">{total}</strong>{' '}
+                {hasActiveFilters && <span className="text-zinc-500">({totalCves} total)</span>}
               </>
             )}
           </span>
@@ -433,7 +406,7 @@ const CveCacheView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60 light:divide-zinc-200">
-              {paginatedCves.length === 0 ? (
+              {cveData.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-16 text-center">
                     <div className="mx-auto flex max-w-sm flex-col items-center">
@@ -441,10 +414,10 @@ const CveCacheView: React.FC = () => {
                         <Inbox className="h-5 w-5" aria-hidden="true" />
                       </span>
                       <p className="mt-3 text-sm font-semibold text-zinc-300 light:text-zinc-800">
-                        {cveData.length === 0 ? 'No cached CVE records yet' : 'No CVEs match these filters'}
+                        {totalCves === 0 ? 'No cached CVE records yet' : 'No CVEs match these filters'}
                       </p>
                       <p className="mt-1 text-xs leading-relaxed text-zinc-500">
-                        {cveData.length === 0
+                        {totalCves === 0
                           ? 'Run a pipeline to ingest and normalize threat feed records into the cache.'
                           : 'Adjust the timeline, KEV, EPSS, or search filters to widen the result set.'}
                       </p>
@@ -466,7 +439,7 @@ const CveCacheView: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                paginatedCves.map((cve) => {
+                cveData.map((cve) => {
                   const pubTime = new Date(cve.publishedDate).getTime();
                   const modTime = new Date(cve.modifiedDate).getTime();
                   const pubInScope = now - pubTime <= scopeMillis;
@@ -618,7 +591,7 @@ const CveCacheView: React.FC = () => {
 
         <Pagination
           currentPage={currentPage}
-          totalItems={filteredCves.length}
+          totalItems={total}
           pageSize={pageSize}
           onPageChange={setCurrentPage}
           onPageSizeChange={setPageSize}
@@ -750,15 +723,38 @@ const CveCacheView: React.FC = () => {
 };
 
 const NewsEvidenceView: React.FC = () => {
-  const { intelligenceArticles, intelligenceMatches, setActiveTab } = useApp();
+  const { counts, fetchCollection, setActiveTab } = useApp();
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
-  const search = query.trim().toLowerCase();
-
-  const articles = intelligenceArticles.filter((article) =>
-    `${article.title} ${article.cveIds.join(' ')} ${article.summary}`.toLowerCase().includes(search),
-  );
-  const paginatedArticles = articles.slice((page - 1) * NEWS_PAGE_SIZE, page * NEWS_PAGE_SIZE);
+  const { items: articles, total } = useCollection<IntelligenceArticle>('intelligenceArticles', {
+    page,
+    pageSize: NEWS_PAGE_SIZE,
+    search: query,
+    sort: 'published',
+    order: 'desc',
+  });
+  const [matches, setMatches] = useState<IntelligenceMatch[]>([]);
+  useEffect(() => {
+    if (!articles.length) {
+      setMatches([]);
+      return;
+    }
+    let active = true;
+    fetchCollection<IntelligenceMatch>('intelligenceMatches', {
+      page: 1,
+      pageSize: 500,
+      filters: { articleIds: articles.map((article) => article.id) },
+    })
+      .then((result) => {
+        if (active) setMatches(result.items);
+      })
+      .catch(() => {
+        if (active) setMatches([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [articles, fetchCollection]);
 
   return (
     <div role="tabpanel" id="threat-news-panel" aria-labelledby="threat-news-tab" className="space-y-4">
@@ -795,42 +791,42 @@ const NewsEvidenceView: React.FC = () => {
             )}
           </div>
           <p className="text-[11px] text-zinc-500">
-            {articles.length === intelligenceArticles.length
-              ? `${articles.length} article${articles.length === 1 ? '' : 's'}`
-              : `${articles.length} of ${intelligenceArticles.length} articles`}
+            {total === counts.intelligenceArticles
+              ? `${total} article${total === 1 ? '' : 's'}`
+              : `${total} of ${counts.intelligenceArticles} articles`}
           </p>
         </div>
       </div>
 
-      {articles.length === 0 ? (
+      {total === 0 ? (
         <div className={`rounded-2xl px-4 py-16 text-center shadow-sm ${panel}`}>
           <div className="mx-auto flex max-w-sm flex-col items-center">
             <span className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-500 light:border-zinc-300 light:bg-zinc-100">
               <Newspaper className="h-5 w-5" aria-hidden="true" />
             </span>
             <p className="mt-3 text-sm font-semibold text-zinc-300 light:text-zinc-800">
-              {intelligenceArticles.length === 0
+              {counts.intelligenceArticles === 0
                 ? 'No news or advisory evidence'
                 : 'No articles match your search'}
             </p>
             <p className="mt-1 text-xs leading-relaxed text-zinc-500">
-              {intelligenceArticles.length === 0
+              {counts.intelligenceArticles === 0
                 ? 'Enable an RSS or Atom source and run ingestion to collect vendor advisories.'
                 : 'Try a broader title, CVE, or summary search.'}
             </p>
             <button
               type="button"
-              onClick={intelligenceArticles.length === 0 ? () => setActiveTab('feeds') : () => setQuery('')}
+              onClick={counts.intelligenceArticles === 0 ? () => setActiveTab('feeds') : () => setQuery('')}
               className="mt-4 inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100"
             >
-              {intelligenceArticles.length === 0 ? 'Open feed sources' : 'Clear search'}
+              {counts.intelligenceArticles === 0 ? 'Open feed sources' : 'Clear search'}
             </button>
           </div>
         </div>
       ) : (
         <div className="grid gap-3">
-          {paginatedArticles.map((article) => {
-            const matches = intelligenceMatches.filter((match) => match.articleIds.includes(article.id));
+          {articles.map((article) => {
+            const articleMatches = matches.filter((match) => match.articleIds.includes(article.id));
             return (
               <article
                 key={article.id}
@@ -883,9 +879,9 @@ const NewsEvidenceView: React.FC = () => {
                   )}
                 </div>
 
-                {matches.length > 0 && (
+                {articleMatches.length > 0 && (
                   <div className="mt-3 space-y-2 border-t border-zinc-800/60 pt-3 light:border-zinc-200">
-                    {matches.map((match) => (
+                    {articleMatches.map((match) => (
                       <div key={match.id} className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium text-zinc-200 light:text-zinc-800">
                           <span>{match.assetName}</span>
@@ -916,11 +912,11 @@ const NewsEvidenceView: React.FC = () => {
         </div>
       )}
 
-      {articles.length > 0 && (
+      {total > 0 && (
         <div className={`overflow-hidden rounded-2xl shadow-sm ${panel}`}>
           <Pagination
             currentPage={page}
-            totalItems={articles.length}
+            totalItems={total}
             pageSize={NEWS_PAGE_SIZE}
             onPageChange={setPage}
           />
@@ -932,7 +928,7 @@ const NewsEvidenceView: React.FC = () => {
 
 export const ThreatDataView: React.FC = () => {
   const [tab, setTab] = useState<'cves' | 'news'>('cves');
-  const { cveData, intelligenceArticles, settings } = useApp();
+  const { counts, settings } = useApp();
   const scopeHours = settings.scopeHours || 24;
 
   const tabClass = (active: boolean) =>
@@ -965,7 +961,7 @@ export const ThreatDataView: React.FC = () => {
           <Clock className="h-3.5 w-3.5 text-emerald-400 light:text-emerald-700" aria-hidden="true" />
           <span>{scopeHours}h pipeline scope</span>
           <span className="h-3 w-px bg-zinc-700 light:bg-zinc-300" aria-hidden="true" />
-          <span className="font-mono text-zinc-300 light:text-zinc-800">{cveData.length} cached</span>
+          <span className="font-mono text-zinc-300 light:text-zinc-800">{counts.cveData} cached</span>
         </span>
       </header>
 
@@ -992,7 +988,7 @@ export const ThreatDataView: React.FC = () => {
                 : 'bg-zinc-800/60 text-zinc-500 light:bg-zinc-200/70 light:text-zinc-600'
             }`}
           >
-            {cveData.length}
+            {counts.cveData}
           </span>
         </button>
         <button
@@ -1013,7 +1009,7 @@ export const ThreatDataView: React.FC = () => {
                 : 'bg-zinc-800/60 text-zinc-500 light:bg-zinc-200/70 light:text-zinc-600'
             }`}
           >
-            {intelligenceArticles.length}
+            {counts.intelligenceArticles}
           </span>
         </button>
       </div>
