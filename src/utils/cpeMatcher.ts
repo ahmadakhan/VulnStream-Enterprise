@@ -481,6 +481,7 @@ export function matchesWatchlistItem(
   evaluatePackages = true,
   customVendorAliases: Record<string, string[]> = {},
   customProductAliases: Record<string, string[]> = {},
+  assetVersionInput?: string,
 ): MatchResult {
   let bestMatch: MatchResult | undefined;
   const retain = (candidate: MatchResult) => {
@@ -617,6 +618,19 @@ export function matchesWatchlistItem(
   // 4. Vendor / Product Alias Resolution
   const normVendor = assetVendor.toLowerCase().trim();
   const normProduct = assetProduct.toLowerCase().trim();
+  // The alias path is the last structured option before free text. Evaluate the
+  // advisory's version interval against the inventory version when one is known
+  // so an alias cannot create a finding for an explicitly unaffected release.
+  const assetVersion =
+    (assetVersionInput || '').trim() ||
+    assetCpes
+      .map((cpe) => parseCPE23(cpe))
+      .find(
+        (parsed) =>
+          parsed.isValid && parsed.version && parsed.version !== '*' && parsed.version !== '-',
+      )?.version ||
+    '';
+  const rangeHasBounds = Boolean(versionRange && Object.values(versionRange).some(Boolean));
 
   for (const vulnCpe of vulnCpeMatches) {
     const parsedVuln = parseCPE23(vulnCpe);
@@ -625,12 +639,24 @@ export function matchesWatchlistItem(
         matchVendorWithAliases(normVendor, parsedVuln.vendor, customVendorAliases) &&
         matchProductWithAliases(normProduct, parsedVuln.product, customProductAliases)
       ) {
+        let applicabilityRequiresReview = rangeHasBounds;
+        let versionVerified = false;
+        if (rangeHasBounds && versionRange && assetVersion) {
+          if (canCompareRange(assetVersion, versionRange)) {
+            if (!isVersionInNvdRange(assetVersion, versionRange).inRange) continue;
+            versionVerified = true;
+            applicabilityRequiresReview = false;
+          }
+        }
         return {
           matched: true,
           method: 'VENDOR_PRODUCT_ALIAS',
           confidence: 85,
           matchedCpe: vulnCpe,
-          evidence: `Resolved via Enterprise Alias Thesaurus (${normVendor}/${normProduct} -> ${parsedVuln.vendor}/${parsedVuln.product}) (85% confidence)`,
+          evidence: versionVerified
+            ? `Resolved via Enterprise Alias Thesaurus (${normVendor}/${normProduct} -> ${parsedVuln.vendor}/${parsedVuln.product}); inventory version ${assetVersion} is inside the advisory range (85% confidence)`
+            : `Resolved via Enterprise Alias Thesaurus (${normVendor}/${normProduct} -> ${parsedVuln.vendor}/${parsedVuln.product}) (85% confidence)`,
+          applicabilityRequiresReview,
         };
       }
     }
@@ -639,6 +665,16 @@ export function matchesWatchlistItem(
   // 5. Fallback Heuristic
   const fullText = `${vulnTitle} ${vulnDescription}`.toLowerCase();
   if (normVendor && normProduct && fullText.includes(normVendor) && fullText.includes(normProduct)) {
+    // Do not let the text fallback re-admit a release that the advisory range
+    // explicitly excludes when the inventory version is comparable.
+    if (
+      rangeHasBounds &&
+      versionRange &&
+      assetVersion &&
+      canCompareRange(assetVersion, versionRange) &&
+      !isVersionInNvdRange(assetVersion, versionRange).inRange
+    )
+      return { matched: false, method: 'NONE', confidence: 0, evidence: 'Version outside advisory range' };
     return {
       matched: true,
       method: 'VENDOR_PRODUCT_FALLBACK',

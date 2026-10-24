@@ -6,7 +6,12 @@ import { z } from 'zod';
 import type pg from 'pg';
 import type { Config } from './config';
 import { asyncRoute, requireAuth, requireRole, loginHandler, cookieName, createUser } from './auth';
-import { transaction, state, get, put, appendAudit } from './db';
+import { transaction, state, get, put, appendAudit, list } from './db';
+import { queryCollection } from './collections';
+import { runRetention, previewRetention } from './retention';
+import { verifyAuditChain } from '../src/utils/cryptoChain.ts';
+import { buildAliasMap } from '../src/utils/cpeMatcher.ts';
+import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine.ts';
 import { HttpError } from './validation';
 import { applyCommand } from './commands';
 import { checkPassword, passwordHash, decrypt } from './secrets';
@@ -14,14 +19,13 @@ import { createRequester, resolvePublic } from './network';
 import type { Requester, ResponseData } from './network';
 import { queueRun, stopRun, renderAdvisory } from './pipeline';
 import { enqueue, queueAdvisory } from './delivery';
-import { runRetention } from './retention';
 import { advisoryEmail } from './advisoryEmail';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
 import { emailIsConfigured } from './emailProviders';
 import { parseSyndication, RSS_MAX_BYTES } from './rss';
 import { readEvents, writeEvent } from './events';
 import type { AppState } from '../shared/state.ts';
-import type { AppSettings, ThreatFeed, WebhookEndpoint, Advisory, TemplateCustomization, EmailConfiguration } from '../src/types/index.ts';
+import type { AppSettings, ThreatFeed, WebhookEndpoint, Advisory, TemplateCustomization, EmailConfiguration, NormalizedCVE, AliasEntry, WatchListItem } from '../src/types/index.ts';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler.ts';
 function publicState(data: AppState): AppState {
   return {
@@ -44,6 +48,18 @@ function publicState(data: AppState): AppState {
     },
   };
 }
+const STATE_COLLECTION_LIMITS = {
+  cveData: 100,
+  findings: 100,
+  advisories: 50,
+  alertedCves: 100,
+  emailLogs: 100,
+  webhookLogs: 100,
+  executions: 20,
+  auditLogs: 200,
+  intelligenceArticles: 50,
+  intelligenceMatches: 100,
+} as const;
 async function refreshAdvisoryDeliveryStatus(db: pg.Pool | import('pg').PoolClient, advisoryId: string) {
   const advisory = await get<Advisory>(db, 'advisories', advisoryId);
   if (!advisory) return;
@@ -269,7 +285,124 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
   );
   app.get(
     '/api/state',
-    asyncRoute(async (_req, res) => res.json(publicState(await state(pool)))),
+    asyncRoute(async (_req, res) =>
+      res.json(publicState(await state(pool, { limits: STATE_COLLECTION_LIMITS }))),
+    ),
+  );
+  app.get(
+    '/api/collections/:kind',
+    asyncRoute(async (req, res) => {
+      const query = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(1000).default(50),
+          offset: z.coerce.number().int().min(0).default(0),
+          search: z.string().max(300).optional(),
+          sort: z.string().max(40).optional(),
+          order: z.enum(['asc', 'desc']).optional(),
+          kev: z.enum(['true', 'false']).optional(),
+          epssMin: z.coerce.number().min(0).max(1).optional(),
+          dateFilter: z.enum(['ALL', 'IN_SCOPE', 'RECENT_MODIFIED', 'RECENT_PUBLISHED']).optional(),
+          scopeHours: z.coerce.number().int().min(1).max(2880).optional(),
+          severity: z.string().max(20).optional(),
+          status: z.string().max(40).optional(),
+          notificationStatus: z.string().max(40).optional(),
+          category: z.string().max(20).optional(),
+          level: z.string().max(10).optional(),
+          articleIds: z.string().max(4000).optional(),
+        })
+        .parse(req.query);
+      res.json(
+        await queryCollection(pool, String(req.params.kind), {
+          limit: query.limit,
+          offset: query.offset,
+          search: query.search,
+          sort: query.sort,
+          order: query.order,
+          filters: {
+            kev: query.kev === 'true',
+            epssMin: query.epssMin,
+            dateFilter: query.dateFilter,
+            scopeHours: query.scopeHours,
+            severity: query.severity,
+            status: query.status,
+            notificationStatus: query.notificationStatus,
+            category: query.category,
+            level: query.level,
+            articleIds: query.articleIds?.split(',').filter(Boolean),
+          },
+        }),
+      );
+    }),
+  );
+  app.get(
+    '/api/audit/verify',
+    asyncRoute(async (_req, res) => {
+      const rows = await pool.query('SELECT data FROM audit ORDER BY seq DESC');
+      res.json({ verified: verifyAuditChain(rows.rows.map((row) => row.data)) });
+    }),
+  );
+  app.post(
+    '/api/correlation/simulate',
+    asyncRoute(async (req, res) => {
+      const body = z
+        .object({
+          vendor: z.string().min(1).max(200),
+          product: z.string().min(1).max(200),
+          version: z.string().max(100).optional(),
+          cpes: z.array(z.string().max(600)).max(50).default([]),
+          purls: z.array(z.string().max(600)).max(50).optional(),
+          targetHw: z.string().max(100).optional(),
+          assetTag: z.string().max(120).optional(),
+        })
+        .parse(req.body);
+      const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
+      const cves = await list<NormalizedCVE>(pool, 'cveData');
+      const aliases = await list<AliasEntry>(pool, 'aliases');
+      const watchItem: WatchListItem = {
+        id: 'sim-test-01',
+        vendor: body.vendor,
+        product: body.product,
+        version: body.version,
+        cpes: body.cpes,
+        purls: body.purls,
+        targetHw: body.targetHw,
+        assetTag: body.assetTag || 'SIM-PROD-01',
+        ownerGroup: 'Simulation-Lab',
+        active: true,
+        createdAt: new Date().toISOString(),
+      };
+      const correlation = runVulnerabilityPipeline(
+        [],
+        cves,
+        [watchItem],
+        [],
+        [],
+        { ...settings, scopeHours: 0 },
+        'Simulation',
+        false,
+        buildAliasMap(aliases, 'VENDOR'),
+        buildAliasMap(aliases, 'PRODUCT'),
+      );
+      const matchedCves = correlation.newFindings.map((finding) => ({
+        cve: finding.cve,
+        method: finding.matchingMethod,
+        confidence: finding.notificationStatus === 'REVIEW_REQUIRED' ? 0 : 100,
+        evidence: finding.matchingEvidence,
+        autoAction:
+          finding.notificationStatus === 'REVIEW_REQUIRED' ? 'REVIEW_REQUIRED' : 'MATCH_CONFIRMED',
+        suppressed: false,
+        suppressionReason: '',
+      }));
+      res.json({
+        testedAt: new Date().toISOString(),
+        matchedCves,
+        totalScanned: cves.length,
+        aliasExpanded: matchedCves.some((match) => match.method === 'VENDOR_PRODUCT_ALIAS'),
+        intervalEvaluated: matchedCves.some(
+          (match) => match.method === 'STRICT_CPE_INTERVAL' || match.method === 'PURL_EXACT',
+        ),
+      });
+    }),
   );
   app.get(
     '/api/email-queue',
@@ -507,6 +640,20 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       const result = await runRetention(pool, req.operator!.username, req.ip || '');
       if (!result) throw new HttpError(400, 'Enable the retention policy before running cleanup');
       res.json(result);
+    }),
+  );
+  app.post(
+    '/api/retention/preview',
+    asyncRoute(async (req, res) => {
+      const policy = z
+        .object({
+          enabled: z.boolean(),
+          retentionHours: z.number().int().min(1).max(8760),
+          maxArchivedRecords: z.number().int().min(1000).max(1000000),
+          retentionMode: z.enum(['strict', 'rolling', 'checkpoints']),
+        })
+        .parse(req.body);
+      res.json(await previewRetention(pool, policy));
     }),
   );
   app.post(

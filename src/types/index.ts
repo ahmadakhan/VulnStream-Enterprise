@@ -444,6 +444,21 @@ export interface RetentionRunResult {
   deleted: number;
   unknownAge: number;
   byKind: Record<RetentionKind, number>;
+  /** Transient queue/event rows removed by the same policy window. */
+  system?: { outbox: number; events: number };
+}
+
+export interface RetentionPreviewRow {
+  total: number;
+  past: number;
+  deletable: number;
+}
+
+export interface RetentionPreview {
+  cutoff: string;
+  records: Record<RetentionKind, RetentionPreviewRow>;
+  protected: { findings: number; advisories: number; auditLogs: number };
+  scanned: number;
 }
 
 export interface AppSettings {

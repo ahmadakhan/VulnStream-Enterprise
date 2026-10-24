@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import type { AppSettings, RetentionConfig, RetentionKind, RetentionRunResult } from '../src/types/index.ts';
+import type { AppSettings, RetentionConfig, RetentionKind, RetentionPreview, RetentionRunResult } from '../src/types/index.ts';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import { appendAudit, get, transaction } from './db.ts';
 
@@ -153,6 +153,61 @@ const timestampExpression = RETENTION_KINDS.map(
   (kind) => `WHEN '${kind}' THEN data->>'${TIMESTAMP_FIELDS[kind]}'`,
 ).join('\n        ');
 
+async function loadRetentionRecords(db: pg.Pool | pg.PoolClient): Promise<RetentionRecord[]> {
+  const rows = await db.query<RetentionRecord>(
+    `SELECT kind, id,
+      CASE kind
+      ${timestampExpression}
+      END AS timestamp
+     FROM records
+     WHERE kind = ANY($1::text[])`,
+    [RETENTION_KINDS],
+  );
+  return rows.rows;
+}
+
+/**
+ * Read-only footprint for the archive screen. Mirrors the selection logic used by
+ * a real run so the operator sees both "past the window" and "would be removed"
+ * without loading every record into the browser.
+ */
+export async function previewRetention(
+  pool: pg.Pool,
+  policy: RetentionPolicy,
+): Promise<RetentionPreview> {
+  const rows = await loadRetentionRecords(pool);
+  const now = Date.now();
+  const plan = selectRetention(rows, { ...policy, enabled: true }, now);
+  const cutoffMs = now - policy.retentionHours * 3_600_000;
+  const records = Object.fromEntries(
+    RETENTION_KINDS.map((kind) => [kind, { total: 0, past: 0, deletable: plan.byKind[kind] }]),
+  ) as RetentionPreview['records'];
+  for (const record of rows) {
+    const bucket = records[record.kind];
+    bucket.total++;
+    const at = parseTimestamp(record.timestamp);
+    if (at !== null && at < cutoffMs) bucket.past++;
+  }
+  const protectedRows = (
+    await pool.query<{ kind: string; count: number }>(
+      "SELECT kind, count(*)::int AS count FROM records WHERE kind IN ('findings','advisories') GROUP BY kind",
+    )
+  ).rows;
+  const protectedCount = (kind: string) =>
+    Number(protectedRows.find((row) => row.kind === kind)?.count ?? 0);
+  const auditLogs = Number((await pool.query('SELECT count(*)::int AS count FROM audit')).rows[0].count);
+  return {
+    cutoff: plan.cutoff,
+    records,
+    protected: {
+      findings: protectedCount('findings'),
+      advisories: protectedCount('advisories'),
+      auditLogs,
+    },
+    scanned: rows.length,
+  };
+}
+
 /**
  * Apply the saved retention policy once. Returns null when the policy is
  * disabled so callers can distinguish "nothing to do" from "cleanup ran".
@@ -171,16 +226,8 @@ export async function runRetention(
     const policy = settings.retentionConfig;
     if (!policy?.enabled) return null;
 
-    const rows = await db.query<RetentionRecord>(
-      `SELECT kind, id,
-        CASE kind
-        ${timestampExpression}
-        END AS timestamp
-       FROM records
-       WHERE kind = ANY($1::text[])`,
-      [RETENTION_KINDS],
-    );
-    const plan = selectRetention(rows.rows, policy, Date.now());
+    const records = await loadRetentionRecords(db);
+    const plan = selectRetention(records, policy, Date.now());
     for (const kind of RETENTION_KINDS) {
       const ids = plan.delete.filter((record) => record.kind === kind).map((record) => record.id);
       // Keep each statement's row count bounded so one large backlog cannot hold
@@ -191,6 +238,17 @@ export async function runRetention(
           ids.slice(offset, offset + 1000),
         ]);
     }
+
+    // Terminal queue rows and operational telemetry are transient too. Applying
+    // the same policy window keeps an operator's configured retention period
+    // authoritative instead of silently trimming them on a fixed schedule.
+    const outbox = await db.query(
+      "DELETE FROM outbox WHERE status IN ('ACCEPTED','FAILED','REJECTED') AND updated_at < $1",
+      [new Date(plan.cutoff)],
+    );
+    const events = await db.query('DELETE FROM operational_events WHERE occurred_at < $1', [
+      new Date(plan.cutoff),
+    ]);
 
     if (plan.delete.length) {
       const summary = RETENTION_KINDS.filter((kind) => plan.byKind[kind] > 0)
@@ -216,6 +274,7 @@ export async function runRetention(
       deleted: plan.delete.length,
       unknownAge: plan.unknownAge,
       byKind: plan.byKind,
+      system: { outbox: outbox.rowCount ?? 0, events: events.rowCount ?? 0 },
     };
   });
 }

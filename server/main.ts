@@ -80,10 +80,46 @@ const tick = () => {
 const timer = setInterval(tick, 5000);
 tick();
 // Retention runs on its own cadence because the policy is operator-configurable
-// and can be much slower than the worker tick. Read the saved policy each pass so
-// enabling, disabling or changing the interval takes effect without a restart.
-let lastRetention = 0,
-  retentionRunning = false;
+// and can be much slower than the worker tick. The last successful run is
+// persisted in the database so replicas do not each schedule the same cleanup,
+// and a failed run releases its claim so the next tick can retry immediately.
+const RETENTION_SCHEDULE_ID = 'retention-schedule';
+const RETENTION_CLAIM_TTL_MS = 5 * 60_000;
+async function claimRetention(policy: AppSettings['retentionConfig']): Promise<boolean> {
+  return transaction(pool, async (db) => {
+    const row = await db.query(
+      "SELECT data FROM records WHERE kind='systemState' AND id=$1 FOR UPDATE",
+      [RETENTION_SCHEDULE_ID],
+    );
+    const data = row.rows[0]?.data ?? {};
+    const now = Date.now();
+    const lastRun = typeof data.lastRun === 'string' ? Date.parse(data.lastRun) : NaN;
+    const claimedAt = typeof data.claimedAt === 'string' ? Date.parse(data.claimedAt) : NaN;
+    if (Number.isFinite(lastRun) && now - lastRun < policy.cleanupIntervalMinutes * 60_000)
+      return false;
+    if (Number.isFinite(claimedAt) && now - claimedAt < RETENTION_CLAIM_TTL_MS) return false;
+    await put(db, 'systemState', RETENTION_SCHEDULE_ID, {
+      ...data,
+      claimedAt: new Date(now).toISOString(),
+    });
+    return true;
+  });
+}
+async function releaseRetention(success: boolean) {
+  await transaction(pool, async (db) => {
+    const row = await db.query(
+      "SELECT data FROM records WHERE kind='systemState' AND id=$1 FOR UPDATE",
+      [RETENTION_SCHEDULE_ID],
+    );
+    const data = row.rows[0]?.data ?? {};
+    await put(db, 'systemState', RETENTION_SCHEDULE_ID, {
+      ...data,
+      claimedAt: null,
+      lastRun: success ? new Date().toISOString() : (data.lastRun ?? null),
+    });
+  });
+}
+let retentionRunning = false;
 const retentionTick = () => {
   if (stopping || config.WORKER_ENABLED !== 'true' || retentionRunning) return;
   retentionRunning = true;
@@ -91,13 +127,14 @@ const retentionTick = () => {
     const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
     const policy = settings.retentionConfig;
     if (!policy?.enabled || !policy.autoCleanup) return;
-    if (
-      lastRetention > 0 &&
-      Date.now() - lastRetention < policy.cleanupIntervalMinutes * 60_000
-    )
-      return;
-    lastRetention = Date.now();
-    await runRetention(pool, 'system-retention');
+    if (!(await claimRetention(policy))) return;
+    try {
+      await runRetention(pool, 'system-retention');
+      await releaseRetention(true);
+    } catch (error) {
+      await releaseRetention(false).catch(() => {});
+      throw error;
+    }
   })()
     .catch(report('retention'))
     .finally(() => {
@@ -107,12 +144,13 @@ const retentionTick = () => {
 const retentionTimer = setInterval(retentionTick, 60000);
 retentionTick();
 const cleanup = setInterval(() => {
+  // Session and login-attempt expiry are security invariants, not retained
+  // business data. Queue rows and operational events follow the retention
+  // policy in runRetention so an operator's configured window stays authoritative.
   void pool
     .query(
       `DELETE FROM sessions WHERE expires_at<now();
-       DELETE FROM login_attempts WHERE window_start<now()-interval '1 day';
-       DELETE FROM outbox WHERE status IN ('ACCEPTED', 'FAILED', 'REJECTED') AND updated_at < now() - interval '30 days';
-       DELETE FROM operational_events WHERE occurred_at < now() - interval '90 days';`,
+       DELETE FROM login_attempts WHERE window_start<now()-interval '1 day';`,
     )
     .catch(report('session-cleanup'));
 }, 60000);

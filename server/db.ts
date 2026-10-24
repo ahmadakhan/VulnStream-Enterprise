@@ -2,7 +2,7 @@ import { compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
 import pg, { type PoolClient } from 'pg';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { emptyState, type AppState } from '../shared/state.ts';
+import { emptyState, type AppState, type CollectionKind, type HeavyCollectionKind, COLLECTION_KINDS } from '../shared/state.ts';
 import { chainAuditLogs } from '../src/utils/cryptoChain.ts';
 import type { AuditLog } from '../src/types/index.ts';
 import { orderWatchlist } from '../src/utils/watchlist.ts';
@@ -148,26 +148,74 @@ export async function appendAudit(
   )[0];
   await db.query('INSERT INTO audit(data) VALUES($1)', [JSON.stringify(entry)]);
 }
-export async function state(db: Db): Promise<AppState> {
+export interface StateOptions {
+  /**
+   * Maximum rows returned for a heavy collection. Omit a kind to return all of
+   * its rows (internal callers only). `/api/state` always supplies limits.
+   */
+  limits?: Partial<Record<HeavyCollectionKind, number>>;
+}
+
+const recordOrder = "ORDER BY CASE WHEN kind='feeds' THEN created_at ELSE updated_at END DESC,id";
+
+export async function state(db: Db, options: StateOptions = {}): Promise<AppState> {
   const snapshot = emptyState();
-  const kinds = [
-    ...Object.entries(snapshot)
-      .filter(([, value]) => Array.isArray(value))
+  const arrayKinds = Object.entries(snapshot)
+    .filter(([, value]) => Array.isArray(value))
+    .map(([kind]) => kind)
+    .filter((kind) => kind !== 'auditLogs');
+  const limits = options.limits ?? {};
+  const bounded = new Set(
+    Object.entries(limits)
+      .filter(([, limit]) => typeof limit === 'number' && limit >= 0)
       .map(([kind]) => kind),
-    'settings',
-    'emailConfig',
-    'template',
-  ];
-  // Internal source snapshots and dispatch ledgers are not browser state.
-  const rows = await db.query(
-    "SELECT kind,data FROM records WHERE kind=ANY($1::text[]) ORDER BY CASE WHEN kind='feeds' THEN created_at ELSE updated_at END DESC,id",
-    [kinds],
   );
-  for (const row of rows.rows) {
+  const rows: { kind: string; data: unknown }[] = [];
+  const unbounded = arrayKinds.filter((kind) => !bounded.has(kind));
+  if (unbounded.length)
+    rows.push(
+      ...(
+        await db.query(`SELECT kind,data FROM records WHERE kind=ANY($1::text[]) ${recordOrder}`, [
+          unbounded,
+        ])
+      ).rows,
+    );
+  for (const kind of bounded) {
+    const limit = Math.max(0, Math.floor(limits[kind as HeavyCollectionKind]!));
+    if (!limit) continue;
+    if (kind === 'auditLogs') continue;
+    rows.push(
+      ...(
+        await db.query(`SELECT kind,data FROM records WHERE kind=$1 ${recordOrder} LIMIT $2`, [
+          kind,
+          limit,
+        ])
+      ).rows,
+    );
+  }
+  // Audit rows live in their own append-only table. Keep the historical 500-row
+  // default for internal snapshots; the browser always supplies an explicit limit.
+  const auditLimit = bounded.has('auditLogs')
+    ? Math.max(0, Math.floor(limits.auditLogs!))
+    : 500;
+  if (auditLimit)
+    rows.push(
+      ...(await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT $1', [auditLimit])).rows.map(
+        (row) => ({ kind: 'auditLogs', data: row.data }),
+      ),
+    );
+  rows.push(
+    ...(
+      await db.query("SELECT kind,data FROM records WHERE kind=ANY($1::text[])", [
+        ['settings', 'emailConfig', 'template'],
+      ])
+    ).rows,
+  );
+  for (const row of rows) {
     if (Array.isArray(snapshot[row.kind as keyof AppState]))
       (snapshot[row.kind as keyof AppState] as unknown[]).push(row.data);
-    else if (row.kind === 'settings') snapshot.settings = row.data;
-    else if (row.kind === 'emailConfig') snapshot.emailConfig = row.data;
+    else if (row.kind === 'settings') snapshot.settings = row.data as AppState['settings'];
+    else if (row.kind === 'emailConfig') snapshot.emailConfig = row.data as AppState['emailConfig'];
     else if (row.kind === 'template') Object.assign(snapshot, row.data);
   }
   // Keep inventory position tied to original creation time. PostgreSQL record
@@ -177,10 +225,51 @@ export async function state(db: Db): Promise<AppState> {
   // Saved branding is authoritative; regenerate HTML with the current layout so
   // existing installations receive layout fixes without losing customization.
   snapshot.advisoryTemplate = compileCustomizedTemplate(snapshot.templateCustomization);
-  snapshot.auditLogs = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 500')).rows.map(
-    (r) => r.data,
-  );
+  await attachCounts(db, snapshot);
   return snapshot;
+}
+
+/**
+ * Exact collection sizes and KPI aggregates. They are computed independently of
+ * the bounded arrays so a large installation still shows truthful totals.
+ */
+async function attachCounts(db: Db, snapshot: AppState) {
+  const recordKinds = COLLECTION_KINDS.filter((kind) => kind !== 'auditLogs');
+  const counts = (
+    await db.query<{ kind: CollectionKind; count: number }>(
+      'SELECT kind, count(*)::int AS count FROM records WHERE kind=ANY($1::text[]) GROUP BY kind',
+      [recordKinds],
+    )
+  ).rows;
+  for (const row of counts) snapshot.counts[row.kind] = Number(row.count);
+  snapshot.counts.auditLogs = Number(
+    (await db.query('SELECT count(*)::int AS count FROM audit')).rows[0].count,
+  );
+  const summary = (
+    await db.query(
+      `SELECT
+        (SELECT count(*) FROM records WHERE kind='findings'
+          AND COALESCE(data->>'status','') NOT IN ('RESOLVED','FALSE_POSITIVE','PATCH_APPLIED')
+          AND COALESCE(data->>'notificationStatus','') <> 'NOT_APPLICABLE')::int AS "activeFindings",
+        (SELECT count(*) FROM records WHERE kind='findings'
+          AND COALESCE(data->>'status','') NOT IN ('RESOLVED','FALSE_POSITIVE','PATCH_APPLIED')
+          AND COALESCE(data->>'notificationStatus','') <> 'NOT_APPLICABLE'
+          AND data->'cve'->'cvss'->>'severity'='CRITICAL')::int AS "criticalFindings",
+        (SELECT count(*) FROM records WHERE kind='findings'
+          AND COALESCE(data->>'status','') NOT IN ('RESOLVED','FALSE_POSITIVE','PATCH_APPLIED')
+          AND COALESCE(data->>'notificationStatus','') <> 'NOT_APPLICABLE'
+          AND (data->'cve'->'cisaKev'->>'isKev')::boolean IS TRUE)::int AS "kevFindings",
+        (SELECT count(*) FROM records WHERE kind='emailLogs'
+          AND data->>'status' = ANY($1::text[]))::int AS "deliveredEmails"`,
+      [['ACCEPTED', 'DELIVERED']],
+    )
+  ).rows[0];
+  snapshot.summary = {
+    activeFindings: Number(summary.activeFindings),
+    criticalFindings: Number(summary.criticalFindings),
+    kevFindings: Number(summary.kevFindings),
+    deliveredEmails: Number(summary.deliveredEmails),
+  };
 }
 
 /** Pipeline-only snapshot avoids loading executions, delivery logs, recipients and audit history. */

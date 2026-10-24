@@ -17,6 +17,7 @@ import { Pagination } from './Pagination';
 import { csvCell } from '../utils/csv';
 import { verifyAuditChain } from '../utils/cryptoChain';
 import { LogDetailModal } from './LogDetailModal';
+import { formatEventContext } from '../utils/eventText';
 
 const AuditTrailView: React.FC = () => {
   const { auditLogs } = useApp();
@@ -635,21 +636,16 @@ export const OperationalLogsView: React.FC = () => {
                                 )}
                               </div>
                             )}
-                            {event.context &&
-                              Object.keys(event.context).length > 0 &&
-                              !(
-                                event.level === 'ERROR' &&
-                                (event.context?.error || event.context?.errorType || event.context?.component)
-                              ) && (
-                                <details className="mt-1" onClick={(e) => e.stopPropagation()}>
-                                  <summary className="cursor-pointer text-[10px] font-medium text-blue-300 underline decoration-blue-300/30 underline-offset-2 light:text-blue-700">
-                                    View event context
-                                  </summary>
-                                  <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-950/70 p-2 text-[10px] text-zinc-400 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-600">
-                                    {JSON.stringify(event.context, null, 2)}
-                                  </pre>
-                                </details>
-                              )}
+                            {event.context && Object.keys(event.context).length > 0 && (
+                              <details className="mt-1" onClick={(e) => e.stopPropagation()}>
+                                <summary className="cursor-pointer text-[10px] font-medium text-blue-300 underline decoration-blue-300/30 underline-offset-2 light:text-blue-700">
+                                  View event details
+                                </summary>
+                                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-800 bg-zinc-950/70 p-2 text-[10px] leading-relaxed text-zinc-400 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-600">
+                                  {formatEventContext(event.context)}
+                                </pre>
+                              </details>
+                            )}
                           </td>
                           <td className="truncate px-4 py-3.5 font-mono text-[11px] text-zinc-400 light:text-zinc-600">
                             {event.runId ? (
@@ -707,9 +703,8 @@ export const OperationalLogsView: React.FC = () => {
             { label: 'Execution ID', value: selectedEvent.runId || '—', mono: true },
             { label: 'Entry ID', value: selectedEvent.id, mono: true },
             {
-              label: 'Context',
-              value: JSON.stringify(selectedEvent.context, null, 2),
-              mono: true,
+              label: 'Event details',
+              value: formatEventContext(selectedEvent.context),
               block: true,
               hidden: !selectedEvent.context || Object.keys(selectedEvent.context).length === 0,
             },

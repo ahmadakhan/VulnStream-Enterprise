@@ -14,6 +14,14 @@ import type {
 import { normalizeCveId, isWithinTimelineScope, mergeCveRecords } from '../utils/deduplicator';
 import { matchesWatchlistItem, parseCPE23 } from '../utils/cpeMatcher';
 import ipaddr from 'ipaddr.js';
+
+/** Package identity (`npm/express`) used to index PURL inventory. */
+const purlIdentity = (purl: string): string | null => {
+  const match = /^pkg:([a-z][a-z0-9.+-]*)\/([^?#]+)/.exec(purl.trim());
+  if (!match) return null;
+  const at = match[2].lastIndexOf('@');
+  return `${match[1]}/${at > 0 ? match[2].slice(0, at) : match[2]}`;
+};
 export interface PipelineRunResult {
   execution: PipelineExecution;
   newFindings: Finding[];
@@ -83,14 +91,27 @@ export function runVulnerabilityPipeline(
   // The candidate selection is deliberately a superset: wildcard criteria,
   // unstructured assets, and package assets stay eligible for full matching.
   const assetsByProduct = new Map<string, WatchListItem[]>();
-  const assetsWithNoCpes: WatchListItem[] = [];
+  const assetsByPurl = new Map<string, WatchListItem[]>();
+  // Assets with neither a CPE nor a PURL can only be matched by the text/alias
+  // fallback, so they remain candidates for every CVE. PURL-only assets are
+  // reachable through their package bucket instead of being scanned every time.
+  const assetsWithoutIdentifiers: WatchListItem[] = [];
   const assetsWithBroadCpes: WatchListItem[] = [];
-  const assetsWithPurls = activeAssets.filter((asset) => !!asset.purls?.length);
   for (const asset of activeAssets) {
+    const seenPurls = new Set<string>();
+    for (const purl of asset.purls ?? []) {
+      const identity = purlIdentity(purl);
+      if (!identity || seenPurls.has(identity)) continue;
+      seenPurls.add(identity);
+      const bucket = assetsByPurl.get(identity) || [];
+      bucket.push(asset);
+      assetsByPurl.set(identity, bucket);
+    }
     if (!asset.cpes.length) {
-      assetsWithNoCpes.push(asset);
+      if (!asset.purls?.length) assetsWithoutIdentifiers.push(asset);
       continue;
     }
+    const seenProducts = new Set<string>();
     for (const cpe of asset.cpes) {
       const parsed = parseCPE23(cpe);
       if (!parsed.isValid) continue;
@@ -99,6 +120,8 @@ export function runVulnerabilityPipeline(
         break;
       }
       const key = `${parsed.vendor}\u0000${parsed.product}`;
+      if (seenProducts.has(key)) continue;
+      seenProducts.add(key);
       const bucket = assetsByProduct.get(key) || [];
       bucket.push(asset);
       assetsByProduct.set(key, bucket);
@@ -110,12 +133,22 @@ export function runVulnerabilityPipeline(
     const criteria = cve.cpeMatchDetails?.length
       ? cve.cpeMatchDetails.map((detail) => detail.criteria)
       : cve.cpeMatches;
-    if (!criteria.length) return activeAssets;
     const candidates = new Map<string, WatchListItem>();
     const add = (items: WatchListItem[]) => items.forEach((asset) => candidates.set(asset.id, asset));
-    add(assetsWithNoCpes);
+    add(assetsWithoutIdentifiers);
     add(assetsWithBroadCpes);
-    if (cve.purls?.length) add(assetsWithPurls);
+    if (cve.purls?.length)
+      for (const purl of cve.purls) {
+        const identity = purlIdentity(purl);
+        if (identity) add(assetsByPurl.get(identity) || []);
+      }
+    if (!criteria.length) {
+      // A CVE with no structured identifiers has to use the text/alias fallback
+      // against the whole inventory. A package-only advisory stays bounded to
+      // the matching package buckets.
+      if (!cve.purls?.length) return activeAssets;
+      return [...candidates.values()];
+    }
     for (const criterion of criteria) {
       const parsed = parseCPE23(criterion);
       if (!parsed.isValid || /[?*]/.test(parsed.vendor) || /[?*]/.test(parsed.product)) {

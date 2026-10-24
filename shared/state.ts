@@ -55,6 +55,55 @@ export const DEFAULT_SETTINGS: AppSettings = {
     retentionMode: 'rolling',
   },
 };
+/**
+ * Collections that can grow without bound in a large installation. `/api/state`
+ * returns only a bounded recent slice plus exact counts for these kinds; the
+ * paginated `/api/collections/:kind` endpoint is the source for full browsing.
+ */
+export const HEAVY_COLLECTION_KINDS = [
+  'cveData',
+  'findings',
+  'advisories',
+  'alertedCves',
+  'emailLogs',
+  'webhookLogs',
+  'executions',
+  'auditLogs',
+  'intelligenceArticles',
+  'intelligenceMatches',
+] as const;
+export type HeavyCollectionKind = (typeof HEAVY_COLLECTION_KINDS)[number];
+
+export const COLLECTION_KINDS = [
+  'feeds',
+  'watchlist',
+  'recipients',
+  'webhooks',
+  'aliases',
+  ...HEAVY_COLLECTION_KINDS,
+] as const;
+export type CollectionKind = (typeof COLLECTION_KINDS)[number];
+
+export const isCollectionKind = (value: string): value is CollectionKind =>
+  (COLLECTION_KINDS as readonly string[]).includes(value);
+
+export type CollectionCounts = Record<CollectionKind, number>;
+
+/** Aggregate counts used by dashboards and navigation badges. */
+export interface AppSummary {
+  activeFindings: number;
+  criticalFindings: number;
+  kevFindings: number;
+  deliveredEmails: number;
+}
+
+export interface CollectionPage<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface AppState {
   feeds: ThreatFeed[];
   watchlist: WatchListItem[];
@@ -75,7 +124,15 @@ export interface AppState {
   templateCustomization: TemplateCustomization;
   advisoryTemplate: string;
   aliases: AliasEntry[];
+  /** Exact row counts for every collection, independent of the returned slice. */
+  counts: CollectionCounts;
+  /** Aggregates computed server-side so bounded slices cannot skew KPI cards. */
+  summary: AppSummary;
 }
+
+const zeroCounts = (): CollectionCounts =>
+  Object.fromEntries(COLLECTION_KINDS.map((kind) => [kind, 0])) as CollectionCounts;
+
 export const emptyState = (): AppState => ({
   feeds: [],
   intelligenceArticles: [],
@@ -96,6 +153,8 @@ export const emptyState = (): AppState => ({
   emailConfig: { ...DEFAULT_EMAIL_CONFIG },
   templateCustomization: { ...DEFAULT_TEMPLATE_CUSTOMIZATION },
   advisoryTemplate: compileCustomizedTemplate(DEFAULT_TEMPLATE_CUSTOMIZATION),
+  counts: zeroCounts(),
+  summary: { activeFindings: 0, criticalFindings: 0, kevFindings: 0, deliveredEmails: 0 },
 });
 export type Role = 'ADMIN' | 'OPERATOR' | 'VIEWER';
 export interface SessionInfo {
