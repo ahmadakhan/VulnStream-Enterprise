@@ -1,30 +1,37 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Mail, RotateCw, CheckCircle2, Clock, Search, ShieldCheck, Inbox } from 'lucide-react';
+import { useCollection } from '../hooks/useCollection';
+import { Mail, RotateCw, CheckCircle2, Clock, Search, ShieldCheck, Inbox, RefreshCw } from 'lucide-react';
 import { Pagination } from './Pagination';
+import type { EmailDeliveryLog } from '../types';
 
 export const EmailHistoryView: React.FC = () => {
-  const { emailLogs, retryEmailDelivery, emailConfig, setActiveTab } = useApp();
+  const { retryEmailDelivery, emailConfig, setActiveTab, refresh } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const filteredLogs = emailLogs.filter(
-    (log) =>
-      log.recipientEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.advisoryId.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
-
-  const paginatedLogs = filteredLogs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const { items: emailLogs, total, loading, reload } = useCollection<EmailDeliveryLog>('emailLogs', {
+    page: currentPage,
+    pageSize,
+    search: searchTerm,
+    filters: { status: statusFilter },
+  });
 
   const handleRetry = async (logId: string) => {
     setRetryingId(logId);
     await retryEmailDelivery(logId);
     setRetryingId(null);
+    await reload();
+  };
+
+  const handleRefresh = async () => {
+    await refresh();
+    await reload();
   };
 
   return (
@@ -49,6 +56,16 @@ export const EmailHistoryView: React.FC = () => {
               {emailConfig.provider === 'SMTP' ? 'SMTP relay' : emailConfig.provider} transport
             </span>
           </div>
+          <button
+            type="button"
+            onClick={() => void handleRefresh()}
+            disabled={loading}
+            className="ui-secondary min-h-8 px-3 py-1.5 text-[11px]"
+            title="Refresh delivery log"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
+            Refresh
+          </button>
           <button
             type="button"
             onClick={() => setActiveTab('email-queue')}
@@ -78,7 +95,7 @@ export const EmailHistoryView: React.FC = () => {
 
         <div className="text-xs font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
           Total Dispatches:{' '}
-          <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{emailLogs.length}</strong>
+          <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{total}</strong>
         </div>
       </div>
 
@@ -97,63 +114,77 @@ export const EmailHistoryView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
-              {paginatedLogs.map((log) => {
-                const isDelivered = log.status === 'DELIVERED';
+              {loading && emailLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-zinc-500">
+                    Loading delivery log...
+                  </td>
+                </tr>
+              ) : emailLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-zinc-500">
+                    No delivery records found.
+                  </td>
+                </tr>
+              ) : (
+                emailLogs.map((log) => {
+                  const isDelivered = log.status === 'DELIVERED';
 
-                return (
-                  <tr
-                    key={log.id}
-                    className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition"
-                  >
-                    {/* Recipient */}
-                    <td className="py-3 px-4 font-mono font-medium text-zinc-100 dark:text-zinc-100 light:text-zinc-900">
-                      {log.recipientEmail}
-                    </td>
+                  return (
+                    <tr
+                      key={log.id}
+                      className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition"
+                    >
+                      {/* Recipient */}
+                      <td className="py-3 px-4 font-mono font-medium text-zinc-100 dark:text-zinc-100 light:text-zinc-900">
+                        {log.recipientEmail}
+                      </td>
 
-                    {/* Subject & Advisory */}
-                    <td className="py-3 px-4">
-                      <div className="font-medium text-zinc-200 dark:text-zinc-200 light:text-zinc-800 line-clamp-1 max-w-sm">
-                        {log.subject}
-                      </div>
-                      <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mt-0.5">
-                        Ref: {log.advisoryId}
-                      </div>
-                    </td>
+                      {/* Subject & Advisory */}
+                      <td className="py-3 px-4">
+                        <div className="font-medium text-zinc-200 dark:text-zinc-200 light:text-zinc-800 line-clamp-1 max-w-sm">
+                          {log.subject}
+                        </div>
+                        <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mt-0.5">
+                          Ref: {log.advisoryId}
+                        </div>
+                      </td>
 
-                    {/* Provider */}
-                    <td className="py-3 px-4 font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px]">
-                      {log.provider}
-                    </td>
+                      {/* Provider */}
+                      <td className="py-3 px-4 font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px]">
+                        {log.provider}
+                      </td>
 
-                    {/* Status */}
-                    <td className="py-3 px-4 font-mono">
-                      <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300">
-                        {isDelivered && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
-                        <span>{log.status}</span>
-                      </span>
-                    </td>
+                      {/* Status */}
+                      <td className="py-3 px-4 font-mono">
+                        <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300">
+                          {isDelivered && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+                          <span>{log.status}</span>
+                        </span>
+                      </td>
 
-                    {/* Timestamp */}
-                    <td className="py-3 px-4 font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px]">
-                      {log.sentAt ? new Date(log.sentAt).toLocaleString() : 'Not accepted yet'}
-                    </td>
+                      {/* Timestamp */}
+                      <td className="py-3 px-4 font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px]">
+                        {log.sentAt ? new Date(log.sentAt).toLocaleString() : 'Not accepted yet'}
+                      </td>
 
-                    {/* Actions */}
-                    <td className="py-3 px-4 text-right">
-                      {log.status === 'FAILED' && (
-                        <button
-                          onClick={() => handleRetry(log.id)}
-                          disabled={retryingId === log.id}
-                          className="px-2.5 py-1 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 dark:hover:bg-zinc-700 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 text-xs font-medium inline-flex items-center space-x-1 transition"
-                        >
-                          <RotateCw className={`w-3 h-3 ${retryingId === log.id ? 'animate-spin' : ''}`} />
-                          <span>Retry</span>
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+                      {/* Actions */}
+                      <td className="py-3 px-4 text-right">
+                        {log.status === 'FAILED' && (
+                          <button
+                            onClick={() => handleRetry(log.id)}
+                            disabled={retryingId === log.id}
+                            className="px-2.5 py-1 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 dark:hover:bg-zinc-700 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 text-xs font-medium inline-flex items-center space-x-1 transition"
+                          >
+                            <RotateCw className={`w-3 h-3 ${retryingId === log.id ? 'animate-spin' : ''}`} />
+                            <span>Retry</span>
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -161,7 +192,7 @@ export const EmailHistoryView: React.FC = () => {
         {/* Pagination */}
         <Pagination
           currentPage={currentPage}
-          totalItems={filteredLogs.length}
+          totalItems={total}
           pageSize={pageSize}
           onPageChange={setCurrentPage}
           onPageSizeChange={setPageSize}
