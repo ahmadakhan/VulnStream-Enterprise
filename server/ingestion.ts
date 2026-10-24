@@ -280,74 +280,96 @@ export async function ingestFeed(
     // NVD API key is recommended: without one, rate limits are 5 req/30s and
     // responses can exceed 60s for large windows. Configure authType='API_KEY'
     // with the encrypted key and rateLimitPerMin=100 for 50 req/30s throughput.
-    const { start, end, hasMore } = ingestionWindow(scopeHours, context);
-    if (end.getTime() - start.getTime() > 120 * 24 * 3600000)
-      throw new Error('NVD checkpoint exceeds the 120-day API limit; a bounded re-baseline is required');
     const cves: NormalizedCVE[] = [];
     const withdrawals: NonNullable<IngestResult['withdrawals']> = [];
     let rawCount = 0;
-    let expectedTotal: number | undefined;
-    const seen = new Set<string>();
-    for (let offset = 0; ;) {
-      const url = new URL(feed.url);
-      url.searchParams.set('lastModStartDate', start.toISOString());
-      url.searchParams.set('lastModEndDate', end.toISOString());
-      url.searchParams.set('startIndex', String(offset));
-      // NVD permits up to 2,000 results per response; larger pages reduce
-      // network round trips and provider pacing delays during catch-up runs.
-      url.searchParams.set('resultsPerPage', '2000');
-      // Each page has a distinct URL and the time window moves on every run;
-      // a single feed-level ETag cannot safely validate this paginated query.
-      const { data } = await json(
-        url.href,
-        false,
-        { timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: 32 * 1024 * 1024 },
-        true,
-      );
-      if (data === undefined) throw new Error('NVD returned an unexpected conditional response');
-      const page = data;
-      if (
-        !page ||
-        !Array.isArray(page.vulnerabilities) ||
-        page.vulnerabilities.length > 2000 ||
-        offset + page.vulnerabilities.length > page.totalResults ||
-        (expectedTotal !== undefined && page.totalResults !== expectedTotal) ||
-        !Number.isInteger(page.totalResults) ||
-        page.totalResults < 0 ||
-        page.startIndex !== offset
-      )
-        throw new Error('Invalid NVD pagination response');
-      if (page.totalResults > 50000) throw new Error('NVD window exceeds 50,000 records; reduce scope');
-      expectedTotal = page.totalResults;
-      for (const item of page.vulnerabilities) {
-        const id = normalizeCveId(item?.cve?.id);
-        if (!id || seen.has(id)) throw new Error('NVD returned an invalid or duplicate CVE');
-        seen.add(id);
-        if (item.cve?.vulnStatus === 'Rejected') {
-          const cveId = normalizeCveId(item.cve.id);
-          if (cveId) {
-            const modifiedDate = iso(item.cve.lastModified);
-            const knownWithdrawal = Date.parse(context.knownWithdrawalAt?.get(cveId) || '');
-            if (!Number.isFinite(knownWithdrawal) || knownWithdrawal < Date.parse(modifiedDate))
-              withdrawals.push({ cveId, modifiedDate });
+    let hasMore = false;
+    const ctx = { ...context };
+    const now = Date.now();
+    // Multi-run catch-up: when the NVD checkpoint is stale from extended
+    // downtime, process up to MAX_CATCHUP_WINDOWS consecutive 24-hour windows
+    // in a single run. Each window is bounded by NVD's 120-day API limit and
+    // by the per-request 50,000-record ceiling.
+    const MAX_CATCHUP_WINDOWS = 7;
+    for (let windowIdx = 0; windowIdx < MAX_CATCHUP_WINDOWS; ) {
+      const { start, end, hasMore: windowHasMore } = ingestionWindow(scopeHours, ctx, now);
+      if (end.getTime() - start.getTime() > 120 * 24 * 3600000)
+        throw new Error('NVD checkpoint exceeds the 120-day API limit; a bounded re-baseline is required');
+      let expectedTotal: number | undefined;
+      const seen = new Set<string>();
+      for (let offset = 0; ;) {
+        const url = new URL(feed.url);
+        url.searchParams.set('lastModStartDate', start.toISOString());
+        url.searchParams.set('lastModEndDate', end.toISOString());
+        url.searchParams.set('startIndex', String(offset));
+        // NVD permits up to 2,000 results per response; larger pages reduce
+        // network round trips and provider pacing delays during catch-up runs.
+        url.searchParams.set('resultsPerPage', '2000');
+        // Each page has a distinct URL and the time window moves on every run;
+        // a single feed-level ETag cannot safely validate this paginated query.
+        const { data } = await json(
+          url.href,
+          false,
+          { timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: 32 * 1024 * 1024 },
+          true,
+        );
+        if (data === undefined) throw new Error('NVD returned an unexpected conditional response');
+        const page = data;
+        if (
+          !page ||
+          !Array.isArray(page.vulnerabilities) ||
+          page.vulnerabilities.length > 2000 ||
+          offset + page.vulnerabilities.length > page.totalResults ||
+          (expectedTotal !== undefined && page.totalResults !== expectedTotal) ||
+          !Number.isInteger(page.totalResults) ||
+          page.totalResults < 0 ||
+          page.startIndex !== offset
+        )
+          throw new Error('Invalid NVD pagination response');
+        if (page.totalResults > 50000) throw new Error('NVD window exceeds 50,000 records; reduce scope');
+        expectedTotal = page.totalResults;
+        for (const item of page.vulnerabilities) {
+          const id = normalizeCveId(item?.cve?.id);
+          if (!id || seen.has(id)) throw new Error('NVD returned an invalid or duplicate CVE');
+          seen.add(id);
+          if (item.cve?.vulnStatus === 'Rejected') {
+            const cveId = normalizeCveId(item.cve.id);
+            if (cveId) {
+              const modifiedDate = iso(item.cve.lastModified);
+              const knownWithdrawal = Date.parse(ctx.knownWithdrawalAt?.get(cveId) || '');
+              if (!Number.isFinite(knownWithdrawal) || knownWithdrawal < Date.parse(modifiedDate))
+                withdrawals.push({ cveId, modifiedDate });
+            }
+            continue;
           }
-          continue;
+          const cachedModified = Date.parse(ctx.knownCveModifiedAt?.get(id) || '');
+          const incomingModified = Date.parse(item.cve?.lastModified || '');
+          if (Number.isFinite(cachedModified) && Number.isFinite(incomingModified) && cachedModified >= incomingModified)
+            continue;
+          const cve = normalizeNvd(item, feed.id);
+          if (cve) cves.push(cve);
         }
-        const cachedModified = Date.parse(context.knownCveModifiedAt?.get(id) || '');
-        const incomingModified = Date.parse(item.cve?.lastModified || '');
-        if (Number.isFinite(cachedModified) && Number.isFinite(incomingModified) && cachedModified >= incomingModified)
-          continue;
-        const cve = normalizeNvd(item, feed.id);
-        if (cve) cves.push(cve);
+        rawCount += page.vulnerabilities.length;
+        offset += page.vulnerabilities.length;
+        await onNvdProgress?.({ offset, total: page.totalResults, records: rawCount });
+        if (offset >= page.totalResults) break;
+        if (!page.vulnerabilities.length) throw new Error('NVD pagination stopped before completion');
+        await sleep(nvdInterval);
       }
-      rawCount += page.vulnerabilities.length;
-      offset += page.vulnerabilities.length;
-      await onNvdProgress?.({ offset, total: page.totalResults, records: rawCount });
-      if (offset >= page.totalResults) break;
-      if (!page.vulnerabilities.length) throw new Error('NVD pagination stopped before completion');
-      await sleep(nvdInterval);
+      // Advance the context cursor for the next catch-up window.
+      ctx.cursor = end.toISOString();
+      hasMore = windowHasMore;
+      if (!hasMore) break;
+      windowIdx++;
     }
-    return { cves, count: rawCount, withdrawals, syncState: { cursor: end.toISOString(), hasMore } };
+    // Multi-run continuation: if catch-up didn't complete in this run,
+    // schedule the next catch-up run for the scheduler to prioritize.
+    const syncState: IngestionState = { cursor: ctx.cursor, hasMore };
+    if (hasMore) {
+      syncState.catch_up = true;
+      syncState.next_catchup_at = new Date(Date.now() + 60000).toISOString();
+    }
+    return { cves, count: rawCount, withdrawals, syncState };
   }
   if (feed.type === 'CISA_KEV') {
     const { data: rawData, etag } = await json(feed.url);

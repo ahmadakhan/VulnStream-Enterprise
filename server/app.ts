@@ -9,7 +9,7 @@ import { asyncRoute, requireAuth, requireRole, loginHandler, cookieName, createU
 import { transaction, state, get, put, appendAudit, list } from './db';
 import { queryCollection } from './collections';
 import { runRetention, previewRetention } from './retention';
-import { verifyAuditChain } from '../src/utils/cryptoChain.ts';
+import { merkleRoot, verifyAuditChain } from '../src/utils/cryptoChain.ts';
 import { buildAliasMap } from '../src/utils/cpeMatcher.ts';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine.ts';
 import { HttpError } from './validation';
@@ -311,11 +311,13 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           articleIds: z.string().max(4000).optional(),
         })
         .parse(req.query);
+      const role = req.operator?.role;
+      const effectiveLimit = role === 'VIEWER' ? Math.min(query.limit, 100) : query.limit;
       res.json(
         await queryCollection(pool, String(req.params.kind), {
-          limit: query.limit,
-          offset: query.offset,
-          search: query.search,
+          limit: effectiveLimit,
+          offset: role === 'VIEWER' ? 0 : query.offset,
+          search: role === 'VIEWER' ? undefined : query.search,
           sort: query.sort,
           order: query.order,
           filters: {
@@ -328,7 +330,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
             notificationStatus: query.notificationStatus,
             category: query.category,
             level: query.level,
-            articleIds: query.articleIds?.split(',').filter(Boolean),
+            articleIds: role === 'VIEWER' ? undefined : query.articleIds?.split(',').filter(Boolean),
           },
         }),
       );
@@ -336,9 +338,14 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
   );
   app.get(
     '/api/audit/verify',
-    asyncRoute(async (_req, res) => {
-      const rows = await pool.query('SELECT data FROM audit ORDER BY seq DESC');
-      res.json({ verified: verifyAuditChain(rows.rows.map((row) => row.data)) });
+    asyncRoute(async (req, res) => {
+      const rows = await pool.query('SELECT data FROM audit ORDER BY seq ASC');
+      const logs = rows.rows.map((row) => row.data);
+      const verified = verifyAuditChain(logs.reverse());
+      const root = merkleRoot(logs.map((log: any) => log.hash));
+      const externalRoot = typeof req.query.externalRoot === 'string' ? req.query.externalRoot : undefined;
+      const externalMatch = externalRoot ? externalRoot === root : undefined;
+      res.json({ verified, merkleRoot: root, logCount: logs.length, externalRoot: externalRoot || null, externalMatch });
     }),
   );
   app.post(

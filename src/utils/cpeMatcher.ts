@@ -133,6 +133,7 @@ function cpeComponentPattern(value: string): { regex: RegExp; hasWildcard: boole
   let literal = '';
   let escaped = false;
   let hasWildcard = false;
+  let wildcardCount = 0;
   for (const char of value.toLowerCase()) {
     if (escaped) {
       source += char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -141,9 +142,17 @@ function cpeComponentPattern(value: string): { regex: RegExp; hasWildcard: boole
     } else if (char === '\\') {
       escaped = true;
     } else if (char === '*') {
+      wildcardCount++;
+      if (wildcardCount > 10) {
+        throw new Error('CPE component contains too many wildcards, potential ReDoS');
+      }
       source += '.*';
       hasWildcard = true;
     } else if (char === '?') {
+      wildcardCount++;
+      if (wildcardCount > 10) {
+        throw new Error('CPE component contains too many wildcards, potential ReDoS');
+      }
       source += '.';
       hasWildcard = true;
     } else {
@@ -694,17 +703,12 @@ export function generateCPE23(
   version: string = '*',
   targetHw: string = '*',
 ): string {
+  const escape = (value: string) => value.replace(/\\/g, '\\\\').replace(/:/g, '\\:');
   const cleanPart = part || 'a';
-  const cleanVendor = (vendor || 'any')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9_.-]/g, '_');
-  const cleanProduct = (product || 'any')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9_.-]/g, '_');
-  const cleanVersion = version && version !== '*' ? version.trim() : '*';
-  const cleanHw = targetHw && targetHw !== '*' ? targetHw.trim() : '*';
+  const cleanVendor = escape((vendor || 'any').toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '_'));
+  const cleanProduct = escape((product || 'any').toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '_'));
+  const cleanVersion = version && version !== '*' ? escape(version.trim()) : '*';
+  const cleanHw = targetHw && targetHw !== '*' ? escape(targetHw.trim()) : '*';
 
   return `cpe:2.3:${cleanPart}:${cleanVendor}:${cleanProduct}:${cleanVersion}:*:*:*:*:*:${cleanHw}:*`;
 }

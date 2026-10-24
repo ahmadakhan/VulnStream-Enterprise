@@ -42,6 +42,10 @@ export async function migrate(pool: pg.Pool) {
       await client.query(await readFile(new URL('./migrations/003_record_creation_order.sql', import.meta.url), 'utf8'));
     if (!(await client.query('SELECT version FROM schema_migrations WHERE version=4')).rowCount)
       await client.query(await readFile(new URL('./migrations/004_email_review_queue.sql', import.meta.url), 'utf8'));
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=5')).rowCount)
+      await client.query(await readFile(new URL('./migrations/005_outbox_priority.sql', import.meta.url), 'utf8'));
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=6')).rowCount)
+      await client.query(await readFile(new URL('./migrations/006_catchup_scheduler.sql', import.meta.url), 'utf8'));
     await client.query('COMMIT');
   } catch (e) {
     failed = true;
@@ -128,6 +132,7 @@ export async function appendAudit(
   level: AuditLog['level'] = 'INFO',
   ipAddress: string = '',
 ) {
+  await db.query(`SELECT pg_advisory_xact_lock(800002, ${schemaLockKey})`);
   const previous = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 1')).rows[0]?.data;
   const entry = chainAuditLogs(
     [

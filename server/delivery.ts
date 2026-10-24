@@ -43,6 +43,7 @@ export interface Job {
   attempts: number;
   lock_token: string;
   review_approved?: boolean;
+  priority?: number;
 }
 export type MailSender = (job: Job) => Promise<string | { id: string; provider: EmailDeliveryLog['provider'] }>;
 const revision = (cve: NormalizedCVE) => createHash('sha256').update(stableJson(cve)).digest('hex');
@@ -159,11 +160,12 @@ export async function enqueue(
   payload: Job['payload'],
   dedupe: string,
   initialStatus: 'QUEUED' | 'REVIEW' = 'QUEUED',
+  priority = 0,
 ) {
   const id = randomUUID();
   const inserted = await db.query(
-    'INSERT INTO outbox(id,dedupe_key,channel,target_id,advisory_id,payload,status) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(dedupe_key) DO NOTHING RETURNING id',
-    [id, dedupe, channel, targetId, advisoryId, JSON.stringify(payload), channel === 'email' ? initialStatus : 'QUEUED'],
+    'INSERT INTO outbox(id,dedupe_key,channel,target_id,advisory_id,payload,status,priority) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(dedupe_key) DO NOTHING RETURNING id',
+    [id, dedupe, channel, targetId, advisoryId, JSON.stringify(payload), channel === 'email' ? initialStatus : 'QUEUED', priority],
   );
   if (!inserted.rowCount) return null;
   if (channel === 'email') {
@@ -216,6 +218,21 @@ export async function queueAdvisory(
     cveRevisions: Object.fromEntries(findings.map((finding) => [finding.cveId, revision(finding.cve)])),
   };
   let count = 0;
+  const priority = Math.max(
+    0,
+    ...findings.map(
+      (finding) =>
+        finding.cve.cisaKev?.isKev
+          ? 100
+          : finding.exploitRisk === 'REPORTED_IN_WILD_EXPLOIT' ||
+              finding.exploitRisk === 'WEAPONIZED_EXPLOIT' ||
+              finding.cve.exploitationSources?.length
+            ? 50
+            : finding.notificationStatus === 'REVIEW_REQUIRED'
+              ? 50
+              : 0,
+    ),
+  );
   for (const recipient of selected)
     if (
       await enqueue(
@@ -226,13 +243,14 @@ export async function queueAdvisory(
         { ...payload, recipientEmail: recipient.email },
         `${dispatchKey}:email:${recipient.id}`,
         recipient.deliveryGroup === 'EVERYONE' ? 'REVIEW' : 'QUEUED',
+        priority,
       )
     )
       count++;
   for (const hook of hooks.filter(
     (h) => h.enabled && findings.length > 0 && findings.every((finding) => webhookAllows(h, finding)),
   ))
-    if (await enqueue(db, 'webhook', hook.id, advisory.id, payload, `${dispatchKey}:webhook:${hook.id}`))
+    if (await enqueue(db, 'webhook', hook.id, advisory.id, payload, `${dispatchKey}:webhook:${hook.id}`, 'QUEUED', priority))
       count++;
   if (!count) return 0;
   advisory.recipientCount = selected.length;
@@ -248,7 +266,7 @@ export async function deliverNext(
 ): Promise<boolean> {
   const job = await transaction(pool, async (db) => {
     const claimed = await db.query(
-      `WITH candidate AS (SELECT id FROM outbox WHERE (status='QUEUED' AND next_attempt<=now()) OR (status='SENDING' AND locked_at<now()-interval '2 minutes') ORDER BY next_attempt FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE outbox SET status='SENDING',locked_at=now(),lock_token=$1,attempts=attempts+1,updated_at=now() WHERE id IN (SELECT id FROM candidate) RETURNING *`,
+      `WITH candidate AS (SELECT id FROM outbox WHERE (status='QUEUED' AND next_attempt<=now()) OR (status='SENDING' AND locked_at<now()-interval '2 minutes') ORDER BY priority DESC, next_attempt FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE outbox SET status='SENDING',locked_at=now(),lock_token=$1,attempts=attempts+1,updated_at=now() WHERE id IN (SELECT id FROM candidate) RETURNING *`,
       [randomUUID()],
     );
     return claimed.rows[0] as Job | undefined;
@@ -527,6 +545,15 @@ export async function deliverNext(
       }
     }
     await writeEvent(db, {category:job.channel === 'email' ? 'EMAIL' : 'EVENT', level:error ? 'WARNING' : 'INFO', code:error ? 'delivery.attempt_failed' : 'delivery.accepted', message:error ? 'Delivery attempt failed; retry policy applied' : 'Transport accepted delivery', context:{jobId:job.id, channel:job.channel, attempt:job.attempts, advisoryId:job.advisory_id}});
+    if (failed && error) {
+      await writeEvent(db, {
+        category: job.channel === 'email' ? 'EMAIL' : 'EVENT',
+        level: 'ERROR',
+        code: 'delivery.exhausted',
+        message: `Delivery retries exhausted for advisory ${job.advisory_id}; permanent failure`,
+        context: { jobId: job.id, channel: job.channel, attempts: job.attempts, advisoryId: job.advisory_id, error },
+      });
+    }
     await appendAudit(
       db,
       error ? 'Delivery attempt failed' : 'Delivery accepted',

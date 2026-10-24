@@ -6,6 +6,10 @@ export interface IngestionState {
   indexEtag?: string;
   epssScope?: string[];
   epssExpiresAt?: string;
+  /** True when a multi-run catch-up is in progress after extended downtime. */
+  catch_up?: boolean;
+  /** Next time to start a catch-up run, used by the scheduler to prioritize catch-up. */
+  next_catchup_at?: string;
 }
 export interface FeedCursor extends IngestionState { fingerprint: string }
 const HOUR = 3600000;

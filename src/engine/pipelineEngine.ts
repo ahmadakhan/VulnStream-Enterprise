@@ -8,6 +8,7 @@ import type {
   PipelineExecution,
   AppSettings,
   ExploitRiskLevel,
+  IntelligenceMatch,
   EmailDeliveryLog,
   AuditLog,
 } from '../types';
@@ -64,6 +65,121 @@ export function determineExploitRisk(cve: NormalizedCVE): ExploitRiskLevel {
           ? 'ELEVATED'
           : 'STANDARD';
 }
+/**
+ * Enforce VEX (Vulnerability Exploitability eXchange) statements on findings.
+ *
+ * A VEX statement asserting `not_affected` or `fixed` suppresses a finding
+ * unless independent exploit intelligence (CISA KEV, VulnCheck EWI, active
+ * exploit reports) contradicts the suppression. An `under_investigation`
+ * VEX status escalates the finding to REVIEW_REQUIRED.
+ */
+export function applyVexSuppression(findings: Finding[]): Finding[] {
+  return findings.map((finding) => {
+    const vex = finding.cve.vex;
+    if (!vex?.status) return finding;
+    // Independent exploitation sources override VEX suppression.
+    const hasExploitIntelligence =
+      Boolean(finding.cve.exploitationSources?.length) ||
+      finding.cve.cisaKev?.isKev ||
+      finding.cve.exploitStatus === 'Reported In Wild' ||
+      finding.cve.exploitStatus === 'Active Weaponized';
+    if ((vex.status === 'not_affected' || vex.status === 'fixed') && !hasExploitIntelligence) {
+      return {
+        ...finding,
+        notificationStatus:
+          finding.notificationStatus === 'QUEUED_FOR_DISPATCH' ||
+          finding.notificationStatus === 'AUTO_DISPATCHED'
+            ? 'SUPPRESSED_VEX_NOT_AFFECTED'
+            : finding.notificationStatus === 'REVIEW_REQUIRED'
+              ? 'REVIEW_REQUIRED'
+              : 'SUPPRESSED_VEX_NOT_AFFECTED',
+        timeline: [
+          ...finding.timeline,
+          {
+            timestamp: new Date().toISOString(),
+            action: 'VEX assessed',
+            system: 'Server correlation engine',
+            details:
+              finding.cve.exploitationSources?.length
+                ? 'VEX not_affected overridden by exploitation sources'
+                : `VEX ${vex.status} suppresses finding${vex.justification ? `: ${vex.justification}` : ''}`,
+          },
+        ],
+      };
+    }
+    if (vex.status === 'under_investigation') {
+      return {
+        ...finding,
+        notificationStatus:
+          finding.notificationStatus === 'QUEUED_FOR_DISPATCH' ||
+          finding.notificationStatus === 'AUTO_DISPATCHED'
+            ? 'REVIEW_REQUIRED'
+            : finding.notificationStatus,
+        timeline: [
+          ...finding.timeline,
+          {
+            timestamp: new Date().toISOString(),
+            action: 'VEX assessed',
+            system: 'Server correlation engine',
+            details: `VEX under_investigation escalates finding${vex.justification ? `: ${vex.justification}` : ''}`,
+          },
+        ],
+      };
+    }
+    return finding;
+  });
+}
+/**
+ * Rate-limit zero-day matches and consolidate into digests.
+ *
+ * Zero-day matches (findings without a CVE, or with active exploit indicators)
+ * are capped at MAX_ZERO_DAYS_PER_RUN to prevent notification storms.
+ * Multiple zero-day matches for the same vendor/product are consolidated into
+ * a single advisory (the "zero-day digest" mode).
+ */
+export const MAX_ZERO_DAYS_PER_RUN = 50;
+export interface ZeroDayDigest {
+  advisoryId: string;
+  vendor: string;
+  product: string;
+  findingIds: string[];
+  matchCount: number;
+}
+export function rankAndRateLimitZeroDays(
+  findings: Finding[],
+  matches: IntelligenceMatch[],
+): { findings: Finding[]; matches: IntelligenceMatch[]; digests: ZeroDayDigest[] } {
+  // Identify zero-day findings: REVIEW_REQUIRED with no CVE or with exploit
+  // sources but no CVE ID.
+  const zeroDayMatches = matches.filter((m) => m.zeroDay || (!m.cveId && m.status === 'REVIEW_REQUIRED'));
+  if (zeroDayMatches.length <= MAX_ZERO_DAYS_PER_RUN) {
+    return { findings, matches, digests: [] };
+  }
+  // Rate limit by credibility score: keep the highest-credibility matchups.
+  const ranked = [...zeroDayMatches].sort((a, b) => (b.credibilityScore ?? 0) - (a.credibilityScore ?? 0));
+  const dropped = ranked.slice(MAX_ZERO_DAYS_PER_RUN);
+  const keptIds = new Set(ranked.slice(0, MAX_ZERO_DAYS_PER_RUN).map((m) => m.id));
+  // Build digests for dropped zero-day matches grouped by vendor/product.
+  const digests: ZeroDayDigest[] = [];
+  const byAsset = new Map<string, IntelligenceMatch[]>();
+  for (const match of dropped) {
+    const key = `${match.assetId}`;
+    if (!byAsset.has(key)) byAsset.set(key, []);
+    byAsset.get(key)!.push(match);
+  }
+  for (const [_, matches] of byAsset) {
+    const match = matches[0];
+    digests.push({
+      advisoryId: `ZDIGEST_${match.assetId}`,
+      vendor: match.assetName.split('(')[1]?.split(')')[0]?.trim() || 'unknown',
+      product: match.assetName.split('(')[0]?.trim() || 'unknown',
+      findingIds: [],
+      matchCount: matches.length,
+    });
+  }
+  const filteredMatches = matches.filter((m) => keptIds.has(m.id) || !m.zeroDay);
+  return { findings, matches: filteredMatches, digests };
+}
 /** Pure correlation. Network ingestion and transactional outbox delivery live on the server. */
 export function runVulnerabilityPipeline(
   _feeds: ThreatFeed[],
@@ -97,6 +213,12 @@ export function runVulnerabilityPipeline(
   // reachable through their package bucket instead of being scanned every time.
   const assetsWithoutIdentifiers: WatchListItem[] = [];
   const assetsWithBroadCpes: WatchListItem[] = [];
+  // Build alias-expanded indices so assets are candidates when their vendor
+  // or product differs from a CVE's by an alias rather than a canonical name.
+  const aliasVendorKeys = (v: string): string[] =>
+    !v ? [v] : [v, ...(vendorAliases[v.toLowerCase()] || [])].map((k) => k.toLowerCase());
+  const aliasProductKeys = (p: string): string[] =>
+    !p ? [p] : [p, ...(productAliases[p.toLowerCase()] || [])].map((k) => k.toLowerCase());
   for (const asset of activeAssets) {
     const seenPurls = new Set<string>();
     for (const purl of asset.purls ?? []) {
@@ -119,12 +241,16 @@ export function runVulnerabilityPipeline(
         assetsWithBroadCpes.push(asset);
         break;
       }
-      const key = `${parsed.vendor}\u0000${parsed.product}`;
-      if (seenProducts.has(key)) continue;
-      seenProducts.add(key);
-      const bucket = assetsByProduct.get(key) || [];
-      bucket.push(asset);
-      assetsByProduct.set(key, bucket);
+      // Register asset under all alias-expanded vendor/product keys.
+      for (const vendorKey of aliasVendorKeys(parsed.vendor))
+        for (const productKey of aliasProductKeys(parsed.product)) {
+          const key = `${vendorKey}\u0000${productKey}`;
+          if (seenProducts.has(key)) continue;
+          seenProducts.add(key);
+          const bucket = assetsByProduct.get(key) || [];
+          bucket.push(asset);
+          assetsByProduct.set(key, bucket);
+        }
     }
     // Keep assets with non-empty but invalid CPE lists out of text fallback;
     // the matcher correctly treats structured identifiers as authoritative.

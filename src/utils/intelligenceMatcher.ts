@@ -1,4 +1,4 @@
-import type { Finding, IntelligenceArticle, IntelligenceMatch, WatchListItem, NormalizedCVE } from '../types';
+import type { Finding, IntelligenceArticle, IntelligenceMatch, WatchListItem, NormalizedCVE, ThreatFeed } from '../types';
 import { quickHash } from './cryptoChain';
 
 const text = (value: string) =>
@@ -7,6 +7,43 @@ const text = (value: string) =>
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
+
+/** Source feed weight: higher for authoritative threat intel feeds (0–40). */
+const FEED_WEIGHTS: Record<string, number> = {
+  NVD_API: 40,
+  CISA_KEV: 40,
+  MITRE_CVE: 35,
+  VULNCHECK_KEV: 30,
+  OPENCVE_API: 25,
+  RSS_NEWS: 15,
+  THREAT_FEED: 20,
+};
+
+/** Compute a credibility score (0–100) for an intelligence match.
+ *
+ * Combines the source feed weight with the confidence of the vendor/product
+ * keyword match. Corroborated structural matches score higher than
+ * heuristic text matches.
+ */
+export function computeCredibilityScore(
+  match: IntelligenceMatch,
+  sourceFeeds: string[] = [],
+  hasStructuredFinding: boolean,
+): number {
+  let feedScore = 10; // baseline for unknown feeds
+  if (sourceFeeds.length) {
+    const maxWeight = Math.max(...sourceFeeds.map((f) => FEED_WEIGHTS[f] ?? 10));
+    feedScore = maxWeight;
+  }
+  // Keyword confidence: corroborated by a structured finding = 100,
+  // zero-day without CVE = 70, review-only text match = 50.
+  let keywordScore: number;
+  if (hasStructuredFinding && match.status === 'CORROBORATED') keywordScore = 100;
+  else if (match.zeroDay) keywordScore = 70;
+  else keywordScore = 50;
+  // Average feed weight and keyword confidence, normalized to 0–100.
+  return Math.round((feedScore * 0.6 + keywordScore * 0.4));
+}
 
 /**
  * Built-in vendor display-name aliases for the news text matcher.
@@ -45,10 +82,13 @@ export function mergeArticles(records: IntelligenceArticle[]): IntelligenceArtic
     byId.set(article.id, {
       ...winner,
       sourceFeeds: [...new Set([...(old?.sourceFeeds || []), ...article.sourceFeeds])].sort(),
+      zeroDay: winner.zeroDay || old?.zeroDay || article.zeroDay,
+      cveIds: [...new Set([...(winner.cveIds || []), ...(article.cveIds || [])])].sort(),
     });
   }
   return [...byId.values()];
 }
+
 /** News mentions are review evidence. Only the structured matcher can confirm installed-version applicability.
  *
  * @param customVendorAliases - Operator-managed vendor aliases from the Alias Thesaurus
@@ -113,6 +153,12 @@ export function matchIntelligence(
           finding.status !== 'RESOLVED' &&
           finding.status !== 'FALSE_POSITIVE';
         const old = matches.get(id);
+        const isZeroDay = !cveId || article.zeroDay === true;
+        const credibilityScore = computeCredibilityScore(
+          { id, cveId, assetId: asset.id, assetName: '', articleIds: [], status: confirmed ? 'CORROBORATED' : 'REVIEW_REQUIRED', evidence: '', zeroDay: isZeroDay },
+          article.sourceFeeds,
+          Boolean(finding && confirmed),
+        );
         matches.set(id, {
           id,
           cveId,
@@ -121,9 +167,13 @@ export function matchIntelligence(
           articleIds: [...new Set([...(old?.articleIds || []), article.id])].sort(),
           status: confirmed ? 'CORROBORATED' : 'REVIEW_REQUIRED',
           findingId: finding?.id,
+          zeroDay: old?.zeroDay || isZeroDay,
+          credibilityScore,
           evidence: confirmed
             ? 'Article references a CVE independently matched to this product by structured applicability.'
-            : 'Vendor and product are mentioned together, or a review-only CVE correlation exists. Confirm affected versions and the CVE-to-product relationship before acting.',
+            : isZeroDay
+              ? 'Potential zero-day: vendor and product mentioned in threat intelligence without an assigned CVE. Confirm affected versions and exploitability before acting.'
+              : 'Vendor and product are mentioned together, or a review-only CVE correlation exists. Confirm affected versions and the CVE-to-product relationship before acting.',
         });
       }
     }

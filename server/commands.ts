@@ -142,13 +142,26 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     );
     return { success: true, imported: unique.size, errors: [] };
   } else if (action === 'watchlist.import') {
-    const input = watchlistImportSchema.parse(data);
+    if (!Array.isArray(data)) throw new HttpError(400, 'Expected an array of assets');
+    // Pre-validate all rows before inserting any, collecting per-row errors with line numbers.
+    const validItems: { id: string; [key: string]: unknown }[] = [];
+    const rowErrors: string[] = [];
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const rowNumber = i + 1;
+      try {
+        watchlistImportSchema.element.parse(row);
+        validItems.push(row as { id: string; [key: string]: unknown });
+      } catch (e: any) {
+        rowErrors.push(`Row ${rowNumber}: ${e instanceof z.ZodError ? e.issues.map(issue => `${issue.path?.join('.') || 'root'}: ${issue.message}`).join('; ') : e.message}`);
+      }
+    }
+    if (rowErrors.length) {
+      return { success: false, imported: 0, errors: rowErrors };
+    }
     let imported = 0;
-    const errors: string[] = [];
-    for (const item of input) {
+    for (const item of validItems) {
       const old = await get<any>(db, 'watchlist', item.id);
-      // Upsert keeps the identifier and original creation time stable so that
-      // repeated seeding does not orphan findings that reference an asset id.
       const merged = {
         ...old,
         ...item,
@@ -159,8 +172,8 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
       await put(db, 'watchlist', item.id, merged);
       imported += 1;
     }
-    await appendAudit(db, 'Watchlist imported', `${imported} assets`, actor, 'WATCHLIST', 'INFO', ipAddress);
-    return { success: true, imported, errors };
+    await appendAudit(db, 'Assets imported', `${imported} assets`, actor, 'WATCHLIST', 'INFO', ipAddress);
+    return { success: true, imported, errors: [] };
   } else if (action === 'alias.save') {
     const input = aliasSchema.parse(data),
       old = await checkExisting('aliases');

@@ -103,6 +103,13 @@ export function parseSyndication(
       invalid++;
       continue;
     }
+    // Zero-day heuristic: articles without a CVE ID that mention exploitation,
+    // zero-day, or in-the-wild activity are flagged for priority review.
+    const zeroDay =
+      cveIds.length === 0 &&
+      /\b(zero[- ]?day|0[- ]?day|actively exploited|in the wild|unpatched|no (?:patch|fix|cve))\b/i.test(
+        `${title} ${full}`,
+      );
     const id = createHash('sha256').update(url).digest('hex');
     const article: IntelligenceArticle = {
       id,
@@ -113,6 +120,7 @@ export function parseSyndication(
       modifiedDate: new Date(modified).toISOString(),
       cveIds,
       sourceFeeds: [sourceId],
+      zeroDay,
     };
     const old = records.get(id);
     if (

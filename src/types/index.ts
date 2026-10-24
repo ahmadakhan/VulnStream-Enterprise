@@ -54,6 +54,8 @@ export interface IntelligenceArticle {
   modifiedDate: string;
   cveIds: string[];
   sourceFeeds: string[];
+  /** True when the article describes a vulnerability without an assigned CVE ID (potential zero-day). */
+  zeroDay?: boolean;
 }
 export interface IntelligenceMatch {
   id: string;
@@ -64,6 +66,10 @@ export interface IntelligenceMatch {
   status: 'CORROBORATED' | 'REVIEW_REQUIRED';
   evidence: string;
   findingId?: string;
+  /** True when matched articles describe a vulnerability without an assigned CVE (potential zero-day). */
+  zeroDay?: boolean;
+  /** Credibility score: source feed weight × keyword confidence (0–100). */
+  credibilityScore?: number;
 }
 export const EVENT_CATEGORIES = [
   'PIPELINE',

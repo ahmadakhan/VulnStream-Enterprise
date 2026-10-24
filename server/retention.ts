@@ -242,13 +242,26 @@ export async function runRetention(
     // Terminal queue rows and operational telemetry are transient too. Applying
     // the same policy window keeps an operator's configured retention period
     // authoritative instead of silently trimming them on a fixed schedule.
-    const outbox = await db.query(
-      "DELETE FROM outbox WHERE status IN ('ACCEPTED','FAILED','REJECTED') AND updated_at < $1",
-      [new Date(plan.cutoff)],
-    );
-    const events = await db.query('DELETE FROM operational_events WHERE occurred_at < $1', [
-      new Date(plan.cutoff),
-    ]);
+    // Deletions are batched in 10,000-row chunks using subquery-scoped
+    // primary-key lookups to avoid table-level lock contention.
+    let outboxDeleted = 0;
+    for (;;) {
+      const outbox = await db.query(
+        "DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE status IN ('ACCEPTED','FAILED','REJECTED') AND updated_at < $1 LIMIT 10000)",
+        [new Date(plan.cutoff)],
+      );
+      outboxDeleted += outbox.rowCount ?? 0;
+      if ((outbox.rowCount ?? 0) < 10000) break;
+    }
+    let eventsDeleted = 0;
+    for (;;) {
+      const events = await db.query(
+        "DELETE FROM operational_events WHERE id IN (SELECT id FROM operational_events WHERE occurred_at < $1 LIMIT 10000)",
+        [new Date(plan.cutoff)],
+      );
+      eventsDeleted += events.rowCount ?? 0;
+      if ((events.rowCount ?? 0) < 10000) break;
+    }
 
     if (plan.delete.length) {
       const summary = RETENTION_KINDS.filter((kind) => plan.byKind[kind] > 0)
@@ -274,7 +287,7 @@ export async function runRetention(
       deleted: plan.delete.length,
       unknownAge: plan.unknownAge,
       byKind: plan.byKind,
-      system: { outbox: outbox.rowCount ?? 0, events: events.rowCount ?? 0 },
+      system: { outbox: outboxDeleted, events: eventsDeleted },
     };
   });
 }

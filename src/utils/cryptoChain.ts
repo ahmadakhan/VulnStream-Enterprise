@@ -38,3 +38,25 @@ export function verifyAuditChain(logs: AuditLog[]): boolean {
     && log.hash === hashAuditLog(log)
     && (i === logs.length - 1 || log.prevHash === logs[i + 1].hash));
 }
+
+/** Compute a Merkle root hash over a sorted list of audit log hashes.
+ *
+ * This root can be periodically written to an external write-once store
+ * (S3 object lock, cloud logging) so that the full chain content is
+ * anchored outside the local database, making wholesale replacement
+ * or deletion of the audit chain detectable.
+ */
+export function merkleRoot(hashes: string[]): string {
+  if (!hashes.length) return '0'.repeat(64);
+  let level: string[] = [...hashes].sort();
+  while (level.length > 1) {
+    const next: string[] = [];
+    for (let i = 0; i < level.length; i += 2) {
+      const left = level[i];
+      const right = i + 1 < level.length ? level[i + 1] : left;
+      next.push(quickHash(left + right));
+    }
+    level = next;
+  }
+  return level[0];
+}

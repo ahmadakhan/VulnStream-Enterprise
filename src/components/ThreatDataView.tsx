@@ -835,7 +835,16 @@ const NewsEvidenceView: React.FC = () => {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <a
                     className="group inline-flex min-w-0 items-start gap-1.5 text-sm font-semibold text-blue-400 underline-offset-4 hover:underline light:text-blue-700"
-                    href={article.url}
+                    href={
+                      (() => {
+                        try {
+                          const u = new URL(article.url);
+                          return ['http:', 'https:'].includes(u.protocol) ? article.url : '#';
+                        } catch {
+                          return '#';
+                        }
+                      })()
+                    }
                     target="_blank"
                     rel="noopener noreferrer"
                   >

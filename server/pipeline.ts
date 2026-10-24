@@ -17,7 +17,7 @@ import type {
 import { buildAliasMap } from '../src/utils/cpeMatcher';
 import { mergeCveRecords, normalizeCveId, stableJson } from '../src/utils/deduplicator';
 import { reconcileFindings } from '../src/engine/reconcileFindings';
-import { determineExploitRisk, runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
+import { applyVexSuppression, determineExploitRisk, rankAndRateLimitZeroDays, runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { ingestFeed, type IngestContext } from './ingestion';
 import { recoveryDue, recoveryAt, shouldStartAutomaticRun } from './feedRecovery';
 import { ingestionWindow, type FeedCursor } from './ingestionState';
@@ -195,20 +195,26 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       .find((e) => e.status === 'QUEUED');
     if (!execution) {
       const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
-      const last = (await pool.query('SELECT last_run FROM scheduler_state WHERE id=1')).rows[0]?.last_run;
+      const last = (await pool.query('SELECT last_run, next_catchup_run FROM scheduler_state WHERE id=1')).rows[0];
       const configuredFeeds = await list<ThreatFeed>(pool, 'feeds');
       const cursors = new Map((await pool.query("SELECT id,data FROM records WHERE kind='feedCursors'")).rows.map(row => [row.id, row.data as FeedCursor]));
-      const catchupDue = configuredFeeds.some(feed => {
+      const now = Date.now();
+      const catchupDue = configuredFeeds.some((feed) => {
         const cursor = cursors.get(feed.id);
-        return feed.enabled && cursor?.hasMore && cursor.fingerprint === sourceFingerprint(feed) &&
-          !(Date.parse(feed.circuitOpenUntil || '') > Date.now());
+        if (!feed.enabled || cursor?.fingerprint !== sourceFingerprint(feed)) return false;
+        if (Date.parse(feed.circuitOpenUntil || '') > now) return false;
+        // A catch-up in progress with next_catchup_at due, or any pending hasMore.
+        if (cursor.catch_up && cursor.next_catchup_at && Date.parse(cursor.next_catchup_at) <= now) return true;
+        return Boolean(cursor?.hasMore);
       });
+      // Prioritize catch-up run if scheduled.
+      const catchupScheduled = last?.next_catchup_run && Date.parse(last.next_catchup_run) <= now;
       const recoveryProbeDue = configuredFeeds.some((feed) => recoveryDue(feed));
       if (shouldStartAutomaticRun({
         schedulerEnabled: settings.schedulerEnabled,
         recoveryProbeDue,
-        catchupDue,
-        lastRun: last ? new Date(last).toISOString() : null,
+        catchupDue: catchupDue || catchupScheduled,
+        lastRun: last ? new Date(last.last_run).toISOString() : null,
         intervalMinutes: settings.schedulerIntervalMinutes,
       }))
         execution = await queueRun(pool, undefined, 'scheduler');
@@ -520,8 +526,12 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       for (const result of acceptedResults) {
         if (result.syncState) {
           const source = currentFeeds.get(result.sourceId!)!;
+          // Clear catch_up flag when hasMore is false (catch-up complete).
+          const cursorState = result.syncState.hasMore
+            ? result.syncState
+            : { ...result.syncState, catch_up: false, next_catchup_at: undefined };
           await put(db, 'feedCursors', source.id, {
-            ...result.syncState, fingerprint: sourceFingerprint(source),
+            ...cursorState, fingerprint: sourceFingerprint(source),
           } satisfies FeedCursor);
         }
         if (result.kev && !result.notModified) {
@@ -669,34 +679,37 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         ),
         correlated.newFindings,
       );
+      const vexEnforced = applyVexSuppression(reconciled);
       await putMany(
         db,
         'findings',
-        reconciled.map((f) => ({ id: f.id, data: f })),
+        vexEnforced.map((f) => ({ id: f.id, data: f })),
       );
       const intelligenceMatches = matchIntelligence(
         articles,
         snapshot.watchlist,
-        reconciled,
+        vexEnforced,
         [...byId.values()],
         vendorAliases,
         productAliases,
       );
       await putMany(db, 'intelligenceMatches', intelligenceMatches.map(data => ({id:data.id,data})));
       await db.query("DELETE FROM records WHERE kind='intelligenceMatches' AND NOT (id=ANY($1::text[]))", [intelligenceMatches.map(item => item.id)]);
+      // Apply zero-day rate limiting and digest consolidation.
+      const { matches: rateLimitedMatches, digests: zeroDayDigests } = rankAndRateLimitZeroDays(vexEnforced, intelligenceMatches);
       await writeEvent(db, {category:'MATCHING', code:'matching.completed', message:'Structured applicability and news evidence correlation completed', runId:execution!.id,
-        context:{ findings:correlated.newFindings.length, articles:articles.length, evidenceMatches:intelligenceMatches.length,
-          reviewRequired:intelligenceMatches.filter(item => item.status === 'REVIEW_REQUIRED').length }});
+        context:{ findings:correlated.newFindings.length, articles:articles.length, evidenceMatches:rateLimitedMatches.length,
+          reviewRequired:rateLimitedMatches.filter(item => item.status === 'REVIEW_REQUIRED').length, zeroDayDigests:zeroDayDigests.length, zeroDaysRateLimited: intelligenceMatches.length - rateLimitedMatches.length }});
       const queueStarted = Date.now();
       let notificationsQueued = 0,
         advisoriesQueued = 0;
       // Previously queued findings also become deliverable after enabling dispatch.
-      const pending = reconciled.filter(
+      const pending = vexEnforced.filter(
         (f) =>
-          f.notificationStatus === 'QUEUED_FOR_DISPATCH' &&
+          (f.notificationStatus === 'QUEUED_FOR_DISPATCH' || f.notificationStatus === 'AUTO_DISPATCHED') &&
           !f.advisoryId &&
           !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status),
-      );
+        );
       if (settings.autoDispatchEnabled && pending.length) {
         // A KEV-only or high-severity subscriber must never receive unrelated
         // findings merely because one other item in a bundle passes its filter.
@@ -782,7 +795,13 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       execution.stats.notificationsQueued = notificationsQueued;
       execution.stats.advisoriesQueued = advisoriesQueued;
       await put(db, 'executions', execution.id, execution);
-      await db.query('UPDATE scheduler_state SET last_run=now() WHERE id=1');
+      // Clear next_catchup_run if all feeds have completed their catch-up.
+      const pendingCatchup = acceptedResults.some((r) => r.syncState?.catch_up && r.syncState.hasMore);
+      if (pendingCatchup) {
+        await db.query('UPDATE scheduler_state SET last_run=now(), next_catchup_run=now() WHERE id=1');
+      } else {
+        await db.query('UPDATE scheduler_state SET last_run=now(), next_catchup_run=NULL WHERE id=1');
+      }
       await writeEvent(db, {category:'PIPELINE', level:execution!.status === 'FAILED' ? 'ERROR' : 'INFO', code:'pipeline.finished', message:`Pipeline ${execution!.status.toLowerCase()}`, runId:execution!.id, context:{stats:execution!.stats}});
       await appendAudit(
         db,
