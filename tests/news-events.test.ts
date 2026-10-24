@@ -190,3 +190,110 @@ test('large legitimate RSS archives are bounded but filtered by scope instead of
   assert.throws(() => parseSyndication('x'.repeat(8 * 1024 * 1024 + 1), 'oversized', 24), /8 MiB/);
   assert.throws(() => parseSyndication(rss('<item/>'.repeat(10001)), 'too-many', 24), /10,000 entries/);
 });
+
+test('custom vendor aliases from the Alias Thesaurus reach news matching', () => {
+  // Article says "Acme Corp" but inventory uses the CPE identifier "acmecorp".
+  // Without the custom alias, no match. With it, vendor is found.
+  const article = {
+    id: 'alias-vendor-1',
+    title: 'Acme Corp product hit by critical RCE',
+    summary: 'The Acme Corp widget server is vulnerable.',
+    url: 'https://example.com/acme',
+    publishedDate: '2026-10-01T00:00:00Z',
+    modifiedDate: '2026-10-01T00:00:00Z',
+    cveIds: ['CVE-2026-9001'],
+    sourceFeeds: ['test'],
+  };
+  const asset: WatchListItem = {
+    id: 'asset-alias-test',
+    assetTag: 'Widget Server',
+    vendor: 'acmecorp',
+    product: 'widget',
+    version: '3.0',
+    cpes: [],
+    purls: [],
+    active: true,
+    ownerGroup: 'Test',
+    targetHw: '*',
+    createdAt: '2026-01-01T00:00:00Z',
+  };
+  // No match without alias
+  assert.equal(matchIntelligence([article], [asset], []).length, 0);
+  // Match once we supply the custom vendor alias
+  const matches = matchIntelligence([article], [asset], [], [], { acmecorp: ['acme corp'] });
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].status, 'REVIEW_REQUIRED');
+  assert.equal(matches[0].assetId, 'asset-alias-test');
+});
+
+test('custom product aliases from the Alias Thesaurus reach news matching', () => {
+  // Article uses a marketing name "xenon gateway" — inventory records the product
+  // by its CPE identifier "xgateway". The vendor is explicitly named in both.
+  const article = {
+    id: 'alias-product-1',
+    title: 'Critical RCE in acmecorp Xenon Gateway',
+    summary: 'The acmecorp Xenon Gateway appliance is affected by CVE-2026-5555.',
+    url: 'https://example.com/xenon',
+    publishedDate: '2026-10-01T00:00:00Z',
+    modifiedDate: '2026-10-01T00:00:00Z',
+    cveIds: [],
+    sourceFeeds: ['test'],
+  };
+  const asset: WatchListItem = {
+    id: 'asset-product-alias-test',
+    assetTag: 'Gateway Appliance',
+    vendor: 'acmecorp',
+    product: 'xgateway',
+    version: '3.0',
+    cpes: [],
+    purls: [],
+    active: true,
+    ownerGroup: 'Test',
+    targetHw: '*',
+    createdAt: '2026-01-01T00:00:00Z',
+  };
+  // Vendor matches literally ('acmecorp'); product 'xgateway' does NOT appear in article.
+  assert.equal(matchIntelligence([article], [asset], [], [], {}, {}).length, 0);
+  // Once we alias xgateway → 'xenon gateway', the product is found in the article.
+  const matches = matchIntelligence([article], [asset], [], [], {}, { xgateway: ['xenon gateway'] });
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].status, 'REVIEW_REQUIRED');
+});
+
+test('built-in vendor aliases still work after custom-alias merge', () => {
+  // 'palo alto networks' is a built-in alias for 'paloaltonetworks'.
+  // Adding a custom alias for an unrelated vendor must not break this.
+  const article = {
+    id: 'builtin-alias-preserved',
+    title: 'Palo Alto Networks firewall vulnerability',
+    summary: 'A critical vulnerability affects Palo Alto Networks pan os products.',
+    url: 'https://example.com/pan',
+    publishedDate: '2026-10-01T00:00:00Z',
+    modifiedDate: '2026-10-01T00:00:00Z',
+    cveIds: ['CVE-2026-9002'],
+    sourceFeeds: ['test'],
+  };
+  const asset: WatchListItem = {
+    id: 'asset-pan',
+    assetTag: 'Firewall',
+    vendor: 'paloaltonetworks',
+    product: 'pan os',
+    version: '10.2',
+    cpes: [],
+    purls: [],
+    active: true,
+    ownerGroup: 'Ops',
+    targetHw: '*',
+    createdAt: '2026-01-01T00:00:00Z',
+  };
+  // Should match via the built-in alias even when custom aliases are supplied
+  const matches = matchIntelligence(
+    [article],
+    [asset],
+    [],
+    [],
+    { acmecorp: ['acme corp'] }, // unrelated custom alias
+  );
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].assetId, 'asset-pan');
+});

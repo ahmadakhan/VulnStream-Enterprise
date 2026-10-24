@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { emptyState, type AppState, type SessionInfo, type CollectionKind, type CollectionPage, type RetentionPreview } from '../../shared/state';
+import { emptyState, type AppState, type SessionInfo, type CollectionKind, type CollectionPage } from '../../shared/state';
+import type { RetentionPreview } from '../types';
 import type {
   ThreatFeed,
   WatchListItem,

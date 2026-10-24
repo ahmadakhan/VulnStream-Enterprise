@@ -7,7 +7,19 @@ const text = (value: string) =>
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
-const vendorAliases: Record<string, string[]> = {
+
+/**
+ * Built-in vendor display-name aliases for the news text matcher.
+ * These handle cases where a vendor's CPE identifier differs from how their
+ * name appears in article prose (e.g. "paloaltonetworks" in CPE vs.
+ * "palo alto networks" in a headline).
+ *
+ * Operator-managed aliases from the Alias Thesaurus are merged on top of
+ * this table at call time via the `customVendorAliases` parameter of
+ * matchIntelligence, so the Thesaurus page controls both CVE matching
+ * and news evidence matching from a single place.
+ */
+const BUILTIN_VENDOR_ALIASES: Record<string, string[]> = {
   paloaltonetworks: ['palo alto networks'],
   checkpoint: ['check point'],
   f5networks: ['f5'],
@@ -37,12 +49,21 @@ export function mergeArticles(records: IntelligenceArticle[]): IntelligenceArtic
   }
   return [...byId.values()];
 }
-/** News mentions are review evidence. Only the structured matcher can confirm installed-version applicability. */
+/** News mentions are review evidence. Only the structured matcher can confirm installed-version applicability.
+ *
+ * @param customVendorAliases - Operator-managed vendor aliases from the Alias Thesaurus
+ *   (buildAliasMap(aliasEntries, 'VENDOR')), merged on top of the built-in display-name
+ *   table so a single Thesaurus entry covers both CVE matching and news evidence.
+ * @param customProductAliases - Operator-managed product aliases from the Alias Thesaurus
+ *   (buildAliasMap(aliasEntries, 'PRODUCT')), used to catch product name variants in article prose.
+ */
 export function matchIntelligence(
   articles: IntelligenceArticle[],
   inventory: WatchListItem[],
   findings: Finding[],
   corpus: NormalizedCVE[] = [],
+  customVendorAliases: Record<string, string[]> = {},
+  customProductAliases: Record<string, string[]> = {},
 ): IntelligenceMatch[] {
   const matches = new Map<string, IntelligenceMatch>();
   const current = new Map(findings.map((finding) => [`${finding.cveId}:${finding.matchedAssetId}`, finding]));
@@ -54,10 +75,24 @@ export function matchIntelligence(
   for (const article of mergeArticles(articles)) {
     const document = text(`${article.title} ${article.summary}`);
     for (const asset of inventory.filter((item) => item.active)) {
-      const vendorMentioned = [asset.vendor, ...(vendorAliases[text(asset.vendor)] || [])].some((vendor) =>
-        mentions(document, vendor),
-      );
-      const productMentioned = mentions(document, asset.product);
+      // Merge built-in display-name variants with any operator-managed aliases
+      // from the Alias Thesaurus, deduplicated, then test each against the article.
+      const normVendor = text(asset.vendor);
+      const allVendorVariants = [
+        asset.vendor,
+        ...(BUILTIN_VENDOR_ALIASES[normVendor] || []),
+        ...(customVendorAliases[normVendor] || []),
+      ];
+      const vendorMentioned = allVendorVariants.some((variant) => mentions(document, variant));
+
+      // Also check product aliases so e.g. "globalprotect" in an article matches
+      // an inventory item tagged as "globalprotect" even if the CPE uses "pan_os".
+      const normProduct = text(asset.product);
+      const allProductVariants = [
+        asset.product,
+        ...(customProductAliases[normProduct] || []),
+      ];
+      const productMentioned = allProductVariants.some((variant) => mentions(document, variant));
       const references = article.cveIds.length ? article.cveIds : [null];
       for (const cveId of references) {
         const finding = cveId ? current.get(`${cveId}:${asset.id}`) : undefined;

@@ -674,7 +674,14 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         'findings',
         reconciled.map((f) => ({ id: f.id, data: f })),
       );
-      const intelligenceMatches = matchIntelligence(articles, snapshot.watchlist, reconciled, [...byId.values()]);
+      const intelligenceMatches = matchIntelligence(
+        articles,
+        snapshot.watchlist,
+        reconciled,
+        [...byId.values()],
+        vendorAliases,
+        productAliases,
+      );
       await putMany(db, 'intelligenceMatches', intelligenceMatches.map(data => ({id:data.id,data})));
       await db.query("DELETE FROM records WHERE kind='intelligenceMatches' AND NOT (id=ANY($1::text[]))", [intelligenceMatches.map(item => item.id)]);
       await writeEvent(db, {category:'MATCHING', code:'matching.completed', message:'Structured applicability and news evidence correlation completed', runId:execution!.id,
