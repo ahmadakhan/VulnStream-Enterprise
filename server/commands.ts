@@ -238,7 +238,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
       throw new HttpError(400, 'Enter your Mailjet API secret');
     if (smtpProvider && input.smtpHost) {
       const allowedHosts = config.EGRESS_ALLOWED_HOSTS.split(',').map((host) => host.trim().toLowerCase());
-      if (!allowedHosts.includes(input.smtpHost))
+      if (!allowedHosts.includes(input.smtpHost.toLowerCase().trim()))
         throw new HttpError(400, `Add ${input.smtpHost} to EGRESS_ALLOWED_HOSTS before configuring this SMTP host`);
       const presetRequiresAuth = input.provider !== 'SMTP_CUSTOM' && input.provider !== 'SMTP';
       if (presetRequiresAuth && (!input.smtpUsername || !smtpPassword))
