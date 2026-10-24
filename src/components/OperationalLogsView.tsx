@@ -641,9 +641,9 @@ export const OperationalLogsView: React.FC = () => {
                                 <summary className="cursor-pointer text-[10px] font-medium text-blue-300 underline decoration-blue-300/30 underline-offset-2 light:text-blue-700">
                                   View event details
                                 </summary>
-                                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-800 bg-zinc-950/70 p-2 text-[10px] leading-relaxed text-zinc-400 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-600">
-                                  {formatEventContext(event.context)}
-                                </pre>
+    <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-700/50 bg-zinc-950/80 p-3 text-[11px] leading-relaxed text-zinc-300 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-700">
+      {formatEventContext(event.context)}
+    </pre>
                               </details>
                             )}
                           </td>

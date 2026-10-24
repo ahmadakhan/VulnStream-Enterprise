@@ -43,7 +43,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   onClose,
 }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-    <div className="relative w-full max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl light:border-zinc-200 light:bg-white">
+    <div className="relative w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl light:border-zinc-200 light:bg-white">
       <button
         onClick={onClose}
         aria-label="Close"
@@ -84,9 +84,9 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
               <dt className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{field.label}</dt>
               <dd
                 className={
-                  field.block
-                    ? `mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-950/70 p-2.5 text-[11px] text-zinc-300 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-700 ${field.mono ? 'font-mono' : ''}`
-                    : `mt-1 break-words text-[12px] text-zinc-200 light:text-zinc-800 ${field.mono ? 'font-mono' : ''}`
+                    field.block
+                      ? `mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-700/50 bg-zinc-950/80 p-3 text-[11px] leading-relaxed text-zinc-300 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-700 ${field.mono ? 'font-mono' : ''}`
+                      : `mt-1 break-words text-[12px] text-zinc-200 light:text-zinc-800 ${field.mono ? 'font-mono' : ''}`
                 }
               >
                 {field.value}
