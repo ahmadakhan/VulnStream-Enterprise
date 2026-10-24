@@ -105,7 +105,7 @@ async function claimRetention(policy: AppSettings['retentionConfig']): Promise<b
     return true;
   });
 }
-async function releaseRetention(success: boolean) {
+async function releaseRetention(success: boolean, nextRetryAt?: string) {
   await transaction(pool, async (db) => {
     const row = await db.query(
       "SELECT data FROM records WHERE kind='systemState' AND id=$1 FOR UPDATE",
@@ -116,17 +116,26 @@ async function releaseRetention(success: boolean) {
       ...data,
       claimedAt: null,
       lastRun: success ? new Date().toISOString() : (data.lastRun ?? null),
+      lastFailedAt: success ? null : new Date().toISOString(),
+      nextRetryAt: success ? null : (nextRetryAt || new Date(Date.now() + 60_000).toISOString()),
     });
   });
 }
-let retentionRunning = false;
+let retentionRunning: Promise<unknown> | null = null;
 const retentionTick = () => {
   if (stopping || config.WORKER_ENABLED !== 'true' || retentionRunning) return;
-  retentionRunning = true;
-  void (async () => {
+  retentionRunning = (async () => {
     const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
     const policy = settings.retentionConfig;
     if (!policy?.enabled || !policy.autoCleanup) return;
+    const row = await pool.query(
+      "SELECT data FROM records WHERE kind='systemState' AND id=$1",
+      [RETENTION_SCHEDULE_ID],
+    );
+    const data = row.rows[0]?.data ?? {};
+    const now = Date.now();
+    // Honor nextRetryAt for failed runs to enable immediate retry.
+    if (typeof data.nextRetryAt === 'string' && Date.parse(data.nextRetryAt) > now) return;
     if (!(await claimRetention(policy))) return;
     try {
       await runRetention(pool, 'system-retention');
@@ -138,7 +147,7 @@ const retentionTick = () => {
   })()
     .catch(report('retention'))
     .finally(() => {
-      retentionRunning = false;
+      retentionRunning = null;
     });
 };
 const retentionTimer = setInterval(retentionTick, 60000);
@@ -163,7 +172,7 @@ async function shutdown() {
   const deadline = setTimeout(() => process.exit(1), 30000);
   deadline.unref();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  await Promise.allSettled([pipeline, outbox].filter(Boolean) as Promise<unknown>[]);
+  await Promise.allSettled([pipeline, outbox, retentionRunning].filter(Boolean) as Promise<unknown>[]);
   await pool.end();
   clearTimeout(deadline);
 }
