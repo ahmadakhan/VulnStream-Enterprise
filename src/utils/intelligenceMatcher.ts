@@ -66,9 +66,15 @@ export function matchIntelligence(
         if (cveId && authoritative.has(cveId) && !finding) continue;
         if (!finding && !(vendorMentioned && productMentioned)) continue;
         const id = quickHash(`${cveId || article.id}:${asset.id}`);
+        // NOT_APPLICABLE and VEX-suppressed findings are explicit exclusions:
+        // news coverage must not turn them back into corroborated evidence.
         const confirmed =
           finding &&
-          finding.notificationStatus !== 'REVIEW_REQUIRED' &&
+          ![
+            'REVIEW_REQUIRED',
+            'NOT_APPLICABLE',
+            'SUPPRESSED_VEX_NOT_AFFECTED',
+          ].includes(finding.notificationStatus) &&
           finding.status !== 'RESOLVED' &&
           finding.status !== 'FALSE_POSITIVE';
         const old = matches.get(id);

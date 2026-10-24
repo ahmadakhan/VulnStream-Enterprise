@@ -96,6 +96,17 @@ test('structured exclusions and operator resolutions cannot be overridden by art
       .status,
     'REVIEW_REQUIRED',
   );
+  for (const notificationStatus of ['NOT_APPLICABLE', 'SUPPRESSED_VEX_NOT_AFFECTED'] as const)
+    assert.equal(
+      matchIntelligence(
+        articles(),
+        [asset],
+        [{ ...finding, notificationStatus } as Finding],
+        corpus,
+      )[0].status,
+      'REVIEW_REQUIRED',
+      `${notificationStatus} must not become corroborated by a news mention`,
+    );
 });
 test('event context redacts credentials recursively and bounds arbitrary values', () => {
   assert.deepEqual(

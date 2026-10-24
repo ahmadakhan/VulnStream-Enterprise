@@ -27,7 +27,9 @@ export const feedSchema = z.object({
   url: httpsUrl.refine(
     (s) =>
       !Array.from(new URL(s).searchParams.keys()).some((key) =>
-        /token|password|secret|api.?key|signature/i.test(key),
+        /token|password|passwd|secret|api.?key|access.?key|private.?key|signature|credential|(?:^|[_-])key(?:$|[_-])|(?:^|[_-])sig(?:$|[_-])/i.test(
+          key,
+        ),
       ),
     'Use the auth secret field rather than credentials in query parameters',
   ),
@@ -277,6 +279,24 @@ export const settingsSchema = z.object({
     domain: z.literal(''),
     fromEmail: z.literal(''),
   }),
+  // Defaults keep settings stored before retention was configurable valid.
+  retentionConfig: z
+    .object({
+      enabled: z.boolean(),
+      retentionHours: z.number().int().min(1).max(8760),
+      cleanupIntervalMinutes: z.number().int().min(1).max(1440),
+      maxArchivedRecords: z.number().int().min(1000).max(1000000),
+      autoCleanup: z.boolean(),
+      retentionMode: z.enum(['strict', 'rolling', 'checkpoints']),
+    })
+    .default({
+      enabled: false,
+      retentionHours: 24,
+      cleanupIntervalMinutes: 60,
+      maxArchivedRecords: 10000,
+      autoCleanup: true,
+      retentionMode: 'rolling',
+    }),
 });
 export class HttpError extends Error {
   status: number;

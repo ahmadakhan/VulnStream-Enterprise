@@ -249,8 +249,12 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       });
       const queued = await queueRun(pool, 24, 'test');
       await assert.rejects(processPipeline(pool, config, async () => {
+        // Two-int advisory locks are exposed as classid/objid in pg_locks;
+        // scope the termination to this schema so parallel test databases and
+        // other deployments sharing the cluster are not affected.
         await pool.query(`SELECT pg_terminate_backend(pid) FROM pg_locks
-          WHERE locktype='advisory' AND objid=800003 AND granted`);
+          WHERE locktype='advisory' AND classid=800003 AND objsubid=2
+            AND objid=hashtext(COALESCE(current_schema(), current_database())) AND granted`);
         await new Promise(resolve => setTimeout(resolve, 50));
         return { status: 200, body: JSON.stringify([vulnerability()]), headers: {} };
       }), /lock connection/);
@@ -453,6 +457,41 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
           (await pool.query("SELECT count(*)::int AS count FROM outbox WHERE status='QUEUED'")).rows[0].count,
           0,
         );
+      },
+    );
+    await t.test(
+      'retention of the threat cache does not permanently block a queued advisory',
+      async () => {
+        await reset();
+        await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
+        await save('recipients', 'recipient', {
+          id: 'recipient',
+          name: 'test',
+          email: 'test@example.invalid',
+          role: 'test',
+          subscriptionTier: 'ALL_SEVERITIES',
+          enabled: true,
+          deliverySuccessRate: 0,
+        });
+        const cve = vulnerability();
+        await save('cveData', cve.cveId, cve);
+        await save('watchlist', 'asset', asset());
+        await run();
+        assert.equal(
+          (await pool.query("SELECT count(*)::int AS count FROM outbox WHERE status='QUEUED'")).rows[0]
+            .count,
+          1,
+        );
+        // The retention policy may remove the regenerable cache record while a
+        // manually reviewed advisory is still waiting to be delivered.
+        await pool.query("DELETE FROM records WHERE kind='cveData' AND id=$1", [cve.cveId]);
+        let calls = 0;
+        await deliverNext(pool, config, request, async () => {
+          calls++;
+          return 'accepted-from-finding-snapshot';
+        });
+        assert.equal(calls, 1);
+        assert.equal((await pool.query('SELECT status FROM outbox')).rows[0].status, 'ACCEPTED');
       },
     );
     await t.test('feed circuit breaker cools down and allows a recovery probe', async () => {

@@ -154,6 +154,72 @@ function cpeComponentPattern(value: string): { regex: RegExp; hasWildcard: boole
   return { regex: new RegExp(`^${source}$`, 'i'), hasWildcard, literal };
 }
 
+type GlobToken =
+  | { type: 'star' }
+  | { type: 'any' }
+  | { type: 'literal'; value: string };
+
+function globTokens(value: string): GlobToken[] {
+  const tokens: GlobToken[] = [];
+  let escaped = false;
+  for (const char of value.toLowerCase()) {
+    if (escaped) {
+      tokens.push({ type: 'literal', value: char });
+      escaped = false;
+    } else if (char === '\\') {
+      escaped = true;
+    } else if (char === '*') {
+      tokens.push({ type: 'star' });
+    } else if (char === '?') {
+      tokens.push({ type: 'any' });
+    } else {
+      tokens.push({ type: 'literal', value: char });
+    }
+  }
+  return tokens;
+}
+
+/**
+ * Decides whether two CPE component globs can describe the same concrete
+ * value. A wildcard-versus-wildcard comparison cannot simply be accepted:
+ * `2.*` and `1.*` are disjoint, while `1.*` and `1.2*` overlap. This is the
+ * standard non-emptiness check for the intersection of two glob languages.
+ */
+function globIntersects(leftValue: string, rightValue: string): boolean {
+  const left = globTokens(leftValue);
+  const right = globTokens(rightValue);
+  const memo = new Map<string, boolean>();
+  const onlyStars = (tokens: GlobToken[], from: number) =>
+    tokens.slice(from).every((token) => token.type === 'star');
+  const visit = (i: number, j: number): boolean => {
+    if (i === left.length && j === right.length) return true;
+    if (i === left.length) return onlyStars(right, j);
+    if (j === right.length) return onlyStars(left, i);
+    const key = `${i}:${j}`;
+    const cached = memo.get(key);
+    if (cached !== undefined) return cached;
+    const a = left[i],
+      b = right[j];
+    let result: boolean;
+    if (a.type === 'star') {
+      // The star can match the empty string, or consume whatever b[j] matches.
+      result = visit(i + 1, j) || visit(i, j + 1);
+    } else if (a.type === 'any') {
+      result = b.type === 'star' ? visit(i, j + 1) || visit(i + 1, j) : visit(i + 1, j + 1);
+    } else {
+      result =
+        b.type === 'star'
+          ? visit(i, j + 1) || visit(i + 1, j)
+          : b.type === 'any'
+            ? visit(i + 1, j + 1)
+            : a.value === b.value && visit(i + 1, j + 1);
+    }
+    memo.set(key, result);
+    return result;
+  };
+  return visit(0, 0);
+}
+
 function matchComponent(assetAttr: string, vulnAttr: string): boolean {
   if (assetAttr === '*' || vulnAttr === '*') return true;
   if (assetAttr === '-' && vulnAttr === '-') return true;
@@ -161,7 +227,7 @@ function matchComponent(assetAttr: string, vulnAttr: string): boolean {
 
   const asset = cpeComponentPattern(assetAttr);
   const vuln = cpeComponentPattern(vulnAttr);
-  if (asset.hasWildcard && vuln.hasWildcard) return true;
+  if (asset.hasWildcard && vuln.hasWildcard) return globIntersects(assetAttr, vulnAttr);
   if (vuln.hasWildcard) return vuln.regex.test(asset.literal);
   if (asset.hasWildcard) return asset.regex.test(vuln.literal);
   return asset.literal === vuln.literal;
@@ -440,26 +506,36 @@ export function matchesWatchlistItem(
       for (const vp of vulnPurls) {
         const packageVersion = ap.split(/[?#]/)[0].split('@').pop();
         const hasVersion = ap.split(/[?#]/)[0].lastIndexOf('@') > ap.indexOf('/') + 1;
+        const vulnHasVersion = vp.split(/[?#]/)[0].lastIndexOf('@') > vp.indexOf('/') + 1;
         if (!matchPurl(ap, vp)) continue;
         if (versionRange && hasVersion && !isVersionInNvdRange(packageVersion!, versionRange).inRange)
           continue;
         if (versionRange) {
+          const verified = hasVersion && canCompareRange(packageVersion!, versionRange);
           retain({
             matched: true,
             method: 'PURL_EXACT',
-            confidence: hasVersion && canCompareRange(packageVersion!, versionRange) ? 95 : 70,
+            confidence: verified ? 95 : 70,
             matchedCpe: ap,
-            evidence: `Matched package dependency via PURL: ${vp} (95% confidence)`,
-            applicabilityRequiresReview: !hasVersion || !canCompareRange(packageVersion!, versionRange),
+            evidence: verified
+              ? `Matched package dependency via PURL with verified version range: ${vp} (95% confidence)`
+              : `Matched package name via PURL; installed version or range requires review: ${vp} (70% confidence)`,
+            applicabilityRequiresReview: !verified,
           });
           continue;
         }
+        // Without a range, a version-less advisory PURL only proves the package
+        // identity. Treat it as review evidence rather than an exact correlation.
+        const verified = hasVersion && vulnHasVersion;
         retain({
           matched: true,
           method: 'PURL_EXACT',
-          confidence: 95,
+          confidence: verified ? 95 : 70,
           matchedCpe: ap,
-          evidence: `Matched package dependency via PURL: ${vp} (95% confidence)`,
+          evidence: verified
+            ? `Matched package dependency via PURL: ${vp} (95% confidence)`
+            : `Matched package name via PURL without a version constraint; applicability requires review: ${vp} (70% confidence)`,
+          applicabilityRequiresReview: !verified,
         });
       }
     }

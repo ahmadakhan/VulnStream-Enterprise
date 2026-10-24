@@ -27,6 +27,8 @@ export const ThreatFeedsView: React.FC = () => {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [testingAll, setTestingAll] = useState(false);
+  const [testAllProgress, setTestAllProgress] = useState<{ completed: number; total: number } | null>(null);
   const [testMessage, setTestMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingFeed, setEditingFeed] = useState<ThreatFeed | null>(null);
@@ -76,6 +78,51 @@ export const ThreatFeedsView: React.FC = () => {
       });
     }
     setTimeout(() => setTestMessage(null), 8000);
+  };
+
+  const handleTestAll = async () => {
+    if (testingAll || feeds.length === 0) return;
+
+    // Test in small batches so one slow or unreachable vendor cannot serialize the whole run.
+    const queue = [...feeds];
+    setTestingAll(true);
+    setTestMessage(null);
+    setTestAllProgress({ completed: 0, total: queue.length });
+
+    const results: { name: string; success: boolean; latency: number; error?: string }[] = [];
+    const worker = async () => {
+      for (;;) {
+        const feed = queue.shift();
+        if (!feed) return;
+        const result = await testFeedConnectivity(feed.id);
+        results.push({ name: feed.name, ...result });
+        setTestAllProgress(prev => (prev ? { ...prev, completed: prev.completed + 1 } : prev));
+      }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, () => worker()));
+
+    setTestingAll(false);
+    setTestAllProgress(null);
+
+    const failed = results.filter(result => !result.success);
+    if (failed.length === 0) {
+      setTestMessage({
+        type: 'success',
+        text: `All ${results.length} feeds passed connectivity checks.`,
+      });
+    } else {
+      const details = failed
+        .slice(0, 3)
+        .map(result => `${result.name}${result.error ? ` (${result.error})` : ''}`)
+        .join('; ');
+      const remaining = failed.length > 3 ? `; +${failed.length - 3} more` : '';
+      setTestMessage({
+        type: 'error',
+        text: `${failed.length} of ${results.length} feeds failed: ${details}${remaining}`,
+      });
+    }
+    setTimeout(() => setTestMessage(null), 12000);
   };
 
   const handleOpenAdd = () => {
@@ -177,13 +224,32 @@ export const ThreatFeedsView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="text-xs px-3.5 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition flex items-center space-x-1.5 shadow-sm"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Add Threat Feed</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void handleTestAll()}
+            disabled={testingAll || feeds.length === 0}
+            className="text-xs px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-200 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 font-semibold transition flex items-center space-x-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Run a connectivity check against every configured feed"
+          >
+            {testingAll ? (
+              <RotateCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Zap className="w-3.5 h-3.5" />
+            )}
+            <span>
+              {testingAll && testAllProgress
+                ? `Testing ${testAllProgress.completed}/${testAllProgress.total}...`
+                : 'Test All Feeds'}
+            </span>
+          </button>
+          <button
+            onClick={handleOpenAdd}
+            className="text-xs px-3.5 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition flex items-center space-x-1.5 shadow-sm"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Threat Feed</span>
+          </button>
+        </div>
       </div>
 
       {/* Search & Stats Bar */}
@@ -214,6 +280,8 @@ export const ThreatFeedsView: React.FC = () => {
 
       {testMessage && (
         <div
+          role="status"
+          aria-live="polite"
           className={`mb-4 px-4 py-2.5 rounded-xl text-xs font-mono flex items-center space-x-2 ${
             testMessage.type === 'success'
               ? 'bg-emerald-950/40 border border-emerald-800 text-emerald-300'
@@ -347,7 +415,7 @@ export const ThreatFeedsView: React.FC = () => {
                       <div className="flex flex-wrap items-center justify-end gap-1.5">
                       <button
                         onClick={() => handleTest(feed.id)}
-                        disabled={isTesting}
+                        disabled={isTesting || testingAll}
                         className="px-2.5 py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-200 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 text-[11px] font-medium transition inline-flex items-center space-x-1"
                         title="Ping Endpoint & Test SSRF"
                       >

@@ -14,6 +14,7 @@ import { createRequester, resolvePublic } from './network';
 import type { Requester, ResponseData } from './network';
 import { queueRun, stopRun, renderAdvisory } from './pipeline';
 import { enqueue, queueAdvisory } from './delivery';
+import { runRetention } from './retention';
 import { advisoryEmail } from './advisoryEmail';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
 import { emailIsConfigured } from './emailProviders';
@@ -76,7 +77,15 @@ async function refreshAdvisoryDeliveryStatus(db: pg.Pool | import('pg').PoolClie
   if (notificationStatus)
     for (const findingId of advisory.findingIds) {
       const finding = await get<any>(db, 'findings', findingId);
-      if (finding && finding.advisoryId === advisory.id)
+      // Do not resurrect a finding that was explicitly excluded (for example,
+      // inventory was removed while the bundle waited for review).
+      if (
+        finding &&
+        finding.advisoryId === advisory.id &&
+        !['NOT_APPLICABLE', 'SUPPRESSED_VEX_NOT_AFFECTED', 'REVIEW_REQUIRED'].includes(
+          finding.notificationStatus,
+        )
+      )
         await put(db, 'findings', findingId, {
           ...finding,
           notificationStatus,
@@ -161,7 +170,14 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
     '/api/logout',
     asyncRoute(async (req, res) => {
       await pool.query('DELETE FROM sessions WHERE token_hash=$1', [req.operator!.sessionHash]);
-      res.clearCookie(cookieName(config), { path: '/' });
+      // __Host- cookies are only cleared when the deletion carries the same
+      // Secure/Path attributes as the original cookie.
+      res.clearCookie(cookieName(config), {
+        path: '/',
+        secure: config.NODE_ENV === 'production',
+        sameSite: 'strict',
+        httpOnly: true,
+      });
       res.json({ success: true });
     }),
   );
@@ -192,7 +208,12 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           req.ip || '',
         );
       });
-      res.clearCookie(cookieName(config), { path: '/' });
+      res.clearCookie(cookieName(config), {
+        path: '/',
+        secure: config.NODE_ENV === 'production',
+        sameSite: 'strict',
+        httpOnly: true,
+      });
       res.json({ success: true });
     }),
   );
@@ -371,7 +392,19 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
                 ? { headers, timeoutMs: 25000, maxResponseBytes: RSS_MAX_BYTES }
                 : { headers };
         response = await request(testUrl.href, requestOptions);
-        if (feed.type === 'RSS_ATOM' && response.status === 200) parseSyndication(response.body, feed.id, 2880);
+        if (response.status >= 200 && response.status < 300) {
+          if (feed.type === 'RSS_ATOM') parseSyndication(response.body, feed.id, 2880);
+          else {
+            // A successful HTTP status is not proof that the endpoint returned
+            // the JSON contract this adapter needs. Reject an HTML error page or
+            // truncated body during the test instead of reporting HEALTHY.
+            try {
+              JSON.parse(response.body);
+            } catch {
+              throw new Error('Feed returned a non-JSON response body');
+            }
+          }
+        }
         const latency = Math.round(performance.now() - start);
         await transaction(pool, async (db) => {
           const current = await get<ThreatFeed>(db, 'feeds', feed.id);
@@ -465,6 +498,15 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       res
         .status(202)
         .json({ success: true, message: 'Test queued. Check the delivery log for provider acceptance.', id });
+    }),
+  );
+  app.post(
+    '/api/retention/run',
+    requireRole('ADMIN'),
+    asyncRoute(async (req, res) => {
+      const result = await runRetention(pool, req.operator!.username, req.ip || '');
+      if (!result) throw new HttpError(400, 'Enable the retention policy before running cleanup');
+      res.json(result);
     }),
   );
   app.post(

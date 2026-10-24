@@ -427,6 +427,25 @@ export interface RetentionConfig {
   retentionMode: 'strict' | 'rolling' | 'checkpoints';
 }
 
+/** Record kinds the retention policy is allowed to delete. */
+export type RetentionKind =
+  | 'cveData'
+  | 'intelligenceArticles'
+  | 'emailLogs'
+  | 'webhookLogs'
+  | 'executions';
+
+export interface RetentionRunResult {
+  ranAt: string;
+  mode: RetentionConfig['retentionMode'];
+  retentionHours: number;
+  cutoff: string;
+  scanned: number;
+  deleted: number;
+  unknownAge: number;
+  byKind: Record<RetentionKind, number>;
+}
+
 export interface AppSettings {
   scopeHours: number;
   schedulerIntervalMinutes: number;

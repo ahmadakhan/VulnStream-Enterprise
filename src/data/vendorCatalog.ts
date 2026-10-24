@@ -658,10 +658,14 @@ export function buildStrictCpe23(
   version: string = '*',
   targetHw: string = '*',
 ): string {
-  const normVendor = (vendor || 'any').toLowerCase().trim().replace(/\s+/g, '_');
-  const normProduct = (product || 'any').toLowerCase().trim().replace(/\s+/g, '_');
-  const normVersion = (version || '*').trim();
-  const normHw = targetHw && targetHw !== '*' ? targetHw.trim() : '*';
+  // ':' and '\' are the only characters that break CPE 2.3 formatted-string
+  // tokenization. Escape them so inventory names such as "acme:gateway" still
+  // produce a parseable, matchable criterion. Wildcards stay unescaped.
+  const escape = (value: string) => value.replace(/\\/g, '\\\\').replace(/:/g, '\\:');
+  const normVendor = escape((vendor || 'any').toLowerCase().trim().replace(/\s+/g, '_'));
+  const normProduct = escape((product || 'any').toLowerCase().trim().replace(/\s+/g, '_'));
+  const normVersion = version?.trim() ? escape(version.trim()) : '*';
+  const normHw = targetHw?.trim() ? escape(targetHw.trim()) : '*';
 
   return `cpe:2.3:${part}:${normVendor}:${normProduct}:${normVersion}:*:*:*:*:*:${normHw}:*`;
 }

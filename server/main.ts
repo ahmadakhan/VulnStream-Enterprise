@@ -7,6 +7,9 @@ import { createApp } from './app';
 import { createRequester } from './network';
 import { createMailSender, deliverNext } from './delivery';
 import { processPipeline } from './pipeline';
+import { runRetention } from './retention';
+import { DEFAULT_SETTINGS } from '../shared/state.ts';
+import type { AppSettings } from '../src/types/index.ts';
 const config = loadConfig(),
   pool = createPool(config.DATABASE_URL);
 pool.on('error', (error) =>
@@ -76,6 +79,33 @@ const tick = () => {
 };
 const timer = setInterval(tick, 5000);
 tick();
+// Retention runs on its own cadence because the policy is operator-configurable
+// and can be much slower than the worker tick. Read the saved policy each pass so
+// enabling, disabling or changing the interval takes effect without a restart.
+let lastRetention = 0,
+  retentionRunning = false;
+const retentionTick = () => {
+  if (stopping || config.WORKER_ENABLED !== 'true' || retentionRunning) return;
+  retentionRunning = true;
+  void (async () => {
+    const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
+    const policy = settings.retentionConfig;
+    if (!policy?.enabled || !policy.autoCleanup) return;
+    if (
+      lastRetention > 0 &&
+      Date.now() - lastRetention < policy.cleanupIntervalMinutes * 60_000
+    )
+      return;
+    lastRetention = Date.now();
+    await runRetention(pool, 'system-retention');
+  })()
+    .catch(report('retention'))
+    .finally(() => {
+      retentionRunning = false;
+    });
+};
+const retentionTimer = setInterval(retentionTick, 60000);
+retentionTick();
 const cleanup = setInterval(() => {
   void pool
     .query(
@@ -90,6 +120,7 @@ async function shutdown() {
   if (stopping) return;
   stopping = true;
   clearInterval(timer);
+  clearInterval(retentionTimer);
   clearInterval(cleanup);
   const deadline = setTimeout(() => process.exit(1), 30000);
   deadline.unref();

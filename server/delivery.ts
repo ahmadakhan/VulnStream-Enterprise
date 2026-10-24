@@ -3,7 +3,8 @@ import { advisoryEmail } from './advisoryEmail';
 import type pg from 'pg';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
-import type { WatchListItem, NormalizedCVE } from '../src/types/index.ts';
+import type { WatchListItem, NormalizedCVE, AliasEntry } from '../src/types/index.ts';
+import { buildAliasMap } from '../src/utils/cpeMatcher';
 import { randomUUID, createHmac, createHash } from 'node:crypto';
 import { stableJson } from '../src/utils/deduplicator';
 import nodemailer from 'nodemailer';
@@ -269,20 +270,41 @@ export async function deliverNext(
       );
     }
     if (advisory) {
+      // Revalidation must use the same operator-managed aliases as the pipeline
+      // that produced the finding; otherwise an alias-matched finding is
+      // permanently rejected as "no longer applicable".
+      const aliasEntries = await list<AliasEntry>(pool, 'aliases');
+      const vendorAliases = buildAliasMap(aliasEntries, 'VENDOR');
+      const productAliases = buildAliasMap(aliasEntries, 'PRODUCT');
       const invalid: string[] = [];
       for (const id of advisory.findingIds) {
         const finding = await get<Finding>(pool, 'findings', id);
-        const [asset, cve, withdrawal] = finding
+        const [asset, cachedCve, withdrawal] = finding
           ? await Promise.all([
               get<WatchListItem>(pool, 'watchlist', finding.matchedAssetId),
               get<NormalizedCVE>(pool, 'cveData', finding.cveId),
               get<{ modifiedDate: string }>(pool, 'cveWithdrawals', finding.cveId),
             ])
           : [undefined, undefined, undefined];
+        // Retention may delete the regenerable threat-cache record while a
+        // manually reviewed advisory is still queued. The finding embeds the
+        // validated CVE snapshot, so fall back to it instead of permanently
+        // rejecting an otherwise deliverable bundle.
+        const cve = cachedCve || finding?.cve;
         const match =
           asset && cve
-            ? runVulnerabilityPipeline([], [cve], [asset], [], [], { ...DEFAULT_SETTINGS, scopeHours: 0 })
-                .newFindings[0]
+            ? runVulnerabilityPipeline(
+                [],
+                [cve],
+                [asset],
+                [],
+                [],
+                { ...DEFAULT_SETTINGS, scopeHours: 0 },
+                'Server worker',
+                false,
+                vendorAliases,
+                productAliases,
+              ).newFindings[0]
             : undefined;
         if (match) currentFindings.push(match);
         if (

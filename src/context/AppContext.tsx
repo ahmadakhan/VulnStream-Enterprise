@@ -16,6 +16,7 @@ import type {
   SystemHealth,
   EmailQueueItem,
   AliasEntry,
+  RetentionRunResult,
 } from '../types';
 import { compileCustomizedTemplate } from '../utils/templateCompiler';
 function useApplication() {
@@ -243,6 +244,7 @@ function useApplication() {
       (await call<{ success: boolean; latency: number; error?: string }>(
         `/feeds/${encodeURIComponent(id)}/test`,
       )) || { success: false, latency: 0, error: 'Connectivity test failed' },
+    runRetentionCleanup: () => call<RetentionRunResult>('/retention/run'),
     addWatchlistItem: (item: Omit<WatchListItem, 'id' | 'createdAt'>) => save('asset.save', item),
     updateWatchlistItem: (item: WatchListItem) => save('asset.save', item, item.id),
     toggleWatchlistItemActive: async (id: string) => {

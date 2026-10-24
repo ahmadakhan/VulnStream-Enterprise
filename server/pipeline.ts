@@ -2,7 +2,7 @@ import { writeEvent } from './events';
 import { mergeArticles, matchIntelligence } from '../src/utils/intelligenceMatcher';
 import type pg from 'pg';
 import { randomUUID, createHash } from 'node:crypto';
-import { get, list, put, putMany, transaction, appendAudit, pipelineState } from './db';
+import { get, list, put, putMany, transaction, appendAudit, pipelineState, schemaLockKey } from './db';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import type {
   AppSettings,
@@ -146,7 +146,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     execution: PipelineExecution | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   try {
-    locked = (await lock.query('SELECT pg_try_advisory_lock(800003) AS locked')).rows[0].locked;
+    locked = (
+      await lock.query(`SELECT pg_try_advisory_lock(800003, ${schemaLockKey}) AS locked`)
+    ).rows[0].locked;
     if (!locked) return false;
     const runs = await list<PipelineExecution>(pool, 'executions');
     // Owning the advisory lock proves no other live worker owns a run. Recovery
@@ -815,7 +817,12 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     return true;
   } finally {
     if (heartbeat) clearInterval(heartbeat);
-    if (locked) await lock.query('SELECT pg_advisory_unlock(800003)').catch(() => { connectionLost = true; });
+    if (locked)
+      await lock
+        .query(`SELECT pg_advisory_unlock(800003, ${schemaLockKey})`)
+        .catch(() => {
+          connectionLost = true;
+        });
     lock.removeListener('error', onError);
     lock.release(connectionLost);
   }

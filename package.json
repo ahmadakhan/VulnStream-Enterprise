@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "node -e \"for (const p of ['dist','server-dist']) require('node:fs').rmSync(p,{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
-    "test": "node --import tsx --test tests/*.test.ts",
+    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
     "dev:server": "tsx watch --env-file=.env server/main.ts",
     "seed": "node --import tsx --env-file=.env scripts/seed.ts",
     "build:client": "vite build",

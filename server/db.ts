@@ -16,12 +16,20 @@ export const createPool = (url: string) =>
     statement_timeout: 15000,
     application_name: 'vulnstream',
   });
+/**
+ * Advisory locks are scoped to the database, not to the active schema. Mixing
+ * in the schema keeps independent deployments (and isolated per-schema test
+ * databases) that share one PostgreSQL database from blocking each other.
+ * COALESCE covers a search_path whose first schema does not exist yet.
+ */
+export const schemaLockKey = 'hashtext(COALESCE(current_schema(), current_database()))';
+
 export async function migrate(pool: pg.Pool) {
   const client = await pool.connect();
   let failed = false;
   try {
     await client.query('BEGIN');
-    await client.query('SELECT pg_advisory_xact_lock(800001)');
+    await client.query(`SELECT pg_advisory_xact_lock(800001, ${schemaLockKey})`);
     const exists = await client.query("SELECT to_regclass('schema_migrations') AS name");
     const applied =
       exists.rows[0].name &&
@@ -57,7 +65,7 @@ export async function transaction<T>(
   try {
     await db.query('BEGIN');
     // Serializes state mutation and audit append; network I/O is never done here.
-    await db.query('SELECT pg_advisory_xact_lock(800002)');
+    await db.query(`SELECT pg_advisory_xact_lock(800002, ${schemaLockKey})`);
     const result = await fn(db);
     await db.query('COMMIT');
     return result;

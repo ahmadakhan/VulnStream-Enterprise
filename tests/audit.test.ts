@@ -31,6 +31,16 @@ test('CPE component wildcards match only the intended version pattern', () => {
   assert.equal(matchCPE(pattern('2.0'), pattern('1.*')).matched, false);
   assert.equal(matchCPE(pattern('1.2'), pattern('1.\\*')).matched, false);
 });
+test('disjoint component wildcards never match each other', () => {
+  const pattern = (version: string) => `cpe:2.3:a:vendor:widget:${version}:*:*:*:*:*:*:*`;
+  // Both sides are globs, so the matcher must check whether their languages
+  // overlap instead of accepting every wildcard-versus-wildcard comparison.
+  assert.equal(matchCPE(pattern('2.*'), pattern('1.*')).matched, false);
+  assert.equal(matchCPE(pattern('1.*'), pattern('2.*')).matched, false);
+  assert.equal(matchCPE(pattern('1.*'), pattern('1.2*')).matched, true);
+  assert.equal(matchCPE(pattern('1.2*'), pattern('1.*')).matched, true);
+  assert.equal(matchCPE(pattern('1.?'), pattern('1.2')).matched, true);
+});
 test('fallback cannot override a known version exclusion', () => {
   assert.equal(
     matchesWatchlistItem([cpe('3')], 'vendor', 'widget', [cpe('*')], 'vendor widget', '', {
@@ -207,6 +217,22 @@ test('unsupported package version ordering requires review before dispatch', () 
   assert.equal(result.newFindings[0].notificationStatus, 'REVIEW_REQUIRED');
 });
 
+test('package-name-only PURL correlation requires review without a version constraint', () => {
+  const { cve, asset, settings } = fixture();
+  asset.cpes = [];
+  asset.purls = ['pkg:npm/widget'];
+  cve.cpeMatches = [];
+  cve.purls = ['pkg:npm/widget'];
+  cve.versionRange = undefined;
+  const result = runVulnerabilityPipeline([], [cve], [asset], [], [], settings);
+  assert.equal(result.newFindings.length, 1);
+  assert.equal(result.newFindings[0].notificationStatus, 'REVIEW_REQUIRED');
+  assert.equal(
+    matchesWatchlistItem([], '', '', [], '', '', undefined, asset.purls, cve.purls).confidence,
+    70,
+  );
+});
+
 test('strict CPE does not equate different products through marketing aliases', () => {
   assert.equal(
     matchCPE(
@@ -312,6 +338,17 @@ test('inventory CPE builders preserve hyphens in canonical product identifiers',
   for (const build of [generateCPE23, buildStrictCpe23]) {
     assert.equal(parseCPE23(build('o', 'paloaltonetworks', 'pan-os', '10.2.3')).product, 'pan-os');
   }
+});
+
+test('inventory CPE builder escapes token delimiters instead of emitting invalid CPEs', () => {
+  const built = buildStrictCpe23('a', 'acme', 'gateway:edge', '1.0');
+  const parsed = parseCPE23(built);
+  assert.equal(parsed.isValid, true);
+  assert.equal(parsed.product, 'gateway\\:edge');
+  assert.equal(
+    matchCPE(built, 'cpe:2.3:a:acme:gateway\\:edge:1.0:*:*:*:*:*:*:*').matched,
+    true,
+  );
 });
 
 test('a CPE range cannot override an explicit vulnerable version token', () => {

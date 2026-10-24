@@ -199,12 +199,33 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     const input = emailConfigSchema.parse(data);
     const old = (await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
     const smtpProvider = isSmtpEmailProvider(input.provider);
-    const apiKey = smtpProvider ? '' : input.apiKey
-      ? encrypt(input.apiKey, config.ENCRYPTION_KEY, `email-provider:${input.provider}`)
-      : old.provider === input.provider ? old.apiKey : '';
-    const smtpPassword = smtpProvider && (input.provider !== 'SMTP' || !!input.smtpHost) ? input.smtpPassword
-      ? encrypt(input.smtpPassword, config.ENCRYPTION_KEY, `email-smtp:${input.provider}`)
-      : old.provider === input.provider ? old.smtpPassword : '' : '';
+    // A stored credential is only reusable when it still belongs to the same
+    // destination. Changing a custom API endpoint, SMTP host, or SMTP username
+    // must require the operator to enter the secret again instead of silently
+    // sending the previous credential to a different service or account.
+    const sameApiDestination =
+      old.provider === input.provider &&
+      (input.provider !== 'API' ||
+        (old.apiEndpoint === input.apiEndpoint && old.apiSourceDomain === input.apiSourceDomain));
+    const sameSmtpIdentity =
+      old.provider === input.provider &&
+      old.smtpHost === input.smtpHost &&
+      old.smtpUsername === input.smtpUsername;
+    const apiKey = smtpProvider
+      ? ''
+      : input.apiKey
+        ? encrypt(input.apiKey, config.ENCRYPTION_KEY, `email-provider:${input.provider}`)
+        : sameApiDestination
+          ? old.apiKey
+          : '';
+    const smtpPassword =
+      smtpProvider && (input.provider !== 'SMTP' || !!input.smtpHost)
+        ? input.smtpPassword
+          ? encrypt(input.smtpPassword, config.ENCRYPTION_KEY, `email-smtp:${input.provider}`)
+          : sameSmtpIdentity
+            ? old.smtpPassword
+            : ''
+        : '';
     const mailjetApiSecret =
       input.provider === 'MAILJET_API' && input.mailjetApiSecret
         ? encrypt(input.mailjetApiSecret, config.ENCRYPTION_KEY, `email-mailjet:${input.provider}`)
@@ -271,8 +292,16 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     if (!id) throw new HttpError(400, 'Record ID required');
     const old = await get<any>(db, kind, id);
     if (!old) throw new HttpError(404, 'Record not found');
-    if (operation === 'delete') await remove(db, kind, id);
-    else
+    if (operation === 'delete') {
+      await remove(db, kind, id);
+      // Source checkpoints are internal state keyed by feed id; deleting the
+      // feed must not leave a stale cursor/snapshot that a later feed with the
+      // same id could accidentally resume from.
+      if (entity === 'feed') {
+        await remove(db, 'feedCursors', id);
+        await remove(db, 'feedSnapshots', id);
+      }
+    } else
       await put(db, kind, id, {
         ...old,
         [entity === 'asset' ? 'active' : 'enabled']: !old[entity === 'asset' ? 'active' : 'enabled'],

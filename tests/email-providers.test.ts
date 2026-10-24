@@ -243,6 +243,39 @@ test(
         'FAILED',
       );
       assert.equal((await get<EmailDeliveryLog>(pool, 'emailLogs', retry.id))?.provider, 'SendGrid');
+
+      // Changing a custom API destination must not silently reuse the token
+      // that was entered for the previous endpoint.
+      const apiA = {
+        ...configuration('API'),
+        apiEndpoint: 'https://api.sendgrid.com/v3/mail/send',
+        apiKey: token,
+      };
+      assert.equal((await command(apiA)).status, 200);
+      const storedA = await get<EmailConfiguration>(pool, 'emailConfig', 'main');
+      assert.equal(decrypt(storedA!.apiKey, config.ENCRYPTION_KEY, 'email-provider:API'), token);
+      const apiB = {
+        ...apiA,
+        apiEndpoint: 'https://api.mailgun.net/v3/example.invalid/messages',
+        apiKey: '',
+      };
+      // A changed destination cannot reuse the previous credential, so saving
+      // without re-entering a token is rejected and the old config is intact.
+      assert.equal((await command(apiB)).status, 400);
+      assert.equal(
+        decrypt(
+          (await get<EmailConfiguration>(pool, 'emailConfig', 'main'))!.apiKey,
+          config.ENCRYPTION_KEY,
+          'email-provider:API',
+        ),
+        token,
+      );
+      assert.equal((await command({ ...apiB, apiKey: token })).status, 200);
+      const storedB = await get<EmailConfiguration>(pool, 'emailConfig', 'main');
+      assert.equal(decrypt(storedB!.apiKey, config.ENCRYPTION_KEY, 'email-provider:API'), token);
+      // Re-saving the same destination without a new token keeps the secret.
+      assert.equal((await command({ ...apiB, apiKey: '' })).status, 200);
+      assert.equal((await get<EmailConfiguration>(pool, 'emailConfig', 'main'))?.apiKey, storedB!.apiKey);
     } finally {
       await pool.end();
       await base.query(`DROP SCHEMA ${schema} CASCADE`);

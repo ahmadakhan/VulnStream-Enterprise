@@ -22,7 +22,7 @@ const config = loadConfig({
   DATABASE_URL: database || 'postgres://unused',
   APP_ORIGIN: 'http://localhost',
   ENCRYPTION_KEY: key,
-  EGRESS_ALLOWED_HOSTS: '8.8.8.8',
+  EGRESS_ALLOWED_HOSTS: '8.8.8.8,filestore.fortinet.com',
   WORKER_ENABLED: 'false',
 });
 const password = 'Integration-test-password-2026!';
@@ -357,6 +357,83 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
         enabled: false,
       });
       assert.equal(feed.status, 400);
+    });
+    await t.test('retention policy persists through settings.save', async () => {
+      const retentionConfig = {
+        enabled: true,
+        retentionHours: 336,
+        cleanupIntervalMinutes: 30,
+        maxArchivedRecords: 250000,
+        autoCleanup: true,
+        retentionMode: 'strict',
+      };
+      assert.equal((await command('settings.save', { retentionConfig })).status, 200);
+      const state = await admin.get('/api/state');
+      assert.equal(state.status, 200);
+      assert.deepEqual(state.body.settings.retentionConfig, retentionConfig);
+      assert.equal(
+        (await command('settings.save', { retentionConfig: { ...retentionConfig, retentionHours: 0 } }))
+          .status,
+        400,
+      );
+    });
+    await t.test('manual retention run deletes only expired removable records', async () => {
+      const retentionConfig = {
+        enabled: true,
+        retentionHours: 24,
+        cleanupIntervalMinutes: 30,
+        maxArchivedRecords: 250000,
+        autoCleanup: true,
+        retentionMode: 'strict' as const,
+      };
+      assert.equal((await command('settings.save', { retentionConfig })).status, 200);
+      const old = new Date(Date.now() - 48 * 3_600_000).toISOString();
+      const recent = new Date(Date.now() - 3_600_000).toISOString();
+      await put(pool, 'cveData', 'retention-old-cve', { cveId: 'CVE-2026-0001', publishedDate: old });
+      await put(pool, 'cveData', 'retention-recent-cve', { cveId: 'CVE-2026-0002', publishedDate: recent });
+      await put(pool, 'emailLogs', 'retention-old-email', { id: 'retention-old-email', sentAt: old });
+      await put(pool, 'findings', 'retention-protected-finding', {
+        id: 'retention-protected-finding',
+        timeline: [{ timestamp: old }],
+      });
+
+      assert.equal(
+        (
+          await operator
+            .post('/api/retention/run')
+            .set('Origin', config.APP_ORIGIN)
+            .set('x-csrf-token', opCsrf)
+            .send({})
+        ).status,
+        403,
+      );
+      const run = await post('/api/retention/run');
+      assert.equal(run.status, 200, JSON.stringify(run.body));
+      assert.equal(run.body.mode, 'strict');
+      assert.equal(run.body.scanned, 3);
+      assert.equal(run.body.deleted, 2);
+      assert.equal(run.body.byKind.cveData, 1);
+      assert.equal(run.body.byKind.emailLogs, 1);
+
+      const remaining = (
+        await pool.query(
+          "SELECT id FROM records WHERE id = ANY($1::text[]) ORDER BY id",
+          [['retention-old-cve', 'retention-recent-cve', 'retention-old-email', 'retention-protected-finding']],
+        )
+      ).rows.map((row) => row.id);
+      assert.deepEqual(remaining, ['retention-protected-finding', 'retention-recent-cve']);
+      const audit = (await pool.query("SELECT data FROM audit WHERE data->>'event'='Retention cleanup'"))
+        .rows[0]?.data;
+      assert.ok(audit, 'retention cleanup must be audited');
+      assert.match(audit.details, /2 record\(s\) removed/);
+
+      assert.equal(
+        (await command('settings.save', { retentionConfig: { ...retentionConfig, enabled: false } })).status,
+        200,
+      );
+      assert.equal((await post('/api/retention/run')).status, 400);
+      // Later pipeline tests consume every cveData record, so never leave fixtures behind.
+      await pool.query("DELETE FROM records WHERE id LIKE 'retention-%'");
     });
     await t.test('records persist and feed secrets are encrypted and redacted', async () => {
       assert.equal(
