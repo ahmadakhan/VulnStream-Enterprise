@@ -1,3 +1,4 @@
+import { CorrelationDashboard } from './components/CorrelationDashboard';
 import React from 'react';
 import { LogOut, ShieldCheck } from 'lucide-react';
 import { LoginView } from './components/LoginView';
@@ -33,6 +34,7 @@ export const MainContent: React.FC = () => {
       {activeTab === 'findings' && <FindingsView />}
       {activeTab === 'threat-data' && <ThreatDataView />}
       {activeTab === 'advisories' && <AdvisoriesView />}
+      {activeTab === 'correlation' && <CorrelationDashboard />}
       {activeTab === 'pipeline' && <PipelineExecutionsView />}
       {activeTab === 'alerted-cves' && <AlertedCVEsView />}
       {activeTab === 'feeds' && <ThreatFeedsView />}

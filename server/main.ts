@@ -1,3 +1,5 @@
+import { backfillCorrelationInventory } from './correlation/inventory.ts';
+import { CorrelationRuntime } from './correlation/runtime.ts';
 import { writeEvent } from './events';
 import { loadConfig } from './config';
 import { createPool, migrate, transaction, get, put, REQUIRED_SCHEMA_VERSION } from './db';
@@ -26,6 +28,11 @@ if (config.NODE_ENV === 'production') {
       `Database schema version ${version} is older than required version ${REQUIRED_SCHEMA_VERSION}; run migrations before starting`,
     );
 } else await migrate(pool);
+await transaction(pool,async db => {
+  if (await get(db,'systemState','native-inventory-v1')) return;
+  await backfillCorrelationInventory(db);
+  await put(db,'systemState','native-inventory-v1',{completedAt:new Date().toISOString()});
+},undefined,{locks:['native-inventory-bootstrap']});
 // Upgrade existing installations once; the marker makes later operator deletions persist.
 await transaction(pool, async (db) => {
   if (await get(db, 'systemState', 'recommended-feeds-v2')) return;
@@ -52,7 +59,10 @@ await transaction(pool, async (db) => {
 await writeEvent(pool, {category:'SYSTEM', code:'system.started', message:'Application initialized', context:{workerEnabled:config.WORKER_ENABLED === 'true'}});
 const request = createRequester(config),
   sendMail = createMailSender(config, pool, request);
-const server = createApp(pool, config, request).listen(config.PORT, '0.0.0.0', () =>
+const correlation = new CorrelationRuntime(pool, config.ENCRYPTION_KEY, process.env.CORRELATION_DLQ_DIRECTORY || '/tmp/vulnstream-correlation-dlq');
+if (config.WORKER_ENABLED === 'true') correlation.start();
+else correlation.supervisor.start();
+const server = createApp(pool, config, request, { correlation }).listen(config.PORT, '0.0.0.0', () =>
   console.log(JSON.stringify({ event: 'listening', port: config.PORT })),
 );
 server.requestTimeout = 30000;
@@ -192,6 +202,7 @@ async function shutdown() {
   deadline.unref();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await Promise.allSettled([pipeline, outbox, retentionRunning].filter(Boolean) as Promise<unknown>[]);
+  await correlation.stop();
   await pool.end();
   clearTimeout(deadline);
 }
@@ -206,6 +217,7 @@ process.on('SIGINT', () => void shutdown());
 // recover from; this handler only makes the failure visible and gives
 // in-flight work a chance at a clean stop before the process exits.
 const fatal = (event: string) => (error: unknown) => {
+  correlation.supervisor.ingestor.telemetry.log('CRITICAL', 'process.restart_required');
   report(event)(error);
   // If a graceful SIGTERM/SIGINT shutdown is already under way, let its own
   // 30-second deadline govern the exit instead of racing it with a second,

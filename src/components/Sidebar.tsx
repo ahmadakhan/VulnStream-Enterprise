@@ -7,6 +7,7 @@ import {
   Database,
   FileText,
   Activity,
+  Zap,
   Bell,
   Radio,
   Users,
@@ -73,6 +74,7 @@ export const Sidebar: React.FC = () => {
     {
       title: 'AUTONOMOUS PIPELINE',
       items: [
+        { id: 'correlation', label: 'Live Correlation', icon: Zap },
         { id: 'pipeline', label: 'Executions', icon: Activity },
         { id: 'alerted-cves', label: 'Sent History', icon: Bell },
         { id: 'feeds', label: 'Threat Feeds', icon: Radio, count: feeds.length },

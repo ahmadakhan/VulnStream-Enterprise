@@ -32,6 +32,7 @@ const trustProxy = z
   }, 'TRUST_PROXY must list explicit proxy IPs, CIDRs, or presets (trust-all is not permitted)');
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  METRICS_TOKEN: z.string().max(256).default('').refine(value=>!value || value.length>=32,'Metrics token must contain at least 32 characters'),
   PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   DATABASE_URL: databaseUrl,
   APP_ORIGIN: z.url(),

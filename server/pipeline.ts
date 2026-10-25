@@ -572,6 +572,22 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         level:update.healthStatus === 'DOWN' ? 'ERROR' : update.healthStatus === 'DEGRADED' ? 'WARNING' : 'INFO',
         code:'feed.ingestion', message:`${update.name}: ${update.healthStatus}`, runId:execution!.id,
         context:{ feedId:update.id, count:update.itemCountLastRun, latencyMs:update.latencyMs } });
+      // Commit a durable native-correlation handoff with the source checkpoint.
+      // Existing inventory remains authoritative; no record-store assets are copied.
+      for (const result of acceptedResults)
+        for (const article of result.articles || [])
+          await db.query(
+            `INSERT INTO correlation_pending(id,payload) VALUES($1,$2)
+          ON CONFLICT(id) DO NOTHING`,
+            [
+              article.id,
+              JSON.stringify({
+                title: article.title,
+                content: article.summary,
+                url: article.url,
+              }),
+            ],
+          );
       const snapshot = await pipelineState(db);
       const articles = mergeArticles([...snapshot.intelligenceArticles, ...acceptedResults.flatMap(result => result.articles || [])]);
       await putMany(db, 'intelligenceArticles', articles.map(data => ({id:data.id,data})));

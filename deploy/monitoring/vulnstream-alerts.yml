@@ -1,0 +1,31 @@
+groups:
+  - name: vulnstream
+    rules:
+      - alert: VulnStreamInstanceUnavailable
+        expr: up{job="vulnstream"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: A VulnStream instance cannot be scraped
+      - alert: VulnStreamDatabaseRecovery
+        expr: vulnstream_correlation_health{state="RECOVERING_DB_SEVERANCE"} == 1
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: Advisory admission paused during database recovery
+      - alert: VulnStreamMemoryPressure
+        expr: vulnstream_correlation_memory_percent >= 85
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: VulnStream is shedding ingestion under memory pressure
+      - alert: VulnStreamDeadLetters
+        expr: increase(vulnstream_correlation_dead_letters_total[5m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: Advisory input needs dead-letter review
+      - alert: VulnStreamLogLoss
+        expr: increase(vulnstream_correlation_dropped_logs_total[5m]) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: Stdout collector congestion exceeded the bounded log queue

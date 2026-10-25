@@ -1,3 +1,4 @@
+import { validateNativeDelivery, type NativeDelivery } from './correlation/notificationEvidence.ts';
 import { writeEvent } from './events';
 import { advisoryEmail } from './advisoryEmail';
 import type pg from 'pg';
@@ -42,6 +43,7 @@ export interface Job {
     html?: string;
     recipientEmail?: string;
     cveIds: string[];
+    nativeCorrelation?: NativeDelivery;
     cveRevisions?: Record<string, string>;
     findingRevisions?: Record<string, string>;
   };
@@ -383,9 +385,17 @@ export async function deliverNext(
       permanent = true;
       throw new Error('Delivery retry budget exhausted after worker recovery');
     }
+    let native: NativeDelivery | undefined;
+    if (job.payload.nativeCorrelation) {
+      try { native = await validateNativeDelivery(pool,job); }
+      catch { permanent = true; throw new Error('Native evidence or notification policy is no longer applicable'); }
+      if (native.confidence === 'MEDIUM' && !job.review_approved) {
+        routeToReview = true; throw new Error('Native medium-confidence evidence requires security review');
+      }
+    }
     const advisory = await get<Advisory>(pool, 'advisories', job.advisory_id);
     const currentFindings: Finding[] = [];
-    if (!advisory && job.advisory_id !== 'TEST') {
+    if (!advisory && !native && job.advisory_id !== 'TEST') {
       permanent = true;
       throw new Error('Queued advisory no longer exists');
     }
@@ -465,6 +475,9 @@ export async function deliverNext(
           permanent = true;
           throw new Error('Recipient removed, changed, or disabled');
         }
+        if (native && rec.subscriptionTier !== 'ALL_SEVERITIES') {
+          permanent = true; throw new Error('Recipient subscription no longer permits unscored intelligence');
+        }
         if (advisory && !currentFindings.every((finding) => recipientAllows(rec, finding))) {
           permanent = true;
           throw new Error('Recipient subscription no longer permits all advisory findings');
@@ -482,6 +495,9 @@ export async function deliverNext(
       if (!hook?.enabled) {
         permanent = true;
         throw new Error('Webhook removed or disabled');
+      }
+      if (native && (native.confidence !== 'HIGH' || !hook.events.includes('ALL'))) {
+        permanent = true; throw new Error('Webhook subscription does not permit native intelligence');
       }
       if (advisory && !currentFindings.every((finding) => webhookAllows(hook, finding))) {
         permanent = true;

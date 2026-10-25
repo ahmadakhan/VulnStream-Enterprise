@@ -1,3 +1,4 @@
+import { syncCorrelationAsset } from './correlation/inventory.ts';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Db } from './db.ts';
@@ -21,7 +22,7 @@ import { emailConfigSchema } from './validation.ts';
 import { emailEndpoint } from './emailProviders.ts';
 import { compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
 import type { Config } from './config';
-import { isSmtpEmailProvider, type AppSettings, type Finding, type EmailConfiguration } from '../src/types/index.ts';
+import { isSmtpEmailProvider, type AppSettings, type Finding, type EmailConfiguration, type WatchListItem } from '../src/types/index.ts';
 
 export interface CommandRequest {
   action: string;
@@ -113,7 +114,9 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
   } else if (action === 'asset.save') {
     const input = assetSchema.parse(data),
       old = await checkExisting('watchlist');
-    await put(db, 'watchlist', newId, { ...input, id: newId, createdAt: old?.createdAt || now });
+    const asset = { ...input, id: newId, createdAt: old?.createdAt || now };
+    await put(db, 'watchlist', newId, asset);
+    await syncCorrelationAsset(db, asset);
   } else if (action === 'asset.import') {
     const input = z.array(assetSchema).min(1).max(1000).parse(data);
     const identity = (item: z.infer<typeof assetSchema>) =>
@@ -129,7 +132,9 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     for (const [key, item] of unique) {
       const old = existing.get(key),
         assetId = old?.id || randomUUID();
-      await put(db, 'watchlist', assetId, { ...old, ...item, id: assetId, createdAt: old?.createdAt || now });
+      const asset = { ...old, ...item, id: assetId, createdAt: old?.createdAt || now };
+      await put(db, 'watchlist', assetId, asset);
+      await syncCorrelationAsset(db,asset);
     }
     await appendAudit(
       db,
@@ -170,6 +175,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
         exposure: item.exposure ?? old?.exposure,
       };
       await put(db, 'watchlist', item.id, merged);
+      await syncCorrelationAsset(db,merged as WatchListItem);
       imported += 1;
     }
     await appendAudit(db, 'Assets imported', `${imported} assets`, actor, 'WATCHLIST', 'INFO', ipAddress);
@@ -321,6 +327,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     if (!id) throw new HttpError(400, 'Record ID required');
     const old = await getForUpdate<any>(db, kind, id);
     if (!old) throw new HttpError(404, 'Record not found');
+    if (entity === 'asset') await syncCorrelationAsset(db,{...old,active:operation === 'delete' ? false : !old.active});
     if (operation === 'delete') {
       await remove(db, kind, id);
       // Source checkpoints are internal state keyed by feed id; deleting the

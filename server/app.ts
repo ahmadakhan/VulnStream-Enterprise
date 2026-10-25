@@ -1,3 +1,8 @@
+import { correlationMetrics } from './correlation/metrics.ts';
+import { correlationWorkflows, decideCorrelationReview, decideDeadLetter, updateCorrelationPolicy, retainCorrelationData } from './correlation/operations.ts';
+import type { CorrelationRuntime } from './correlation/runtime.ts';
+import { advisoryRecords } from './correlation/stream.ts';
+import { Readable } from 'node:stream';
 import express from 'express';
 import compression from 'compression';
 import helmet from 'helmet';
@@ -23,7 +28,7 @@ import { buildAliasMap } from '../src/utils/cpeMatcher.ts';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine.ts';
 import { HttpError } from './validation';
 import { applyCommand } from './commands';
-import { checkPassword, passwordHash, decrypt } from './secrets';
+import { checkPassword, passwordHash, decrypt, secureEqual } from './secrets';
 import { createRequester, resolvePublic } from './network';
 import type { Requester, ResponseData } from './network';
 import { queueRun, stopRun, renderAdvisory } from './pipeline';
@@ -133,6 +138,7 @@ async function refreshAdvisoryDeliveryStatus(db: pg.Pool | import('pg').PoolClie
     }
 }
 export interface AppOptions {
+  correlation?: CorrelationRuntime;
   /**
    * Overrides the shared database-backed mutation limiter. Tests use this to
    * exercise the middleware with a small deterministic quota.
@@ -186,6 +192,11 @@ export function createApp(
     next();
   });
   app.get('/live', (_req, res) => res.json({ status: 'live' }));
+  app.get('/metrics',(req,res)=>{
+    if(!options.correlation || !config.METRICS_TOKEN) return res.sendStatus(404);
+    if(!secureEqual(req.headers.authorization || '',`Bearer ${config.METRICS_TOKEN}`)) return res.sendStatus(401);
+    res.type('text/plain; version=0.0.4').send(correlationMetrics(options.correlation.supervisor));
+  });
   app.get(
     '/ready',
     asyncRoute(async (_req, res) => {
@@ -211,6 +222,107 @@ export function createApp(
       next(error);
     }
   });
+  if (options.correlation) {
+    const runtime = options.correlation;
+    app.get('/api/correlation/workflows',asyncRoute(async (_req,res)=>res.json(await correlationWorkflows(pool))));
+    app.patch('/api/correlation/policy',requireRole('ADMIN'),asyncRoute(async(req,res)=>{
+      const policy = await transaction(pool,db=>updateCorrelationPolicy(db,req.body,req.operator!.username));
+      res.json(policy);
+    }));
+    app.post('/api/correlation/reviews/:id/decision',requireRole('ADMIN','OPERATOR'),asyncRoute(async(req,res)=>{
+      const id = z.uuid().parse(req.params.id);
+      await transaction(pool,db=>decideCorrelationReview(db,id,req.body,req.operator!.username));
+      res.json({success:true});
+    }));
+    app.post('/api/correlation/dead-letters/:id/decision',requireRole('ADMIN'),asyncRoute(async(req,res)=>{
+      const id = z.uuid().parse(req.params.id);
+      await transaction(pool,db=>decideDeadLetter(db,id,req.body,req.operator!.username,config.ENCRYPTION_KEY));
+      res.json({success:true});
+    }));
+    app.post('/api/correlation/retention/run',requireRole('ADMIN'),asyncRoute(async(req,res)=>{
+      const removed = await transaction(pool,async db=>{
+        const count = await retainCorrelationData(db);
+        await appendAudit(db,'Correlation retention run',`${count} resolved or expired records removed`,req.operator!.username);
+        return count;
+      });
+      res.json({removed});
+    }));
+    app.get('/api/correlation/assets',asyncRoute(async(req,res)=>{
+      const query = z.object({q:z.string().trim().max(200).default(''),after:z.uuid().optional()}).strict().parse(req.query);
+      const rows = await pool.query(`SELECT i.id,i.vendor,i.product,i.version,m.record_id AS "recordId",r.data->>'assetTag' AS "assetTag"
+        FROM correlation_asset_inventory i LEFT JOIN correlation_managed_assets m ON m.native_id=i.id
+        LEFT JOIN records r ON r.kind='watchlist' AND r.id=m.record_id
+        WHERE ($1::uuid IS NULL OR i.id>$1) AND ($2='' OR strpos(lower(i.vendor||' '||i.product),lower($2))>0)
+        ORDER BY i.id LIMIT 51`,[query.after || null,query.q]);
+      res.json({assets:rows.rows.slice(0,50),nextCursor:rows.rows.length>50 ? rows.rows[49].id : null});
+    }));
+
+    app.get(
+      '/api/correlation',
+      asyncRoute(async (_req, res) => res.json(await runtime.supervisor.snapshot())),
+    );
+    app.post(
+      '/api/correlation/concurrency',
+      requireRole('ADMIN', 'OPERATOR'),
+      asyncRoute(async (req, res) => {
+        const { limit } = z
+          .object({ limit: z.number().int().min(1).max(32) })
+          .strict()
+          .parse(req.body);
+        runtime.supervisor.setConcurrency(limit);
+        res.json({ concurrencyLimit: runtime.supervisor.concurrencyLimit });
+      }),
+    );
+    app.post(
+      '/api/correlation/fault',
+      requireRole('ADMIN'),
+      asyncRoute(async (req, res) => {
+        if (config.NODE_ENV === 'production')
+          throw new HttpError(403, 'Fault simulation is disabled in production');
+        const { fault } = z
+          .object({ fault: z.enum(['memory', 'database']) })
+          .strict()
+          .parse(req.body);
+        runtime.supervisor.simulate(fault);
+        res.json({ accepted: true });
+      }),
+    );
+    app.post(
+      '/api/correlation/ingest',
+      requireRole('ADMIN', 'OPERATOR'),
+      asyncRoute(async (req, res) => {
+        const { ndjson } = z
+          .object({ ndjson: z.string().min(1).max(524288) })
+          .strict()
+          .parse(req.body);
+        let count = 0;
+        await transaction(pool, async (db) => {
+          for await (const payload of advisoryRecords(
+            Readable.from([Buffer.from(ndjson)], { objectMode: false }),
+          )) {
+            if (++count > 128) throw new HttpError(413, 'At most 128 records per submission');
+            await db.query('INSERT INTO correlation_pending(id,payload) VALUES($1,$2)', [
+              randomUUID(),
+              JSON.stringify(payload),
+            ]);
+          }
+        });
+        res.status(202).json({ queued: count });
+      }),
+    );
+    app.get(
+      '/api/correlation/search',
+      asyncRoute(async (req, res) => {
+        const { q } = z.object({ q: z.string().trim().min(1).max(200) }).parse(req.query);
+        const result = await pool.query(
+          `SELECT id,title,url,processed_at FROM unstructured_advisories
+        WHERE tsv_content @@ plainto_tsquery('simple',$1) ORDER BY processed_at DESC LIMIT 50`,
+          [q],
+        );
+        res.json({ advisories: result.rows });
+      }),
+    );
+  }
   app.get('/api/session', (req, res) =>
     res.json({
       username: req.operator!.username,

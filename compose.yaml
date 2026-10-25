@@ -48,7 +48,11 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
       FEED_MAX_DURATION_SECONDS: ${FEED_MAX_DURATION_SECONDS:-1800}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
       WORKER_ENABLED: 'true'
+      CORRELATION_DLQ_DIRECTORY: /var/lib/vulnstream/deadletters
+    volumes:
+      - correlation-deadletters:/var/lib/vulnstream/deadletters
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -69,6 +73,7 @@ services:
     networks: [backend, egress]
 volumes:
   postgres-data:
+  correlation-deadletters:
   caddy-data:
   caddy-config:
 networks:

@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   test-db:
-    image: postgres:alpine
+    image: postgres:17-alpine
     container_name: vulnstream-test-db
     environment:
       POSTGRES_USER: postgres
@@ -16,7 +14,7 @@ services:
       -c max_connections=100
       -c fsync=off
       -c synchronous_commit=off
-      -c checkpoint_completion_targets=0.9
+      -c checkpoint_completion_target=0.9
       -c random_page_cost=1.1
     tmpfs:
       - /var/lib/postgresql/data
@@ -32,6 +30,7 @@ services:
       retries: 30
       start_period: 2s
     restart: "no"
+    networks: [test-network]
 
   test-runner:
     build:
@@ -50,13 +49,7 @@ services:
       VITEST_TEST_TIMEOUT: '10000'
       VITEST_POOL: 'forks'
       VITEST_ISOLATE: 'true'
-    command: >
-      sh -c "
-        echo '[test-runner] Waiting for database health check to complete...' &&
-        npx pg_isready -h test-db -p 5432 -U postgres -d vulnstream_test &&
-        echo '[test-runner] Database is ready. Running test suite...' &&
-        npm run test:vitest
-      "
+    command: [npm, run, test:vitest]
     restart: "no"
     networks:
       - test-network

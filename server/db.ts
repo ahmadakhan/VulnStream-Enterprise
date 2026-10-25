@@ -1,3 +1,4 @@
+import { correlationPreflight } from './correlation/preflight.ts';
 import { compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
 import pg, { type PoolClient } from 'pg';
 import { readFile } from 'node:fs/promises';
@@ -34,7 +35,7 @@ export const schemaLockKey = 'hashtext(COALESCE(current_schema(), current_databa
  * The newest migration this build depends on. Production startup refuses to
  * run against an older schema instead of failing later on a missing column.
  */
-export const REQUIRED_SCHEMA_VERSION = 10;
+export const REQUIRED_SCHEMA_VERSION = 13;
 
 export async function migrate(pool: pg.Pool) {
   const client = await pool.connect();
@@ -48,6 +49,8 @@ export async function migrate(pool: pg.Pool) {
     // statement timeout.
     await client.query("SET LOCAL statement_timeout = '300000ms'");
     await client.query(`SELECT pg_advisory_xact_lock(800001, ${schemaLockKey})`);
+    const nativeContract = await correlationPreflight(client);
+    if (!nativeContract.compatible) throw new Error('Protected correlation schema incompatible: '+nativeContract.issues.join('; '));
     const exists = await client.query("SELECT to_regclass('schema_migrations') AS name");
     const applied =
       exists.rows[0].name &&
@@ -90,6 +93,16 @@ export async function migrate(pool: pg.Pool) {
       await client.query(
         await readFile(new URL('./migrations/010_shared_rate_limit.sql', import.meta.url), 'utf8'),
       );
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=11')).rowCount)
+      await client.query(
+        await readFile(new URL('./migrations/011_text_correlation.sql', import.meta.url), 'utf8'),
+      );
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=12')).rowCount)
+      await client.query(
+        await readFile(new URL('./migrations/012_rate_limit_return.sql', import.meta.url), 'utf8'),
+      );
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=13')).rowCount)
+      await client.query(await readFile(new URL('./migrations/013_correlation_operations.sql', import.meta.url), 'utf8'));
     await client.query('COMMIT');
   } catch (e) {
     failed = true;
