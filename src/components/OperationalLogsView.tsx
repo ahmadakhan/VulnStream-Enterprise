@@ -20,6 +20,7 @@ import { useCollection } from '../hooks/useCollection';
 import { LogDetailModal } from './LogDetailModal';
 import { EventDetailPanel } from './EventDetailPanel';
 import { formatEventContext } from '../utils/eventText';
+import { SecondaryButton } from './SecondaryButton';
 
 const AuditTrailView: React.FC = () => {
   const { fetchCollection, refreshVersion, verifyAuditChainRemote } = useApp();
@@ -27,6 +28,7 @@ const AuditTrailView: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // Cryptographic Chain Verification State
   const [verifyingChain, setVerifyingChain] = useState(false);
@@ -87,6 +89,7 @@ const AuditTrailView: React.FC = () => {
   };
 
   const handleExportJson = async () => {
+    setExporting(true);
     try {
       const logs = await loadAllLogs();
       const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(logs, null, 2));
@@ -98,10 +101,13 @@ const AuditTrailView: React.FC = () => {
       downloadAnchor.remove();
     } catch {
       // The request layer surfaces transport failures through the global banner.
+    } finally {
+      setExporting(false);
     }
   };
 
   const handleExportCsv = async () => {
+    setExporting(true);
     try {
       const logs = await loadAllLogs();
       const headers = ['ID', 'Timestamp', 'Category', 'Level', 'Event', 'Details', 'Actor', 'IP'];
@@ -124,6 +130,8 @@ const AuditTrailView: React.FC = () => {
       downloadAnchor.remove();
     } catch {
       // The request layer surfaces transport failures through the global banner.
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -136,36 +144,37 @@ const AuditTrailView: React.FC = () => {
         </PageHeading>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => void handleVerifyChain()}
+          <SecondaryButton
+            icon={
+              verifyingChain ? (
+                <RotateCw className="h-3.5 w-3.5 animate-spin text-zinc-400" />
+              ) : chainVerified === true ? (
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+              ) : chainVerified === false ? (
+                <AlertTriangle className="h-3.5 w-3.5 text-rose-400" />
+              ) : (
+                <ShieldCheck className="h-3.5 w-3.5 text-zinc-400" />
+              )
+            }
             disabled={verifyingChain}
-            className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3.5 py-2.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 disabled:opacity-60 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100"
+            onClick={() => void handleVerifyChain()}
           >
-            {verifyingChain ? (
-              <RotateCw className="h-3.5 w-3.5 animate-spin text-zinc-400" />
-            ) : chainVerified === true ? (
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-            ) : chainVerified === false ? (
-              <AlertTriangle className="h-3.5 w-3.5 text-rose-400" />
-            ) : (
-              <ShieldCheck className="h-3.5 w-3.5 text-zinc-400" />
-            )}
-            <span>{verifyingChain ? 'Verifying chain…' : 'Verify chain'}</span>
-          </button>
-          <button
+            {verifyingChain ? 'Verifying chain…' : 'Verify chain'}
+          </SecondaryButton>
+          <SecondaryButton
+            icon={<Download className="h-3.5 w-3.5" />}
+            loading={exporting}
             onClick={() => void handleExportCsv()}
-            className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3.5 py-2.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100"
           >
-            <Download className="h-3.5 w-3.5" />
-            <span>Export CSV</span>
-          </button>
-          <button
+            Export CSV
+          </SecondaryButton>
+          <SecondaryButton
+            icon={<Download className="h-3.5 w-3.5" />}
+            loading={exporting}
             onClick={() => void handleExportJson()}
-            className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3.5 py-2.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100"
           >
-            <Download className="h-3.5 w-3.5" />
-            <span>Export JSON</span>
-          </button>
+            Export JSON
+          </SecondaryButton>
         </div>
       </div>
 
@@ -268,7 +277,7 @@ const AuditTrailView: React.FC = () => {
                 <th className="py-3 px-4">Timestamp (UTC)</th>
                 <th className="py-3 px-4">Category</th>
                 <th className="py-3 px-4">Level</th>
-                <th className="py-3 px-4">Event &amp; Action Details</th>
+                <th className="py-3 px-4">Event & Action Details</th>
                 <th className="py-3 px-4">Actor</th>
                 <th className="py-3 px-4 text-right">Source IP</th>
               </tr>
@@ -302,7 +311,7 @@ const AuditTrailView: React.FC = () => {
                       <span className="text-zinc-600">UTC</span>
                     </td>
                     <td className="px-4 py-3.5 text-[11px] text-zinc-300 light:text-zinc-700">
-                      <span className="rounded-md border border-zinc-700/70 bg-zinc-800/60 px-2 py-1 light:border-zinc-200 light:bg-zinc-100">
+                      <span className="rounded-md border border-zinc-700/70 bg-zinc-800/70 px-2 py-1 light:border-zinc-200 light:bg-zinc-100">
                         {log.category}
                       </span>
                     </td>
@@ -607,10 +616,17 @@ export const OperationalLogsView: React.FC = () => {
                                 column width the single-line form clipped the
                                 value ("Oct 25, 2026, 9:"). */}
                             <div className="whitespace-nowrap tabular-nums">
-                              {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(event.timestamp))}
+                              {new Intl.DateTimeFormat(undefined, {
+                                dateStyle: 'medium',
+                                timeZone: 'UTC',
+                              }).format(new Date(event.timestamp))}
                             </div>
                             <div className="mt-0.5 whitespace-nowrap font-mono text-[10px] tabular-nums text-zinc-500">
-                              {new Intl.DateTimeFormat(undefined, { timeStyle: "medium", timeZone: "UTC" }).format(new Date(event.timestamp))} UTC
+                              {new Intl.DateTimeFormat(undefined, {
+                                timeStyle: 'medium',
+                                timeZone: 'UTC',
+                              }).format(new Date(event.timestamp))}{' '}
+                              UTC
                             </div>
                           </td>
                           <td className="px-4 py-3.5 align-top text-[11px] text-zinc-300 light:text-zinc-700">
