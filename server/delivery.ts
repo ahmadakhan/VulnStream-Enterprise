@@ -12,7 +12,12 @@ import type { Config } from './config';
 import { transaction, get, list, put, appendAudit } from './db';
 import type { Db } from './db';
 import { createRequester, type Requester } from './network';
-import { EMAIL_PROVIDER_LABELS, EmailProviderError, emailIsConfigured, sendProviderEmail } from './emailProviders';
+import {
+  EMAIL_PROVIDER_LABELS,
+  EmailProviderError,
+  emailIsConfigured,
+  sendProviderEmail,
+} from './emailProviders';
 import { decrypt } from './secrets';
 import { isSmtpEmailProvider } from '../src/types/index.ts';
 import type {
@@ -45,7 +50,9 @@ export interface Job {
   review_approved?: boolean;
   priority?: number;
 }
-export type MailSender = (job: Job) => Promise<string | { id: string; provider: EmailDeliveryLog['provider'] }>;
+export type MailSender = (
+  job: Job,
+) => Promise<string | { id: string; provider: EmailDeliveryLog['provider'] }>;
 const revision = (cve: NormalizedCVE) => createHash('sha256').update(stableJson(cve)).digest('hex');
 const findingRevision = (finding: Finding) =>
   createHash('sha256')
@@ -54,9 +61,44 @@ const findingRevision = (finding: Finding) =>
         cveId: finding.cveId,
         assetId: finding.matchedAssetId,
         assetName: finding.matchedAssetName,
+        matchingMethod: finding.matchingMethod,
+        matchingEvidence: finding.matchingEvidence,
+        exploitRisk: finding.exploitRisk,
       }),
     )
     .digest('hex');
+/**
+ * Content revision for one advisory. Queueing the same advisory revision twice
+ * is idempotent; a materially changed advisory (new findings, revised severity,
+ * summary, remediation, or changed CVE evidence) gets a new revision and can be
+ * delivered again.
+ */
+const advisoryRevision = (advisory: Advisory, findings: Finding[]) =>
+  createHash('sha256')
+    .update(
+      stableJson({
+        advisory: {
+          // The advisory ID is intentionally excluded: pipeline-created
+          // advisories receive a new random ID on every run, so including it
+          // would defeat idempotent delivery of unchanged content. An explicit
+          // operator dispatch key still distinguishes intentional resends.
+          title: advisory.title,
+          severity: advisory.severity,
+          cveIds: advisory.cveIds,
+          findingIds: advisory.findingIds,
+          executiveSummary: advisory.executiveSummary,
+          remediationInstructions: advisory.remediationInstructions,
+          affectedSystems: advisory.affectedSystems,
+          isDigestBatch: advisory.isDigestBatch ?? false,
+          vendorLink: advisory.vendorLink ?? '',
+        },
+        findings: findings
+          .map((finding) => [finding.id, findingRevision(finding)])
+          .sort(([left], [right]) => left.localeCompare(right)),
+      }),
+    )
+    .digest('hex')
+    .slice(0, 20);
 export function recipientAllows(recipient: EmailRecipient, finding: Finding): boolean {
   return (
     recipient.subscriptionTier === 'ALL_SEVERITIES' ||
@@ -72,7 +114,11 @@ export function webhookAllows(hook: WebhookEndpoint, finding: Finding): boolean 
     (hook.events.includes('CISA_KEV') && finding.cve.cisaKev.isKev)
   );
 }
-export function createMailSender(config: Config, db?: Db, request: Requester = createRequester(config)): MailSender {
+export function createMailSender(
+  config: Config,
+  db?: Db,
+  request: Requester = createRequester(config),
+): MailSender {
   const transporter = config.SMTP_HOST
     ? nodemailer.createTransport({
         host: config.SMTP_HOST,
@@ -88,7 +134,7 @@ export function createMailSender(config: Config, db?: Db, request: Requester = c
       })
     : null;
   return async (job) => {
-    const saved = (db && await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
+    const saved = (db && (await get<EmailConfiguration>(db, 'emailConfig', 'main'))) || DEFAULT_EMAIL_CONFIG;
     if (!emailIsConfigured(saved, config)) throw new Error('Email provider is not configured');
     if (!isSmtpEmailProvider(saved.provider)) {
       const token = decrypt(saved.apiKey, config.ENCRYPTION_KEY, `email-provider:${saved.provider}`);
@@ -108,7 +154,10 @@ export function createMailSender(config: Config, db?: Db, request: Requester = c
         );
         return { id, provider };
       } catch (error) {
-        if (error instanceof EmailProviderError) { error.provider = provider; throw error; }
+        if (error instanceof EmailProviderError) {
+          error.provider = provider;
+          throw error;
+        }
         throw new EmailProviderError(`${provider} connection failed`, 502, 0, provider);
       }
     }
@@ -163,15 +212,47 @@ export async function enqueue(
   priority = 0,
 ) {
   const id = randomUUID();
+  // A content revision that already exists is normally a duplicate. The one
+  // safe exception is a bundle that was terminally failed because its findings
+  // were temporarily inapplicable: the pipeline only calls queueAdvisory again
+  // after revalidating the current inventory, so the same revision can be
+  // re-opened without ever having been accepted by a transport. Transport,
+  // recipient, and subscription failures are deliberately not resurrected.
   const inserted = await db.query(
-    'INSERT INTO outbox(id,dedupe_key,channel,target_id,advisory_id,payload,status,priority) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(dedupe_key) DO NOTHING RETURNING id',
-    [id, dedupe, channel, targetId, advisoryId, JSON.stringify(payload), channel === 'email' ? initialStatus : 'QUEUED', priority],
+    `INSERT INTO outbox(id,dedupe_key,channel,target_id,advisory_id,payload,status,priority)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT(dedupe_key) DO UPDATE SET
+       advisory_id=EXCLUDED.advisory_id,
+       payload=EXCLUDED.payload,
+       status=EXCLUDED.status,
+       priority=EXCLUDED.priority,
+       attempts=0,
+       next_attempt=now(),
+       error=NULL,
+       provider_id=NULL,
+       locked_at=NULL,
+       lock_token=NULL,
+       updated_at=now()
+     WHERE outbox.status='FAILED'
+       AND COALESCE(outbox.error,'') LIKE '%no longer applicable%'
+     RETURNING id`,
+    [
+      id,
+      dedupe,
+      channel,
+      targetId,
+      advisoryId,
+      JSON.stringify(payload),
+      channel === 'email' ? initialStatus : 'QUEUED',
+      priority,
+    ],
   );
   if (!inserted.rowCount) return null;
+  const insertedId = inserted.rows[0].id as string;
   if (channel === 'email') {
     const configuration = (await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
-    await put(db, 'emailLogs', id, {
-      id,
+    await put(db, 'emailLogs', insertedId, {
+      id: insertedId,
       recipientEmail: payload.recipientEmail || '',
       advisoryId,
       subject: payload.subject,
@@ -184,8 +265,8 @@ export async function enqueue(
     } satisfies EmailDeliveryLog);
   } else {
     const hook = await get<WebhookEndpoint>(db, 'webhooks', targetId);
-    await put(db, 'webhookLogs', id, {
-      id,
+    await put(db, 'webhookLogs', insertedId, {
+      id: insertedId,
       endpointId: targetId,
       endpointName: hook?.name || '',
       provider: hook?.provider || 'GENERIC_HMAC',
@@ -197,14 +278,14 @@ export async function enqueue(
       sentAt: '',
     } satisfies WebhookDeliveryLog);
   }
-  return id;
+  return insertedId;
 }
 export async function queueAdvisory(
   db: Db,
   advisory: Advisory,
   findings: Finding[],
   html?: string,
-  dispatchKey = advisory.id,
+  dispatchKey?: string,
 ) {
   const recipients = await list<EmailRecipient>(db, 'recipients'),
     hooks = await list<WebhookEndpoint>(db, 'webhooks');
@@ -217,20 +298,26 @@ export async function queueAdvisory(
     findingRevisions: Object.fromEntries(findings.map((finding) => [finding.id, findingRevision(finding)])),
     cveRevisions: Object.fromEntries(findings.map((finding) => [finding.cveId, revision(finding.cve)])),
   };
+  // Deduplicate by content revision, not just advisory ID: a genuinely revised
+  // advisory may be delivered again, while a repeated queue pass over the same
+  // revision remains idempotent. Pipeline-created advisories get a new random
+  // ID on every run, so the default dispatch key must be content-derived; an
+  // explicit key (operator resend) still overrides it.
+  const contentRevision = advisoryRevision(advisory, findings);
+  const stableDispatchKey = dispatchKey ?? contentRevision;
   let count = 0;
   const priority = Math.max(
     0,
-    ...findings.map(
-      (finding) =>
-        finding.cve.cisaKev?.isKev
-          ? 100
-          : finding.exploitRisk === 'REPORTED_IN_WILD_EXPLOIT' ||
-              finding.exploitRisk === 'WEAPONIZED_EXPLOIT' ||
-              finding.cve.exploitationSources?.length
+    ...findings.map((finding) =>
+      finding.cve.cisaKev?.isKev
+        ? 100
+        : finding.exploitRisk === 'REPORTED_IN_WILD_EXPLOIT' ||
+            finding.exploitRisk === 'WEAPONIZED_EXPLOIT' ||
+            finding.cve.exploitationSources?.length
+          ? 50
+          : finding.notificationStatus === 'REVIEW_REQUIRED'
             ? 50
-            : finding.notificationStatus === 'REVIEW_REQUIRED'
-              ? 50
-              : 0,
+            : 0,
     ),
   );
   for (const recipient of selected)
@@ -241,7 +328,7 @@ export async function queueAdvisory(
         recipient.id,
         advisory.id,
         { ...payload, recipientEmail: recipient.email },
-        `${dispatchKey}:email:${recipient.id}`,
+        `${stableDispatchKey}:${contentRevision}:email:${recipient.id}`,
         recipient.deliveryGroup === 'EVERYONE' ? 'REVIEW' : 'QUEUED',
         priority,
       )
@@ -250,7 +337,18 @@ export async function queueAdvisory(
   for (const hook of hooks.filter(
     (h) => h.enabled && findings.length > 0 && findings.every((finding) => webhookAllows(h, finding)),
   ))
-    if (await enqueue(db, 'webhook', hook.id, advisory.id, payload, `${dispatchKey}:webhook:${hook.id}`, 'QUEUED', priority))
+    if (
+      await enqueue(
+        db,
+        'webhook',
+        hook.id,
+        advisory.id,
+        payload,
+        `${stableDispatchKey}:${contentRevision}:webhook:${hook.id}`,
+        'QUEUED',
+        priority,
+      )
+    )
       count++;
   if (!count) return 0;
   advisory.recipientCount = selected.length;
@@ -296,6 +394,10 @@ export async function deliverNext(
       throw new Error(
         'Advisory revision is no longer applicable; rebuild legacy queued payload from current intelligence',
       );
+    }
+    if (advisory && !advisory.findingIds.length) {
+      permanent = true;
+      throw new Error('Advisory has no findings; rebuild from current inventory before delivery');
     }
     if (advisory) {
       // Revalidation must use the same operator-managed aliases as the pipeline
@@ -448,8 +550,29 @@ export async function deliverNext(
       );
     await db.query(
       'UPDATE outbox SET status=$2,next_attempt=$3,error=$4,provider_id=$5,locked_at=NULL,lock_token=NULL,updated_at=now() WHERE id=$1',
-      [job.id, routeToReview ? 'REVIEW' : error ? (failed ? 'FAILED' : 'QUEUED') : 'ACCEPTED', next, routeToReview ? null : error || null, providerId || null],
+      [
+        job.id,
+        routeToReview ? 'REVIEW' : error ? (failed ? 'FAILED' : 'QUEUED') : 'ACCEPTED',
+        next,
+        routeToReview ? null : error || null,
+        providerId || null,
+      ],
     );
+    if (error && !routeToReview && !failed) {
+      // A rate-limited or blackholed endpoint must not be hammered once per
+      // queued job. Share this target's backoff with its remaining pending work;
+      // bound the batch so the global state lock is not held across the queue.
+      await db.query(
+        `WITH pending AS (
+           SELECT id FROM outbox
+           WHERE channel=$1 AND target_id=$2 AND status='QUEUED' AND id<>$3 AND next_attempt < $4
+           ORDER BY next_attempt
+           LIMIT 1000
+         )
+         UPDATE outbox o SET next_attempt=$4, updated_at=now() FROM pending p WHERE o.id=p.id`,
+        [job.channel, job.target_id, job.id, next],
+      );
+    }
     if (job.channel === 'email') {
       const log = await get<EmailDeliveryLog>(db, 'emailLogs', job.id);
       if (log)
@@ -507,6 +630,9 @@ export async function deliverNext(
         for (const cveId of advisory.cveIds) {
           const prior = await get<AlertedCVE>(db, 'alertedCves', cveId),
             now = new Date().toISOString();
+          // The dedupe key carries the advisory content revision, so a revised
+          // advisory counts as a new dispatch while a retry of the same
+          // revision does not inflate the dispatch count.
           const dispatchKey = job.dedupe_key.split(':email:')[0].split(':webhook:')[0];
           const dispatchId = `${cveId}:${dispatchKey}`;
           const same =
@@ -544,14 +670,26 @@ export async function deliverNext(
           });
       }
     }
-    await writeEvent(db, {category:job.channel === 'email' ? 'EMAIL' : 'EVENT', level:error ? 'WARNING' : 'INFO', code:error ? 'delivery.attempt_failed' : 'delivery.accepted', message:error ? 'Delivery attempt failed; retry policy applied' : 'Transport accepted delivery', context:{jobId:job.id, channel:job.channel, attempt:job.attempts, advisoryId:job.advisory_id}});
+    await writeEvent(db, {
+      category: job.channel === 'email' ? 'EMAIL' : 'EVENT',
+      level: error ? 'WARNING' : 'INFO',
+      code: error ? 'delivery.attempt_failed' : 'delivery.accepted',
+      message: error ? 'Delivery attempt failed; retry policy applied' : 'Transport accepted delivery',
+      context: { jobId: job.id, channel: job.channel, attempt: job.attempts, advisoryId: job.advisory_id },
+    });
     if (failed && error) {
       await writeEvent(db, {
         category: job.channel === 'email' ? 'EMAIL' : 'EVENT',
         level: 'ERROR',
         code: 'delivery.exhausted',
         message: `Delivery retries exhausted for advisory ${job.advisory_id}; permanent failure`,
-        context: { jobId: job.id, channel: job.channel, attempts: job.attempts, advisoryId: job.advisory_id, error },
+        context: {
+          jobId: job.id,
+          channel: job.channel,
+          attempts: job.attempts,
+          advisoryId: job.advisory_id,
+          error,
+        },
       });
     }
     await appendAudit(

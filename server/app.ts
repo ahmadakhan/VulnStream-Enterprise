@@ -1,12 +1,21 @@
 import express from 'express';
+import compression from 'compression';
 import helmet from 'helmet';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type pg from 'pg';
 import type { Config } from './config';
-import { asyncRoute, requireAuth, requireRole, loginHandler, cookieName, createUser } from './auth';
-import { transaction, state, get, put, appendAudit, list } from './db';
+import {
+  asyncRoute,
+  requireAuth,
+  requireRole,
+  loginHandler,
+  cookieName,
+  createUser,
+  sessionCookieOptions,
+} from './auth';
+import { transaction, state, get, getForUpdate, put, appendAudit, list } from './db';
 import { queryCollection } from './collections';
 import { runRetention, previewRetention } from './retention';
 import { merkleRoot, verifyAuditChain } from '../src/utils/cryptoChain.ts';
@@ -24,8 +33,19 @@ import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
 import { emailIsConfigured } from './emailProviders';
 import { parseSyndication, RSS_MAX_BYTES } from './rss';
 import { readEvents, writeEvent } from './events';
+import { createDatabaseRateLimiter, type MutationLimiter } from './rateLimit';
 import type { AppState } from '../shared/state.ts';
-import type { AppSettings, ThreatFeed, WebhookEndpoint, Advisory, TemplateCustomization, EmailConfiguration, NormalizedCVE, AliasEntry, WatchListItem } from '../src/types/index.ts';
+import type {
+  AppSettings,
+  ThreatFeed,
+  WebhookEndpoint,
+  Advisory,
+  TemplateCustomization,
+  EmailConfiguration,
+  NormalizedCVE,
+  AliasEntry,
+  WatchListItem,
+} from '../src/types/index.ts';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler.ts';
 function publicState(data: AppState): AppState {
   return {
@@ -61,7 +81,7 @@ const STATE_COLLECTION_LIMITS = {
   intelligenceMatches: 100,
 } as const;
 async function refreshAdvisoryDeliveryStatus(db: pg.Pool | import('pg').PoolClient, advisoryId: string) {
-  const advisory = await get<Advisory>(db, 'advisories', advisoryId);
+  const advisory = await getForUpdate<Advisory>(db, 'advisories', advisoryId);
   if (!advisory) return;
   const totals = (
     await db.query(
@@ -92,7 +112,7 @@ async function refreshAdvisoryDeliveryStatus(db: pg.Pool | import('pg').PoolClie
           : null;
   if (notificationStatus)
     for (const findingId of advisory.findingIds) {
-      const finding = await get<any>(db, 'findings', findingId);
+      const finding = await getForUpdate<any>(db, 'findings', findingId);
       // Do not resurrect a finding that was explicitly excluded (for example,
       // inventory was removed while the bundle waited for review).
       if (
@@ -112,9 +132,23 @@ async function refreshAdvisoryDeliveryStatus(db: pg.Pool | import('pg').PoolClie
         });
     }
 }
-export function createApp(pool: pg.Pool, config: Config, request: Requester = createRequester(config)) {
+export interface AppOptions {
+  /**
+   * Overrides the shared database-backed mutation limiter. Tests use this to
+   * exercise the middleware with a small deterministic quota.
+   */
+  mutationLimiter?: MutationLimiter;
+}
+export function createApp(
+  pool: pg.Pool,
+  config: Config,
+  request: Requester = createRequester(config),
+  options: AppOptions = {},
+) {
   const app = express();
   app.disable('x-powered-by');
+  // /api/state is a bounded snapshot; gzip keeps its transfer size small.
+  app.use(compression({ threshold: 1024 }));
   if (config.TRUST_PROXY)
     app.set(
       'trust proxy',
@@ -160,7 +194,23 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
     }),
   );
   app.post('/api/login', loginHandler(pool, config));
-  app.use('/api', requireAuth(pool, config));
+  // Global rate limiting for authenticated mutation endpoints. The bucket is
+  // stored in PostgreSQL so every replica shares one quota per operator.
+  const mutationLimiter = options.mutationLimiter ?? createDatabaseRateLimiter(pool);
+  app.use('/api', requireAuth(pool, config), async (req, res, next) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+    try {
+      const identifier = req.operator?.id || req.ip || '';
+      const result = await mutationLimiter(`rl:${identifier}`);
+      if (!result.allowed) {
+        res.setHeader('Retry-After', String(Math.max(1, Math.ceil(result.retryAfterMs / 1000))));
+        return next(new HttpError(429, 'Too many requests'));
+      }
+      next();
+    } catch (error) {
+      next(error);
+    }
+  });
   app.get('/api/session', (req, res) =>
     res.json({
       username: req.operator!.username,
@@ -188,12 +238,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       await pool.query('DELETE FROM sessions WHERE token_hash=$1', [req.operator!.sessionHash]);
       // __Host- cookies are only cleared when the deletion carries the same
       // Secure/Path attributes as the original cookie.
-      res.clearCookie(cookieName(config), {
-        path: '/',
-        secure: config.NODE_ENV === 'production',
-        sameSite: 'strict',
-        httpOnly: true,
-      });
+      res.clearCookie(cookieName(config), sessionCookieOptions(config));
       res.json({ success: true });
     }),
   );
@@ -224,12 +269,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           req.ip || '',
         );
       });
-      res.clearCookie(cookieName(config), {
-        path: '/',
-        secure: config.NODE_ENV === 'production',
-        sameSite: 'strict',
-        httpOnly: true,
-      });
+      res.clearCookie(cookieName(config), sessionCookieOptions(config));
       res.json({ success: true });
     }),
   );
@@ -311,13 +351,14 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           articleIds: z.string().max(4000).optional(),
         })
         .parse(req.query);
-      const role = req.operator?.role;
-      const effectiveLimit = role === 'VIEWER' ? Math.min(query.limit, 100) : query.limit;
+      // VIEWER is a read role: it gets the same server-side filtering and
+      // pagination as ADMIN/OPERATOR. Silently forcing offset 0 and dropping
+      // search made every read-only history view show only its first page.
       res.json(
         await queryCollection(pool, String(req.params.kind), {
-          limit: effectiveLimit,
-          offset: role === 'VIEWER' ? 0 : query.offset,
-          search: role === 'VIEWER' ? undefined : query.search,
+          limit: query.limit,
+          offset: query.offset,
+          search: query.search,
           sort: query.sort,
           order: query.order,
           filters: {
@@ -330,7 +371,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
             notificationStatus: query.notificationStatus,
             category: query.category,
             level: query.level,
-            articleIds: role === 'VIEWER' ? undefined : query.articleIds?.split(',').filter(Boolean),
+            articleIds: query.articleIds?.split(',').filter(Boolean),
           },
         }),
       );
@@ -345,7 +386,13 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       const root = merkleRoot(logs.map((log: any) => log.hash));
       const externalRoot = typeof req.query.externalRoot === 'string' ? req.query.externalRoot : undefined;
       const externalMatch = externalRoot ? externalRoot === root : undefined;
-      res.json({ verified, merkleRoot: root, logCount: logs.length, externalRoot: externalRoot || null, externalMatch });
+      res.json({
+        verified,
+        merkleRoot: root,
+        logCount: logs.length,
+        externalRoot: externalRoot || null,
+        externalMatch,
+      });
     }),
   );
   app.post(
@@ -395,8 +442,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         method: finding.matchingMethod,
         confidence: finding.notificationStatus === 'REVIEW_REQUIRED' ? 0 : 100,
         evidence: finding.matchingEvidence,
-        autoAction:
-          finding.notificationStatus === 'REVIEW_REQUIRED' ? 'REVIEW_REQUIRED' : 'MATCH_CONFIRMED',
+        autoAction: finding.notificationStatus === 'REVIEW_REQUIRED' ? 'REVIEW_REQUIRED' : 'MATCH_CONFIRMED',
         suppressed: false,
         suppressionReason: '',
       }));
@@ -447,7 +493,8 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       const heartbeatAgeSeconds = worker.heartbeat
         ? Math.max(0, Math.floor((Date.now() - new Date(worker.heartbeat).getTime()) / 1000))
         : null;
-      const emailConfig = (await get<EmailConfiguration>(pool, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
+      const emailConfig =
+        (await get<EmailConfiguration>(pool, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
       res.json({
         database: 'connected',
         databaseLatencyMs: dbMs,
@@ -478,16 +525,23 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       });
     }),
   );
-  app.get('/api/events', asyncRoute(async (req, res) => res.json(await readEvents(pool, req.query))));
+  app.get(
+    '/api/events',
+    asyncRoute(async (req, res) => res.json(await readEvents(pool, req.query))),
+  );
   app.post(
     '/api/pipeline',
     requireRole('ADMIN', 'OPERATOR'),
     asyncRoute(async (req, res) => {
-      const data = z.object({
-        scopeHours: z.number().int().min(1).max(2880).optional(),
-        incrementalFeeds: z.boolean().default(true),
-      }).parse(req.body);
-      res.status(202).json(await queueRun(pool, data.scopeHours, req.operator!.username, data.incrementalFeeds));
+      const data = z
+        .object({
+          scopeHours: z.number().int().min(1).max(2880).optional(),
+          incrementalFeeds: z.boolean().default(true),
+        })
+        .parse(req.body);
+      res
+        .status(202)
+        .json(await queueRun(pool, data.scopeHours, req.operator!.username, data.incrementalFeeds));
     }),
   );
   app.post(
@@ -504,10 +558,19 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
       const feed = await get<ThreatFeed>(pool, 'feeds', String(req.params.id));
       if (!feed) throw new HttpError(404, 'Feed not found');
       const start = performance.now();
-      const headers: Record<string, string> = feed.type === 'RSS_ATOM' ? {Accept:'application/rss+xml, application/atom+xml, application/xml, text/xml'} : {};
+      const headers: Record<string, string> =
+        feed.type === 'RSS_ATOM'
+          ? { Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' }
+          : {};
       let secret: string;
-      try { secret = decrypt(feed.authSecretKey || '', config.ENCRYPTION_KEY, `feed:${feed.id}`); }
-      catch { throw new HttpError(400, 'Stored feed credentials could not be decrypted; re-enter the secret or restore the original encryption key'); }
+      try {
+        secret = decrypt(feed.authSecretKey || '', config.ENCRYPTION_KEY, `feed:${feed.id}`);
+      } catch {
+        throw new HttpError(
+          400,
+          'Stored feed credentials could not be decrypted; re-enter the secret or restore the original encryption key',
+        );
+      }
       if (feed.authType !== 'NONE' && !secret) throw new HttpError(400, 'Feed secret is missing');
       if (feed.authType === 'API_KEY') headers.apiKey = secret;
       if (['BEARER', 'BASIC'].includes(feed.authType))
@@ -521,16 +584,16 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
             ? { headers, timeoutMs: 25000, socketTimeoutMs: 20000, maxResponseBytes: 256 * 1024 }
             : feed.type === 'MITRE_CVE'
               ? { headers, timeoutMs: 120000, socketTimeoutMs: 60000, maxResponseBytes: 64 * 1024 * 1024 }
-            : feed.type === 'OPENCVE_API'
-              ? {
-                  headers,
-                  timeoutMs: (feed.requestTimeoutSeconds || 60) * 1000,
-                  socketTimeoutMs: Math.min((feed.requestTimeoutSeconds || 60) * 1000, 30000),
-                  maxResponseBytes: 4 * 1024 * 1024,
-                }
-              : feed.type === 'RSS_ATOM'
-                ? { headers, timeoutMs: 25000, maxResponseBytes: RSS_MAX_BYTES }
-                : { headers };
+              : feed.type === 'OPENCVE_API'
+                ? {
+                    headers,
+                    timeoutMs: (feed.requestTimeoutSeconds || 60) * 1000,
+                    socketTimeoutMs: Math.min((feed.requestTimeoutSeconds || 60) * 1000, 30000),
+                    maxResponseBytes: 4 * 1024 * 1024,
+                  }
+                : feed.type === 'RSS_ATOM'
+                  ? { headers, timeoutMs: 25000, maxResponseBytes: RSS_MAX_BYTES }
+                  : { headers };
         response = await request(testUrl.href, requestOptions);
         if (response.status >= 200 && response.status < 300) {
           if (feed.type === 'RSS_ATOM') parseSyndication(response.body, feed.id, 2880);
@@ -547,7 +610,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         }
         const latency = Math.round(performance.now() - start);
         await transaction(pool, async (db) => {
-          const current = await get<ThreatFeed>(db, 'feeds', feed.id);
+          const current = await getForUpdate<ThreatFeed>(db, 'feeds', feed.id);
           if (current)
             await put(db, 'feeds', feed.id, {
               ...current,
@@ -574,7 +637,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         const message = e instanceof Error ? e.message : 'Connection failed';
         const latency = Math.round(performance.now() - start);
         await transaction(pool, async (db) => {
-          const current = await get<ThreatFeed>(db, 'feeds', feed.id);
+          const current = await getForUpdate<ThreatFeed>(db, 'feeds', feed.id);
           if (current)
             await put(db, 'feeds', feed.id, {
               ...current,
@@ -602,15 +665,23 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
     asyncRoute(async (req, res) => {
       const { email } = z.object({ email: z.email().max(254) }).parse(req.body);
       const id = await transaction(pool, async (db) => {
-        const emailConfig = (await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
+        const emailConfig =
+          (await getForUpdate<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
         if (!emailIsConfigured(emailConfig, config))
           throw new HttpError(409, 'Configure an email provider in Settings before sending a test');
         const data = await state(db);
         const testAdvisory: Advisory = {
-          id: `${data.settings.advisoryPrefix}TEST`, title: 'BA Threat Intel template test', severity: 'UNKNOWN',
-          cveIds: [], findingIds: [], createdDate: new Date().toISOString(), deliveryStatus: 'PENDING',
-          recipientCount: 1, executiveSummary: 'Requested template test. This is not a live vulnerability advisory.',
-          affectedSystems: ['Example inventory asset'], remediationInstructions: 'Preview only; no remediation action is required.',
+          id: `${data.settings.advisoryPrefix}TEST`,
+          title: 'BA Threat Intel template test',
+          severity: 'UNKNOWN',
+          cveIds: [],
+          findingIds: [],
+          createdDate: new Date().toISOString(),
+          deliveryStatus: 'PENDING',
+          recipientCount: 1,
+          executiveSummary: 'Requested template test. This is not a live vulnerability advisory.',
+          affectedSystems: ['Example inventory asset'],
+          remediationInstructions: 'Preview only; no remediation action is required.',
         };
         const id = await enqueue(
           db,
@@ -651,6 +722,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
   );
   app.post(
     '/api/retention/preview',
+    requireRole('ADMIN'),
     asyncRoute(async (req, res) => {
       const policy = z
         .object({
@@ -675,7 +747,11 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           'webhook',
           hook.id,
           'TEST',
-          { subject: 'BA Threat Intel connection test', text: 'Requested BA Threat Intel webhook test', cveIds: [] },
+          {
+            subject: 'BA Threat Intel connection test',
+            text: 'Requested BA Threat Intel webhook test',
+            cveIds: [],
+          },
           randomUUID(),
         );
         await appendAudit(
@@ -702,7 +778,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         );
         if (!row.rowCount) throw new HttpError(409, 'Only notifications awaiting review can be approved');
         const id = String(req.params.id);
-        const log = await get<any>(db, 'emailLogs', id);
+        const log = await getForUpdate<any>(db, 'emailLogs', id);
         if (log)
           await put(db, 'emailLogs', id, {
             ...log,
@@ -735,7 +811,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         );
         if (!row.rowCount) throw new HttpError(409, 'Only notifications awaiting review can be rejected');
         const id = String(req.params.id);
-        const log = await get<any>(db, 'emailLogs', id);
+        const log = await getForUpdate<any>(db, 'emailLogs', id);
         if (log)
           await put(db, 'emailLogs', id, {
             ...log,
@@ -767,7 +843,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
           [req.params.id],
         );
         if (!row.rowCount) throw new HttpError(409, 'Only failed deliveries may be retried');
-        const log = await get<any>(db, 'emailLogs', String(req.params.id));
+        const log = await getForUpdate<any>(db, 'emailLogs', String(req.params.id));
         if (log)
           await put(db, 'emailLogs', String(req.params.id), {
             ...log,
@@ -801,7 +877,7 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         );
         if (!deleted.rowCount)
           throw new HttpError(409, 'Only queued or failed email deliveries can be deleted');
-        const log = await get<any>(db, 'emailLogs', id);
+        const log = await getForUpdate<any>(db, 'emailLogs', id);
         if (log)
           await put(db, 'emailLogs', id, {
             ...log,
@@ -865,8 +941,24 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
         .parse(req.body);
       const { action, id, data } = command,
         actor = req.operator!.username;
-      const adminActions = ['feed', 'recipient', 'webhook', 'settings', 'template', 'email', 'alias'];
-      if (adminActions.some((prefix) => action.startsWith(prefix)) && req.operator!.role !== 'ADMIN')
+      const adminActions = [
+        'feed.save',
+        'feed.import',
+        'feed.delete',
+        'feed.toggle',
+        'recipient.save',
+        'recipient.delete',
+        'recipient.toggle',
+        'webhook.save',
+        'webhook.delete',
+        'webhook.toggle',
+        'settings.save',
+        'template.save',
+        'email.configure',
+        'alias.save',
+        'alias.delete',
+      ];
+      if (adminActions.includes(action) && req.operator!.role !== 'ADMIN')
         throw new HttpError(403, 'Administrator role required');
       // Resolve URLs outside the database transaction. They are validated again at connection time.
       if (['feed.save', 'webhook.save'].includes(action)) {
@@ -912,8 +1004,13 @@ export function createApp(pool: pg.Pool, config: Config, request: Requester = cr
     if (error?.type === 'entity.too.large') return res.status(413).json({ error: 'Request body too large' });
     if (error instanceof SyntaxError) return res.status(400).json({ error: 'Invalid JSON' });
     const reference = randomUUID();
-    void writeEvent(pool, { category:'ISSUE', level:'ERROR', code:'http.request_failed', message:'An API request failed',
-      context:{ reference, method:_req.method, path:_req.path, errorType:error?.name || 'Error' } }).catch(() => {});
+    void writeEvent(pool, {
+      category: 'ISSUE',
+      level: 'ERROR',
+      code: 'http.request_failed',
+      message: 'An API request failed',
+      context: { reference, method: _req.method, path: _req.path, errorType: error?.name || 'Error' },
+    }).catch(() => {});
     console.error(
       JSON.stringify({ level: 'error', reference, type: error?.name || 'Error', code: error?.code }),
     );

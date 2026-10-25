@@ -4,7 +4,15 @@ import type { NormalizedCVE, WatchListItem } from '../src/types/index.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
-import { matchCPE, matchPurl, matchesWatchlistItem, matchProductWithAliases, matchVendorWithAliases, buildAliasMap, parseCPE23 } from '../src/utils/cpeMatcher.ts';
+import {
+  matchCPE,
+  matchPurl,
+  matchesWatchlistItem,
+  matchProductWithAliases,
+  matchVendorWithAliases,
+  buildAliasMap,
+  parseCPE23,
+} from '../src/utils/cpeMatcher.ts';
 import { compareVersions } from '../src/utils/versionComparator.ts';
 import { mergeCveRecords } from '../src/utils/deduplicator';
 import { quickHash, generateHmacSignature } from '../src/utils/cryptoChain';
@@ -53,6 +61,12 @@ test('PURL matches exact identity and specified version', () => {
   assert.equal(matchPurl('pkg:npm/express-extra@1', 'pkg:npm/express'), false);
   assert.equal(matchPurl('pkg:npm/express@5', 'pkg:npm/express@4'), false);
   assert.equal(matchPurl('pkg:npm/express@5', 'pkg:npm/express'), true);
+});
+test('scoped PURLs keep the npm scope when no version is present', () => {
+  assert.equal(matchPurl('pkg:npm/@scope/name', 'pkg:npm/@scope/name'), true);
+  assert.equal(matchPurl('pkg:npm/@scope/name@1.0.0', 'pkg:npm/@scope/name'), true);
+  assert.equal(matchPurl('pkg:npm/@scope/name@1.0.0', 'pkg:npm/@scope/name@2.0.0'), false);
+  assert.equal(matchPurl('pkg:npm/@scope/name', 'pkg:npm/@other/name'), false);
 });
 test('SemVer build metadata does not change precedence', () => {
   assert.equal(compareVersions('1.2.3+build.1', '1.2.3+build.2'), 0);
@@ -208,7 +222,7 @@ test('PURL cannot bypass an explicit version exclusion', () => {
 test('unsupported package version ordering requires review before dispatch', () => {
   const { cve, asset, settings } = fixture();
   asset.cpes = [];
-  asset.purls = ['pkg:npm/widget@1.0-beta'];
+  asset.purls = ['pkg:npm/widget@1.0-custom'];
   cve.cpeMatches = [];
   cve.purls = ['pkg:npm/widget'];
   cve.versionRange = { versionEndExcluding: '2.0' };
@@ -266,14 +280,8 @@ test('operator-managed custom aliases add to the built-in thesaurus without bein
   assert.equal(matchProductWithAliases('pan_os', 'panos'), true);
   // A custom alias not present in the built-in table is honored once supplied.
   assert.equal(matchProductWithAliases('acme_widget', 'widget_pro'), false);
-  assert.equal(
-    matchProductWithAliases('acme_widget', 'widget_pro', { acme_widget: ['widget_pro'] }),
-    true,
-  );
-  assert.equal(
-    matchVendorWithAliases('acme', 'acme_corp', { acme: ['acme_corp'] }),
-    true,
-  );
+  assert.equal(matchProductWithAliases('acme_widget', 'widget_pro', { acme_widget: ['widget_pro'] }), true);
+  assert.equal(matchVendorWithAliases('acme', 'acme_corp', { acme: ['acme_corp'] }), true);
 });
 test('custom aliases extend an existing canonical key rather than replacing its built-in aliases', () => {
   // 'panos' is a built-in alias of pan_os; adding a custom alias for the same
@@ -287,8 +295,9 @@ test('buildAliasMap scopes rows to VENDOR or PRODUCT and merges repeated canonic
     { scope: 'PRODUCT' as const, canonical: 'widget', aliases: ['widget-pro'] },
     { scope: 'VENDOR' as const, canonical: 'acme', aliases: ['acme, inc.'] },
   ];
-  assert.deepEqual(buildAliasMap(rows, 'VENDOR'), { acme: ['acme corp', 'acme, inc.'] });
-  assert.deepEqual(buildAliasMap(rows, 'PRODUCT'), { widget: ['widget-pro'] });
+  // The map intentionally has a null prototype; compare its data content.
+  assert.deepEqual({ ...buildAliasMap(rows, 'VENDOR') }, { acme: ['acme corp', 'acme, inc.'] });
+  assert.deepEqual({ ...buildAliasMap(rows, 'PRODUCT') }, { widget: ['widget-pro'] });
 });
 test('the alias-thesaurus match step in matchesWatchlistItem honors custom aliases end to end', () => {
   const result = matchesWatchlistItem(
@@ -345,10 +354,7 @@ test('inventory CPE builder escapes token delimiters instead of emitting invalid
   const parsed = parseCPE23(built);
   assert.equal(parsed.isValid, true);
   assert.equal(parsed.product, 'gateway\\:edge');
-  assert.equal(
-    matchCPE(built, 'cpe:2.3:a:acme:gateway\\:edge:1.0:*:*:*:*:*:*:*').matched,
-    true,
-  );
+  assert.equal(matchCPE(built, 'cpe:2.3:a:acme:gateway\\:edge:1.0:*:*:*:*:*:*:*').matched, true);
 });
 
 test('a CPE range cannot override an explicit vulnerable version token', () => {

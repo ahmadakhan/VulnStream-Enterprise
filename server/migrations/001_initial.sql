@@ -30,9 +30,12 @@ CREATE TABLE IF NOT EXISTS outbox (
   status text NOT NULL DEFAULT 'QUEUED' CHECK(status IN ('QUEUED','SENDING','ACCEPTED','FAILED')),
   attempts integer NOT NULL DEFAULT 0, next_attempt timestamptz NOT NULL DEFAULT now(),
   locked_at timestamptz, lock_token uuid, error text, provider_id text,
+  review_approved boolean NOT NULL DEFAULT false,
+  priority smallint NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS outbox_due ON outbox(status,next_attempt);
+CREATE INDEX IF NOT EXISTS outbox_priority ON outbox(status,priority DESC,next_attempt);
 CREATE TABLE IF NOT EXISTS scheduler_state (id integer PRIMARY KEY CHECK(id=1), last_run timestamptz, heartbeat timestamptz);
 INSERT INTO scheduler_state(id) VALUES(1) ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations(version) VALUES(1) ON CONFLICT DO NOTHING;

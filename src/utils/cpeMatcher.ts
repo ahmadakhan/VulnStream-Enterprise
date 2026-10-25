@@ -163,10 +163,7 @@ function cpeComponentPattern(value: string): { regex: RegExp; hasWildcard: boole
   return { regex: new RegExp(`^${source}$`, 'i'), hasWildcard, literal };
 }
 
-type GlobToken =
-  | { type: 'star' }
-  | { type: 'any' }
-  | { type: 'literal'; value: string };
+type GlobToken = { type: 'star' } | { type: 'any' } | { type: 'literal'; value: string };
 
 function globTokens(value: string): GlobToken[] {
   const tokens: GlobToken[] = [];
@@ -246,14 +243,26 @@ function hasUnescapedCpeWildcard(value: string): boolean {
   return value !== '*' && cpeComponentPattern(value).hasWildcard;
 }
 
+export interface CpeAliasOptions {
+  /** Passing either map enables symmetric alias resolution for structured CPEs. */
+  vendorAliases?: Record<string, string[]>;
+  productAliases?: Record<string, string[]>;
+}
+
 /**
- * Strict CPE 2.3 Component matching between watch-list asset CPE and vulnerability target CPE
+ * Strict CPE 2.3 Component matching between watch-list asset CPE and vulnerability target CPE.
+ *
+ * Exact component equality is always evaluated first and remains authoritative.
+ * When alias maps are supplied, a structured CPE pair whose vendor/product differ
+ * only by a thesaurus entry is matched symmetrically and flagged `viaAlias` so
+ * the caller can apply the lower alias confidence and review gate.
  */
 export function matchCPE(
   assetCpeStr: string,
   vulnCpeStr: string,
   versionRange?: NvdVersionRange,
-): { matched: boolean; reason?: string } {
+  aliases?: CpeAliasOptions,
+): { matched: boolean; viaAlias?: boolean; reason?: string } {
   const asset = parseCPE23(assetCpeStr);
   const vuln = parseCPE23(vulnCpeStr);
 
@@ -264,14 +273,22 @@ export function matchCPE(
   // Part match (application, os, hardware)
   if (!matchComponent(asset.part, vuln.part)) return { matched: false, reason: 'Part mismatch' };
 
-  // Structured identifiers require exact components; aliases are only for catalog search.
+  let viaAlias = false;
+
+  // Exact structured identifiers win. Only an explicit alias map may broaden a
+  // vendor/product comparison, and only in the symmetric thesaurus sense.
   if (!matchComponent(asset.vendor, vuln.vendor)) {
-    return { matched: false, reason: `Vendor mismatch (${asset.vendor} vs ${vuln.vendor})` };
+    if (!aliases || !matchVendorWithAliases(asset.vendor, vuln.vendor, aliases.vendorAliases))
+      return { matched: false, reason: `Vendor mismatch (${asset.vendor} vs ${vuln.vendor})` };
+    viaAlias = true;
   }
 
-  // Do not equate separate products through marketing aliases.
+  // Do not equate separate products through marketing aliases unless the
+  // operator/built-in thesaurus explicitly groups them.
   if (!matchComponent(asset.product, vuln.product)) {
-    return { matched: false, reason: `Product mismatch (${asset.product} vs ${vuln.product})` };
+    if (!aliases || !matchProductWithAliases(asset.product, vuln.product, aliases.productAliases))
+      return { matched: false, reason: `Product mismatch (${asset.product} vs ${vuln.product})` };
+    viaAlias = true;
   }
 
   // Architecture check if specified (e.g. x86_64 vs aarch64)
@@ -309,7 +326,7 @@ export function matchCPE(
       return { matched: false, reason: 'Version token mismatch' };
   }
 
-  return { matched: true };
+  return { matched: true, viaAlias };
 }
 
 /**
@@ -354,6 +371,33 @@ export const DEFAULT_PRODUCT_ALIASES: Record<string, string[]> = {
   express: ['expressjs'],
 };
 
+const normalizeAliasToken = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * Returns every spelling in the alias group that contains `value`.
+ *
+ * Candidate prefilters (the in-process inventory index and the PostgreSQL
+ * version index) must expand exactly like the matcher. Expanding only
+ * operator-managed aliases would exclude built-in pairs such as
+ * `microsoft`/`msft` before `matchVendorWithAliases` ever sees them, silently
+ * dropping a finding that the matcher considers valid.
+ */
+export function aliasGroupKeys(
+  value: string,
+  base: Record<string, string[]>,
+  custom: Record<string, string[]> = {},
+): string[] {
+  const target = normalizeAliasToken(value);
+  if (!target) return [];
+  const keys = new Set<string>();
+  for (const [canonical, aliases] of Object.entries(mergeAliasTables(base, custom))) {
+    const group = [canonical, ...aliases];
+    if (!group.some((entry) => normalizeAliasToken(entry) === target)) continue;
+    for (const entry of group) keys.add(entry.toLowerCase());
+  }
+  return [...keys];
+}
+
 /** Merges operator-managed additions onto the built-in baseline. Custom
  * entries only ever ADD aliases to a canonical key (or introduce a new
  * canonical key); they cannot remove a built-in alias, so the reviewed
@@ -363,7 +407,9 @@ function mergeAliasTables(
   custom: Record<string, string[]>,
 ): Record<string, string[]> {
   if (!Object.keys(custom).length) return base;
-  const merged: Record<string, string[]> = { ...base };
+  // A null prototype keeps operator-controlled keys such as `__proto__` as
+  // ordinary data instead of invoking the prototype setter.
+  const merged: Record<string, string[]> = Object.assign(Object.create(null), base);
   for (const [canonical, extra] of Object.entries(custom))
     merged[canonical] = [...new Set([...(merged[canonical] || []), ...extra])];
   return merged;
@@ -376,7 +422,7 @@ export function buildAliasMap(
   entries: { scope: 'VENDOR' | 'PRODUCT'; canonical: string; aliases: string[] }[],
   scope: 'VENDOR' | 'PRODUCT',
 ): Record<string, string[]> {
-  const map: Record<string, string[]> = {};
+  const map: Record<string, string[]> = Object.create(null);
   for (const entry of entries) {
     if (entry.scope !== scope) continue;
     const key = entry.canonical.toLowerCase().trim();
@@ -398,7 +444,9 @@ export function matchVendorWithAliases(
   if (a === v) return true;
 
   // Check aliases (built-in baseline + any operator-managed custom aliases)
-  for (const [canonical, aliases] of Object.entries(mergeAliasTables(DEFAULT_VENDOR_ALIASES, customAliases))) {
+  for (const [canonical, aliases] of Object.entries(
+    mergeAliasTables(DEFAULT_VENDOR_ALIASES, customAliases),
+  )) {
     const group = [canonical, ...aliases].map((s) => s.replace(/[^a-z0-9]/g, ''));
     if (group.includes(a) && group.includes(v)) return true;
   }
@@ -418,7 +466,9 @@ export function matchProductWithAliases(
 
   if (a === v) return true;
 
-  for (const [canonical, aliases] of Object.entries(mergeAliasTables(DEFAULT_PRODUCT_ALIASES, customAliases))) {
+  for (const [canonical, aliases] of Object.entries(
+    mergeAliasTables(DEFAULT_PRODUCT_ALIASES, customAliases),
+  )) {
     const group = [canonical, ...aliases].map((s) => s.replace(/[^a-z0-9]/g, ''));
     if (group.includes(a) && group.includes(v)) return true;
   }
@@ -435,10 +485,15 @@ export function matchPurl(assetPurl: string, vulnPurl: string): boolean {
   const parse = (value: string) => {
     const match = /^pkg:([a-z][a-z0-9.+-]*)\/([^?#]+)(\?[^#]*)?(#.*)?$/.exec(value.trim());
     if (!match) return null;
-    const at = match[2].lastIndexOf('@');
+    const path = match[2];
+    // A leading `@` is the npm scope, not a version delimiter. Only an `@`
+    // after the package path is a version separator, so `pkg:npm/@scope/name`
+    // keeps its full identity instead of becoming `npm/@scope/`.
+    const at = path.lastIndexOf('@');
+    const versionAt = at > path.indexOf('/') + 1 ? at : -1;
     return {
-      identity: `${match[1]}/${at > 0 ? match[2].slice(0, at) : match[2]}`,
-      version: at > 0 ? match[2].slice(at + 1) : '',
+      identity: `${match[1]}/${versionAt > 0 ? path.slice(0, versionAt) : path}`,
+      version: versionAt > 0 ? path.slice(versionAt + 1) : '',
       qualifiers: match[3] || '',
       subpath: match[4] || '',
     };
@@ -514,14 +569,18 @@ export function matchesWatchlistItem(
   if (evaluatePackages && assetPurls && vulnPurls) {
     for (const ap of assetPurls) {
       for (const vp of vulnPurls) {
-        const packageVersion = ap.split(/[?#]/)[0].split('@').pop();
-        const hasVersion = ap.split(/[?#]/)[0].lastIndexOf('@') > ap.indexOf('/') + 1;
-        const vulnHasVersion = vp.split(/[?#]/)[0].lastIndexOf('@') > vp.indexOf('/') + 1;
+        const assetMain = ap.split(/[?#]/)[0];
+        const atIdx = assetMain.lastIndexOf('@');
+        const packageVersion = atIdx > assetMain.indexOf('/') + 1 ? assetMain.slice(atIdx + 1) : '';
+        const hasVersion = atIdx > assetMain.indexOf('/') + 1;
+        const vulnMain = vp.split(/[?#]/)[0];
+        const vulnAtIdx = vulnMain.lastIndexOf('@');
+        const vulnHasVersion = vulnAtIdx > vulnMain.indexOf('/') + 1;
         if (!matchPurl(ap, vp)) continue;
-        if (versionRange && hasVersion && !isVersionInNvdRange(packageVersion!, versionRange).inRange)
+        if (versionRange && hasVersion && !isVersionInNvdRange(packageVersion, versionRange).inRange)
           continue;
         if (versionRange) {
-          const verified = hasVersion && canCompareRange(packageVersion!, versionRange);
+          const verified = hasVersion && canCompareRange(packageVersion, versionRange);
           retain({
             matched: true,
             method: 'PURL_EXACT',
@@ -554,7 +613,10 @@ export function matchesWatchlistItem(
   // 3. Strict CPE 2.3 comparison with NVD version interval evaluation
   for (const assetCpe of assetCpes) {
     for (const vulnCpe of vulnCpeMatches) {
-      const matchRes = matchCPE(assetCpe, vulnCpe, versionRange);
+      const matchRes = matchCPE(assetCpe, vulnCpe, versionRange, {
+        vendorAliases: customVendorAliases,
+        productAliases: customProductAliases,
+      });
       if (matchRes.matched) {
         const asset = parseCPE23(assetCpe);
         const vuln = parseCPE23(vulnCpe);
@@ -563,23 +625,39 @@ export function matchesWatchlistItem(
           rangeHasBounds &&
           (!asset.version || asset.version === '*' || !canCompareRange(asset.version, versionRange!)),
         );
+        if (matchRes.viaAlias) {
+          // A structured CPE pair resolved only through the thesaurus is a
+          // product correlation, not a verified exact token match. Keep it
+          // below the auto-dispatch threshold and require review when the
+          // advisory constrains a version the inventory cannot prove.
+          retain({
+            matched: true,
+            method: 'VENDOR_PRODUCT_ALIAS',
+            confidence: 85,
+            matchedCpe: vulnCpe,
+            evidence: `Matched structured CPE through the symmetric alias thesaurus (${asset.vendor}/${asset.product} -> ${vuln.vendor}/${vuln.product}) (85% confidence)`,
+            applicabilityRequiresReview: rangeNeedsReview,
+          });
+          continue;
+        }
         // An unknown inventory component cannot prove a constrained criterion,
         // including explicit versions, editions, target OS, language or updates.
-        const contextNeedsReview = (
-          [
-            'part',
-            'vendor',
-            'product',
-            'version',
-            'update',
-            'edition',
-            'language',
-            'swEdition',
-            'targetSw',
-            'targetHw',
-            'other',
-          ] as const
-        ).some((field) => asset[field] === '*' && vuln[field] !== '*') ||
+        const contextNeedsReview =
+          (
+            [
+              'part',
+              'vendor',
+              'product',
+              'version',
+              'update',
+              'edition',
+              'language',
+              'swEdition',
+              'targetSw',
+              'targetHw',
+              'other',
+            ] as const
+          ).some((field) => asset[field] === '*' && vuln[field] !== '*') ||
           (
             [
               'part',
@@ -634,10 +712,8 @@ export function matchesWatchlistItem(
     (assetVersionInput || '').trim() ||
     assetCpes
       .map((cpe) => parseCPE23(cpe))
-      .find(
-        (parsed) =>
-          parsed.isValid && parsed.version && parsed.version !== '*' && parsed.version !== '-',
-      )?.version ||
+      .find((parsed) => parsed.isValid && parsed.version && parsed.version !== '*' && parsed.version !== '-')
+      ?.version ||
     '';
   const rangeHasBounds = Boolean(versionRange && Object.values(versionRange).some(Boolean));
 
@@ -705,8 +781,18 @@ export function generateCPE23(
 ): string {
   const escape = (value: string) => value.replace(/\\/g, '\\\\').replace(/:/g, '\\:');
   const cleanPart = part || 'a';
-  const cleanVendor = escape((vendor || 'any').toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '_'));
-  const cleanProduct = escape((product || 'any').toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '_'));
+  const cleanVendor = escape(
+    (vendor || 'any')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9_.-]/g, '_'),
+  );
+  const cleanProduct = escape(
+    (product || 'any')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9_.-]/g, '_'),
+  );
   const cleanVersion = version && version !== '*' ? escape(version.trim()) : '*';
   const cleanHw = targetHw && targetHw !== '*' ? escape(targetHw.trim()) : '*';
 

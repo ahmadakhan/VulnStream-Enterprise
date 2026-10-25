@@ -2,7 +2,13 @@ import { compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
 import pg, { type PoolClient } from 'pg';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { emptyState, type AppState, type CollectionKind, type HeavyCollectionKind, COLLECTION_KINDS } from '../shared/state.ts';
+import {
+  emptyState,
+  type AppState,
+  type CollectionKind,
+  type HeavyCollectionKind,
+  COLLECTION_KINDS,
+} from '../shared/state.ts';
 import { chainAuditLogs } from '../src/utils/cryptoChain.ts';
 import type { AuditLog } from '../src/types/index.ts';
 import { orderWatchlist } from '../src/utils/watchlist.ts';
@@ -24,11 +30,23 @@ export const createPool = (url: string) =>
  */
 export const schemaLockKey = 'hashtext(COALESCE(current_schema(), current_database()))';
 
+/**
+ * The newest migration this build depends on. Production startup refuses to
+ * run against an older schema instead of failing later on a missing column.
+ */
+export const REQUIRED_SCHEMA_VERSION = 10;
+
 export async function migrate(pool: pg.Pool) {
   const client = await pool.connect();
   let failed = false;
   try {
     await client.query('BEGIN');
+    // Fail fast instead of queueing behind long-running worker transactions and
+    // stalling the application behind an AccessExclusive DDL lock.
+    await client.query("SET LOCAL lock_timeout = '10000ms'");
+    // Migrations may include index builds; do not inherit the 15-second API
+    // statement timeout.
+    await client.query("SET LOCAL statement_timeout = '300000ms'");
     await client.query(`SELECT pg_advisory_xact_lock(800001, ${schemaLockKey})`);
     const exists = await client.query("SELECT to_regclass('schema_migrations') AS name");
     const applied =
@@ -37,15 +55,41 @@ export async function migrate(pool: pg.Pool) {
     if (!applied)
       await client.query(await readFile(new URL('./migrations/001_initial.sql', import.meta.url), 'utf8'));
     if (!(await client.query('SELECT version FROM schema_migrations WHERE version=2')).rowCount)
-      await client.query(await readFile(new URL('./migrations/002_operational_events.sql', import.meta.url), 'utf8'));
+      await client.query(
+        await readFile(new URL('./migrations/002_operational_events.sql', import.meta.url), 'utf8'),
+      );
     if (!(await client.query('SELECT version FROM schema_migrations WHERE version=3')).rowCount)
-      await client.query(await readFile(new URL('./migrations/003_record_creation_order.sql', import.meta.url), 'utf8'));
+      await client.query(
+        await readFile(new URL('./migrations/003_record_creation_order.sql', import.meta.url), 'utf8'),
+      );
     if (!(await client.query('SELECT version FROM schema_migrations WHERE version=4')).rowCount)
-      await client.query(await readFile(new URL('./migrations/004_email_review_queue.sql', import.meta.url), 'utf8'));
+      await client.query(
+        await readFile(new URL('./migrations/004_email_review_queue.sql', import.meta.url), 'utf8'),
+      );
     if (!(await client.query('SELECT version FROM schema_migrations WHERE version=5')).rowCount)
-      await client.query(await readFile(new URL('./migrations/005_outbox_priority.sql', import.meta.url), 'utf8'));
+      await client.query(
+        await readFile(new URL('./migrations/005_outbox_priority.sql', import.meta.url), 'utf8'),
+      );
     if (!(await client.query('SELECT version FROM schema_migrations WHERE version=6')).rowCount)
-      await client.query(await readFile(new URL('./migrations/006_catchup_scheduler.sql', import.meta.url), 'utf8'));
+      await client.query(
+        await readFile(new URL('./migrations/006_catchup_scheduler.sql', import.meta.url), 'utf8'),
+      );
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=7')).rowCount)
+      await client.query(
+        await readFile(new URL('./migrations/007_delivery_and_audit_guards.sql', import.meta.url), 'utf8'),
+      );
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=8')).rowCount)
+      await client.query(
+        await readFile(new URL('./migrations/008_match_index.sql', import.meta.url), 'utf8'),
+      );
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=9')).rowCount)
+      await client.query(
+        await readFile(new URL('./migrations/009_safe_json_casts.sql', import.meta.url), 'utf8'),
+      );
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=10')).rowCount)
+      await client.query(
+        await readFile(new URL('./migrations/010_shared_rate_limit.sql', import.meta.url), 'utf8'),
+      );
     await client.query('COMMIT');
   } catch (e) {
     failed = true;
@@ -59,17 +103,31 @@ export async function migrate(pool: pg.Pool) {
     client.release(failed);
   }
 }
+export interface TransactionOptions {
+  /**
+   * Optional named advisory locks acquired for the duration of the transaction.
+   * Locks are sorted before acquisition to prevent deadlocks between callers.
+   * The previous single global 800002 lock serialized every write in the
+   * installation; scoped locks let independent domains proceed concurrently.
+   */
+  locks?: string[];
+}
+
 export async function transaction<T>(
   pool: pg.Pool,
   fn: (db: PoolClient) => Promise<T>,
   client?: PoolClient,
+  options: TransactionOptions = {},
 ): Promise<T> {
   const db = client || (await pool.connect());
   let failed = false;
   try {
     await db.query('BEGIN');
-    // Serializes state mutation and audit append; network I/O is never done here.
-    await db.query(`SELECT pg_advisory_xact_lock(800002, ${schemaLockKey})`);
+    // Named, transaction-scoped locks replace the former global mutation lock.
+    // Row-level locks on the records being mutated provide the per-record
+    // serialization that operators actually need.
+    for (const lock of [...(options.locks ?? [])].sort())
+      await db.query(`SELECT pg_advisory_xact_lock(hashtext($1), ${schemaLockKey})`, [lock]);
     const result = await fn(db);
     await db.query('COMMIT');
     return result;
@@ -112,6 +170,16 @@ export async function putMany(db: Db, kind: string, items: { id: string; data: u
 export async function get<T>(db: Db, kind: string, id: string): Promise<T | undefined> {
   return (await db.query('SELECT data FROM records WHERE kind=$1 AND id=$2', [kind, id])).rows[0]?.data;
 }
+/**
+ * Reads a record while holding a row-level lock. Command handlers use this for
+ * read-modify-write sequences so two concurrent operators cannot overwrite each
+ * other's changes without taking the installation-wide lock.
+ */
+export async function getForUpdate<T>(db: Db, kind: string, id: string): Promise<T | undefined> {
+  return (
+    await db.query('SELECT data FROM records WHERE kind=$1 AND id=$2 FOR UPDATE', [kind, id])
+  ).rows[0]?.data;
+}
 export async function list<T>(db: Db, kind: string): Promise<T[]> {
   return (
     await db.query(
@@ -131,9 +199,16 @@ export async function appendAudit(
   category: AuditLog['category'] = 'SECURITY',
   level: AuditLog['level'] = 'INFO',
   ipAddress: string = '',
-) {
-  await db.query(`SELECT pg_advisory_xact_lock(800002, ${schemaLockKey})`);
-  const previous = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 1')).rows[0]?.data;
+): Promise<void> {
+  // Outside a transaction, wrap the read/insert pair so the audit lock is held
+  // for the whole operation instead of being released after the lock statement.
+  if (db instanceof pg.Pool)
+    return transaction(db, (tx) => appendAudit(tx, event, details, actor, category, level, ipAddress));
+  // The audit chain is a single linked list; a dedicated named lock serializes
+  // only audit appends instead of every state mutation in the installation.
+  await db.query(`SELECT pg_advisory_xact_lock(hashtext($1), ${schemaLockKey})`, ['audit-chain']);
+  const previous = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 1 FOR UPDATE')).rows[0]
+    ?.data;
   const entry = chainAuditLogs(
     [
       {
@@ -180,9 +255,7 @@ export async function state(db: Db, options: StateOptions = {}): Promise<AppStat
   if (unbounded.length)
     rows.push(
       ...(
-        await db.query(`SELECT kind,data FROM records WHERE kind=ANY($1::text[]) ${recordOrder}`, [
-          unbounded,
-        ])
+        await db.query(`SELECT kind,data FROM records WHERE kind=ANY($1::text[]) ${recordOrder}`, [unbounded])
       ).rows,
     );
   for (const kind of bounded) {
@@ -191,18 +264,13 @@ export async function state(db: Db, options: StateOptions = {}): Promise<AppStat
     if (kind === 'auditLogs') continue;
     rows.push(
       ...(
-        await db.query(`SELECT kind,data FROM records WHERE kind=$1 ${recordOrder} LIMIT $2`, [
-          kind,
-          limit,
-        ])
+        await db.query(`SELECT kind,data FROM records WHERE kind=$1 ${recordOrder} LIMIT $2`, [kind, limit])
       ).rows,
     );
   }
   // Audit rows live in their own append-only table. Keep the historical 500-row
   // default for internal snapshots; the browser always supplies an explicit limit.
-  const auditLimit = bounded.has('auditLogs')
-    ? Math.max(0, Math.floor(limits.auditLogs!))
-    : 500;
+  const auditLimit = bounded.has('auditLogs') ? Math.max(0, Math.floor(limits.auditLogs!)) : 500;
   if (auditLimit)
     rows.push(
       ...(await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT $1', [auditLimit])).rows.map(
@@ -211,7 +279,7 @@ export async function state(db: Db, options: StateOptions = {}): Promise<AppStat
     );
   rows.push(
     ...(
-      await db.query("SELECT kind,data FROM records WHERE kind=ANY($1::text[])", [
+      await db.query('SELECT kind,data FROM records WHERE kind=ANY($1::text[])', [
         ['settings', 'emailConfig', 'template'],
       ])
     ).rows,
@@ -280,7 +348,15 @@ async function attachCounts(db: Db, snapshot: AppState) {
 /** Pipeline-only snapshot avoids loading executions, delivery logs, recipients and audit history. */
 export async function pipelineState(db: Db): Promise<AppState> {
   const snapshot = emptyState();
-  const kinds = ['settings', 'watchlist', 'cveData', 'findings', 'alertedCves', 'intelligenceArticles', 'template'];
+  const kinds = [
+    'settings',
+    'watchlist',
+    'cveData',
+    'findings',
+    'alertedCves',
+    'intelligenceArticles',
+    'template',
+  ];
   const rows = await db.query(
     'SELECT kind,data FROM records WHERE kind=ANY($1::text[]) ORDER BY updated_at DESC,id',
     [kinds],
