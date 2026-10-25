@@ -99,6 +99,17 @@ export interface OperationalEvent {
   message: string;
   runId?: string;
   context: Record<string, unknown>;
+  /** Correlation-worker metadata, present only on telemetry-sourced events. */
+  trackingId?: string;
+  /** Raw telemetry event name (dot-namespaced), distinct from the pipeline `code`. */
+  event?: string;
+  /** Worker-local sequence; restarts per process, so it orders within a writer only. */
+  sequence?: number;
+  ingestionLatencyMs?: number;
+  extractionLatencyMs?: number;
+  totalDatabaseTimeMs?: number;
+  /** Retry attempt number for transient database failures. */
+  attempt?: number;
 }
 
 export interface CVSSData {
@@ -596,6 +607,17 @@ export interface AppSettings {
     maxLoginAttempts: number;
     lockoutMins: number;
   };
+  /**
+   * Operational logging detail level.
+   *  - `standard`: lifecycle and security-relevant events only; the correlation
+   *    worker's per-advisory telemetry is dropped at the source, so the table
+   *    stays small and fast to search during an incident.
+   *  - `verbose`: every correlation telemetry entry is persisted, including
+   *    per-advisory extraction and database timings, for deep forensics.
+   * Enforced server-side: selecting `standard` stops the rows being written at
+   * all, rather than hiding them from the viewer after the fact.
+   */
+  logVerbosity: 'standard' | 'verbose';
   ntpConfig: {
     enabled: boolean;
     server: string;

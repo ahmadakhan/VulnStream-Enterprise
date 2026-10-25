@@ -78,7 +78,15 @@ export async function readEvents(
   values.push(query.limit + 1);
   const rows = (
     await db.query(
-      `SELECT id::text,occurred_at,category,level,code,message,run_id,context FROM operational_events ${clauses.length ? 'WHERE ' + clauses.join(' AND ') : ''} ORDER BY operational_events.id DESC LIMIT $${values.length}`,
+      // Telemetry columns are surfaced too: they distinguish a correlation
+      // worker event from a pipeline event and carry the per-advisory timings
+      // an operator needs to place an event on a timeline.
+      `SELECT id::text,occurred_at,category,level,code,message,run_id,context,
+              sequence,tracking_id::text AS tracking_id,event,
+              ingestion_latency_ms,extraction_latency_ms,total_database_time_ms,
+              count,attempt
+         FROM operational_events ${clauses.length ? 'WHERE ' + clauses.join(' AND ') : ''}
+        ORDER BY operational_events.id DESC LIMIT $${values.length}`,
       values,
     )
   ).rows;
@@ -94,6 +102,21 @@ export async function readEvents(
       message: row.message,
       runId: row.run_id || undefined,
       context: row.context,
+      // Correlation-worker metadata. Omitted rather than null so the client can
+      // render a compact row for ordinary pipeline events.
+      ...(row.tracking_id ? { trackingId: row.tracking_id } : {}),
+      ...(row.event ? { event: row.event } : {}),
+      ...(row.sequence !== null && row.sequence !== undefined ? { sequence: Number(row.sequence) } : {}),
+      ...(row.ingestion_latency_ms !== null && row.ingestion_latency_ms !== undefined
+        ? { ingestionLatencyMs: Number(row.ingestion_latency_ms) }
+        : {}),
+      ...(row.extraction_latency_ms !== null && row.extraction_latency_ms !== undefined
+        ? { extractionLatencyMs: Number(row.extraction_latency_ms) }
+        : {}),
+      ...(row.total_database_time_ms !== null && row.total_database_time_ms !== undefined
+        ? { totalDatabaseTimeMs: Number(row.total_database_time_ms) }
+        : {}),
+      ...(row.attempt !== null && row.attempt !== undefined ? { attempt: Number(row.attempt) } : {}),
     })),
     nextCursor: hasMore ? selected[selected.length - 1].id : null,
   };

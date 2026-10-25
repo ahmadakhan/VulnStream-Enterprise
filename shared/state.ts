@@ -44,6 +44,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     maxLoginAttempts: 5,
     lockoutMins: 15,
   },
+  // Standard keeps the event table small enough to stay fast during an
+  // incident; verbose is an explicit forensic choice.
+  logVerbosity: 'standard',
   ntpConfig: { enabled: false, server: '', driftToleranceMs: 50 },
   mailgunConfig: { enabled: false, apiKey: '', domain: '', fromEmail: '' },
   retentionConfig: {

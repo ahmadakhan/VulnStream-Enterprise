@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { EmailProviderSettings } from './EmailProviderSettings';
+import type { AppSettings } from '../types';
 import './settings.css';
 
 const field = 'ui-field';
@@ -69,6 +70,7 @@ export function SettingsView() {
     form.schedulerIntervalMinutes !== settings.schedulerIntervalMinutes ||
     form.advisoryPrefix !== settings.advisoryPrefix ||
     form.securityPolicy.sessionTimeoutMins !== settings.securityPolicy.sessionTimeoutMins ||
+    (form.logVerbosity ?? 'standard') !== (settings.logVerbosity ?? 'standard') ||
     form.schedulerEnabled !== settings.schedulerEnabled ||
     form.autoDispatchEnabled !== settings.autoDispatchEnabled;
   const sections = [
@@ -240,6 +242,25 @@ export function SettingsView() {
                     />
                     <span className="ui-description mt-1.5 block">
                       Inactive sessions expire after this period.
+                    </span>
+                  </label>
+                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                    Operational log detail
+                    <select
+                      className={field}
+                      value={form.logVerbosity ?? 'standard'}
+                      onChange={(e) =>
+                        setForm({ ...form, logVerbosity: e.target.value as AppSettings['logVerbosity'] })
+                      }
+                    >
+                      <option value="standard">Standard — lifecycle &amp; security events</option>
+                      <option value="verbose">Verbose — full forensic telemetry</option>
+                    </select>
+                    <span className="ui-description mt-1.5 block">
+                      Standard records pipeline, feed, matching, delivery and security events, plus every
+                      warning and error. Verbose additionally persists per-advisory correlation telemetry
+                      (extraction and database timings). Warnings and errors are never suppressed. Applied
+                      to the next advisory without a restart.
                     </span>
                   </label>
                 </div>

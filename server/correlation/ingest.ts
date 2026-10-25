@@ -21,11 +21,40 @@ export const transientDatabaseError = (error: unknown) =>
   (error instanceof Error &&
     /connection terminated|connection timeout|timeout exceeded when trying to connect/i.test(error.message));
 export class AdvisoryIngestor {
+  /**
+   * Cached logging detail level, refreshed at the start of each advisory.
+   *
+   * It cannot be resolved inside the ingest transaction: the first telemetry
+   * entries (`ingestion.started`, `extraction.completed`) are emitted before a
+   * connection is even acquired, so reading the setting later meant those lines
+   * were filtered under the previous level and the advisory committed with an
+   * empty telemetry buffer. Refreshing per advisory keeps a settings change
+   * effective without a restart while ensuring the level is known up front.
+   */
+  private verbosityLevel: 'standard' | 'verbose' = 'standard';
+  private verbosityCheckedAt = 0;
   constructor(
     readonly telemetry: CorrelationTelemetry,
     readonly deadLetterQueue: DeadLetterQueue,
     private readonly engine = new TextCorrelationEngine(),
   ) {}
+  /** Refresh from the settings record at most once per second. */
+  private async refreshVerbosity(pool: Pool): Promise<void> {
+    const now = Date.now();
+    if (now - this.verbosityCheckedAt < 1000) return;
+    this.verbosityCheckedAt = now;
+    try {
+      const row = (
+        await pool.query<{ value: string | null }>(
+          "SELECT data->>'logVerbosity' AS value FROM records WHERE kind='settings' AND id='main'",
+        )
+      ).rows[0];
+      this.verbosityLevel = row?.value === 'verbose' ? 'verbose' : 'standard';
+    } catch {
+      this.verbosityLevel = 'standard';
+    }
+    this.telemetry.verbosity = this.verbosityLevel;
+  }
   /** Resolve the operator-configured cluster window; falls back to the
    * default when the policy row is absent (pre-021 database mid-migration). */
   private async clusterWindowDays(query: TimedQuery): Promise<number> {
@@ -48,6 +77,9 @@ export class AdvisoryIngestor {
   ): Promise<IngestionResult> {
     const started = performance.now();
     let databaseTime = 0;
+    // Resolve the logging level before the first entry so the whole advisory is
+    // recorded under one consistent level.
+    await this.refreshVerbosity(dbPool);
     this.telemetry.log('INFO', 'ingestion.started', { trackingId });
     const parsed = AdvisoryInputSchema.safeParse(rawInput);
     if (!parsed.success) {
@@ -104,7 +136,7 @@ export class AdvisoryIngestor {
           await query('BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED');
           await query("SET LOCAL statement_timeout='3500ms'");
           await query("SET LOCAL lock_timeout='2000ms'");
-          await query("SET LOCAL idle_in_transaction_session_timeout='5000ms'");
+          await query('SET LOCAL idle_in_transaction_session_timeout=\'5000ms\'');
           const duplicate = await query('SELECT id FROM unstructured_advisories WHERE fingerprint=$1', [
             fingerprint,
           ]);
@@ -195,6 +227,8 @@ export class AdvisoryIngestor {
       this.telemetry.latencyTotal += performance.now() - started;
     }
   }
+
+
 
   /**
    * Durable fallback chain: encrypted spool first, then the database.

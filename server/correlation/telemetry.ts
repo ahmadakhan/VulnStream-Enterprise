@@ -1,6 +1,31 @@
 import type { CorrelationLog } from '../../shared/correlation.ts';
 import type { Pool, PoolClient } from 'pg';
-/** Fixed allowlist: caller-controlled strings, errors, URLs and payloads cannot enter context. */
+
+/**
+ * Which telemetry entries are persisted at `standard` verbosity.
+ *
+ * The rule is about operational significance, not severity alone: a per-advisory
+ * `ingestion.committed` line is normal throughput and carries no investigative
+ * value, while `database.transaction_retry` on an INFO-ish path, an extraction
+ * isolation, or anything WARN/CRITICAL is exactly what an operator needs during
+ * an incident — those are never dropped.
+ *
+ * Entries are matched by exact name, so a new event is retained unless it is
+ * explicitly listed here. Burning forensic evidence by default is worse than
+ * writing an extra row.
+ */
+const STANDARD_DROP = new Set([
+  'ingestion.started',
+  'ingestion.committed',
+  'extraction.completed',
+  'ingestion.duplicate',
+]);
+const STANDARD_KEEP_PREFIXES = ['dead_letter.', 'database.', 'extraction.isolated', 'validation.'];
+
+/**
+ * Fixed allowlist: caller-controlled strings, errors, URLs and payloads cannot
+ * enter context. Also enforces the operator-selected logging detail level.
+ */
 export class CorrelationTelemetry {
   private sequence = 0;
   readonly logs: CorrelationLog[] = [];
@@ -13,6 +38,14 @@ export class CorrelationTelemetry {
   private drainWaiters = new Set<(error?: Error) => void>();
   private outputError?: Error;
   droppedLogs = 0;
+  /**
+   * Operational logging detail. Mutated at runtime from settings so an
+   * operator can raise verbosity without restarting the worker; defaults to
+   * standard so an unconfigured process never writes forensic volume.
+   */
+  verbosity: 'standard' | 'verbose' = 'standard';
+  /** Count of entries suppressed by standard verbosity, for the health view. */
+  suppressedByVerbosity = 0;
   constructor(private readonly output: NodeJS.WritableStream = process.stdout) {
     output.on('error', () => this.failOutput());
     output.on('close', () => this.failOutput());
@@ -76,13 +109,32 @@ export class CorrelationTelemetry {
       const value = metrics[key];
       if (typeof value === 'number' && Number.isFinite(value)) entry[key] = Math.round(value * 100) / 100;
     }
-    this.logs.push(entry);
-    if (this.logs.length > 300) this.logs.shift();
+    // Suppression is decided before the entry joins the viewer ring, so the
+    // in-memory view matches what is actually durable. Stdout is emitted
+    // regardless of verbosity: an operator watching the worker live still sees
+    // every line, while the shared event table stays small in standard mode.
+    // WARN/CRITICAL and the diagnostic prefixes are never suppressed.
+    const suppressed = this.verbosity === 'standard' && !this.shouldPersistInStandard(entry);
+    if (suppressed) this.suppressedByVerbosity++;
+    else {
+      this.logs.push(entry);
+      // Bound the viewer ring. Under verbose logging this fills quickly, which
+      // is the operator's choice; standard logging keeps it mostly idle.
+      if (this.logs.length > (this.verbosity === 'verbose' ? 1000 : 300)) this.logs.shift();
+    }
     // Bound both the viewer ring and the stdout queue. Admission waits for drain.
     const outputEntry = this.scrub(entry);
     if (!this.outputError && this.pendingOutput.length < 512) this.pendingOutput.push(JSON.stringify(outputEntry) + '\n');
     else this.droppedLogs++;
     this.flushOutput();
+  }
+  /** True when a routine, non-diagnostic entry is worth a durable row at the
+   * standard detail level. Only INFO-level chatter is a candidate for
+   * suppression; WARN and CRITICAL always persist. */
+  private shouldPersistInStandard(entry: CorrelationLog): boolean {
+    if (entry.level !== 'INFO') return true;
+    if (STANDARD_KEEP_PREFIXES.some((prefix) => entry.event.startsWith(prefix))) return true;
+    return !STANDARD_DROP.has(entry.event);
   }
   /** Write-ahead logging: persist telemetry entries to operational_events before commit.
    * Caller MUST call this inside the same transaction that commits the advisory.

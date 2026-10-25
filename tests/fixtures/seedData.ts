@@ -709,6 +709,9 @@ export const INITIAL_SETTINGS: AppSettings = {
   schedulerEnabled: false,
   advisoryPrefix: 'ADV-2026-',
   autoDispatchEnabled: true,
+  // Fixtures use standard detail: verbose telemetry is a deliberate forensic
+  // choice an operator makes against a live installation.
+  logVerbosity: 'standard',
   digestBatchingEnabled: true,
   digestWindowMinutes: 3,
   webhookSigningSecret: 'whsec_enterprise_hmac_prod_99x8...',

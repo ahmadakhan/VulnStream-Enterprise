@@ -19,8 +19,9 @@ import { CorrelationTelemetry } from '../server/correlation/telemetry.ts';
 import { DeadLetterQueue } from '../server/correlation/deadLetter.ts';
 import { AdvisoryIngestor } from '../server/correlation/ingest.ts';
 import { PipelineSupervisor } from '../server/correlation/supervisor.ts';
-import { createPool, migrate } from '../server/db.ts';
+import { createPool, migrate, put, get } from '../server/db.ts';
 import { decrypt } from '../server/secrets.ts';
+import { DEFAULT_SETTINGS } from '../shared/state.ts';
 const silent = () =>
   new CorrelationTelemetry(
     new Writable({
@@ -152,6 +153,94 @@ test('telemetry persistence drains only the entries of the committing advisory',
     "another advisory's telemetry must stay buffered",
   );
 });
+test('standard verbosity suppresses only routine telemetry, never warnings or errors', () => {
+  // The logging level must reduce volume without ever losing the evidence an
+  // operator needs during an incident.
+  const telemetry = silent();
+  telemetry.verbosity = 'standard';
+  telemetry.log('INFO', 'ingestion.started', { trackingId: randomUUID() });
+  telemetry.log('INFO', 'ingestion.committed', { trackingId: randomUUID() });
+  telemetry.log('INFO', 'extraction.completed', { trackingId: randomUUID() });
+  // Never suppressible at any level:
+  telemetry.log('WARN', 'database.transaction_retry', { trackingId: randomUUID(), attempt: 1 });
+  telemetry.log('CRITICAL', 'extraction.isolated', { trackingId: randomUUID() });
+  telemetry.log('INFO', 'dead_letter.spool_exhausted', { trackingId: randomUUID() });
+  telemetry.log('INFO', 'validation.failed', { trackingId: randomUUID(), count: 2 });
+  assert.deepEqual(
+    telemetry.logs.map((entry) => entry.event),
+    [
+      'database.transaction_retry',
+      'extraction.isolated',
+      'dead_letter.spool_exhausted',
+      'validation.failed',
+    ],
+    'WARN/CRITICAL and diagnostic prefixes must survive standard verbosity',
+  );
+  assert.equal(telemetry.suppressedByVerbosity, 3);
+
+  // Verbose keeps everything.
+  const verbose = silent();
+  verbose.verbosity = 'verbose';
+  verbose.log('INFO', 'ingestion.started', { trackingId: randomUUID() });
+  verbose.log('INFO', 'ingestion.committed', { trackingId: randomUUID() });
+  assert.equal(verbose.logs.length, 2);
+  assert.equal(verbose.suppressedByVerbosity, 0);
+});
+test(
+  'log verbosity setting controls durable telemetry volume end to end',
+  { skip: !process.env.TEST_DATABASE_URL },
+  async () => {
+    // The setting must be applied before the first telemetry entry. Resolving it
+    // later in the transaction meant the early entries were filtered under the
+    // previous level and the advisory committed with an empty buffer.
+    const master = createPool(process.env.TEST_DATABASE_URL!);
+    const schema = 'correlation_verbosity_' + randomBytes(12).toString('hex');
+    let pool: pg.Pool | undefined;
+    try {
+      await master.query(`CREATE SCHEMA ${schema}`);
+      pool = new pg.Pool({
+        connectionString: process.env.TEST_DATABASE_URL,
+        options: `-c search_path=${schema}`,
+        max: 3,
+      });
+      await migrate(pool);
+      const mk = () => {
+        const telemetry = silent();
+        return {
+          telemetry,
+          ingestor: new AdvisoryIngestor(
+            telemetry,
+            new DeadLetterQueue(join(tmpdir(), 'vlq-' + randomBytes(6).toString('hex')), key, telemetry),
+          ),
+        };
+      };
+      const rows = async () =>
+        Number((await pool!.query('SELECT count(*)::int AS n FROM operational_events')).rows[0].n);
+      const advisory = (tag: string) => ({
+        title: 'Kubernetes actively exploited',
+        content: 'An unpatched zero-day vulnerability affects k8s.',
+        url: `https://example.org/verbosity/${tag}-${randomUUID()}`,
+      });
+
+      await put(pool, 'settings', 'main', { ...DEFAULT_SETTINGS, logVerbosity: 'standard' });
+      const beforeStandard = await rows();
+      assert.equal(await mk().ingestor.processIncomingAdvisory(advisory('std'), pool), 'PROCESSED');
+      assert.equal(await rows(), beforeStandard, 'standard must not persist routine telemetry');
+
+      await put(pool, 'settings', 'main', { ...DEFAULT_SETTINGS, logVerbosity: 'verbose' });
+      const beforeVerbose = await rows();
+      await mk().ingestor.processIncomingAdvisory(advisory('vrb'), pool);
+      assert.ok(
+        (await rows()) > beforeVerbose,
+        'verbose must persist the per-advisory telemetry',
+      );
+    } finally {
+      await pool?.end();
+      await master.query(`DROP SCHEMA ${schema} CASCADE`);
+      await master.end();
+    }
+  },
+);
 test('a full dead-letter spool must not silently discard the advisory', async () => {
   // The spool exists to guarantee a failed advisory is never lost. When it is
   // full, throwing loses the very record it was meant to protect; the caller
@@ -437,7 +526,10 @@ test(
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        telemetry.log('INFO', 'ingestion.started', { trackingId });
+        // Use a diagnostic entry: standard verbosity deliberately suppresses
+        // routine lifecycle chatter, and this test is about the clock, not
+        // about which entries survive.
+        telemetry.log('WARN', 'database.transaction_retry', { trackingId });
         await telemetry.persistBeforeCommit(client, trackingId);
         await client.query('COMMIT');
       } finally {

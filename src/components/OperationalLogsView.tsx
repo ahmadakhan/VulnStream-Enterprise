@@ -18,6 +18,7 @@ import { Pagination } from './Pagination';
 import { csvCell } from '../utils/csv';
 import { useCollection } from '../hooks/useCollection';
 import { LogDetailModal } from './LogDetailModal';
+import { EventDetailPanel } from './EventDetailPanel';
 import { formatEventContext } from '../utils/eventText';
 
 const AuditTrailView: React.FC = () => {
@@ -568,14 +569,21 @@ export const OperationalLogsView: React.FC = () => {
             {events.length > 0 && (
               <div className="ui-panel overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1080px] table-fixed text-left text-xs">
+                  <table className="w-full min-w-[1040px] table-fixed text-left text-xs">
                     <colgroup>
-                      <col style={{ width: '11%' }} />
-                      <col style={{ width: '11%' }} />
-                      <col style={{ width: '10%' }} />
-                      <col style={{ width: '12%' }} />
-                      <col style={{ width: '32%' }} />
-                      <col style={{ width: '24%' }} />
+                      {/* table-fixed distributes width from these percentages and
+                          will not grow a column to fit content, so the
+                          timestamp needs enough for "Oct 25, 2026, 9:12:00 PM
+                          UTC" and the code column enough for the longest
+                          dot-namespaced event name. Narrower values caused the
+                          timestamp to clip and the code to overrun into the
+                          message column. */}
+                      <col style={{ width: '17%' }} />
+                      <col style={{ width: '13%' }} />
+                      <col style={{ width: '8%' }} />
+                      <col style={{ width: '16%' }} />
+                      <col style={{ width: '30%' }} />
+                      <col style={{ width: '16%' }} />
                     </colgroup>
                     <thead className="border-b border-zinc-800/80 bg-zinc-950/80 font-mono text-[10px] uppercase tracking-wider text-zinc-500 light:border-zinc-200 light:bg-zinc-100 light:text-zinc-600">
                       <tr>
@@ -594,16 +602,19 @@ export const OperationalLogsView: React.FC = () => {
                           onClick={() => setSelectedEvent(event)}
                           className="cursor-pointer transition hover:bg-zinc-800/25 light:hover:bg-zinc-50"
                         >
-                          <td className="whitespace-nowrap px-4 py-3.5 text-[11px] text-zinc-400 light:text-zinc-600">
-                            {new Intl.DateTimeFormat(undefined, {
-                              dateStyle: 'medium',
-                              timeStyle: 'medium',
-                              timeZone: 'UTC',
-                            }).format(new Date(event.timestamp))}{' '}
-                            <span className="text-zinc-600">UTC</span>
+                          <td className="px-4 py-3.5 align-top text-[11px] leading-tight text-zinc-400 light:text-zinc-600">
+                            {/* Two lines, not one nowrap line: at the narrow
+                                column width the single-line form clipped the
+                                value ("Oct 25, 2026, 9:"). */}
+                            <div className="whitespace-nowrap tabular-nums">
+                              {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(event.timestamp))}
+                            </div>
+                            <div className="mt-0.5 whitespace-nowrap font-mono text-[10px] tabular-nums text-zinc-500">
+                              {new Intl.DateTimeFormat(undefined, { timeStyle: "medium", timeZone: "UTC" }).format(new Date(event.timestamp))} UTC
+                            </div>
                           </td>
-                          <td className="px-4 py-3.5 text-[11px] text-zinc-300 light:text-zinc-700">
-                            <span className="rounded-md border border-zinc-700/70 bg-zinc-800/60 px-2 py-1 light:border-zinc-200 light:bg-zinc-100">
+                          <td className="px-4 py-3.5 align-top text-[11px] text-zinc-300 light:text-zinc-700">
+                            <span className="inline-block max-w-full truncate rounded-md border-zinc-700/70 bg-zinc-800/60 px-2 py-1 light:border-zinc-200 light:bg-zinc-100">
                               {event.category}
                             </span>
                           </td>
@@ -629,47 +640,43 @@ export const OperationalLogsView: React.FC = () => {
                             <div className="text-xs font-semibold text-zinc-200 light:text-zinc-900">
                               {event.message}
                             </div>
-                            {event.level === 'ERROR' && (
-                              <div className="mt-1 space-y-1">
-                                {event.context?.error !== undefined && (
-                                  <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-rose-500/15 bg-rose-950/20 p-2 text-[10px] text-rose-300 light:text-rose-800">
-                                    {String(event.context.error as unknown as string)}
-                                  </pre>
-                                )}
-                                {event.context?.errorType !== undefined && (
-                                  <div className="text-[10px] text-zinc-400 light:text-zinc-600">
-                                    Error type{' '}
-                                    <span className="font-medium text-rose-300 light:text-rose-700">
-                                      {event.context.errorType as string}
-                                    </span>
-                                  </div>
-                                )}
-                                {event.context?.component !== undefined && (
-                                  <div className="text-[10px] text-zinc-400 light:text-zinc-600">
-                                    Component{' '}
-                                    <span className="font-medium text-zinc-300 light:text-zinc-800">
-                                      {event.context.component as string}
-                                    </span>
-                                  </div>
-                                )}
+                            {event.level === 'ERROR' && event.context?.error !== undefined && (
+                              <div className="mt-1 line-clamp-1 font-mono text-[10px] text-rose-300 light:text-rose-700">
+                                {String(event.context.error as string).split('\n')[0]}
                               </div>
                             )}
-                            {event.context && Object.keys(event.context).length > 0 && (
-                              <details className="mt-1" onClick={(e) => e.stopPropagation()}>
-                                <summary className="cursor-pointer text-[10px] font-medium text-blue-300 underline decoration-blue-300/30 underline-offset-2 light:text-blue-700">
-                                  View event details
-                                </summary>
-                                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-700/50 bg-zinc-950/80 p-3 text-[11px] leading-relaxed text-zinc-300 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-700">
-                                  {formatEventContext(event.context)}
-                                </pre>
-                              </details>
-                            )}
+                            <div className="mt-1.5 flex-wrap items-center gap-1.5">
+                              {event.totalDatabaseTimeMs !== undefined && (
+                                <span className="rounded border-zinc-700/60 bg-zinc-800/50 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 light:border-zinc-200 light:bg-zinc-100 light:text-zinc-600">
+                                  DB {event.totalDatabaseTimeMs.toFixed(0)} ms
+                                </span>
+                              )}
+                              {event.extractionLatencyMs !== undefined && (
+                                <span className="rounded border-zinc-700/60 bg-zinc-800/50 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 light:border-zinc-200 light:bg-zinc-100 light:text-zinc-600">
+                                  extract {event.extractionLatencyMs.toFixed(0)} ms
+                                </span>
+                              )}
+                              {event.trackingId && (
+                                <span className="rounded border-teal-500/20 bg-teal-500/10 px-1.5 py-0.5 font-mono text-[9px] text-teal-300 light:text-teal-700">
+                                  tracked
+                                </span>
+                              )}
+                              {Object.keys(event.context ?? {}).length > 0 && (
+                                <span className="font-mono text-[9px] text-zinc-500">
+                                  {Object.keys(event.context).length} field
+                                  {Object.keys(event.context).length === 1 ? '' : 's'}
+                                </span>
+                              )}
+                            </div>
                           </td>
-                          <td className="truncate px-4 py-3.5 font-mono text-[11px] text-zinc-400 light:text-zinc-600">
+                          <td className="px-4 py-3.5 align-top font-mono text-[11px] text-zinc-400 light:text-zinc-600">
                             {event.runId ? (
-                              <span className="inline-flex items-center gap-1">
-                                <Cpu className="h-3 w-3 text-indigo-400 light:text-indigo-600" />
-                                {event.runId}
+                              /* min-w-0 + truncate keeps a UUID inside its cell;
+                                 a bare inline-flex row previously overran the
+                                 table's right edge. */
+                              <span className="flex min-w-0 items-center gap-1" title={event.runId}>
+                                <Cpu className="h-3 w-3 shrink-0 text-indigo-400 light:text-indigo-600" />
+                                <span className="truncate">{event.runId.slice(0, 8)}</span>
                               </span>
                             ) : (
                               '—'
@@ -709,24 +716,15 @@ export const OperationalLogsView: React.FC = () => {
       )}
 
       {selectedEvent && (
-        <LogDetailModal
-          icon={<Cpu className="h-4 w-4" />}
-          eyebrow={selectedEvent.category}
-          title={selectedEvent.message}
-          level={selectedEvent.level}
-          timestamp={selectedEvent.timestamp}
+        <EventDetailPanel
+          event={selectedEvent}
           onClose={() => setSelectedEvent(null)}
-          fields={[
-            { label: 'Code', value: selectedEvent.code, mono: true },
-            { label: 'Execution ID', value: selectedEvent.runId || '—', mono: true },
-            { label: 'Entry ID', value: selectedEvent.id, mono: true },
-            {
-              label: 'Event details',
-              value: formatEventContext(selectedEvent.context),
-              block: true,
-              hidden: !selectedEvent.context || Object.keys(selectedEvent.context).length === 0,
-            },
-          ]}
+          onFilterByTrackingId={(trackingId) => {
+            setSelectedEvent(null);
+            setRunId('');
+            setQuery(trackingId);
+            setCursor('');
+          }}
         />
       )}
     </div>

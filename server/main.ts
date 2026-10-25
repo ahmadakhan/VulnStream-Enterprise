@@ -1,3 +1,19 @@
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+const _envPath = join(process.cwd(), '.env');
+if (existsSync(_envPath) && !process.env.DATABASE_URL) {
+  const _raw = readFileSync(_envPath, 'utf8');
+  for (const _line of _raw.split(String.fromCharCode(10))) {
+    const _trimmed = _line.trim();
+    if (!_trimmed || _trimmed.startsWith('#')) continue;
+    const _eq = _trimmed.indexOf('=');
+    if (_eq === -1) continue;
+    const _key = _trimmed.slice(0, _eq).trim();
+    const _value = _trimmed.slice(_eq + 1).trim().replace(/^['"]|['"]$/g, '');
+    if (!(_key in process.env)) process.env[_key] = _value;
+  }
+}
+
 import { backfillCorrelationInventory } from './correlation/inventory.ts';
 import { CorrelationRuntime } from './correlation/runtime.ts';
 import { writeEvent } from './events';

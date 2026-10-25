@@ -307,6 +307,9 @@ export const settingsSchema = z.object({
     maxLoginAttempts: z.literal(5),
     lockoutMins: z.literal(15),
   }),
+  // Defaults to 'standard' so an older client that omits the field cannot
+  // silently switch an installation into high-volume forensic logging.
+  logVerbosity: z.enum(['standard', 'verbose']).default('standard'),
   ntpConfig: z.object({
     enabled: z.literal(false),
     server: z.literal(''),
