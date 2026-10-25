@@ -108,7 +108,15 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: false });
       const source = { id: 'catchup', name: 'NVD catch-up', type: 'NVD_API', url: 'https://example.com/nvd', authType: 'NONE', rateLimitPerMin: 600, enabled: true };
       await save('feeds', source.id, source);
-      const request = async () => ({ status: 200, headers: {}, body: JSON.stringify({ startIndex: 0, totalResults: 0, vulnerabilities: [] }) });
+      const windows: Array<{ start: number; end: number }> = [];
+      const request = async (raw: string) => {
+        const url = new URL(raw);
+        windows.push({
+          start: Date.parse(url.searchParams.get('lastModStartDate')!),
+          end: Date.parse(url.searchParams.get('lastModEndDate')!),
+        });
+        return { status: 200, headers: {}, body: JSON.stringify({ startIndex: 0, totalResults: 0, vulnerabilities: [] }) };
+      };
       await queueRun(pool, 24, 'test');
       await processPipeline(pool, config, request);
       const cursor = await get<any>(pool, 'feedCursors', source.id);
@@ -117,11 +125,16 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       assert.equal(await processPipeline(pool, config, request), false);
       assert.equal((await get<any>(pool, 'feedCursors', source.id)).cursor, new Date(old).toISOString());
       await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: true });
+      windows.length = 0;
       assert.equal(await processPipeline(pool, config, request), true);
+      // A single run may consume several consecutive catch-up windows, but each
+      // individual provider request must remain bounded to one day.
+      assert.ok(windows.length > 0);
+      for (const window of windows) assert.ok(window.end - window.start <= 86400000);
       const next = await get<any>(pool, 'feedCursors', source.id);
       assert.ok(Date.parse(next.cursor) > old);
-      assert.ok(Date.parse(next.cursor) - old <= 86400000);
-      assert.equal(next.hasMore, true);
+      assert.ok(Date.parse(next.cursor) >= Date.now() - 60000);
+      assert.equal(next.hasMore, false);
       await save('feeds', source.id, { ...source, enabled: false });
       assert.equal(await processPipeline(pool, config, request), false);
     });

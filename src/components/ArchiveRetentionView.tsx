@@ -20,7 +20,13 @@ import {
   X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import type { RetentionConfig, RetentionRunResult } from '../types';
+import type {
+  AuditLog,
+  RetentionConfig,
+  RetentionKind,
+  RetentionPreview,
+  RetentionRunResult,
+} from '../types';
 
 const FALLBACK: RetentionConfig = {
   enabled: false,
@@ -148,16 +154,12 @@ export const ArchiveRetentionView: React.FC = () => {
     settings,
     updateSettings,
     session,
-    cveData,
-    intelligenceArticles,
-    findings,
-    advisories,
-    emailLogs,
-    webhookLogs,
-    executions,
-    auditLogs,
+    counts,
     setActiveTab,
     runRetentionCleanup,
+    previewRetention,
+    fetchCollection,
+    refreshVersion,
   } = useApp();
   const admin = session?.role === 'ADMIN';
 
@@ -168,6 +170,10 @@ export const ArchiveRetentionView: React.FC = () => {
   const [running, setRunning] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [runNotice, setRunNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  // Exact footprint counts come from the server. The snapshot only carries
+  // capped recent slices, so computing totals from it would under-report.
+  const [preview, setPreview] = useState<RetentionPreview | null>(null);
+  const [previewVersion, setPreviewVersion] = useState(0);
   const dirty = JSON.stringify(form) !== JSON.stringify(saved);
 
   useEffect(() => {
@@ -180,6 +186,30 @@ export const ArchiveRetentionView: React.FC = () => {
   useEffect(() => {
     if (dirty || !form.enabled) setConfirming(false);
   }, [dirty, form.enabled]);
+
+  // Refresh the server-side footprint as the operator edits the policy. The
+  // context callback is intentionally omitted from the dependency list: the
+  // provider recreates it on every clock tick, which would otherwise refetch
+  // this preview once per second.
+  useEffect(() => {
+    if (!admin) return;
+    let active = true;
+    const timer = setTimeout(() => {
+      void previewRetention({
+        enabled: form.enabled,
+        retentionHours: form.retentionHours,
+        maxArchivedRecords: form.maxArchivedRecords,
+        retentionMode: form.retentionMode,
+      }).then((value) => {
+        if (active && value) setPreview(value);
+      });
+    }, 200);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admin, form.enabled, form.retentionHours, form.maxArchivedRecords, form.retentionMode, previewVersion]);
 
   const patch = (update: Partial<RetentionConfig>) => {
     setForm((current) => ({ ...current, ...update }));
@@ -210,19 +240,32 @@ export const ArchiveRetentionView: React.FC = () => {
     }
   };
 
-  const lastCleanup = useMemo(
-    () => auditLogs.find((entry) => entry.event === 'Retention cleanup'),
-    [auditLogs],
-  );
+  // The snapshot's audit slice is capped, so look up the latest cleanup through
+  // the paginated audit endpoint instead of scanning recent entries only.
+  const [lastCleanup, setLastCleanup] = useState<AuditLog | null>(null);
+  useEffect(() => {
+    if (!admin) return;
+    let active = true;
+    void fetchCollection<AuditLog>('auditLogs', {
+      page: 1,
+      pageSize: 20,
+      search: 'Retention cleanup',
+    })
+      .then((page) => {
+        if (active)
+          setLastCleanup(page.items.find((entry) => entry.event === 'Retention cleanup') ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admin, refreshVersion]);
 
-  const cutoff = Date.now() - form.retentionHours * 3_600_000;
-  const isPast = (value?: string | null) => {
-    if (!value) return false;
-    const date = new Date(value);
-    return !Number.isNaN(date.getTime()) && date.getTime() < cutoff;
-  };
-  const pastCount = <T,>(items: T[], value: (item: T) => string | null | undefined) =>
-    items.filter((item) => isPast(value(item))).length;
+  const cutoff =
+    preview?.cutoff ?? new Date(Date.now() - form.retentionHours * 3_600_000).toISOString();
+  const footprint = (kind: RetentionKind): { total: number; past: number } =>
+    preview?.records[kind] ?? { total: counts[kind], past: 0 };
 
   // Only these kinds are eligible for deletion; each timestamp matches the
   // field the corresponding table shows to operators.
@@ -231,42 +274,57 @@ export const ArchiveRetentionView: React.FC = () => {
       label: 'Threat cache',
       tab: 'threat-data',
       icon: Database,
-      total: cveData.length,
-      past: pastCount(cveData, (item) => item.publishedDate),
+      total: footprint('cveData').total,
+      past: footprint('cveData').past,
     },
     {
       label: 'News cache',
       tab: 'threat-data',
       icon: Newspaper,
-      total: intelligenceArticles.length,
-      past: pastCount(intelligenceArticles, (item) => item.publishedDate),
+      total: footprint('intelligenceArticles').total,
+      past: footprint('intelligenceArticles').past,
     },
     {
       label: 'Delivery log',
       tab: 'emails',
       icon: Clock3,
-      total: emailLogs.length,
-      past: pastCount(emailLogs, (item) => item.sentAt),
+      total: footprint('emailLogs').total,
+      past: footprint('emailLogs').past,
     },
     {
       label: 'Webhook log',
       tab: 'recipients',
       icon: Webhook,
-      total: webhookLogs.length,
-      past: pastCount(webhookLogs, (item) => item.sentAt),
+      total: footprint('webhookLogs').total,
+      past: footprint('webhookLogs').past,
     },
     {
       label: 'Executions',
       tab: 'pipeline',
       icon: Settings2,
-      total: executions.length,
-      past: pastCount(executions, (item) => item.startTime),
+      total: footprint('executions').total,
+      past: footprint('executions').past,
     },
   ];
   const retained: FootprintRow[] = [
-    { label: 'Findings', tab: 'findings', icon: ShieldCheck, total: findings.length },
-    { label: 'Advisories', tab: 'advisories', icon: Archive, total: advisories.length },
-    { label: 'Audit history', tab: 'logs', icon: HardDrive, total: auditLogs.length },
+    {
+      label: 'Findings',
+      tab: 'findings',
+      icon: ShieldCheck,
+      total: preview?.protected.findings ?? counts.findings,
+    },
+    {
+      label: 'Advisories',
+      tab: 'advisories',
+      icon: Archive,
+      total: preview?.protected.advisories ?? counts.advisories,
+    },
+    {
+      label: 'Audit history',
+      tab: 'logs',
+      icon: HardDrive,
+      total: preview?.protected.auditLogs ?? counts.auditLogs,
+    },
   ];
   const totalRecords = [...removable, ...retained].reduce((sum, row) => sum + row.total, 0);
   const removableRecords = removable.reduce((sum, row) => sum + row.total, 0);
@@ -298,6 +356,8 @@ export const ArchiveRetentionView: React.FC = () => {
       );
     } finally {
       setRunning(false);
+      // Cleanup removed rows; refresh the exact server footprint.
+      setPreviewVersion((value) => value + 1);
     }
   };
 

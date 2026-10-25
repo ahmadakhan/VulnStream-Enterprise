@@ -2,7 +2,14 @@ import { z } from 'zod';
 import { FEED_TYPES, EMAIL_PROVIDERS, SMTP_EMAIL_PROVIDERS } from '../src/types/index.ts';
 import { parseCPE23 } from '../src/utils/cpeMatcher.ts';
 export const shortText = z.string().trim().min(1).max(200);
-export const idSchema = z.string().min(1).max(150);
+export const idSchema = z
+  .string()
+  .min(1)
+  .max(150)
+  .refine(
+    (value) => !/[\u0000-\u001f\u007f]/.test(value),
+    'Identifier must not contain control characters',
+  );
 const strings = z.array(z.string().max(2000)).max(100);
 const httpsUrl = z
   .url()
@@ -170,7 +177,39 @@ export const cveSchema = z.object({
       status: z.enum(['affected', 'not_affected', 'fixed', 'under_investigation']),
       justification: z.string().max(4000).optional(),
       impactStatement: z.string().max(4000).optional(),
+      source: z.string().max(300).optional(),
+      scope: z
+        .object({
+          cpe: z.string().max(600).optional(),
+          purl: z.string().max(600).optional(),
+          vendor: z.string().max(200).optional(),
+          product: z.string().max(200).optional(),
+        })
+        .optional(),
+      signed: z.boolean().optional(),
+      timestamp: z.iso.datetime({ offset: true }).optional(),
     })
+    .optional(),
+  vexStatements: z
+    .array(
+      z.object({
+        status: z.enum(['affected', 'not_affected', 'fixed', 'under_investigation']),
+        justification: z.string().max(4000).optional(),
+        impactStatement: z.string().max(4000).optional(),
+        source: z.string().max(300).optional(),
+        scope: z
+          .object({
+            cpe: z.string().max(600).optional(),
+            purl: z.string().max(600).optional(),
+            vendor: z.string().max(200).optional(),
+            product: z.string().max(200).optional(),
+          })
+          .optional(),
+        signed: z.boolean().optional(),
+        timestamp: z.iso.datetime({ offset: true }).optional(),
+      }),
+    )
+    .max(100)
     .optional(),
   sourceFeeds: strings,
   epss: z.object({ score: z.number().min(0).max(1), percentile: z.number().min(0).max(1) }),

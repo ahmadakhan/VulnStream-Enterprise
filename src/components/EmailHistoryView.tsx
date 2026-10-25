@@ -24,9 +24,12 @@ export const EmailHistoryView: React.FC = () => {
 
   const handleRetry = async (logId: string) => {
     setRetryingId(logId);
-    await retryEmailDelivery(logId);
-    setRetryingId(null);
-    await reload();
+    try {
+      await retryEmailDelivery(logId);
+      await reload();
+    } finally {
+      setRetryingId(null);
+    }
   };
 
   const handleRefresh = async () => {

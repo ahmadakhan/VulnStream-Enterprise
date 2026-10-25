@@ -1,3 +1,8 @@
+> **Historical document.** This report reflects the codebase as of its original date and has been
+> superseded by [`PRODUCTION-READINESS-AUDIT.md`](./PRODUCTION-READINESS-AUDIT.md), which is the
+> authoritative readiness report. Findings here may already be fixed; do not use this file to make
+> current readiness decisions.
+
 # Codebase and UI verification — 2026-10-21
 
 This follow-up builds on ECOSYSTEM-AUDIT-2026-10-21.md. Existing feed, matching, withdrawal, de-duplication and delivery regression coverage remains passing. This is verified development evidence, not a certification of a production deployment.

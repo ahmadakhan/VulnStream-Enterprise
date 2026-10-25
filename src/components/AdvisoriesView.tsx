@@ -1,21 +1,24 @@
 import React, { useState } from 'react';
-import { useApp } from '../context/AppContext';
 import { Advisory } from '../types';
 import { FileText, Download, Printer, Copy, Check, Send, X, ShieldAlert } from 'lucide-react';
 import { Pagination } from './Pagination';
+import { useCollection } from '../hooks/useCollection';
 import { copyText } from '../utils/clipboard';
 import { CveLink } from './CveLink';
 
 export const AdvisoriesView: React.FC = () => {
-  const { advisories } = useApp();
   const [copied, setCopied] = useState<string | null>(null);
   const [activeModalAdvisory, setActiveModalAdvisory] = useState<Advisory | null>(null);
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
-
-  const paginatedAdvisories = advisories.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  // Advisories are paginated server-side: the state snapshot only carries the
+  // most recent page-sized slice and must not be treated as the full history.
+  const { items: advisories, total } = useCollection<Advisory>('advisories', {
+    page: currentPage,
+    pageSize,
+  });
 
   const handleCopyMarkdown = async (adv: Advisory) => {
     const md = `# PRODUCT SECURITY ADVISORY: ${adv.id}
@@ -142,14 +145,14 @@ ${adv.remediationInstructions}
         <div className="text-xs font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-3 py-1.5 rounded-xl shadow-sm">
           Total Generated:{' '}
           <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">
-            {advisories.length}
+            {total}
           </strong>
         </div>
       </div>
 
       {/* Advisory Cards List */}
       <div className="space-y-4">
-        {paginatedAdvisories.map((adv) => (
+        {advisories.map((adv) => (
           <div
             key={adv.id}
             className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm space-y-4 transition-colors"
@@ -250,10 +253,13 @@ ${adv.remediationInstructions}
         <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm">
           <Pagination
             currentPage={currentPage}
-            totalItems={advisories.length}
+            totalItems={total}
             pageSize={pageSize}
             onPageChange={setCurrentPage}
-            onPageSizeChange={setPageSize}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setCurrentPage(1);
+            }}
             pageSizeOptions={[5, 10, 20]}
           />
         </div>

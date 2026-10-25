@@ -220,9 +220,13 @@ export function SettingsView() {
         aria-labelledby="account-security-title"
         onSubmit={async (e) => {
           e.preventDefault();
-          await changePassword(currentPassword, newPassword);
-          setCurrentPassword('');
-          setNewPassword('');
+          const changed = await changePassword(currentPassword, newPassword);
+          // Keep the fields intact when the change failed so the operator can
+          // correct the current password instead of retyping both values.
+          if (changed) {
+            setCurrentPassword('');
+            setNewPassword('');
+          }
         }}
       >
         <SectionHeading

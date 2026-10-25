@@ -77,12 +77,15 @@ export function useCollection<T>(
         // The app-level error banner is populated by the request helper; keep the
         // last page visible instead of replacing it with a misleading empty table.
         if (requestId.current !== id) return;
-        setItems([]);
-        setTotal(0);
       })
       .finally(() => {
         if (requestId.current === id) setLoading(false);
       });
+    return () => {
+      // Invalidate the in-flight request on unmount or parameter change so a
+      // late response cannot update a hook that is no longer current.
+      requestId.current++;
+    };
   }, [
     fetchCollection,
     kind,

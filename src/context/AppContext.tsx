@@ -1,6 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { emptyState, type AppState, type SessionInfo, type CollectionKind, type CollectionPage } from '../../shared/state';
-import type { RetentionPreview } from '../types';
 import type {
   ThreatFeed,
   WatchListItem,
@@ -18,6 +17,7 @@ import type {
   EmailQueueItem,
   AliasEntry,
   RetentionRunResult,
+  RetentionPreview,
   CorrelationSimulation,
 } from '../types';
 import { compileCustomizedTemplate } from '../utils/templateCompiler';
@@ -43,6 +43,8 @@ function useApplication() {
     [pending, setPending] = useState(0);
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  // Monotonic id so an older snapshot response can never overwrite a newer one.
+  const refreshId = useRef(0);
   const request = useCallback(
     async <T,>(url: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> => {
       let response: Response;
@@ -80,7 +82,20 @@ function useApplication() {
     [],
   );
   const refresh = useCallback(async () => {
-    setSnapshot(await request<AppState>('/state'));
+    const id = ++refreshId.current;
+    let next: AppState;
+    try {
+      next = await request<AppState>('/state');
+    } catch (error) {
+      // A stale request that failed after a newer refresh succeeded must not
+      // surface an error banner for state that is already current.
+      if (refreshId.current !== id) return;
+      throw error;
+    }
+    // Concurrent polls and post-mutation refreshes can resolve out of order.
+    // Apply only the newest request so a slow response cannot roll state back.
+    if (refreshId.current !== id) return;
+    setSnapshot(next);
     // Signals bounded collection views to refetch their current page after a
     // mutation or poll, without duplicating heavy collections in the snapshot.
     setRefreshVersion((value) => value + 1);
@@ -163,12 +178,21 @@ function useApplication() {
   useEffect(() => {
     if (!session) return;
     let active = true;
-    const timer = setInterval(() => {
-      if (active) void refresh().catch((e) => setError(e.message));
-    }, 10000);
+    const poll = () => {
+      // Idle background tabs do not need the full snapshot every ten seconds.
+      // Refresh immediately when the tab becomes visible again.
+      if (active && document.visibilityState !== 'hidden')
+        void refresh().catch((e) => setError(e.message));
+    };
+    const timer = setInterval(poll, 10000);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') poll();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       active = false;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [!!session, refresh]);
   useEffect(() => {
@@ -199,15 +223,25 @@ function useApplication() {
       const result = await request<any>('/commands', { action, data, id });
       return result;
     });
+  // A committed mutation is a success even if the follow-up snapshot refresh
+  // fails. Surface the stale snapshot separately so destructive actions are not
+  // retried blindly because of a transient GET failure.
+  const refreshAfterMutation = async () => {
+    try {
+      await refresh();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'State refresh failed');
+    }
+  };
   const save = async (action: string, data: unknown, id?: string) => {
     const saved = !!(await command(action, data, id));
-    if (saved) await refresh();
+    if (saved) await refreshAfterMutation();
     return saved;
   };
   const call = async <T,>(url: string, body: unknown = {}, method = 'POST') =>
     safely(async () => {
       const result = await request<T>(url, body, method);
-      await refresh();
+      await refreshAfterMutation();
       return result;
     });
   const activeExecution = snapshot.executions.find((e) => ['RUNNING', 'QUEUED'].includes(e.status));
@@ -266,7 +300,7 @@ function useApplication() {
     ntpSyncStatus: { synchronized: false, driftMs: 0, lastChecked: '' },
     toggleFeedEnabled: async (id: string) => {
       const result = await command('feed.toggle', undefined, id);
-      if (result?.success) await refresh();
+      if (result?.success) await refreshAfterMutation();
       return result?.success || false;
     },
     addFeed: (
@@ -278,7 +312,7 @@ function useApplication() {
     updateFeed: (feed: ThreatFeed) => save('feed.save', feed, feed.id),
     deleteFeed: async (id: string) => {
       const result = await command('feed.delete', undefined, id);
-      if (result?.success) await refresh();
+      if (result?.success) await refreshAfterMutation();
       return result?.success || false;
     },
     testFeedConnectivity: async (id: string) =>
@@ -306,28 +340,47 @@ function useApplication() {
     updateWatchlistItem: (item: WatchListItem) => save('asset.save', item, item.id),
     toggleWatchlistItemActive: async (id: string) => {
       const updated = !!(await command('asset.toggle', undefined, id));
-      if (updated) await refresh();
+      if (updated) await refreshAfterMutation();
       return updated;
     },
     deleteWatchlistItem: async (id: string) => {
       const result = await command('asset.delete', undefined, id);
-      if (result?.success) await refresh();
+      if (result?.success) await refreshAfterMutation();
       return result?.success || false;
     },
     bulkImportWatchlist: async (items: unknown[]) => {
       const result = await command('asset.import', items);
-      if (result && !result.errors?.length) await refresh();
+      if (result && !result.errors?.length) await refreshAfterMutation();
       return result || { imported: 0, errors: ['Import failed. See the error banner.'] };
     },
     addCustomCve: (cve: NormalizedCVE) => save('cve.save', cve),
-    updateFindingStatus: (id: string, status: Finding['status'], note?: string) =>
-      command('finding.status', { status, note }, id),
+    updateFindingStatus: async (id: string, status: Finding['status'], note?: string) => {
+      const result = await command('finding.status', { status, note }, id);
+      if (result?.success) await refreshAfterMutation();
+      return result;
+    },
     addRecipient: (rec: Omit<EmailRecipient, 'id' | 'deliverySuccessRate'>) => save('recipient.save', rec),
-    toggleRecipientEnabled: (id: string) => command('recipient.toggle', undefined, id),
-    deleteRecipient: (id: string) => command('recipient.delete', undefined, id),
+    toggleRecipientEnabled: async (id: string) => {
+      const updated = !!(await command('recipient.toggle', undefined, id));
+      if (updated) await refreshAfterMutation();
+      return updated;
+    },
+    deleteRecipient: async (id: string) => {
+      const result = await command('recipient.delete', undefined, id);
+      if (result?.success) await refreshAfterMutation();
+      return result?.success || false;
+    },
     addWebhook: (hook: Omit<WebhookEndpoint, 'id' | 'deliveryCount'>) => save('webhook.save', hook),
-    toggleWebhookEnabled: (id: string) => command('webhook.toggle', undefined, id),
-    deleteWebhook: (id: string) => command('webhook.delete', undefined, id),
+    toggleWebhookEnabled: async (id: string) => {
+      const updated = !!(await command('webhook.toggle', undefined, id));
+      if (updated) await refreshAfterMutation();
+      return updated;
+    },
+    deleteWebhook: async (id: string) => {
+      const result = await command('webhook.delete', undefined, id);
+      if (result?.success) await refreshAfterMutation();
+      return result?.success || false;
+    },
     testWebhook: async (id: string) =>
       (await call<{ success: boolean; statusCode: number; signature: string }>(
         `/webhooks/${encodeURIComponent(id)}/test`,
@@ -336,7 +389,7 @@ function useApplication() {
     updateAlias: (entry: AliasEntry) => save('alias.save', entry, entry.id),
     deleteAlias: async (id: string) => {
       const result = await command('alias.delete', undefined, id);
-      if (result?.success) await refresh();
+      if (result?.success) await refreshAfterMutation();
       return result?.success || false;
     },
     resendNotification: (cveId: string, reason: string) => call('/resend', { cveId, reason }),

@@ -43,9 +43,29 @@ export function mergeCveRecords(records: NormalizedCVE[]): Map<string, Normalize
       merged.set(cveId, candidate);
       continue;
     }
-    const delta = Date.parse(candidate.modifiedDate) - Date.parse(old.modifiedDate);
-    const winner = delta > 0 || (delta === 0 && content(candidate) > content(old)) ? candidate : old;
-    const applicabilityConflict = delta === 0 && applicability(old) !== applicability(candidate);
+    const candidateTime = Date.parse(candidate.modifiedDate);
+    const oldTime = Date.parse(old.modifiedDate);
+    const candidateValid = Number.isFinite(candidateTime);
+    const oldValid = Number.isFinite(oldTime);
+    const delta = candidateTime - oldTime;
+    const contentWins = content(candidate) > content(old);
+    // A missing or unparseable revision date must not silently make an older
+    // record win. Prefer the record with a usable date; when both are unusable,
+    // fall back to deterministic content ordering.
+    const winner =
+      candidateValid && !oldValid
+        ? candidate
+        : oldValid && !candidateValid
+          ? old
+          : candidateValid && oldValid
+            ? delta > 0 || (delta === 0 && contentWins)
+              ? candidate
+              : old
+            : contentWins
+              ? candidate
+              : old;
+    const applicabilityConflict =
+      candidateValid && oldValid && delta === 0 && applicability(old) !== applicability(candidate);
     const mergedDetails = applicabilityConflict
       ? [...new Map([...detailsFor(old), ...detailsFor(candidate)].map((detail) => [stableJson(detail), detail])).values()]
           .sort((a, b) => stableJson(a).localeCompare(stableJson(b)))

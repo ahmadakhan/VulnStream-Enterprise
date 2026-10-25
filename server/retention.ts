@@ -221,10 +221,12 @@ export async function runRetention(
   actor: string,
   ipAddress = '',
 ): Promise<RetentionRunResult | null> {
-  return transaction(pool, async (db) => {
-    const settings = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
-    const policy = settings.retentionConfig;
-    if (!policy?.enabled) return null;
+  return transaction(
+    pool,
+    async (db) => {
+      const settings = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
+      const policy = settings.retentionConfig;
+      if (!policy?.enabled) return null;
 
     const records = await loadRetentionRecords(db);
     const plan = selectRetention(records, policy, Date.now());
@@ -263,14 +265,20 @@ export async function runRetention(
       if ((events.rowCount ?? 0) < 10000) break;
     }
 
-    if (plan.delete.length) {
+    if (plan.delete.length || outboxDeleted || eventsDeleted) {
       const summary = RETENTION_KINDS.filter((kind) => plan.byKind[kind] > 0)
         .map((kind) => `${kind}: ${plan.byKind[kind]}`)
+        .join(', ');
+      const system = [
+        outboxDeleted ? `outbox: ${outboxDeleted}` : '',
+        eventsDeleted ? `operationalEvents: ${eventsDeleted}` : '',
+      ]
+        .filter(Boolean)
         .join(', ');
       await appendAudit(
         db,
         'Retention cleanup',
-        `${plan.delete.length} record(s) removed (${summary}) using ${policy.retentionMode} mode and a ${policy.retentionHours}h window`,
+        `${plan.delete.length} record(s) removed${summary ? ` (${summary})` : ''}${system ? `; transient system rows removed (${system})` : ''} using ${policy.retentionMode} mode and a ${policy.retentionHours}h window`,
         actor,
         'SECURITY',
         'INFO',
@@ -289,5 +297,10 @@ export async function runRetention(
       byKind: plan.byKind,
       system: { outbox: outboxDeleted, events: eventsDeleted },
     };
-  });
+    },
+    undefined,
+    // Serialize destructive cleanup across replicas; ordinary mutations are no
+    // longer blocked behind a multi-second retention sweep.
+    { locks: ['retention-run'] },
+  );
 }

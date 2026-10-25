@@ -35,7 +35,7 @@ export const Sidebar: React.FC = () => {
     setActiveTab,
     mobileNavOpen,
     setMobileNavOpen,
-    findings,
+    summary,
     watchlist,
     feeds,
     theme,
@@ -45,11 +45,9 @@ export const Sidebar: React.FC = () => {
     session,
   } = useApp();
 
-  const activeFindingsCount = findings.filter(
-    (f) =>
-      !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status) &&
-      f.notificationStatus !== 'NOT_APPLICABLE',
-  ).length;
+  // Use the server-computed total; the snapshot's findings array is a capped
+  // recent slice and would under-count the navigation badge.
+  const activeFindingsCount = summary.activeFindings;
 
   const sessionMins = Math.floor(sessionTimeRemainingSec / 60);
   const sessionSecs = sessionTimeRemainingSec % 60;

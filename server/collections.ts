@@ -18,46 +18,50 @@ export interface CollectionQuery {
 
 const SORTS: Partial<Record<CollectionKind, Record<string, string>>> = {
   cveData: {
-    score: "(data->'cvss'->>'score')::numeric",
-    published: "(data->>'publishedDate')::timestamptz",
-    modified: "(data->>'modifiedDate')::timestamptz",
+    score: "safe_numeric(data->'cvss'->>'score')",
+    published: "safe_timestamptz(data->>'publishedDate')",
+    modified: "safe_timestamptz(data->>'modifiedDate')",
     updated: 'updated_at',
   },
   findings: {
-    published: "(data->'cve'->>'publishedDate')::timestamptz",
-    modified: "(data->'cve'->>'modifiedDate')::timestamptz",
+    published: "safe_timestamptz(data->'cve'->>'publishedDate')",
+    modified: "safe_timestamptz(data->'cve'->>'modifiedDate')",
     updated: 'updated_at',
   },
-  advisories: { created: "(data->>'createdDate')::timestamptz", updated: 'updated_at' },
-  alertedCves: { alerted: "(data->>'lastAlertedAt')::timestamptz" },
-  emailLogs: { sent: "(data->>'sentAt')::timestamptz" },
-  webhookLogs: { sent: "(data->>'sentAt')::timestamptz" },
-  executions: { started: "(data->>'startTime')::timestamptz" },
-  intelligenceArticles: { published: "(data->>'publishedDate')::timestamptz" },
+  advisories: { created: "safe_timestamptz(data->>'createdDate')", updated: 'updated_at' },
+  alertedCves: { alerted: "safe_timestamptz(data->>'lastAlertedAt')" },
+  emailLogs: { sent: "safe_timestamptz(data->>'sentAt')" },
+  webhookLogs: { sent: "safe_timestamptz(data->>'sentAt')" },
+  executions: { started: "safe_timestamptz(data->>'startTime')" },
+  intelligenceArticles: { published: "safe_timestamptz(data->>'publishedDate')" },
   intelligenceMatches: { updated: 'updated_at' },
 };
 
 const DEFAULT_ORDER: Partial<Record<CollectionKind, string>> = {
-  cveData: "(data->>'modifiedDate')::timestamptz DESC, id DESC",
+  cveData: "safe_timestamptz(data->>'modifiedDate') DESC NULLS LAST, id DESC",
   findings:
-    "(data->'cve'->>'publishedDate')::timestamptz DESC, (data->'cve'->>'modifiedDate')::timestamptz DESC, id DESC",
-  advisories: "(data->>'createdDate')::timestamptz DESC, id DESC",
-  alertedCves: "(data->>'lastAlertedAt')::timestamptz DESC, id DESC",
-  emailLogs: "(data->>'sentAt')::timestamptz DESC, id DESC",
-  webhookLogs: "(data->>'sentAt')::timestamptz DESC, id DESC",
-  executions: "(data->>'startTime')::timestamptz DESC, id DESC",
-  intelligenceArticles: "(data->>'publishedDate')::timestamptz DESC, id DESC",
+    "safe_timestamptz(data->'cve'->>'publishedDate') DESC NULLS LAST, safe_timestamptz(data->'cve'->>'modifiedDate') DESC NULLS LAST, id DESC",
+  advisories: "safe_timestamptz(data->>'createdDate') DESC NULLS LAST, id DESC",
+  alertedCves: "safe_timestamptz(data->>'lastAlertedAt') DESC NULLS LAST, id DESC",
+  emailLogs: "safe_timestamptz(data->>'sentAt') DESC NULLS LAST, id DESC",
+  webhookLogs: "safe_timestamptz(data->>'sentAt') DESC NULLS LAST, id DESC",
+  executions: "safe_timestamptz(data->>'startTime') DESC NULLS LAST, id DESC",
+  intelligenceArticles: "safe_timestamptz(data->>'publishedDate') DESC NULLS LAST, id DESC",
 };
 
 const orderClause = (kind: CollectionKind, query: CollectionQuery): string => {
   if (kind === 'auditLogs') return 'seq DESC';
   const sort = query.sort && SORTS[kind]?.[query.sort];
-  if (sort) return `${sort} ${query.order === 'asc' ? 'ASC' : 'DESC'}, id DESC`;
+  // DESC defaults to NULLS FIRST; a malformed legacy value should fall to the
+  // end of the page instead of outranking every valid timestamp.
+  if (sort) return `${sort} ${query.order === 'asc' ? 'ASC' : 'DESC'} NULLS LAST, id DESC`;
   return DEFAULT_ORDER[kind] || 'updated_at DESC, id DESC';
 };
 
 const likeValue = (search?: string) =>
-  search && search.trim() ? `%${search.trim().toLowerCase()}%` : undefined;
+  search && search.trim()
+    ? `%${search.trim().toLowerCase().replace(/[!%_]/g, (character) => `!${character}`)}%`
+    : undefined;
 
 function recordConditions(kind: CollectionKind, query: CollectionQuery) {
   const params: unknown[] = [kind];
@@ -74,37 +78,37 @@ function recordConditions(kind: CollectionKind, query: CollectionQuery) {
     case 'cveData': {
       if (like)
         clauses.push(
-          `(lower(data->>'cveId') LIKE ${param(like)}
-            OR lower(COALESCE(data->>'title','')) LIKE ${param(like)}
-            OR lower(COALESCE(data->>'description','')) LIKE ${param(like)}
-            OR lower(COALESCE(data->'sourceFeeds'::text,'')) LIKE ${param(like)}
-            OR lower(COALESCE(data->'cpeMatches'::text,'')) LIKE ${param(like)}
-            OR lower(COALESCE(data->'purls'::text,'')) LIKE ${param(like)})`,
+          `(lower(data->>'cveId') LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'title','')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'description','')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->'sourceFeeds'::text,'')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->'cpeMatches'::text,'')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->'purls'::text,'')) LIKE ${param(like)} ESCAPE '!')`,
         );
       if (filters.kev === true || filters.kev === 'true' || filters.kev === 'KEV_ONLY')
-        clauses.push(`(data->'cisaKev'->>'isKev')::boolean IS TRUE`);
+        clauses.push(`data->'cisaKev'->>'isKev' = 'true'`);
       if (typeof filters.epssMin === 'number' && Number.isFinite(filters.epssMin))
-        clauses.push(`(data->'epss'->>'score')::numeric >= ${param(filters.epssMin)}`);
+        clauses.push(`safe_numeric(data->'epss'->>'score') >= ${param(filters.epssMin)}`);
       if (filters.dateFilter === 'IN_SCOPE') {
         const hours = typeof filters.scopeHours === 'number' ? filters.scopeHours : 24;
         const hoursParam = param(hours);
         clauses.push(
-          `((data->>'publishedDate')::timestamptz >= now() - (${hoursParam} * interval '1 hour')
-            OR (data->>'modifiedDate')::timestamptz >= now() - (${hoursParam} * interval '1 hour'))`,
+          `(safe_timestamptz(data->>'publishedDate') >= now() - (${hoursParam} * interval '1 hour')
+            OR safe_timestamptz(data->>'modifiedDate') >= now() - (${hoursParam} * interval '1 hour'))`,
         );
       } else if (filters.dateFilter === 'RECENT_MODIFIED') {
-        clauses.push(`(data->>'modifiedDate')::timestamptz >= now() - interval '7 days'`);
+        clauses.push(`safe_timestamptz(data->>'modifiedDate') >= now() - interval '7 days'`);
       } else if (filters.dateFilter === 'RECENT_PUBLISHED') {
-        clauses.push(`(data->>'publishedDate')::timestamptz >= now() - interval '7 days'`);
+        clauses.push(`safe_timestamptz(data->>'publishedDate') >= now() - interval '7 days'`);
       }
       break;
     }
     case 'findings': {
       if (like)
         clauses.push(
-          `(lower(data->>'cveId') LIKE ${param(like)}
-            OR lower(COALESCE(data->>'matchedAssetName','')) LIKE ${param(like)}
-            OR lower(COALESCE(data->'cve'->>'title','')) LIKE ${param(like)})`,
+          `(lower(data->>'cveId') LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'matchedAssetName','')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->'cve'->>'title','')) LIKE ${param(like)} ESCAPE '!')`,
         );
       if (!isAll(filters.severity))
         clauses.push(`data->'cve'->'cvss'->>'severity' = ${param(String(filters.severity))}`);
@@ -117,9 +121,9 @@ function recordConditions(kind: CollectionKind, query: CollectionQuery) {
     case 'advisories': {
       if (like)
         clauses.push(
-          `(lower(data->>'id') LIKE ${param(like)}
-            OR lower(COALESCE(data->>'title','')) LIKE ${param(like)}
-            OR lower(COALESCE(data->>'executiveSummary','')) LIKE ${param(like)})`,
+          `(lower(data->>'id') LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'title','')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'executiveSummary','')) LIKE ${param(like)} ESCAPE '!')`,
         );
       if (!isAll(filters.status))
         clauses.push(`data->>'deliveryStatus' = ${param(String(filters.status))}`);
@@ -128,9 +132,9 @@ function recordConditions(kind: CollectionKind, query: CollectionQuery) {
     case 'alertedCves': {
       if (like)
         clauses.push(
-          `(lower(data->>'cveId') LIKE ${param(like)}
-            OR lower(COALESCE(data->>'advisoryId','')) LIKE ${param(like)}
-            OR lower(COALESCE(data->'recipientEmails'::text,'')) LIKE ${param(like)})`,
+          `(lower(data->>'cveId') LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'advisoryId','')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->'recipientEmails'::text,'')) LIKE ${param(like)} ESCAPE '!')`,
         );
       if (!isAll(filters.status))
         clauses.push(`data->>'status' = ${param(String(filters.status))}`);
@@ -139,9 +143,9 @@ function recordConditions(kind: CollectionKind, query: CollectionQuery) {
     case 'emailLogs': {
       if (like)
         clauses.push(
-          `(lower(data->>'recipientEmail') LIKE ${param(like)}
-            OR lower(COALESCE(data->>'subject','')) LIKE ${param(like)}
-            OR lower(COALESCE(data->>'advisoryId','')) LIKE ${param(like)})`,
+          `(lower(data->>'recipientEmail') LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'subject','')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'advisoryId','')) LIKE ${param(like)} ESCAPE '!')`,
         );
       if (!isAll(filters.status))
         clauses.push(`data->>'status' = ${param(String(filters.status))}`);
@@ -150,9 +154,9 @@ function recordConditions(kind: CollectionKind, query: CollectionQuery) {
     case 'webhookLogs': {
       if (like)
         clauses.push(
-          `(lower(COALESCE(data->>'endpointName','')) LIKE ${param(like)}
-            OR lower(COALESCE(data->>'advisoryId','')) LIKE ${param(like)}
-            OR lower(COALESCE(data->>'cveId','')) LIKE ${param(like)})`,
+          `(lower(COALESCE(data->>'endpointName','')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'advisoryId','')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'cveId','')) LIKE ${param(like)} ESCAPE '!')`,
         );
       if (!isAll(filters.status))
         clauses.push(`data->>'status' = ${param(String(filters.status))}`);
@@ -161,7 +165,7 @@ function recordConditions(kind: CollectionKind, query: CollectionQuery) {
     case 'executions': {
       if (like)
         clauses.push(
-          `(lower(data->>'id') LIKE ${param(like)} OR lower(COALESCE(data->>'status','')) LIKE ${param(like)})`,
+          `(lower(data->>'id') LIKE ${param(like)} ESCAPE '!' OR lower(COALESCE(data->>'status','')) LIKE ${param(like)} ESCAPE '!')`,
         );
       if (!isAll(filters.status))
         clauses.push(`data->>'status' = ${param(String(filters.status))}`);
@@ -170,18 +174,18 @@ function recordConditions(kind: CollectionKind, query: CollectionQuery) {
     case 'intelligenceArticles': {
       if (like)
         clauses.push(
-          `(lower(COALESCE(data->>'title','')) LIKE ${param(like)}
-            OR lower(COALESCE(data->>'summary','')) LIKE ${param(like)}
-            OR lower(COALESCE(data->'cveIds'::text,'')) LIKE ${param(like)})`,
+          `(lower(COALESCE(data->>'title','')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'summary','')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->'cveIds'::text,'')) LIKE ${param(like)} ESCAPE '!')`,
         );
       break;
     }
     case 'intelligenceMatches': {
       if (like)
         clauses.push(
-          `(lower(COALESCE(data->>'assetName','')) LIKE ${param(like)}
-            OR lower(COALESCE(data->>'evidence','')) LIKE ${param(like)}
-            OR lower(COALESCE(data->>'cveId','')) LIKE ${param(like)})`,
+          `(lower(COALESCE(data->>'assetName','')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'evidence','')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE(data->>'cveId','')) LIKE ${param(like)} ESCAPE '!')`,
         );
       const articleIds = filters.articleIds;
       if (Array.isArray(articleIds) && articleIds.length)
@@ -190,7 +194,7 @@ function recordConditions(kind: CollectionKind, query: CollectionQuery) {
     }
     default: {
       // Small configuration collections still get a useful generic search.
-      if (like) clauses.push(`lower(data::text) LIKE ${param(like)}`);
+      if (like) clauses.push(`lower(data::text) LIKE ${param(like)} ESCAPE '!'`);
     }
   }
   return { clauses, params };
@@ -207,10 +211,10 @@ function auditConditions(query: CollectionQuery) {
   const filters = query.filters ?? {};
   if (like)
     clauses.push(
-      `(lower(data->>'event') LIKE ${param(like)}
-        OR lower(COALESCE(data->>'details','')) LIKE ${param(like)}
-        OR lower(COALESCE(data->>'actor','')) LIKE ${param(like)}
-        OR COALESCE(data->>'ipAddress','') LIKE ${param(like)})`,
+      `(lower(data->>'event') LIKE ${param(like)} ESCAPE '!'
+        OR lower(COALESCE(data->>'details','')) LIKE ${param(like)} ESCAPE '!'
+        OR lower(COALESCE(data->>'actor','')) LIKE ${param(like)} ESCAPE '!'
+        OR lower(COALESCE(data->>'ipAddress','')) LIKE ${param(like)} ESCAPE '!')`,
     );
   if (filters.category && filters.category !== 'ALL')
     clauses.push(`data->>'category' = ${param(String(filters.category))}`);

@@ -30,7 +30,10 @@ const decode = (value: string) =>
     const known: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
     if (known[entity.toLowerCase()]) return known[entity.toLowerCase()];
     const code = entity[1]?.toLowerCase() === 'x' ? parseInt(entity.slice(2), 16) : Number(entity.slice(1));
-    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+    // Numeric references must not create lone UTF-16 surrogates. They are not
+    // valid Unicode scalar values and can corrupt downstream JSON/text output.
+    const surrogate = code >= 0xd800 && code <= 0xdfff;
+    return code > 0 && code <= 0x10ffff && !surrogate ? String.fromCodePoint(code) : whole;
   });
 function plain(value: string) {
   return decode(value)

@@ -111,10 +111,55 @@ export interface CisaKevData {
   knownRansomwareCampaignUse?: 'Known' | 'Unknown';
 }
 
+export type VexStatus = 'affected' | 'not_affected' | 'fixed' | 'under_investigation';
+
+/**
+ * VEX statements can be scoped to a single product/CPE/PURL. An unscoped
+ * statement applies to the whole advisory; a scoped statement only applies to
+ * findings whose matched inventory falls inside the declared scope.
+ */
+export interface VexScope {
+  cpe?: string;
+  purl?: string;
+  vendor?: string;
+  product?: string;
+}
+
 export interface VexStatement {
-  status: 'affected' | 'not_affected' | 'fixed' | 'under_investigation';
+  status: VexStatus;
   justification?: string;
   impactStatement?: string;
+  /** Feed/provider that supplied the statement. */
+  source?: string;
+  /** Optional product/package scope. */
+  scope?: VexScope;
+  /**
+   * Only signed statements may suppress alerts. Legacy statements without this
+   * field are treated as signed for backward compatibility; ingestion marks
+   * unsigned generic-feed claims explicitly.
+   */
+  signed?: boolean;
+  timestamp?: string;
+}
+
+export type ExploitabilityConflictState =
+  | 'NONE'
+  | 'CONSISTENT'
+  | 'CONFLICT'
+  | 'EXPLOIT_INTELLIGENCE_OVERRIDE'
+  | 'UNDER_INVESTIGATION'
+  | 'SCOPE_MISMATCH';
+
+/** Result of the per-source exploitability lattice for one finding scope. */
+export interface ExploitabilityAssessment {
+  status: VexStatus | 'unknown';
+  conflictState: ExploitabilityConflictState;
+  suppressed: boolean;
+  requiresReview: boolean;
+  reason: string;
+  sources: string[];
+  applicableStatements: number;
+  ignoredStatements: number;
 }
 
 export interface RemediationPlaybook {
@@ -156,7 +201,9 @@ export interface NormalizedCVE {
   applicabilityRequiresReview?: boolean;
   cpeMatchDetails?: { criteria: string; range?: NvdVersionRange }[];
   purls?: string[]; // Package URLs (PURL)
-  vex?: VexStatement; // CSAF 2.0 VEX status
+  vex?: VexStatement; // CSAF 2.0 VEX status (legacy single-statement form)
+  /** Per-source VEX statements. Resolved through the exploitability lattice. */
+  vexStatements?: VexStatement[];
   sourceFeeds: string[];
   exploitationSources?: string[];
   epss: EPSSData;
@@ -187,11 +234,17 @@ export interface Finding {
   cve: NormalizedCVE;
   matchedAssetId: string;
   matchedAssetName: string;
+  matchedAssetVendor?: string;
+  matchedAssetProduct?: string;
+  /** PURLs of the matched inventory item, used to scope VEX statements. */
+  matchedAssetPurls?: string[];
   matchedCpe: string;
   matchingMethod: string;
   matchingEvidence: string;
   exposure?: ExposureLevel; // Deprecated
   exploitRisk: ExploitRiskLevel;
+  /** Per-source VEX lattice result captured at correlation time. */
+  exploitability?: ExploitabilityAssessment;
   notificationStatus: NotificationStatus;
   status: FindingStatus;
   autoDispatchedAt: string | null;

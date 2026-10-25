@@ -10,16 +10,23 @@
     "clean": "node -e \"for (const p of ['dist','server-dist']) require('node:fs').rmSync(p,{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "test:unit": "vitest run --no-coverage --reporter=verbose",
+    "test:unit:watch": "vitest --no-coverage --reporter=verbose",
+    "test:unit:typecheck": "tsc --noEmit --project tsconfig.json",
+    "test:integration": "docker compose -f docker-compose.yml -f docker-compose.test.yml up --build --abort-on-container-exit --force-recreate",
+    "test:integration:down": "docker compose -f docker-compose.yml -f docker-compose.test.yml down -v --rmi local",
+    "test:vitest": "vitest run --reporter=verbose",
+    "test:typecheck": "tsc --noEmit",
     "dev:server": "tsx watch --env-file=.env server/main.ts",
     "seed": "node --import tsx --env-file=.env scripts/seed.ts",
     "build:client": "vite build",
     "build:server": "node scripts/build-server.mjs",
     "start": "node server-dist/main.js",
-    "operator:create": "node server-dist/create-user.js",
-    "test:integration": "node -e \"if (!process.env.TEST_DATABASE_URL) { console.error('TEST_DATABASE_URL is required'); process.exit(1); }\" && node --import tsx --test tests/integration.test.ts"
+    "operator:create": "node server-dist/create-user.js"
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",
+    "compression": "^1.8.2",
     "express": "^4.21.2",
     "fast-xml-parser": "^5.11.2",
     "helmet": "^8.3.0",
@@ -34,6 +41,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "@types/compression": "^1.8.1",
     "@types/express": "^4.17.25",
     "@types/node": "^22.14.0",
     "@types/nodemailer": "^8.0.2",
@@ -49,7 +57,8 @@
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.0"
+    "vite": "^8.3.0",
+    "vitest": "^5.0.5"
   },
   "engines": {
     "node": ">=22.12.0"

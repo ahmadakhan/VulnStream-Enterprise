@@ -14,8 +14,9 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import type { PipelinePhase } from '../types';
+import type { PipelineExecution, PipelinePhase } from '../types';
 import { Pagination } from './Pagination';
+import { useCollection } from '../hooks/useCollection';
 
 const stages = [
   {
@@ -64,8 +65,15 @@ const panel =
   'rounded-2xl border border-zinc-800 light:border-zinc-200 bg-zinc-900/60 light:bg-white shadow-sm';
 
 export const PipelineExecutionsView: React.FC = () => {
-  const { executions, isPipelineRunning, triggerPipelineRun, stopPipelineRun, settings, session, pending } =
-    useApp();
+  const {
+    isPipelineRunning,
+    latestExecution,
+    triggerPipelineRun,
+    stopPipelineRun,
+    settings,
+    session,
+    pending,
+  } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scopeHours, setScopeHours] = useState(settings.scopeHours);
   const [incrementalFeeds, setIncrementalFeeds] = useState(true);
@@ -73,7 +81,13 @@ export const PipelineExecutionsView: React.FC = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
   const [now, setNow] = useState(Date.now());
-  const running = executions.find((e) => ['QUEUED', 'RUNNING'].includes(e.status));
+  // Execution history is paginated server-side; the snapshot only carries the
+  // newest few runs, so it cannot be used for the history table or its total.
+  const { items: executions, total } = useCollection<PipelineExecution>('executions', {
+    page,
+    pageSize,
+  });
+  const running = isPipelineRunning ? latestExecution : null;
   const execution = executions.find((e) => e.id === selectedId) || running || executions[0];
   const canOperate = session?.role === 'ADMIN' || session?.role === 'OPERATOR';
   useEffect(() => {
@@ -174,6 +188,7 @@ export const PipelineExecutionsView: React.FC = () => {
                 if (run) {
                   setSelectedId(run.id);
                   setSelectedStage(null);
+                  setPage(1);
                 }
               }}
               className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
@@ -315,7 +330,7 @@ export const PipelineExecutionsView: React.FC = () => {
             </div>
             <Pagination
               currentPage={page}
-              totalItems={executions.length}
+              totalItems={total}
               pageSize={pageSize}
               onPageChange={setPage}
               onPageSizeChange={(n) => {

@@ -1,6 +1,6 @@
 import { writeEvent } from './events';
 import { loadConfig } from './config';
-import { createPool, migrate, transaction, get, put } from './db';
+import { createPool, migrate, transaction, get, put, REQUIRED_SCHEMA_VERSION } from './db';
 import { applyCommand } from './commands';
 import { RECOMMENDED_FEEDS } from './recommendedFeeds';
 import { createApp } from './app';
@@ -16,8 +16,15 @@ pool.on('error', (error) =>
   console.error(JSON.stringify({ level: 'error', event: 'database-connection', code: (error as any).code })),
 );
 if (config.NODE_ENV === 'production') {
-  const version = await pool.query('SELECT version FROM schema_migrations WHERE version=4');
-  if (!version.rowCount) throw new Error('Required migration missing');
+  const initialized = await pool.query("SELECT to_regclass('schema_migrations') AS name");
+  if (!initialized.rows[0]?.name)
+    throw new Error('Database schema is not initialized; run migrations before starting');
+  const result = await pool.query('SELECT COALESCE(MAX(version), 0)::int AS version FROM schema_migrations');
+  const version = Number(result.rows[0]?.version || 0);
+  if (version < REQUIRED_SCHEMA_VERSION)
+    throw new Error(
+      `Database schema version ${version} is older than required version ${REQUIRED_SCHEMA_VERSION}; run migrations before starting`,
+    );
 } else await migrate(pool);
 // Upgrade existing installations once; the marker makes later operator deletions persist.
 await transaction(pool, async (db) => {
@@ -86,40 +93,52 @@ tick();
 const RETENTION_SCHEDULE_ID = 'retention-schedule';
 const RETENTION_CLAIM_TTL_MS = 5 * 60_000;
 async function claimRetention(policy: AppSettings['retentionConfig']): Promise<boolean> {
-  return transaction(pool, async (db) => {
-    const row = await db.query(
-      "SELECT data FROM records WHERE kind='systemState' AND id=$1 FOR UPDATE",
-      [RETENTION_SCHEDULE_ID],
-    );
-    const data = row.rows[0]?.data ?? {};
-    const now = Date.now();
-    const lastRun = typeof data.lastRun === 'string' ? Date.parse(data.lastRun) : NaN;
-    const claimedAt = typeof data.claimedAt === 'string' ? Date.parse(data.claimedAt) : NaN;
-    if (Number.isFinite(lastRun) && now - lastRun < policy.cleanupIntervalMinutes * 60_000)
-      return false;
-    if (Number.isFinite(claimedAt) && now - claimedAt < RETENTION_CLAIM_TTL_MS) return false;
-    await put(db, 'systemState', RETENTION_SCHEDULE_ID, {
-      ...data,
-      claimedAt: new Date(now).toISOString(),
-    });
-    return true;
-  });
+  return transaction(
+    pool,
+    async (db) => {
+      const row = await db.query(
+        "SELECT data FROM records WHERE kind='systemState' AND id=$1 FOR UPDATE",
+        [RETENTION_SCHEDULE_ID],
+      );
+      const data = row.rows[0]?.data ?? {};
+      const now = Date.now();
+      const lastRun = typeof data.lastRun === 'string' ? Date.parse(data.lastRun) : NaN;
+      const claimedAt = typeof data.claimedAt === 'string' ? Date.parse(data.claimedAt) : NaN;
+      if (Number.isFinite(lastRun) && now - lastRun < policy.cleanupIntervalMinutes * 60_000)
+        return false;
+      if (Number.isFinite(claimedAt) && now - claimedAt < RETENTION_CLAIM_TTL_MS) return false;
+      await put(db, 'systemState', RETENTION_SCHEDULE_ID, {
+        ...data,
+        claimedAt: new Date(now).toISOString(),
+      });
+      return true;
+    },
+    undefined,
+    // The schedule row may not exist yet; a scoped advisory lock serializes the
+    // first claim from multiple replicas before there is a row to lock.
+    { locks: ['retention-claim'] },
+  );
 }
 async function releaseRetention(success: boolean, nextRetryAt?: string) {
-  await transaction(pool, async (db) => {
-    const row = await db.query(
-      "SELECT data FROM records WHERE kind='systemState' AND id=$1 FOR UPDATE",
-      [RETENTION_SCHEDULE_ID],
-    );
-    const data = row.rows[0]?.data ?? {};
-    await put(db, 'systemState', RETENTION_SCHEDULE_ID, {
-      ...data,
-      claimedAt: null,
-      lastRun: success ? new Date().toISOString() : (data.lastRun ?? null),
-      lastFailedAt: success ? null : new Date().toISOString(),
-      nextRetryAt: success ? null : (nextRetryAt || new Date(Date.now() + 60_000).toISOString()),
-    });
-  });
+  await transaction(
+    pool,
+    async (db) => {
+      const row = await db.query(
+        "SELECT data FROM records WHERE kind='systemState' AND id=$1 FOR UPDATE",
+        [RETENTION_SCHEDULE_ID],
+      );
+      const data = row.rows[0]?.data ?? {};
+      await put(db, 'systemState', RETENTION_SCHEDULE_ID, {
+        ...data,
+        claimedAt: null,
+        lastRun: success ? new Date().toISOString() : (data.lastRun ?? null),
+        lastFailedAt: success ? null : new Date().toISOString(),
+        nextRetryAt: success ? null : (nextRetryAt || new Date(Date.now() + 60_000).toISOString()),
+      });
+    },
+    undefined,
+    { locks: ['retention-claim'] },
+  );
 }
 let retentionRunning: Promise<unknown> | null = null;
 const retentionTick = () => {

@@ -4,6 +4,7 @@ import { randomBytes, randomUUID, createHmac } from 'node:crypto';
 import supertest from 'supertest';
 import { createPool, migrate, transaction, get, list, put } from '../server/db.ts';
 import { createApp } from '../server/app';
+import { createDatabaseRateLimiter } from '../server/rateLimit';
 import { createUser } from '../server/auth';
 import { loadConfig } from '../server/config.ts';
 import { decrypt, encrypt, passwordHash, checkPassword } from '../server/secrets.ts';
@@ -302,6 +303,12 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       assert.match(response.headers['content-security-policy'], /script-src 'self'/);
       assert.equal(response.headers['cache-control'], 'no-store');
       assert.equal(response.body.watchlist.length, 0);
+      const compressed = await admin.get('/api/state').set('Accept-Encoding', 'gzip');
+      assert.equal(
+        compressed.headers['content-encoding'],
+        'gzip',
+        'the large state snapshot must be gzip-compressed in transit',
+      );
     });
     await t.test('pipeline stop enforces authentication, CSRF and operator roles', async () => {
       const path = '/api/pipeline/missing/stop';
@@ -340,7 +347,69 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
         403,
       );
       assert.equal((await operator.get('/api/users')).status, 403);
+      // VIEWER is read-only, not blind: read endpoints and read-only
+      // simulations stay available while every mutation is role-gated.
+      assert.equal((await viewer.get('/api/audit/verify')).status, 200);
+      assert.equal((await viewer.get('/api/email-queue')).status, 200);
+      const viewerPage = await viewer.get('/api/collections/auditLogs?limit=2&offset=2');
+      assert.equal(viewerPage.status, 200);
+      assert.equal(
+        viewerPage.body.offset,
+        2,
+        'VIEWER pagination must not be silently reset to the first page',
+      );
+      const viewerSearch = await viewer.get(
+        '/api/collections/auditLogs?search=no-such-audit-entry-zz',
+      );
+      assert.equal(viewerSearch.status, 200);
+      assert.equal(viewerSearch.body.total, 0, 'VIEWER collection search must be applied');
+      const simulated = await viewer
+        .post('/api/correlation/simulate')
+        .set('Origin', config.APP_ORIGIN)
+        .set('x-csrf-token', viewCsrf)
+        .send({ vendor: 'acme', product: 'widget' });
+      assert.equal(simulated.status, 200, JSON.stringify(simulated.body));
     });
+    await t.test('mutation quota is shared across application replicas', async () => {
+      const username = 'rate-viewer';
+      await createUser(pool, username, password, 'VIEWER');
+      const replicaA = createApp(pool, config, requester, {
+        mutationLimiter: createDatabaseRateLimiter(pool, 2, 0.000001),
+      });
+      const replicaB = createApp(pool, config, requester, {
+        mutationLimiter: createDatabaseRateLimiter(pool, 2, 0.000001),
+      });
+      const agentA = supertest.agent(replicaA),
+        agentB = supertest.agent(replicaB);
+      const loginReplica = async (agent: typeof agentA) => {
+        const response = await agent
+          .post('/api/login')
+          .set('Origin', config.APP_ORIGIN)
+          .send({ username, password });
+        assert.equal(response.status, 200, JSON.stringify(response.body));
+        return response.body.csrfToken as string;
+      };
+      const csrfA = await loginReplica(agentA),
+        csrfB = await loginReplica(agentB);
+      const mutate = (agent: typeof agentA, csrf: string) =>
+        agent
+          .post('/api/correlation/simulate')
+          .set('Origin', config.APP_ORIGIN)
+          .set('x-csrf-token', csrf)
+          .send({ vendor: 'acme', product: 'widget' });
+      assert.equal((await mutate(agentA, csrfA)).status, 200);
+      assert.equal((await mutate(agentB, csrfB)).status, 200);
+      const denied = await mutate(agentA, csrfA);
+      assert.equal(
+        denied.status,
+        429,
+        'the second replica must observe the first replica\'s consumption',
+      );
+      assert.ok(Number(denied.headers['retry-after']) >= 1);
+      // Reads stay available after the mutation quota is exhausted.
+      assert.equal((await agentB.get('/api/state')).status, 200);
+    });
+
     await t.test('validation rejects malformed data and unsupported feed adapters', async () => {
       assert.equal((await command('asset.import', [null])).status, 400);
       assert.equal((await command('feed.save', { url: 'http://127.0.0.1' })).status, 400);

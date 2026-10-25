@@ -326,9 +326,9 @@ export const AliasesView: React.FC = () => {
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  deleteAlias(deletingId);
-                  setDeletingId(null);
+                onClick={async () => {
+                  const deleted = await deleteAlias(deletingId);
+                  if (deleted) setDeletingId(null);
                 }}
                 className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
               >

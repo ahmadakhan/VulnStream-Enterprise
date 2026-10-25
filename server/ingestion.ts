@@ -592,8 +592,15 @@ export async function ingestFeed(
     if (data === undefined) return { cves: [], count: 0, notModified: true, etag };
     const cves = z.array(cveSchema).max(10000).parse(data);
     // Generic feeds may assert VEX, but unsigned claims cannot suppress alerts.
+    // Signed per-source statements are retained; the legacy single `vex` field is
+    // only accepted through a trusted adapter that can vouch for its provenance.
     return {
-      cves: cves.map((c) => ({ ...c, vex: undefined, sourceFeeds: [feed.id] })),
+      cves: cves.map((c) => ({
+        ...c,
+        vex: undefined,
+        vexStatements: (c.vexStatements ?? []).filter((statement) => statement.signed === true),
+        sourceFeeds: [feed.id],
+      })),
       count: cves.length,
       etag,
     };

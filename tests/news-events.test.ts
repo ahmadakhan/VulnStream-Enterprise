@@ -59,6 +59,18 @@ test('Atom handles alternate links and rejects HTML, entities and future timesta
     parseSyndication('<rss>' + '<nested>'.repeat(100) + '</nested>'.repeat(100) + '</rss>', 'x', 24),
   );
 });
+test('numeric entities cannot emit lone UTF-16 surrogates', () => {
+  const xml = rss(
+    '<item><title>Acme &#xD800; Widget &#x1F600;</title><link>https://example.com/story</link><pubDate>Wed, 21 Oct 2026 10:00:00 GMT</pubDate><description>CVE-2026-12345</description></item>',
+  );
+  const [article] = parseSyndication(xml, 'news', 24, now).articles;
+  assert.ok(article);
+  assert.ok(
+    !/[\uD800-\uDFFF]/u.test(article.title),
+    'a lone surrogate must never reach normalized article text',
+  );
+  assert.match(article.title, /😀/, 'valid astral-plane references must still decode');
+});
 test('cross-feed evidence deduplicates by URL and CVE/product without producing findings', () => {
   const news = articles();
   const other = { ...news[0], id: 'other', url: 'https://example.org/report', sourceFeeds: ['other'] };

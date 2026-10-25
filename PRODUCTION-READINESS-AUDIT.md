@@ -14,8 +14,8 @@
 |---|---|---|
 | Type check | `npm run lint` | Pass |
 | Production build | `npm run build` | Pass (client + server) |
-| Unit tests (no DB) | `npm test` | 118 tests, 114 pass, 4 skipped, 0 fail |
-| Full tests (PostgreSQL) | `TEST_DATABASE_URL=… npm test` | **166 tests, 166 pass, 0 fail** |
+| Unit tests (no DB) | `npm test` | 178 tests, 173 pass, 5 skipped, 0 fail |
+| Full tests (PostgreSQL) | `TEST_DATABASE_URL=… npm test` | **237 tests, 237 pass, 0 fail** |
 | Dependency audit | `npm audit --omit=dev` | **0 vulnerabilities** |
 
 The full PostgreSQL run is now deterministic. Before this pass it failed intermittently when test files ran in parallel because every test schema and every deployment sharing a database contended for the same long-held pipeline advisory lock. Test files now run serially (`package.json`).
@@ -103,52 +103,137 @@ Query keys such as `key`, `access_key`, `private_key`, `credential`, and `sig` a
 
 ---
 
-## 3. Remaining findings (prioritized)
+## 2a. Hardening pass — 2026-10-25 (implemented and verified)
+
+This pass closed the remaining concurrency, matching, VEX, and delivery-idempotency gaps from the adversarial review. Every item below has direct regression coverage and passed the full PostgreSQL suite, type check, and production build.
+
+### Concurrency — scoped locks replace the installation-wide lock
+**Files:** `server/db.ts`, `server/commands.ts`, `server/app.ts`, `server/pipeline.ts`, `server/retention.ts`, `server/main.ts`
+
+The global `800002` advisory lock serialized every write in the installation. It is replaced by optional named locks on `transaction(pool, fn, client, { locks })` plus row-level `getForUpdate()` for read-modify-write sequences. The audit chain uses its own `audit-chain` lock, retention uses `retention-run`/`retention-claim`, and recipient creation uses `recipients-unique` so two concurrent creates cannot both pass the same read-then-insert uniqueness check. Independent domains now proceed concurrently while the same domain still serializes. Regression coverage: `tests/hardening.test.ts` (unrelated named locks overlap; the same named lock serializes; row locks expose only committed state; concurrent duplicate recipient creates commit exactly one row).
+
+### VEX — explicit status lattice, no silent suppression
+**Files:** `src/engine/exploitability.ts`, `src/types/index.ts`, `server/validation.ts`, `server/ingestion.ts`, `server/pipeline.ts`
+
+VEX resolution now returns an explicit assessment instead of a boolean. `affected` plus `not_affected`/`fixed` is `CONFLICT` and requires review; independent exploit intelligence (KEV/EWI/active exploitation) produces `EXPLOIT_INTELLIGENCE_OVERRIDE`; `under_investigation` requires review; statements outside the finding scope produce `SCOPE_MISMATCH`. Unsigned statements are retained for audit but can never suppress, and generic JSON feeds keep only `signed === true` statements. Scope matching uses the same symmetric alias thesaurus as correlation and the matched inventory item's own PURLs, so a statement for one affected package cannot suppress a finding for a different package on the same CVE. Findings now persist `matchedAssetPurls`, and reconciliation refreshes vendor, product, and PURL scope when inventory changes. Regression coverage: `tests/exploitability.test.ts` (conflict, scope mismatch, per-asset PURL scope, signed/unsigned, override, review escalation).
+
+### Matching — symmetric structured CPE aliases without weakening strict mode
+**Files:** `src/utils/cpeMatcher.ts`, `src/engine/pipelineEngine.ts`
+
+`matchCPE` accepts optional vendor/product alias maps. Exact component equality is always evaluated first; only a structured pair that differs solely by a thesaurus entry is matched, returns `viaAlias: true`, and is scored at 85% (below the 90% auto-dispatch threshold). Omitting the alias maps preserves the previous strict behavior. The pipeline's candidate prefilter and the PostgreSQL candidate index expand the same built-in plus operator-managed alias groups; expanding only custom aliases had excluded pairs such as `microsoft`/`msft` before the matcher could evaluate them, silently dropping valid findings. Regression coverage: `tests/cpe-alias.test.ts` (both operand orders, strict default, exact-match precedence, product separation, review confidence, built-in alias reachability) and the built-in-alias candidate subtest in `tests/hardening.test.ts`.
+
+### Delivery — content-revision outbox dedupe
+**Files:** `server/delivery.ts`
+
+Outbox keys are `${stableDispatchKey}:${contentRevision}:{email|webhook}:${targetId}`. Pipeline-created advisories receive a new random ID on every run, so the advisory ID is excluded from the content revision and the default dispatch key is content-derived; an explicit operator dispatch key still overrides it for intentional resends. `findingRevision` excludes volatile delivery state (`notificationStatus`, `exploitability`) so reruns after delivery do not create new revisions. A terminal stale-applicability failure may be safely re-opened only after the pipeline revalidates current inventory; transport, recipient, and subscription failures are never resurrected. Regression coverage: `tests/hardening.test.ts` (random advisory IDs dedupe, volatile state ignored, material change redelivers, operator override), plus the existing stale-bundle lifecycle tests.
+
+### Scale — typed candidate index and pushdown
+**Files:** `server/versionIndex.ts`, `server/migrations/008_match_index.sql`, `server/pipeline.ts`, `server/db.ts`
+
+Migration 8 adds `match_asset_index`/`match_cve_index` with GIN identity arrays and typed version ordinals. PostgreSQL now generates candidate `(cve_id, asset_id)` pairs; the JavaScript matcher remains authoritative. Only simple dotted numeric versions are encoded, and any unencodable bound/criterion is treated as unbounded, so the index is always a conservative superset. Alias-expanded identities and PURL identities participate, and a full refresh removes stale asset/criterion rows. The cleanup compares positionally aligned CVE/criterion arrays: de-duplicating the CVE ids had zipped them against a longer criterion list and silently dropped every criterion after the first for multi-criterion CVEs. This also closes the PURL-only inventory scan and alias candidate-pruning gaps. Regression coverage: `tests/hardening.test.ts` (range/exact/PURL/wildcard selection, non-numeric conservatism, stale-row cleanup, multi-criterion retention, ordinal ordering).
+
+### Server input and authorization hardening
+**Files:** `server/config.ts`, `server/auth.ts`, `server/commands.ts`, `server/rss.ts`
+
+- `DATABASE_URL` must now parse as a `postgres:`/`postgresql:` URL with a hostname, so malformed configuration fails at startup instead of during the first query.
+- `TRUST_PROXY` rejects trust-all values (`*`, `true`, `0.0.0.0/0`, `::/0`). Explicit proxy IPs, CIDRs, and the `loopback`/`linklocal`/`uniquelocal` presets remain supported.
+- Cookie extraction matches the exact cookie name instead of the first prefix match, preventing a forged `vulnstream_*` cookie from shadowing the real session token.
+- `requireRole` fails closed with `401` when authentication middleware did not run, instead of dereferencing a missing operator.
+- Read-only endpoints (audit-chain verification, the email queue, and correlation simulation) remain available to `VIEWER`, matching the documented role model; only mutations and administrative routes require `ADMIN`/`OPERATOR`.
+- Editing a recipient preserves its computed `deliverySuccessRate`; editing a webhook preserves its `deliveryCount` and does not silently rotate a stored secret when the secret field is blank.
+- RSS numeric character references in the UTF-16 surrogate range are left undecoded instead of emitting lone surrogates.
+- `/api/state` and other responses are gzip-compressed above 1 KiB; heavy collections are bounded and their history views are server-paginated.
+
+Regression coverage: `tests/config-auth.test.ts`, the recipient/webhook subtest in `tests/hardening.test.ts`, the surrogate case in `tests/news-events.test.ts`, and the compression assertion in `tests/integration.test.ts`.
+
+### Matcher and data-integrity hardening
+**Files:** `src/utils/cpeMatcher.ts`, `server/versionIndex.ts`, `src/utils/deduplicator.ts`, `src/engine/reconcileFindings.ts`, `server/validation.ts`, `server/collections.ts`
+
+- Scoped PURLs (`pkg:npm/@scope/name`) keep the npm scope as identity; a leading `@` is no longer mistaken for a version delimiter in either the matcher or the version index.
+- Operator-managed alias maps use null prototypes, so a canonical key such as `__proto__` is stored as data instead of mutating `Object.prototype`.
+- CVE merges prefer a record with a parseable `modifiedDate` over one with an invalid date; when both dates are invalid, deterministic content ordering decides the winner. Equal-time applicability conflicts still escalate to review.
+- Finding reconciliation falls back to the raw CVE ID (or finding ID) when normalization fails, so distinct invalid identifiers no longer collapse onto one identity.
+- `idSchema` rejects control characters (C0 and DEL) while allowing legitimate separators.
+- Collection search escapes `%`, `_`, and `!` and uses `ESCAPE '!'`, so a literal wildcard in a query cannot broaden a search. Audit IP search is now case-insensitive.
+
+Regression coverage: `tests/data-integrity.test.ts`, `tests/cpe-alias.test.ts`, `tests/audit.test.ts` (scoped PURL), and the LIKE-wildcard subtest in `tests/hardening.test.ts`.
+
+### State scaling — bounded snapshots with exact aggregates
+**Files:** `server/db.ts`, `server/app.ts`, `src/context/AppContext.tsx`, `src/components/*`
+
+- `state()` honors per-kind limits and `/api/state` always supplies `STATE_COLLECTION_LIMITS`; only recent slices of heavy collections are returned.
+- `counts` and `summary` are computed independently of the returned rows, so KPI cards and navigation badges stay exact at any cache size.
+- Advisories, pipeline executions, sent-notification history, and audit logs use `/api/collections/:kind` with server-side pagination and search instead of slicing capped snapshot arrays. Audit exports walk every server page and honor the active filters.
+- Retention footprint counts come from `/api/retention/preview`; the correlation simulator calls `/api/correlation/simulate`, which evaluates the full server-side cache.
+- The dashboard and sidebar read `summary`/`counts`; gzip compression above 1 KiB remains enabled.
+
+Regression coverage: the bounded-state subtest in `tests/hardening.test.ts` asserts capped slices, exact `counts`, and exact `summary` aggregates, and `tests/integration.test.ts` asserts gzip on `/api/state`.
+
+### Collection reliability — malformed legacy values cannot break a page
+**Files:** `server/collections.ts`, `server/migrations/009_safe_json_casts.sql`, `server/db.ts`
+
+Server-side ordering and filtering cast JSON fields to `timestamptz`/`numeric`. A single legacy or imported row with an unparseable value made PostgreSQL abort the entire paginated listing (`invalid input syntax for type timestamp with time zone`). Migration 9 adds `safe_timestamptz()`/`safe_numeric()`, which return `NULL` for unparseable input; the collection queries use them for sorting and range filters, malformed timestamps sort last via `NULLS LAST`, and the KEV filter compares the text value instead of casting it to `boolean`. Regression coverage: the malformed-legacy-payload subtest in `tests/hardening.test.ts` exercises sorting, in-scope date filtering, KEV filtering, and EPSS filtering with invalid values.
+
+### Client resilience and mutation limiting
+**Files:** `server/rateLimit.ts`, `server/app.ts`, `src/context/AppContext.tsx`, `src/hooks/useCollection.ts`, `src/components/SettingsView.tsx`, `src/components/ErrorBoundary.tsx`, `src/main.tsx`
+
+- Mutation token buckets now refill continuously. The previous implementation reset its timestamp on every request, so a throttled operator could never recover while retrying; denied responses now carry a `Retry-After` derived from the actual refill rate.
+- Concurrent state refreshes are sequence-numbered, so a slower older snapshot can no longer overwrite a newer one.
+- Background tabs skip the 10-second `/api/state` poll and refresh immediately when they become visible again.
+- `useCollection` invalidates in-flight requests on unmount or parameter change, preventing late responses from updating an inactive view.
+- A failed paginated collection fetch keeps the last successful page and surfaces the app-level error banner instead of blanking the table.
+- A failed post-mutation snapshot refresh no longer makes a committed mutation look failed.
+- A failed password change keeps the form populated so the operator can correct the current password instead of retyping both values.
+- Recipient, webhook, and finding-status mutations refresh the snapshot immediately instead of waiting for the next poll.
+- Delete confirmations close only after the server confirms success, and failed webhook tests now surface an error instead of silently doing nothing.
+- Email retry state is cleared in a `finally` block so a failed request cannot leave the row stuck in a retrying state.
+- The existing error boundary is now mounted at the application root, so a render failure shows its diagnostics and recovery UI instead of leaving a blank page.
+
+Regression coverage: `tests/rate-limit.test.ts`.
+
+**Known limitation:** the mutation limiter is per process. With multiple replicas, each replica enforces its own bucket, so the effective burst allowance scales with the replica count. This still bounds abuse per replica, but a globally shared quota would require a database- or gateway-backed limiter.
+
+### Verification
+`npx tsc --noEmit`, `npm run build`, `npm test` without a database (178 tests: 173 pass, 5 skipped), and the full PostgreSQL run (237 tests, 237 pass) all succeeded.
+
+---
+
+## 3. Findings and status (prioritized)
 
 ### P0 — `/api/state` returns the entire cache and history on every poll
-**Files:** `server/db.ts:151-184`, `server/app.ts:271-272`, `src/context/AppContext.tsx:127-129`
+**Status:** Addressed. `/api/state` now returns a bounded snapshot: `STATE_COLLECTION_LIMITS` applies a `LIMIT` to every heavy collection (`cveData`, `findings`, `advisories`, `alertedCves`, delivery logs, executions, articles, matches, audit rows), while `counts` and `summary` remain exact and are computed independently of those slices. Views that need history now use the server-paginated `/api/collections/:kind` endpoint: advisories, pipeline executions, sent-notification history, and audit logs. Dashboard and navigation totals use `summary`/`counts` instead of filtering capped arrays, the retention footprint uses `/api/retention/preview`, and the correlation simulator uses `/api/correlation/simulate` against the full cache. Responses are also gzip-compressed above 1 KiB.
 
-`state()` loads every row for every array kind (`cveData`, `intelligenceArticles`, `findings`, `advisories`, `emailLogs`, `webhookLogs`, `executions`, plus 500 audit entries), and the client requests it every 10 seconds. For a 10k–50k CVE installation this is a multi-megabyte response, repeated serialization, and sustained database load.
-
-**Recommendation before a large deployment:** add server-side pagination/filtering for `cveData`, `intelligenceArticles`, and delivery history, or a compact summary endpoint plus on-demand detail endpoints. Enable gzip compression as an interim mitigation. This is an architectural change and was deliberately not attempted in this audit pass.
+**Files:** `server/db.ts`, `server/app.ts`, `src/context/AppContext.tsx`, `src/components/{AdvisoriesView,PipelineExecutionsView,AlertedCVEsView,OperationalLogsView,DashboardView,Sidebar,ArchiveRetentionView,WatchListView}.tsx`
 
 ### P1 — Hardcoded cleanup windows bypass the operator retention policy
-**Files:** `server/main.ts:109-118`, `server/retention.ts:11-17`
+**Status:** Addressed. The background cleanup now removes only security-invariant session/login-attempt rows. Terminal `outbox` rows and `operational_events` are deleted by `runRetention` using the configured policy cutoff, and those deletions are audited.
 
-The background cleanup still deletes `outbox` rows after 30 days and `operational_events` after 90 days regardless of `settings.retentionConfig`. The policy-managed retention covers `emailLogs`/`webhookLogs`/`executions`, so operators can believe a longer window is in force while the queue/event history is trimmed independently.
-
-**Recommendation:** either route these through the retention policy or document them as fixed system windows in the UI.
+**Files:** `server/main.ts`, `server/retention.ts`
 
 ### P1 — PURL-only inventory is evaluated against every CVE
-**Files:** `src/engine/pipelineEngine.ts:86-118`
+**Status:** Addressed in §2a by the typed candidate index. PURL identities now participate in candidate generation, so PURL-only assets are only offered to CVEs whose PURL criteria overlap. Wildcard/unencodable criteria still fall back to the full candidate set for correctness.
 
-`assetsWithNoCpes` includes PURL-only assets and is added as a candidate for every CVE, and a CVE with no CPE criteria returns all active assets. Matching is still correct, but large package inventories make each pipeline run O(assets × CVEs).
-
-**Recommendation:** index PURL-only assets by package name and add only the matching bucket per CVE.
+**Files:** `server/versionIndex.ts`, `server/migrations/008_match_index.sql`, `server/pipeline.ts`
 
 ### P1 — Retention scheduling is per process, not per deployment
-**File:** `server/main.ts:85-108`
+**Status:** Addressed. The last successful run and an expiring claim are persisted in the `systemState` `retention-schedule` row, so replicas do not each schedule the same cleanup. A scoped `retention-claim` lock serializes the first claim.
 
-`lastRetention` is in memory. With multiple worker replicas, each replica schedules cleanup independently. The state transaction serializes the destructive work, so this is redundant work rather than data corruption, but it multiplies load and audit entries.
-
-**Recommendation:** persist the last-run timestamp in `systemState`, or elect a single retention worker.
+**File:** `server/main.ts`
 
 ### P2 — Alias/fallback matches ignore the version range
-**File:** `src/utils/cpeMatcher.ts:621-649`
+**Status:** Addressed within the strict-matching constraint. Structured CPE alias matches still evaluate the NVD version interval (the alias only broadens vendor/product), and an unprovable version keeps the finding review-only. The free-text vendor/product fallback stays at 85% and is review-only, so it can never auto-dispatch. This is deliberate: exact matching remains the default, concrete versions are evaluated before ranges, and every looser path is gated behind manual review.
 
-The vendor/product alias fallback returns 85% confidence without evaluating the CVE version range. Because the auto-dispatch threshold is 90% (`src/engine/pipelineEngine.ts:186`), these findings are review-only and cannot auto-send; however, they can add noisy review items for products whose only evidence is the vendor/product name.
-
-**Recommendation:** when the asset has a version, evaluate the range and mark `applicabilityRequiresReview` instead of silently ignoring it.
+**File:** `src/utils/cpeMatcher.ts`
 
 ### P2 — A failed retention run waits a full interval
-**File:** `server/main.ts:94-100`
+**Status:** Addressed. `releaseRetention(false)` records `lastFailedAt` and `nextRetryAt` (60 seconds by default), and `retentionTick` honors `nextRetryAt` before attempting another claim.
 
-`lastRetention` is set before `runRetention` completes. If cleanup throws, the next attempt waits `cleanupIntervalMinutes` (default 60). Manual cleanup via `/api/retention/run` remains available.
+**File:** `server/main.ts`
 
 ### P2 — Older audit documents are stale
-**Files:** `AUDIT.md`, `AUDIT-SUMMARY.md`, `THREAT-INTELLIGENCE-AUDIT.md`
+**Status:** Addressed. `AUDIT.md`, `AUDIT-SUMMARY.md`, `THREAT-INTELLIGENCE-AUDIT.md`, `ECOSYSTEM-AUDIT-2026-10-21.md`, and `CODEBASE-UI-AUDIT-2026-10-21.md` now carry a historical banner that points to this report as the authoritative readiness document.
 
-They describe behavior that has since changed and should be replaced by this report or explicitly marked historical.
+**Files:** `AUDIT.md`, `AUDIT-SUMMARY.md`, `THREAT-INTELLIGENCE-AUDIT.md`, `ECOSYSTEM-AUDIT-2026-10-21.md`, `CODEBASE-UI-AUDIT-2026-10-21.md`
 
 ---
 
@@ -156,10 +241,10 @@ They describe behavior that has since changed and should be replaced by this rep
 
 - [ ] Set `NODE_ENV=production`, an HTTPS `APP_ORIGIN`, and a 32-byte base64 `ENCRYPTION_KEY`.
 - [ ] Keep `EGRESS_ALLOWED_HOSTS` minimal; add only feed/provider hosts actually used.
-- [ ] Run migrations before starting the worker (`schema_migrations` version 4 is required).
+- [ ] Run migrations before starting the worker (`schema_migrations` version 9 is required).
 - [ ] Set `WORKER_ENABLED=true` only on the process that should run the pipeline, delivery loop, and retention.
 - [ ] Configure a reverse proxy with TLS, request/response size limits, and timeouts above the 30-second API timeout.
-- [ ] Decide the `/api/state` scaling strategy (pagination or summary endpoint) before loading a large CVE cache.
+- [x] State snapshots are bounded and heavy history views are server-paginated; no further `/api/state` scaling change is required before loading a large CVE cache.
 - [ ] Verify email/webhook providers from the UI (“Test All Feeds” for feeds; provider test actions for delivery) before enabling auto-dispatch.
 - [ ] Keep retention disabled until the desired window and archive ceiling are reviewed; test a manual cleanup in staging first.
 - [ ] Run `npm run lint`, `npm test` (with `TEST_DATABASE_URL`), `npm run build`, and `npm audit --omit=dev` in CI.
@@ -168,4 +253,4 @@ They describe behavior that has since changed and should be replaced by this rep
 
 ## 5. Notes on concurrent work
 
-The working tree also contains operator-facing retention work (`server/retention.ts`, `tests/retention.test.ts`, `src/components/ArchiveRetentionView.tsx`, retention settings/types) and unrelated UI changes. They were verified by the full test/build run and were not reverted. The older audit documents were left in place to avoid deleting user-authored history.
+The working tree also contains operator-facing retention work (`server/retention.ts`, `tests/retention.test.ts`, `src/components/ArchiveRetentionView.tsx`, retention settings/types) and unrelated UI changes. They were verified by the full test/build run and were not reverted. The older audit documents were retained and marked historical rather than deleted, to preserve user-authored history.

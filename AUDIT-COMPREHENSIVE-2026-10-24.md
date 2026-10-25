@@ -12,13 +12,40 @@ The codebase demonstrates strong security engineering: scrypt password hashing, 
 
 **Findings: 12 HIGH, 38 MEDIUM, 25 LOW, 0 CRITICAL**
 
+> **Remediation status (2026-10-25):** This document is retained as the historical baseline for the original review. The authoritative current readiness decision and verification counts are in `PRODUCTION-READINESS-AUDIT.md`. The following items were implemented and verified in the 2026-10-25 hardening pass:
+>
+> | Finding | Status | Implementation |
+> |---|---|---|
+> | H1 — audit-chain race | Fixed | `appendAudit` acquires the scoped `audit-chain` advisory lock itself and wraps non-transaction callers in a transaction. |
+> | H5 — email header injection | Fixed | `advisoryEmail` strips CR/LF from ID, severity, and title before building the subject. |
+> | H6 — CPE delimiter escaping | Fixed | `generateCPE23` escapes `\` and `:`; `buildStrictCpe23` does the same. |
+> | H7 — wildcard CPE ReDoS | Fixed | Wildcard expansion is capped; wildcard-vs-wildcard comparison uses memoized glob intersection. |
+> | H8 — alias candidate pruning | Fixed | Candidate generation expands alias identities, and the PostgreSQL match index carries the same alias-expanded keys. |
+> | M — cookie prefix shadowing | Fixed | Cookie extraction matches the exact cookie name. |
+> | M — `requireRole` missing-operator dereference | Fixed | Returns `401` when authentication middleware did not run. |
+> | M — `TRUST_PROXY` / `DATABASE_URL` validation | Fixed | Trust-all proxy values and malformed database URLs are rejected at startup. |
+> | M — recipient/webhook save resets delivery metrics | Fixed | Edits preserve `deliverySuccessRate`/`deliveryCount` and existing webhook secrets. |
+> | M — RSS numeric entity lone surrogates | Fixed | Surrogate-range references are left undecoded. |
+> | M — large state transfer size | Fixed | Bounded snapshot slices, exact `counts`/`summary`, server-side pagination for heavy views, and gzip above 1 KiB. |
+> | M — scoped PURL identity | Fixed | A leading `@` is treated as the npm scope in the matcher and version index. |
+> | M — alias-map prototype pollution | Fixed | Alias maps use null prototypes and store `__proto__` as ordinary data. |
+> | M — invalid revision dates in CVE merges | Fixed | A parseable date wins; two invalid dates resolve deterministically. |
+> | M — invalid CVE identity collisions | Fixed | Reconciliation falls back to the raw CVE ID or finding ID. |
+> | M — LIKE wildcards in collection search | Fixed | `%`, `_`, and `!` are escaped with `ESCAPE '!'`; audit IP search is case-insensitive. |
+> | M — identifier control characters | Fixed | `idSchema` rejects C0 and DEL control characters. |
+> | M — mutation limiter never refilled | Fixed | Continuous token refill with an accurate `Retry-After`. |
+> | M — stale snapshot / unmounted collection updates | Fixed | Refresh sequencing and in-flight request invalidation. |
+> | M — failed post-mutation refresh reported as failure | Fixed | The committed mutation result survives a snapshot-refresh error. |
+> | M — blank page on render error | Fixed | Top-level error boundary with a reload path. |
+>
+> The same pass added an explicit VEX conflict/scope lattice, symmetric structured CPE aliases, content-revision outbox dedupe, scoped named locks plus row-level locks, a typed candidate-pair index (migration 8), and safe JSON casts (migration 9). Regression coverage lives in `tests/exploitability.test.ts`, `tests/cpe-alias.test.ts`, `tests/config-auth.test.ts`, `tests/data-integrity.test.ts`, `tests/rate-limit.test.ts`, and `tests/hardening.test.ts`. Full verification: type check and production build pass; 237/237 PostgreSQL tests pass; 173/178 tests pass without a database with 5 database suites skipped.
+
 ---
 
 ## HIGH Severity Findings
 
 ### H1. Audit-chain race condition — `server/db.ts:121-149`
-`appendAudit` reads the previous hash with `SELECT ... ORDER BY seq DESC LIMIT 1` then inserts, but does not acquire the advisory lock itself. Correctness depends on every caller already holding transaction lock 800002. Any concurrent or direct caller can fork/lose audit-chain links.
-**Fix:** Acquire `pg_advisory_xact_lock(800002)` inside `appendAudit`, or require a transaction client.
+**Status: Fixed (2026-10-25).** `appendAudit` now acquires the scoped `audit-chain` advisory lock for the read/insert pair and wraps non-transaction callers in a transaction, so callers no longer need to hold a global mutation lock.
 
 ### H2. Missing global rate limiting — `server/auth.ts:104-120`
 Only `/api/login` is throttled. No throttling on `/api/commands`, `/api/pipeline`, feed tests, password changes, or delivery retries. Brute-force and DoS vectors exist on all mutation endpoints.
@@ -45,8 +72,7 @@ The email subject is built from raw `advisory.id` and `advisory.title` without C
 **Fix:** Limit wildcard expansion depth or use a non-backtracking regex engine.
 
 ### H8. Alias candidate pruning false negatives — `src/engine/pipelineEngine.ts:132-161`
-`candidateAssets` indexes inventory by exact lowercased vendor/product pair from CPEs. Assets whose vendor/product strings differ only by alias formatting are not selected as candidates, so the alias thesaurus path is bypassed and valid correlations can be missed.
-**Fix:** Normalize keys through the alias map before indexing, or fall back to a broader candidate scan when alias tables are non-empty.
+**Status: Fixed (2026-10-25).** Candidate keys are expanded through the alias maps, and the PostgreSQL match index (`server/versionIndex.ts`) uses the same alias-expanded identities, so alias-only correlations are no longer pruned.
 
 ### H9. Unvalidated URL in href (XSS) — `src/components/ThreatDataView.tsx:838`
 `href={article.url}` renders an unvalidated URL in a new tab. A malicious/compromised feed article with a `javascript:` URL can execute script when clicked.
@@ -185,7 +211,7 @@ The email subject is built from raw `advisory.id` and `advisory.title` without C
 - Zod validation at all API boundaries
 - Non-root Docker with read-only filesystem, health checks, graceful shutdown
 - CSRF tokens with exact-origin enforcement
-- Comprehensive test suite (178+ tests)
+- Comprehensive test suite (237 tests with PostgreSQL; database suites skip cleanly without it)
 - Retention policy with dry-run preview
 - Circuit breaker for feeds
 - Delivery retry with exponential backoff

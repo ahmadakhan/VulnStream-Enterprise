@@ -137,6 +137,7 @@ export const RecipientsView: React.FC = () => {
   };
 
   const handleRunWebhookTest = async (endpoint: WebhookEndpoint) => {
+    setErrorMsg(null);
     const res = await testWebhook(endpoint.id);
     if (res.success) {
       setTestResult({
@@ -144,6 +145,10 @@ export const RecipientsView: React.FC = () => {
         statusCode: res.statusCode,
         signature: res.signature,
       });
+    } else {
+      setErrorMsg(
+        `Webhook test for ${endpoint.name} failed${res.statusCode ? ` (HTTP ${res.statusCode})` : ''}.`,
+      );
     }
   };
 
@@ -691,9 +696,8 @@ export const RecipientsView: React.FC = () => {
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  deleteRecipient(deletingRecipientId);
-                  setDeletingRecipientId(null);
+                onClick={async () => {
+                  if (await deleteRecipient(deletingRecipientId)) setDeletingRecipientId(null);
                 }}
                 className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
               >
@@ -720,9 +724,8 @@ export const RecipientsView: React.FC = () => {
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  deleteWebhook(deletingWebhookId);
-                  setDeletingWebhookId(null);
+                onClick={async () => {
+                  if (await deleteWebhook(deletingWebhookId)) setDeletingWebhookId(null);
                 }}
                 className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
               >

@@ -31,15 +31,37 @@ export const asyncRoute =
 export function cookieName(config: Config) {
   return config.NODE_ENV === 'production' ? '__Host-vulnstream' : 'vulnstream';
 }
+/**
+ * Parses the Cookie header into exact name/value pairs. Prefix matching is not
+ * sufficient: a header such as `vulnstream_attacker=...; vulnstream=...` would
+ * otherwise let the first prefix-matching entry shadow the real session token.
+ */
+/**
+ * Attributes shared by the session cookie and its deletion. `__Host-` cookies
+ * require Secure, so a development deployment served over HTTPS must set and
+ * clear the cookie with the same attributes.
+ */
+export function sessionCookieOptions(config: Config) {
+  return {
+    httpOnly: true,
+    secure: config.NODE_ENV === 'production' || new URL(config.APP_ORIGIN).protocol === 'https:',
+    sameSite: 'strict' as const,
+    path: '/',
+  };
+}
+export function readCookie(header: string | undefined, name: string): string {
+  if (!header) return '';
+  for (const part of header.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator < 0) continue;
+    if (part.slice(0, separator).trim() !== name) continue;
+    return part.slice(separator + 1).trim();
+  }
+  return '';
+}
 export function requireAuth(pool: pg.Pool, config: Config) {
   return asyncRoute(async (req, res, next) => {
-    const prefix = cookieName(config) + '=';
-    const token =
-      (req.headers.cookie || '')
-        .split(';')
-        .map((s) => s.trim())
-        .find((s) => s.startsWith(prefix))
-        ?.slice(prefix.length) || '';
+    const token = readCookie(req.headers.cookie, cookieName(config));
     if (!/^[\w-]{43}$/.test(token)) throw new HttpError(401, 'Authentication required');
     const hash = tokenHash(token);
     const found = (
@@ -66,8 +88,14 @@ export function requireAuth(pool: pg.Pool, config: Config) {
   });
 }
 export function requireRole(...roles: Role[]) {
-  return (req: Request, _res: Response, next: NextFunction) =>
-    roles.includes(req.operator!.role) ? next() : next(new HttpError(403, 'Insufficient role'));
+  return (req: Request, _res: Response, next: NextFunction) => {
+    // Fail closed if the authentication middleware was not applied. A missing
+    // operator must never turn into a 500 or an implicit authorization pass.
+    if (!req.operator) return next(new HttpError(401, 'Authentication required'));
+    return roles.includes(req.operator.role)
+      ? next()
+      : next(new HttpError(403, 'Insufficient role'));
+  };
 }
 export async function createUser(pool: pg.Pool, username: string, password: string, role: Role, ipAddress = '') {
   z.string()
@@ -136,10 +164,7 @@ export function loginHandler(pool: pg.Pool, config: Config) {
       await appendAudit(db, 'Login succeeded', 'Operator session established', username, 'SECURITY', 'INFO', req.ip || '');
     });
     res.cookie(cookieName(config), token, {
-      httpOnly: true,
-      secure: config.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
+      ...sessionCookieOptions(config),
       maxAge: 12 * 3600000,
     });
     res.json({ username, role: user.role, csrfToken: csrf, expiresAt: expires.toISOString() });

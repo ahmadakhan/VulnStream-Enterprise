@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Db } from './db.ts';
-import { get, list, put, remove, appendAudit } from './db.ts';
+import { get, getForUpdate, list, put, remove, appendAudit, schemaLockKey } from './db.ts';
 import {
   feedSchema,
   feedImportSchema,
@@ -47,7 +47,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
   const now = new Date().toISOString(),
     newId = id || randomUUID();
   const checkExisting = async (kind: string) => {
-    const previous = await get<any>(db, kind, newId);
+    const previous = await getForUpdate<any>(db, kind, newId);
     if (id && !previous) throw new HttpError(404, 'Record not found');
     return previous;
   };
@@ -81,7 +81,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
   } else if (action === 'feed.import') {
     const input = feedImportSchema.parse(data);
     for (const feed of input) {
-      const old = await get<any>(db, 'feeds', feed.id);
+      const old = await getForUpdate<any>(db, 'feeds', feed.id);
       const sameSource =
         old?.url === feed.url &&
         old?.type === feed.type &&
@@ -161,7 +161,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     }
     let imported = 0;
     for (const item of validItems) {
-      const old = await get<any>(db, 'watchlist', item.id);
+      const old = await getForUpdate<any>(db, 'watchlist', item.id);
       const merged = {
         ...old,
         ...item,
@@ -180,23 +180,39 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     await put(db, 'aliases', newId, { ...input, id: newId, createdAt: old?.createdAt || now });
   } else if (action === 'alias.delete') {
     if (!id) throw new HttpError(400, 'Record ID required');
-    if (!(await get<any>(db, 'aliases', id))) throw new HttpError(404, 'Record not found');
+    if (!(await getForUpdate<any>(db, 'aliases', id))) throw new HttpError(404, 'Record not found');
     await remove(db, 'aliases', id);
   } else if (action === 'recipient.save') {
     const input = recipientSchema.parse(data);
-    await checkExisting('recipients');
+    // A row lock cannot protect a uniqueness predicate for a row that does not
+    // exist yet: two concurrent creates both see no match and both insert.
+    // Serialize recipient writes for the transaction instead.
+    await db.query(`SELECT pg_advisory_xact_lock(hashtext($1), ${schemaLockKey})`, [
+      'recipients-unique',
+    ]);
+    const old = await checkExisting('recipients');
     const exists = (await list<any>(db, 'recipients')).some((r) => r.email === input.email && r.id !== id);
     if (exists) throw new HttpError(409, 'Recipient already exists');
-    await put(db, 'recipients', newId, { ...input, id: newId, deliverySuccessRate: 0 });
+    // Editing a recipient must not erase the delivery health computed from the
+    // outbox. Only a genuinely new recipient starts at zero.
+    await put(db, 'recipients', newId, {
+      ...input,
+      id: newId,
+      deliverySuccessRate: old?.deliverySuccessRate ?? 0,
+    });
   } else if (action === 'webhook.save') {
     const input = webhookSchema.parse(data);
-    await checkExisting('webhooks');
+    const old = await checkExisting('webhooks');
     await put(db, 'webhooks', newId, {
       ...input,
       id: newId,
       url: encrypt(input.url, config.ENCRYPTION_KEY, `webhook-url:${newId}`),
-      secretToken: encrypt(input.secretToken || randomToken(), config.ENCRYPTION_KEY, `webhook:${newId}`),
-      deliveryCount: 0,
+      // An edit with a blank secret keeps the stored credential. Rotating it
+      // silently would break the receiver without an explicit operator action.
+      secretToken: input.secretToken
+        ? encrypt(input.secretToken, config.ENCRYPTION_KEY, `webhook:${newId}`)
+        : old?.secretToken || encrypt(randomToken(), config.ENCRYPTION_KEY, `webhook:${newId}`),
+      deliveryCount: old?.deliveryCount ?? 0,
     });
   } else if (action === 'cve.save') {
     const input = cveSchema.parse(data);
@@ -210,7 +226,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     });
   } else if (action === 'email.configure') {
     const input = emailConfigSchema.parse(data);
-    const old = (await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
+    const old = (await getForUpdate<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
     const smtpProvider = isSmtpEmailProvider(input.provider);
     // A stored credential is only reusable when it still belongs to the same
     // destination. Changing a custom API endpoint, SMTP host, or SMTP username
@@ -264,7 +280,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
       throw new HttpError(400, `Allow ${new URL(endpoint).hostname} in EGRESS_ALLOWED_HOSTS before configuring this provider`);
     await put(db, 'emailConfig', 'main', { ...input, apiKey, smtpPassword, mailjetApiSecret });
   } else if (action === 'settings.save') {
-    const old = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
+    const old = (await getForUpdate<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
     await put(
       db,
       'settings',
@@ -284,7 +300,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
         note: z.string().max(2000).optional(),
       })
       .parse(data);
-    const f = await get<Finding>(db, 'findings', newId);
+    const f = await getForUpdate<Finding>(db, 'findings', newId);
     if (!f) throw new HttpError(404, 'Finding not found');
     await put(db, 'findings', newId, {
       ...f,
@@ -303,7 +319,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
         >
       )[entity];
     if (!id) throw new HttpError(400, 'Record ID required');
-    const old = await get<any>(db, kind, id);
+    const old = await getForUpdate<any>(db, kind, id);
     if (!old) throw new HttpError(404, 'Record not found');
     if (operation === 'delete') {
       await remove(db, kind, id);

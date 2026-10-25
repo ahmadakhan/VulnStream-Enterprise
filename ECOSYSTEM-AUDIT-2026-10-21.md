@@ -1,3 +1,8 @@
+> **Historical document.** This report reflects the codebase as of its original date and has been
+> superseded by [`PRODUCTION-READINESS-AUDIT.md`](./PRODUCTION-READINESS-AUDIT.md), which is the
+> authoritative readiness report. Findings here may already be fixed; do not use this file to make
+> current readiness decisions.
+
 # Threat intelligence ecosystem audit and fixes
 
 Reviewed on 21 October 2026. This follow-up audits the current source, Docker topology, ingestion and normalization, correlation, notification outbox, and de-duplication. It includes PostgreSQL-backed tests and small public-provider connectivity checks. It supersedes the outstanding code findings in `THREAT-INTELLIGENCE-AUDIT.md` where described below.

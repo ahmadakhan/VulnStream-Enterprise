@@ -1,3 +1,8 @@
+> **Historical document.** This report reflects the codebase as of its original date and has been
+> superseded by [`PRODUCTION-READINESS-AUDIT.md`](./PRODUCTION-READINESS-AUDIT.md), which is the
+> authoritative readiness report. Findings here may already be fixed; do not use this file to make
+> current readiness decisions.
+
 # Deep Audit Summary — BA Threat Intel Enterprise
 
 **Date:** 21 October 2026  

@@ -28,22 +28,22 @@ export const DashboardView: React.FC = () => {
     findings,
     watchlist,
     feeds,
-    advisories,
     setActiveTab,
     setSelectedFinding,
-    emailLogs,
     webhooks,
     settings,
+    summary,
+    counts,
   } = useApp();
 
+  // The snapshot carries only recent slices of findings/email logs. Exact KPI
+  // totals come from the server-computed summary so a large installation does
+  // not under-report once those slices are capped.
   const activeVulnerabilities = findings.filter(
     (f) =>
       !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status) &&
       f.notificationStatus !== 'NOT_APPLICABLE',
   ).sort(compareFindingsByRecency);
-  const kevFindings = activeVulnerabilities.filter((f) => f.cve.cisaKev.isKev);
-  const criticalFindings = activeVulnerabilities.filter((f) => f.cve.cvss.severity === 'CRITICAL');
-  const deliveredEmails = emailLogs.filter((e) => ['ACCEPTED', 'DELIVERED'].includes(e.status)).length;
 
   const totalCpesCount = watchlist.reduce((acc, curr) => acc + curr.cpes.length, 0);
   const totalPurlsCount = watchlist.reduce((acc, curr) => acc + (curr.purls ? curr.purls.length : 0), 0);
@@ -114,18 +114,18 @@ export const DashboardView: React.FC = () => {
           onClick={() => setActiveTab('findings')}
           className="group w-full cursor-pointer rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-4 text-left shadow-sm transition hover:border-zinc-600 hover:bg-zinc-900/70 dark:border-zinc-800/80 dark:bg-zinc-900/40 dark:hover:border-zinc-600 light:border-zinc-200 light:bg-white light:hover:border-zinc-400"
           title="Click to review correlated product vulnerabilities"
-          aria-label={`Review ${activeVulnerabilities.length} active vulnerabilities`}
+          aria-label={`Review ${summary.activeFindings} active vulnerabilities`}
         >
           <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-xs mb-1.5">
             <span className="group-hover:text-zinc-200 transition">Vulnerabilities</span>
             <Shield className="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-200 transition" />
           </div>
           <div className="text-2xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono flex items-center justify-between">
-            <span>{activeVulnerabilities.length}</span>
+            <span>{summary.activeFindings}</span>
             <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-300 group-hover:translate-x-0.5 transition" />
           </div>
           <div className="text-[11px] text-zinc-500 mt-1 font-medium">
-            {criticalFindings.length} Critical Impact
+            {summary.criticalFindings} Critical Impact
           </div>
         </button>
 
@@ -135,14 +135,14 @@ export const DashboardView: React.FC = () => {
           onClick={() => setActiveTab('findings')}
           className="group w-full cursor-pointer rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-4 text-left shadow-sm transition hover:border-amber-600/60 hover:bg-zinc-900/70 dark:border-zinc-800/80 dark:bg-zinc-900/40 dark:hover:border-amber-600/60 light:border-zinc-200 light:bg-white light:hover:border-amber-400"
           title="Click to view CISA KEV actively exploited items"
-          aria-label={`Review ${kevFindings.length} active CISA KEV vulnerabilities`}
+          aria-label={`Review ${summary.kevFindings} active CISA KEV vulnerabilities`}
         >
           <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-xs mb-1.5">
             <span className="group-hover:text-amber-400 transition">CISA KEV</span>
             <Flame className="w-3.5 h-3.5 text-amber-500/80" />
           </div>
           <div className="text-2xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono flex items-center justify-between">
-            <span className="text-amber-400/90">{kevFindings.length}</span>
+            <span className="text-amber-400/90">{summary.kevFindings}</span>
             <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-amber-300 group-hover:translate-x-0.5 transition" />
           </div>
           <div className="text-[11px] text-amber-500/80 mt-1 font-medium">Active in Wild</div>
@@ -154,14 +154,14 @@ export const DashboardView: React.FC = () => {
           onClick={() => setActiveTab('emails')}
           className="group w-full cursor-pointer rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-4 text-left shadow-sm transition hover:border-emerald-600/60 hover:bg-zinc-900/70 dark:border-zinc-800/80 dark:bg-zinc-900/40 dark:hover:border-emerald-600/60 light:border-zinc-200 light:bg-white light:hover:border-emerald-400"
           title="Click to view automated email & notification log"
-          aria-label={`View ${deliveredEmails} accepted notifications`}
+          aria-label={`View ${summary.deliveredEmails} accepted notifications`}
         >
           <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-xs mb-1.5">
             <span className="group-hover:text-emerald-400 transition">Auto-Dispatched</span>
             <MailCheck className="w-3.5 h-3.5 text-emerald-500/80" />
           </div>
           <div className="text-2xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono flex items-center justify-between">
-            <span className="text-emerald-400/90">{deliveredEmails}</span>
+            <span className="text-emerald-400/90">{summary.deliveredEmails}</span>
             <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-emerald-300 group-hover:translate-x-0.5 transition" />
           </div>
           <div className="text-[11px] text-zinc-500 mt-1 font-medium">Provider Accepted</div>
@@ -194,14 +194,14 @@ export const DashboardView: React.FC = () => {
           onClick={() => setActiveTab('advisories')}
           className="group w-full cursor-pointer rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-4 text-left shadow-sm transition hover:border-zinc-600 hover:bg-zinc-900/70 dark:border-zinc-800/80 dark:bg-zinc-900/40 dark:hover:border-zinc-600 light:border-zinc-200 light:bg-white light:hover:border-zinc-400"
           title="Click to view generated security advisories"
-          aria-label={`View ${advisories.length} generated advisories`}
+          aria-label={`View ${counts.advisories} generated advisories`}
         >
           <div className="flex items-center justify-between text-zinc-400 dark:text-zinc-400 light:text-zinc-500 text-xs mb-1.5">
             <span className="group-hover:text-zinc-200 transition">Advisories</span>
             <FileText className="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-200 transition" />
           </div>
           <div className="text-2xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono flex items-center justify-between">
-            <span>{advisories.length}</span>
+            <span>{counts.advisories}</span>
             <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-300 group-hover:translate-x-0.5 transition" />
           </div>
           <div className="text-[11px] text-zinc-500 mt-1 font-medium">Generated &amp; Logged</div>

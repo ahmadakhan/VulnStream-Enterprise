@@ -2,7 +2,7 @@ import { writeEvent } from './events';
 import { mergeArticles, matchIntelligence } from '../src/utils/intelligenceMatcher';
 import type pg from 'pg';
 import { randomUUID, createHash } from 'node:crypto';
-import { get, list, put, putMany, transaction, appendAudit, pipelineState, schemaLockKey } from './db';
+import { get, getForUpdate, list, put, putMany, transaction, appendAudit, pipelineState, schemaLockKey } from './db';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import type {
   AppSettings,
@@ -19,6 +19,7 @@ import { mergeCveRecords, normalizeCveId, stableJson } from '../src/utils/dedupl
 import { reconcileFindings } from '../src/engine/reconcileFindings';
 import { applyVexSuppression, determineExploitRisk, rankAndRateLimitZeroDays, runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { ingestFeed, type IngestContext } from './ingestion';
+import { refreshCandidatePairs } from './versionIndex';
 import { recoveryDue, recoveryAt, shouldStartAutomaticRun } from './feedRecovery';
 import { ingestionWindow, type FeedCursor } from './ingestionState';
 import type { Requester } from './network';
@@ -60,38 +61,43 @@ export async function queueRun(
   actor: string,
   incrementalFeeds = true,
 ): Promise<PipelineExecution> {
-  return transaction(pool, async (db) => {
-    const existing = (await list<PipelineExecution>(db, 'executions')).find((e) =>
-      ['QUEUED', 'RUNNING'].includes(e.status),
-    );
-    if (existing) return existing;
-    const settings = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
-    const execution: PipelineExecution = {
-      id: randomUUID(),
-      startTime: new Date().toISOString(),
-      endTime: null,
-      status: 'QUEUED',
-      scopeHours: scope ?? settings.scopeHours,
-      incrementalFeeds,
-      phases: [],
-      stats: {
-        rawIngested: 0,
-        normalized: 0,
-        deduplicated: 0,
-        inRunDuplicatesDropped: 0,
-        matchedWatchlist: 0,
-        autoDispatchedNotifications: 0,
-        advisoriesDispatched: 0,
-        webhooksFired: 0,
-        vexSuppressedCount: 0,
-      },
-      logs: [],
-    };
-    await put(db, 'executions', execution.id, execution);
-    await writeEvent(db, { category:'PIPELINE', code:'pipeline.queued', message:'Pipeline queued', runId:execution.id });
-    await appendAudit(db, 'Pipeline queued', `Execution ${execution.id}`, actor, 'PIPELINE');
-    return execution;
-  });
+  return transaction(
+    pool,
+    async (db) => {
+      const existing = (await list<PipelineExecution>(db, 'executions')).find((e) =>
+        ['QUEUED', 'RUNNING'].includes(e.status),
+      );
+      if (existing) return existing;
+      const settings = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
+      const execution: PipelineExecution = {
+        id: randomUUID(),
+        startTime: new Date().toISOString(),
+        endTime: null,
+        status: 'QUEUED',
+        scopeHours: scope ?? settings.scopeHours,
+        incrementalFeeds,
+        phases: [],
+        stats: {
+          rawIngested: 0,
+          normalized: 0,
+          deduplicated: 0,
+          inRunDuplicatesDropped: 0,
+          matchedWatchlist: 0,
+          autoDispatchedNotifications: 0,
+          advisoriesDispatched: 0,
+          webhooksFired: 0,
+          vexSuppressedCount: 0,
+        },
+        logs: [],
+      };
+      await put(db, 'executions', execution.id, execution);
+      await writeEvent(db, { category:'PIPELINE', code:'pipeline.queued', message:'Pipeline queued', runId:execution.id });
+      await appendAudit(db, 'Pipeline queued', `Execution ${execution.id}`, actor, 'PIPELINE');
+      return execution;
+    },
+    undefined,
+    { locks: ['pipeline-queue'] },
+  );
 }
 class PipelineStopped extends Error {
   constructor() {
@@ -99,21 +105,26 @@ class PipelineStopped extends Error {
   }
 }
 export async function stopRun(pool: pg.Pool, id: string, actor: string): Promise<PipelineExecution> {
-  return transaction(pool, async (db) => {
-    const run = await get<PipelineExecution>(db, 'executions', id);
-    if (!run) throw new HttpError(404, 'Execution not found');
-    if (!['QUEUED', 'RUNNING'].includes(run.status) || run.stopRequestedAt) return run;
-    run.stopRequestedAt = new Date().toISOString();
-    if (run.status === 'QUEUED') {
-      run.status = 'CANCELLED';
-      run.endTime = run.stopRequestedAt;
-    }
-    run.logs.push('Operator requested stop');
-    await put(db, 'executions', id, run);
-    await writeEvent(db, { category:'PIPELINE', code:'pipeline.stop_requested', message:'Operator requested pipeline stop', runId:id });
-    await appendAudit(db, 'Pipeline stop requested', `Execution ${id}`, actor, 'PIPELINE');
-    return run;
-  });
+  return transaction(
+    pool,
+    async (db) => {
+      const run = await getForUpdate<PipelineExecution>(db, 'executions', id);
+      if (!run) throw new HttpError(404, 'Execution not found');
+      if (!['QUEUED', 'RUNNING'].includes(run.status) || run.stopRequestedAt) return run;
+      run.stopRequestedAt = new Date().toISOString();
+      if (run.status === 'QUEUED') {
+        run.status = 'CANCELLED';
+        run.endTime = run.stopRequestedAt;
+      }
+      run.logs.push('Operator requested stop');
+      await put(db, 'executions', id, run);
+      await writeEvent(db, { category:'PIPELINE', code:'pipeline.stop_requested', message:'Operator requested pipeline stop', runId:id });
+      await appendAudit(db, 'Pipeline stop requested', `Execution ${id}`, actor, 'PIPELINE');
+      return run;
+    },
+    undefined,
+    { locks: ['pipeline-queue'] },
+  );
 }
 export function renderAdvisory(template: string, advisory: Advisory): string {
   const escape = (v: string) =>
@@ -430,6 +441,19 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       ...results.flatMap((result) => result.cves),
     ]);
     const preliminaryCves = [...preliminaryCorpus.values()];
+    // Push structured identity + typed version-range filtering into PostgreSQL.
+    // The JS matcher still decides every candidate; this only avoids the full
+    // corpus x inventory cross product.
+    const preliminaryPairs = await transaction(
+      pool,
+      (db) =>
+        refreshCandidatePairs(db, preliminaryCves, inventory, {
+          vendorAliases,
+          productAliases,
+        }),
+      undefined,
+      { locks: ['match-index'] },
+    );
     preliminaryCorrelation = runVulnerabilityPipeline(
       [],
       preliminaryCves,
@@ -441,6 +465,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       false,
       vendorAliases,
       productAliases,
+      preliminaryPairs.size ? preliminaryPairs : undefined,
     );
     preliminaryCveSignature = matchingCveSignature(preliminaryCves);
     preliminaryInventorySignature = inventorySignature(inventory);
@@ -582,6 +607,18 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         }
       }
       const kevReports = acceptedResults.filter((result) => result.kev);
+      const cisaKevEnabled = [...currentFeeds.values()].some(
+        (feed) => feed.type === 'CISA_KEV' && feed.enabled,
+      );
+      if (
+        cisaKevEnabled &&
+        !acceptedResults.some(
+          (result) => currentFeeds.get(result.sourceId || '')?.type === 'CISA_KEV',
+        )
+      )
+        execution!.logs.push(
+          'CISA KEV was not refreshed; cached KEV flags are retained and may be stale',
+        );
       const exploitedReports = acceptedResults.filter((result) => result.exploited && !result.notModified);
       const epssReports = acceptedResults.filter((result) => result.epss && !result.notModified);
       const epssScopes = new Map(epssReports.map((result) => [result, new Set(result.epssScope)]));
@@ -640,6 +677,12 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         stableJson(preliminarySourceIds) === stableJson(finalSourceIds) &&
         preliminaryCveSignature === matchingCveSignature(finalCves) &&
         preliminaryInventorySignature === inventorySignature(snapshot.watchlist);
+      const finalPairs = reusableMatches
+        ? undefined
+        : await refreshCandidatePairs(db, finalCves, snapshot.watchlist, {
+            vendorAliases,
+            productAliases,
+          });
       const correlated = reusableMatches
         ? {
             ...preliminaryCorrelation!,
@@ -661,6 +704,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             true,
             vendorAliases,
             productAliases,
+            finalPairs?.size ? finalPairs : undefined,
           );
       // A wholly rejected stale bundle may be rebuilt from current matches. Never
       // automatically resend a bundle with any acceptance or an in-flight delivery.

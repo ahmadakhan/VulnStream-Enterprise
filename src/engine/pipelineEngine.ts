@@ -13,7 +13,14 @@ import type {
   AuditLog,
 } from '../types';
 import { normalizeCveId, isWithinTimelineScope, mergeCveRecords } from '../utils/deduplicator';
-import { matchesWatchlistItem, parseCPE23 } from '../utils/cpeMatcher';
+import {
+  DEFAULT_PRODUCT_ALIASES,
+  DEFAULT_VENDOR_ALIASES,
+  aliasGroupKeys,
+  matchesWatchlistItem,
+  parseCPE23,
+} from '../utils/cpeMatcher';
+import { isPublicAddress } from '../utils/ipSafety';
 import ipaddr from 'ipaddr.js';
 
 /** Package identity (`npm/express`) used to index PURL inventory. */
@@ -39,12 +46,14 @@ export function validateSsrfSafety(value: string): { safe: boolean; reason?: str
         .replace(/^\[|\]$/g, '')
         .replace(/\.$/, '')
         .toLowerCase();
-    if (!['https:', 'http:'].includes(u.protocol) || u.username || u.password)
-      return { safe: false, reason: 'Invalid URL scheme or credentials' };
+    if (u.protocol !== 'https:' || u.username || u.password)
+      return { safe: false, reason: 'HTTPS without URL credentials required' };
+    if (u.port && u.port !== '443')
+      return { safe: false, reason: 'Non-default port on HTTPS is not permitted' };
     if (
       host === 'localhost' ||
       /\.(localhost|local|internal)$/.test(host) ||
-      (ipaddr.isValid(host) && ipaddr.process(host).range() !== 'unicast')
+      (ipaddr.isValid(host) && !isPublicAddress(host))
     )
       return { safe: false, reason: 'Non-public destination' };
     return { safe: true };
@@ -66,69 +75,16 @@ export function determineExploitRisk(cve: NormalizedCVE): ExploitRiskLevel {
           : 'STANDARD';
 }
 /**
- * Enforce VEX (Vulnerability Exploitability eXchange) statements on findings.
- *
- * A VEX statement asserting `not_affected` or `fixed` suppresses a finding
- * unless independent exploit intelligence (CISA KEV, VulnCheck EWI, active
- * exploit reports) contradicts the suppression. An `under_investigation`
- * VEX status escalates the finding to REVIEW_REQUIRED.
+ * VEX enforcement and the exploitability lattice live in their own module so
+ * the resolution rules can be tested independently of correlation.
  */
-export function applyVexSuppression(findings: Finding[]): Finding[] {
-  return findings.map((finding) => {
-    const vex = finding.cve.vex;
-    if (!vex?.status) return finding;
-    // Independent exploitation sources override VEX suppression.
-    const hasExploitIntelligence =
-      Boolean(finding.cve.exploitationSources?.length) ||
-      finding.cve.cisaKev?.isKev ||
-      finding.cve.exploitStatus === 'Reported In Wild' ||
-      finding.cve.exploitStatus === 'Active Weaponized';
-    if ((vex.status === 'not_affected' || vex.status === 'fixed') && !hasExploitIntelligence) {
-      return {
-        ...finding,
-        notificationStatus:
-          finding.notificationStatus === 'QUEUED_FOR_DISPATCH' ||
-          finding.notificationStatus === 'AUTO_DISPATCHED'
-            ? 'SUPPRESSED_VEX_NOT_AFFECTED'
-            : finding.notificationStatus === 'REVIEW_REQUIRED'
-              ? 'REVIEW_REQUIRED'
-              : 'SUPPRESSED_VEX_NOT_AFFECTED',
-        timeline: [
-          ...finding.timeline,
-          {
-            timestamp: new Date().toISOString(),
-            action: 'VEX assessed',
-            system: 'Server correlation engine',
-            details:
-              finding.cve.exploitationSources?.length
-                ? 'VEX not_affected overridden by exploitation sources'
-                : `VEX ${vex.status} suppresses finding${vex.justification ? `: ${vex.justification}` : ''}`,
-          },
-        ],
-      };
-    }
-    if (vex.status === 'under_investigation') {
-      return {
-        ...finding,
-        notificationStatus:
-          finding.notificationStatus === 'QUEUED_FOR_DISPATCH' ||
-          finding.notificationStatus === 'AUTO_DISPATCHED'
-            ? 'REVIEW_REQUIRED'
-            : finding.notificationStatus,
-        timeline: [
-          ...finding.timeline,
-          {
-            timestamp: new Date().toISOString(),
-            action: 'VEX assessed',
-            system: 'Server correlation engine',
-            details: `VEX under_investigation escalates finding${vex.justification ? `: ${vex.justification}` : ''}`,
-          },
-        ],
-      };
-    }
-    return finding;
-  });
-}
+export {
+  applyVexSuppression,
+  resolveExploitability,
+  hasExploitIntelligence,
+  vexImpact,
+  vexStatementsFor,
+} from './exploitability';
 /**
  * Rate-limit zero-day matches and consolidate into digests.
  *
@@ -192,6 +148,7 @@ export function runVulnerabilityPipeline(
   includeExistingCandidates = false,
   vendorAliases: Record<string, string[]> = {},
   productAliases: Record<string, string[]> = {},
+  candidatePairs?: Map<string, Set<string>>,
 ): PipelineRunResult {
   const started = new Date(),
     known = new Set(existing.map((f) => `${normalizeCveId(f.cveId)}:${f.matchedAssetId}`));
@@ -215,10 +172,26 @@ export function runVulnerabilityPipeline(
   const assetsWithBroadCpes: WatchListItem[] = [];
   // Build alias-expanded indices so assets are candidates when their vendor
   // or product differs from a CVE's by an alias rather than a canonical name.
+  // Built-in aliases are included: the matcher accepts them, so the candidate
+  // prefilter must not drop the pair before it can be evaluated.
   const aliasVendorKeys = (v: string): string[] =>
-    !v ? [v] : [v, ...(vendorAliases[v.toLowerCase()] || [])].map((k) => k.toLowerCase());
+    !v
+      ? [v]
+      : [
+          ...new Set([
+            v.toLowerCase(),
+            ...aliasGroupKeys(v, DEFAULT_VENDOR_ALIASES, vendorAliases),
+          ]),
+        ];
   const aliasProductKeys = (p: string): string[] =>
-    !p ? [p] : [p, ...(productAliases[p.toLowerCase()] || [])].map((k) => k.toLowerCase());
+    !p
+      ? [p]
+      : [
+          ...new Set([
+            p.toLowerCase(),
+            ...aliasGroupKeys(p, DEFAULT_PRODUCT_ALIASES, productAliases),
+          ]),
+        ];
   for (const asset of activeAssets) {
     const seenPurls = new Set<string>();
     for (const purl of asset.purls ?? []) {
@@ -281,8 +254,30 @@ export function runVulnerabilityPipeline(
         add(activeAssets);
         break;
       }
-      add(assetsByProduct.get(`${parsed.vendor}\u0000${parsed.product}`) || []);
+      for (const vendorKey of aliasVendorKeys(parsed.vendor))
+        for (const productKey of aliasProductKeys(parsed.product))
+          add(assetsByProduct.get(`${vendorKey}\u0000${productKey}`) || []);
     }
+    return [...candidates.values()];
+  };
+  // Assets that can never be reached through a structured identity join are
+  // added to every CVE's candidate set, matching candidateAssets' fallback.
+  const alwaysCandidateAssets = [...assetsWithoutIdentifiers, ...assetsWithBroadCpes];
+  const assetById = new Map(activeAssets.map((asset) => [asset.id, asset]));
+  /**
+   * When PostgreSQL supplied candidate pairs, iterate only those assets. A CVE
+   * absent from the map has a wildcard/unstructured criterion and falls back to
+   * the in-process candidate selection, preserving the text/alias path.
+   */
+  const assetsForCve = (cve: NormalizedCVE, canonical: string): WatchListItem[] => {
+    const allowed = candidatePairs?.get(canonical);
+    if (!allowed) return candidateAssets(cve);
+    const candidates = new Map<string, WatchListItem>();
+    for (const id of allowed) {
+      const asset = assetById.get(id);
+      if (asset) candidates.set(asset.id, asset);
+    }
+    for (const asset of alwaysCandidateAssets) candidates.set(asset.id, asset);
     return [...candidates.values()];
   };
   const matchingStarted = performance.now();
@@ -295,7 +290,7 @@ export function runVulnerabilityPipeline(
       continue;
     processed++;
     const cve = { ...raw, cveId: canonical };
-    for (const asset of candidateAssets(cve)) {
+    for (const asset of assetsForCve(cve, canonical)) {
       const key = `${canonical}:${asset.id}`;
       if (known.has(key) && !includeExistingCandidates) continue;
       const applicabilitySets = cve.cpeMatchDetails?.length
@@ -353,6 +348,9 @@ export function runVulnerabilityPipeline(
         cve,
         matchedAssetId: asset.id,
         matchedAssetName: `${asset.assetTag} (${asset.vendor} ${asset.product})`,
+        matchedAssetVendor: asset.vendor,
+        matchedAssetProduct: asset.product,
+        matchedAssetPurls: asset.purls,
         matchedCpe: result.matchedCpe || '',
         matchingMethod: result.method,
         matchingEvidence: evidence,

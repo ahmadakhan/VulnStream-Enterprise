@@ -13,10 +13,11 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { Pagination } from './Pagination';
+import { useCollection } from '../hooks/useCollection';
 import { CveLink } from './CveLink';
 
 export const AlertedCVEsView: React.FC = () => {
-  const { alertedCves, resendNotification } = useApp();
+  const { counts, resendNotification } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCve, setSelectedCve] = useState<AlertedCVE | null>(null);
   const [resendReason, setResendReason] = useState('');
@@ -25,16 +26,13 @@ export const AlertedCVEsView: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const filtered = alertedCves.filter(item =>
-    item.cveId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.advisoryId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.recipientEmails.some(r => r.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
-
-  const paginatedItems = filtered.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize
-  );
+  // Server-side search and pagination: the snapshot's alertedCves array is a
+  // capped recent slice, not the full dispatch registry.
+  const { items: paginatedItems, total } = useCollection<AlertedCVE>('alertedCves', {
+    page: currentPage,
+    pageSize,
+    search: searchTerm,
+  });
 
   const handleConfirmResend = () => {
     if (selectedCve && resendReason.trim()) {
@@ -81,7 +79,7 @@ export const AlertedCVEsView: React.FC = () => {
         </div>
 
         <div className="text-xs font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-          Total Tracked: <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{alertedCves.length}</strong>
+          Total Tracked: <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{counts.alertedCves}</strong>
         </div>
       </div>
 
@@ -152,10 +150,13 @@ export const AlertedCVEsView: React.FC = () => {
         {/* Pagination */}
         <Pagination
           currentPage={currentPage}
-          totalItems={filtered.length}
+          totalItems={total}
           pageSize={pageSize}
           onPageChange={setCurrentPage}
-          onPageSizeChange={setPageSize}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setCurrentPage(1);
+          }}
           pageSizeOptions={[10, 25, 50]}
         />
       </div>

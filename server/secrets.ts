@@ -48,17 +48,29 @@ export function decrypt(value: string, key: string, context: string): string {
   const [version, iv, tag, body] = parts;
   if (
     parts.length !== 4 ||
-    [iv, tag, body].some((v) => !v || Buffer.from(v, 'base64').toString('base64') !== v) ||
+    !iv || !tag || !body ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(iv) ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(tag) ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(body) ||
     Buffer.from(iv, 'base64').length !== 12 ||
     Buffer.from(tag, 'base64').length !== 16
   )
     throw new Error('Invalid encrypted secret encoding');
-  if (version !== 'v1' || !iv || !tag || !body) throw new Error('Invalid encrypted secret');
-  const cipher = createDecipheriv('aes-256-gcm', Buffer.from(key, 'base64'), Buffer.from(iv, 'base64'));
-  cipher.setAAD(Buffer.from(context));
-  cipher.setAuthTag(Buffer.from(tag, 'base64'));
-  return Buffer.concat([cipher.update(Buffer.from(body, 'base64')), cipher.final()]).toString('utf8');
+  if (version !== 'v1') throw new Error('Invalid encrypted secret');
+  try {
+    const cipher = createDecipheriv('aes-256-gcm', Buffer.from(key, 'base64'), Buffer.from(iv, 'base64'));
+    cipher.setAAD(Buffer.from(context));
+    cipher.setAuthTag(Buffer.from(tag, 'base64'));
+    return Buffer.concat([cipher.update(Buffer.from(body, 'base64')), cipher.final()]).toString('utf8');
+  } catch (e) {
+    throw new Error('Failed to decrypt secret: invalid key or corrupted ciphertext');
+  }
 }
 export function secureEqual(a: string, b: string) {
-  return timingSafeEqual(Buffer.from(tokenHash(a)), Buffer.from(tokenHash(b)));
+  const MAX_COMPARE_LENGTH = 1024;
+  if (a.length > MAX_COMPARE_LENGTH || b.length > MAX_COMPARE_LENGTH) return false;
+  const aBuffer = Buffer.from(tokenHash(a));
+  const bBuffer = Buffer.from(tokenHash(b));
+  if (aBuffer.length !== bBuffer.length) return false;
+  return timingSafeEqual(aBuffer, bBuffer);
 }

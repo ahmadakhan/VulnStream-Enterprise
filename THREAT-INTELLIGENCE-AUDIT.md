@@ -1,3 +1,8 @@
+> **Historical document.** This report reflects the codebase as of its original date and has been
+> superseded by [`PRODUCTION-READINESS-AUDIT.md`](./PRODUCTION-READINESS-AUDIT.md), which is the
+> authoritative readiness report. Findings here may already be fixed; do not use this file to make
+> current readiness decisions.
+
 # Threat Intelligence Ecosystem Audit
 
 > Follow-up: [Current ecosystem audit and implemented fixes](ECOSYSTEM-AUDIT-2026-10-21.md) records subsequent code changes, live provider probes, and current verification. Outstanding items below are historical where the follow-up marks them fixed.

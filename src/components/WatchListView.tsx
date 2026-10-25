@@ -37,7 +37,6 @@ import {
   Package,
   Cpu,
 } from 'lucide-react';
-import { runVulnerabilityPipeline } from '../engine/pipelineEngine';
 import { Pagination } from './Pagination';
 import { editedWatchlistCpe } from '../utils/watchlist';
 import { CveLink } from './CveLink';
@@ -50,7 +49,7 @@ export const WatchListView: React.FC = () => {
     toggleWatchlistItemActive,
     deleteWatchlistItem,
     bulkImportWatchlist,
-    cveData,
+    simulateCorrelation,
     settings,
   } = useApp();
 
@@ -492,8 +491,10 @@ export const WatchListView: React.FC = () => {
     downloadAnchor.remove();
   };
 
-  // Run Simulator Engine
-  const runSimulation = () => {
+  // Run Simulator Engine against the full server-side cache. The snapshot only
+  // carries a capped recent slice, so evaluating it locally would silently miss
+  // matches on a large installation.
+  const runSimulation = async () => {
     const generatedCpe = generateCPE23(
       simPart,
       simVendor,
@@ -501,8 +502,7 @@ export const WatchListView: React.FC = () => {
       simVersion,
       simHw === 'any' ? '*' : simHw,
     );
-    const simulatedWatchItem: WatchListItem = {
-      id: 'sim-test-01',
+    const result = await simulateCorrelation({
       vendor: simVendor,
       product: simProduct,
       version: simVersion,
@@ -510,33 +510,19 @@ export const WatchListView: React.FC = () => {
       purls: simPurl ? [simPurl] : undefined,
       targetHw: simHw !== 'any' ? simHw : undefined,
       assetTag: 'SIM-PROD-01',
-      ownerGroup: 'Simulation-Lab',
-      active: true,
-      createdAt: new Date().toISOString(),
-    };
-
-    const correlation = runVulnerabilityPipeline([], cveData, [simulatedWatchItem], [], [], {
-      ...settings,
-      scopeHours: 0,
     });
-    const matchedCves = correlation.newFindings.map((finding) => ({
-      cve: finding.cve,
-      method: finding.matchingMethod,
-      confidence: finding.notificationStatus === 'REVIEW_REQUIRED' ? 0 : 100,
-      evidence: finding.matchingEvidence,
-      autoAction: finding.notificationStatus === 'REVIEW_REQUIRED' ? 'REVIEW_REQUIRED' : 'MATCH_CONFIRMED',
-      suppressed: false,
-      suppressionReason: '',
-    }));
-
+    if (!result) return; // The context banner reports the request failure.
+    const testedAt = new Date(result.testedAt);
     setSimResults({
-      testedAt: new Date().toLocaleTimeString(),
-      matchedCves,
-      totalScanned: cveData.length,
+      testedAt: Number.isNaN(testedAt.getTime())
+        ? result.testedAt
+        : testedAt.toLocaleTimeString(),
+      matchedCves: result.matchedCves,
+      totalScanned: result.totalScanned,
       ruleSummary: {
         cpeGenerated: generatedCpe,
-        aliasExpanded: false,
-        intervalEvaluated: true,
+        aliasExpanded: result.aliasExpanded,
+        intervalEvaluated: result.intervalEvaluated,
         architectureFiltered: simHw !== 'any',
       },
     });
@@ -573,7 +559,7 @@ export const WatchListView: React.FC = () => {
           <button
             onClick={() => {
               setViewMode('simulator');
-              if (!simResults) runSimulation();
+              if (!simResults) void runSimulation();
             }}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
               viewMode === 'simulator'
@@ -599,7 +585,7 @@ export const WatchListView: React.FC = () => {
             className="grid gap-3 md:grid-cols-3"
             onSubmit={(e) => {
               e.preventDefault();
-              runSimulation();
+              void runSimulation();
             }}
           >
             <label className="text-sm">

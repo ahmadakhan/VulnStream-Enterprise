@@ -15,12 +15,12 @@ import {
 } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { csvCell } from '../utils/csv';
-import { verifyAuditChain } from '../utils/cryptoChain';
+import { useCollection } from '../hooks/useCollection';
 import { LogDetailModal } from './LogDetailModal';
 import { formatEventContext } from '../utils/eventText';
 
 const AuditTrailView: React.FC = () => {
-  const { auditLogs } = useApp();
+  const { fetchCollection, refreshVersion, verifyAuditChainRemote } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
@@ -30,68 +30,99 @@ const AuditTrailView: React.FC = () => {
   const [verifyingChain, setVerifyingChain] = useState(false);
   const [chainVerified, setChainVerified] = useState<boolean | null>(null);
 
-  useEffect(() => setChainVerified(null), [auditLogs]);
+  // Verification always runs against the full server-side chain; the snapshot
+  // only contains the newest capped slice and cannot prove global integrity.
+  useEffect(() => setChainVerified(null), [refreshVersion]);
 
   const handleVerifyChain = async () => {
     setVerifyingChain(true);
-
-    setChainVerified(verifyAuditChain(auditLogs));
-    setVerifyingChain(false);
+    try {
+      const result = await verifyAuditChainRemote();
+      if (result) setChainVerified(result.verified);
+    } finally {
+      setVerifyingChain(false);
+    }
   };
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const filteredLogs = auditLogs.filter((log) => {
-    const matchesSearch =
-      log.event.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.details.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.actor.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.ipAddress.includes(searchTerm);
-
-    const matchesCategory = categoryFilter === 'ALL' || log.category === categoryFilter;
-    const matchesLevel = levelFilter === 'ALL' || log.level === levelFilter;
-
-    return matchesSearch && matchesCategory && matchesLevel;
+  const filters = { category: categoryFilter, level: levelFilter };
+  const { items: paginatedLogs, total } = useCollection<AuditLog>('auditLogs', {
+    page: currentPage,
+    pageSize,
+    search: searchTerm,
+    filters,
   });
 
   useEffect(() => {
-    const lastPage = Math.max(1, Math.ceil(filteredLogs.length / pageSize));
+    const lastPage = Math.max(1, Math.ceil(total / pageSize));
     if (currentPage > lastPage) setCurrentPage(lastPage);
-  }, [currentPage, filteredLogs.length, pageSize]);
+  }, [currentPage, total, pageSize]);
 
-  const paginatedLogs = filteredLogs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-
-  const handleExportJson = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(auditLogs, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `audit-trail-${new Date().toISOString().split('T')[0]}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
+  /** Exports honor the active filters and walk every server page. */
+  const loadAllLogs = async () => {
+    const size = 1000;
+    const first = await fetchCollection<AuditLog>('auditLogs', {
+      page: 1,
+      pageSize: size,
+      search: searchTerm,
+      filters,
+    });
+    const all = [...first.items];
+    for (let page = 2; all.length < first.total; page++) {
+      const next = await fetchCollection<AuditLog>('auditLogs', {
+        page,
+        pageSize: size,
+        search: searchTerm,
+        filters,
+      });
+      if (!next.items.length) break;
+      all.push(...next.items);
+    }
+    return all;
   };
 
-  const handleExportCsv = () => {
-    const headers = ['ID', 'Timestamp', 'Category', 'Level', 'Event', 'Details', 'Actor', 'IP'];
-    const rows = auditLogs.map((l) => [
-      l.id,
-      l.timestamp,
-      l.category,
-      l.level,
-      l.event,
-      l.details,
-      l.actor,
-      l.ipAddress,
-    ]);
-    const csvContent = [headers.join(','), ...rows.map((e) => e.map(csvCell).join(','))].join('\n');
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent));
-    downloadAnchor.setAttribute('download', `audit-trail-${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
+  const handleExportJson = async () => {
+    try {
+      const logs = await loadAllLogs();
+      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(logs, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute('href', dataStr);
+      downloadAnchor.setAttribute('download', `audit-trail-${new Date().toISOString().split('T')[0]}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    } catch {
+      // The request layer surfaces transport failures through the global banner.
+    }
+  };
+
+  const handleExportCsv = async () => {
+    try {
+      const logs = await loadAllLogs();
+      const headers = ['ID', 'Timestamp', 'Category', 'Level', 'Event', 'Details', 'Actor', 'IP'];
+      const rows = logs.map((l) => [
+        l.id,
+        l.timestamp,
+        l.category,
+        l.level,
+        l.event,
+        l.details,
+        l.actor,
+        l.ipAddress,
+      ]);
+      const csvContent = [headers.join(','), ...rows.map((e) => e.map(csvCell).join(','))].join('\n');
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute('href', 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent));
+      downloadAnchor.setAttribute('download', `audit-trail-${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    } catch {
+      // The request layer surfaces transport failures through the global banner.
+    }
   };
 
   return (
@@ -115,7 +146,7 @@ const AuditTrailView: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={handleVerifyChain}
+            onClick={() => void handleVerifyChain()}
             disabled={verifyingChain}
             className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3.5 py-2.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 disabled:opacity-60 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100"
           >
@@ -131,14 +162,14 @@ const AuditTrailView: React.FC = () => {
             <span>{verifyingChain ? 'Verifying chain…' : 'Verify chain'}</span>
           </button>
           <button
-            onClick={handleExportCsv}
+            onClick={() => void handleExportCsv()}
             className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3.5 py-2.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100"
           >
             <Download className="h-3.5 w-3.5" />
             <span>Export CSV</span>
           </button>
           <button
-            onClick={handleExportJson}
+            onClick={() => void handleExportJson()}
             className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3.5 py-2.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100"
           >
             <Download className="h-3.5 w-3.5" />
@@ -236,7 +267,7 @@ const AuditTrailView: React.FC = () => {
             <p className="mt-0.5 text-[11px] text-zinc-500">Newest records first</p>
           </div>
           <span className="rounded-full border border-zinc-700/80 bg-zinc-950/60 px-2.5 py-1 text-[11px] tabular-nums text-zinc-400 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-600">
-            {filteredLogs.length.toLocaleString()} matches
+            {total.toLocaleString()} matches
           </span>
         </div>
         <div className="overflow-x-auto">
@@ -315,10 +346,13 @@ const AuditTrailView: React.FC = () => {
         <div className="border-t border-zinc-800/70 light:border-zinc-200">
           <Pagination
             currentPage={currentPage}
-            totalItems={filteredLogs.length}
+            totalItems={total}
             pageSize={pageSize}
             onPageChange={setCurrentPage}
-            onPageSizeChange={setPageSize}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setCurrentPage(1);
+            }}
             pageSizeOptions={[10, 25, 50]}
           />
         </div>

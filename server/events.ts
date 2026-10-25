@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Db } from './db';
 import { EVENT_CATEGORIES, type OperationalEvent } from '../src/types/index.ts';
 
-const sensitive = /password|secret|token|authorization|cookie|api.?key|payload|html|body/i;
+const sensitive = /password|secret|token|authorization|cookie|api.?key|payload|html|body|credential|privatekey|jwt|authtoken/i;
 export function redactEventContext(value: unknown, depth = 0): unknown {
   if (depth > 5) return '[truncated]';
   if (typeof value === 'string') return value.slice(0, 2000);

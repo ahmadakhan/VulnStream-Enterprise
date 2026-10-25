@@ -1,6 +1,7 @@
 import type { Finding } from '../types';
 import { normalizeCveId } from '../utils/deduplicator';
-const identity = (f: Finding) => `${normalizeCveId(f.cveId)}:${f.matchedAssetId}`;
+const identity = (f: Finding) =>
+  `${normalizeCveId(f.cveId) ?? `raw:${f.cveId || f.id}`}:${f.matchedAssetId}`;
 /** Preserve finding identity, operator lifecycle decisions and delivery history while refreshing applicability. */
 export function reconcileFindings(
   existing: Finding[],
@@ -23,11 +24,17 @@ export function reconcileFindings(
     const changed =
       old.matchingEvidence !== candidate.matchingEvidence ||
       old.matchedCpe !== candidate.matchedCpe ||
+      old.matchedAssetVendor !== candidate.matchedAssetVendor ||
+      old.matchedAssetProduct !== candidate.matchedAssetProduct ||
+      JSON.stringify(old.matchedAssetPurls ?? []) !== JSON.stringify(candidate.matchedAssetPurls ?? []) ||
       old.notificationStatus !== notificationStatus;
     return {
       ...old,
       cve: candidate.cve,
       matchedAssetName: candidate.matchedAssetName,
+      matchedAssetVendor: candidate.matchedAssetVendor,
+      matchedAssetProduct: candidate.matchedAssetProduct,
+      matchedAssetPurls: candidate.matchedAssetPurls,
       matchedCpe: candidate.matchedCpe,
       matchingMethod: candidate.matchingMethod,
       matchingEvidence: candidate.matchingEvidence,

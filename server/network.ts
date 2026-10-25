@@ -4,14 +4,10 @@ import { pipeline } from 'node:stream/promises';
 import { Transform, Writable, type Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import ipaddr from 'ipaddr.js';
+import { isPublicAddress } from '../src/utils/ipSafety.ts';
 import type { Config } from './config';
 export function publicAddress(address: string): boolean {
-  try {
-    const ip = ipaddr.process(address);
-    return ip.range() === 'unicast';
-  } catch {
-    return false;
-  }
+  return isPublicAddress(address);
 }
 export async function resolvePublic(url: URL, allowedHosts: string[], resolver = lookup) {
   const host = url.hostname
