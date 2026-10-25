@@ -117,31 +117,6 @@ export class PipelineSupervisor {
   private isPaused(): boolean {
     return Date.now() < this.pausedUntil;
   }
-  start(): void {
-    if (this.timer) return;
-    this.stopped = false;
-    this.shutdown = new AbortController();
-    this.ingestor.telemetry.log('INFO', 'supervisor.started');
-    this.timer = setInterval(() => {
-      void this.check();
-    }, 1000);
-    this.timer.unref();
-    void this.check();
-  }
-  async stop(): Promise<void> {
-    this.stopped = true;
-    this.shutdown.abort();
-    clearInterval(this.timer);
-    this.timer = undefined;
-    for (const task of this.active.values()) task.controller.abort();
-    while (this.active.size || this.checking) await delay(20);
-  }
-  simulate(fault: 'memory' | 'database'): void {
-    this.simulated = fault;
-    this.simulatedUntil = Date.now() + 5000;
-    this.ingestor.telemetry.log('WARN', 'supervisor.fault_simulated');
-    void this.check();
-  }
   async check(): Promise<void> {
     if (this.checking || this.stopped) return;
     this.checking = true;

@@ -168,26 +168,4 @@ export class CorrelationTelemetry {
     for (const resolve of this.drainWaiters) resolve();
     this.drainWaiters.clear();
   }
-  private failOutput(): void {
-    this.outputError = new Error('TELEMETRY_OUTPUT_UNAVAILABLE');
-    this.droppedLogs += this.pendingOutput.length;
-    this.pendingOutput = [];
-    for (const settle of this.drainWaiters) settle(this.outputError);
-    this.drainWaiters.clear();
-  }
-  async ready(signal?: AbortSignal): Promise<void> {
-    signal?.throwIfAborted();
-    if (this.outputError) throw this.outputError;
-    if (this.outputBlocked || this.pendingOutput.length)
-      await new Promise<void>((resolve, reject) => {
-        const settle = (error?: Error) => {
-          signal?.removeEventListener('abort', abort);
-          this.drainWaiters.delete(settle);
-          if (error) reject(error); else resolve();
-        };
-        const abort = () => settle(new Error('TELEMETRY_WAIT_ABORTED'));
-        this.drainWaiters.add(settle);
-        signal?.addEventListener('abort', abort, { once: true });
-      });
-  }
 }
