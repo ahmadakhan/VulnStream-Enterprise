@@ -60,10 +60,28 @@ export class TextCorrelationEngine {
     }
     // Generate bounded token n-grams, then indexed alias lookups. A generic product
     // substring must never join every asset mentioned elsewhere in an article.
+    const STOPWORDS = new Set([
+      'the','a','an','and','or','of','in','for','to','on','with','by','from','at','is','are','was','were',
+      'this','that','it','as','be','has','have','had','not','no','but','its','their','our','new','other',
+      'after','before','between','through','over','under','about','into','more','most','than','then',
+      'exploit','exploits','vulnerability','vulnerabilities','security','attack','attacker','attackers',
+      'flaw','flaws','bug','bugs','patch','patched','update','updates','zero','day','critical','remote',
+      'code','execution','affected','versions','version','software','servers','server','systems','system',
+      'users','user','researchers','researcher','reported','disclosed','fixed','issued','using','used',
+      'which','while','when','who','also','been','being','could','would','should','may','might','will',
+    ]);
     const tokens = extracted.text.trim().split(' ').slice(0, 20_000);
     const grams = new Set<string>();
     for (let i = 0; i < tokens.length; i++)
-      for (let n = 1; n <= 4 && i + n <= tokens.length; n++) grams.add(tokens.slice(i, i + n).join(' '));
+      for (let n = 1; n <= 4 && i + n <= tokens.length; n++) {
+        // Every token in the gram must be a plausible identity token: a stopword
+        // span ("a critical flaw in") or a single character can never be a
+        // product alias, and admitting them lets one sensationalized article
+        // saturate the 101-row alias budget with junk candidates.
+        const span = tokens.slice(i, i + n);
+        if (span.some((token) => STOPWORDS.has(token) || token.length < 2)) continue;
+        grams.add(span.join(' '));
+      }
     const aliases = await query<Entity & { alias: string }>(
       `SELECT alias,vendor,product FROM vendor_product_aliases
       WHERE lower(alias)=ANY($1::text[]) LIMIT 101`,

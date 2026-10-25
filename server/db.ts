@@ -1,7 +1,8 @@
 import { correlationPreflight } from './correlation/preflight.ts';
 import { compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
 import pg, { type PoolClient } from 'pg';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import {
   emptyState,
@@ -35,7 +36,21 @@ export const schemaLockKey = 'hashtext(COALESCE(current_schema(), current_databa
  * The newest migration this build depends on. Production startup refuses to
  * run against an older schema instead of failing later on a missing column.
  */
-export const REQUIRED_SCHEMA_VERSION = 16;
+export const REQUIRED_SCHEMA_VERSION = 22;
+
+/**
+ * Migration files sorted by numeric prefix. Only plain `NNN_name.sql` entries
+ * participate; anything else (README, retired migrations, editor backups) is
+ * ignored rather than accidentally executed.
+ */
+async function migrationFiles(): Promise<{ version: number; name: string }[]> {
+  const directory = fileURLToPath(new URL('./migrations/', import.meta.url));
+  const entries = await readdir(directory);
+  return entries
+    .filter((name) => /^\d{3}_.*\.sql$/.test(name))
+    .map((name) => ({ version: Number(name.slice(0, 3)), name }))
+    .sort((a, b) => a.version - b.version);
+}
 
 export async function migrate(pool: pg.Pool) {
   const client = await pool.connect();
@@ -51,62 +66,24 @@ export async function migrate(pool: pg.Pool) {
     await client.query(`SELECT pg_advisory_xact_lock(800001, ${schemaLockKey})`);
     const nativeContract = await correlationPreflight(client);
     if (!nativeContract.compatible) throw new Error('Protected correlation schema incompatible: '+nativeContract.issues.join('; '));
+    // Apply every migration file in the directory, in version order. A
+    // hard-coded list silently skipped files whenever two shared a version
+    // number (014 and 015 each did) and had to be edited for every new
+    // migration. Reading the directory makes the file the source of truth.
+    // On a brand-new database schema_migrations does not exist yet; 001 creates
+    // it. Probe first rather than letting the SELECT abort the transaction.
     const exists = await client.query("SELECT to_regclass('schema_migrations') AS name");
-    const applied =
-      exists.rows[0].name &&
-      (await client.query('SELECT version FROM schema_migrations WHERE version=1')).rowCount;
-    if (!applied)
-      await client.query(await readFile(new URL('./migrations/001_initial.sql', import.meta.url), 'utf8'));
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=2')).rowCount)
-      await client.query(
-        await readFile(new URL('./migrations/002_operational_events.sql', import.meta.url), 'utf8'),
-      );
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=3')).rowCount)
-      await client.query(
-        await readFile(new URL('./migrations/003_record_creation_order.sql', import.meta.url), 'utf8'),
-      );
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=4')).rowCount)
-      await client.query(
-        await readFile(new URL('./migrations/004_email_review_queue.sql', import.meta.url), 'utf8'),
-      );
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=5')).rowCount)
-      await client.query(
-        await readFile(new URL('./migrations/005_outbox_priority.sql', import.meta.url), 'utf8'),
-      );
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=6')).rowCount)
-      await client.query(
-        await readFile(new URL('./migrations/006_catchup_scheduler.sql', import.meta.url), 'utf8'),
-      );
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=7')).rowCount)
-      await client.query(
-        await readFile(new URL('./migrations/007_delivery_and_audit_guards.sql', import.meta.url), 'utf8'),
-      );
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=8')).rowCount)
-      await client.query(
-        await readFile(new URL('./migrations/008_match_index.sql', import.meta.url), 'utf8'),
-      );
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=9')).rowCount)
-      await client.query(
-        await readFile(new URL('./migrations/009_safe_json_casts.sql', import.meta.url), 'utf8'),
-      );
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=10')).rowCount)
-      await client.query(
-        await readFile(new URL('./migrations/010_shared_rate_limit.sql', import.meta.url), 'utf8'),
-      );
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=11')).rowCount)
-      await client.query(
-        await readFile(new URL('./migrations/011_text_correlation.sql', import.meta.url), 'utf8'),
-      );
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=12')).rowCount)
-      await client.query(
-        await readFile(new URL('./migrations/012_rate_limit_return.sql', import.meta.url), 'utf8'),
-      );
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=13')).rowCount)
-      await client.query(await readFile(new URL('./migrations/013_correlation_operations.sql', import.meta.url), 'utf8'));
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=14')).rowCount)
-      await client.query(await readFile(new URL('./migrations/014_shared_correlation_concurrency.sql', import.meta.url), 'utf8'));
-    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=15')).rowCount)
-      await client.query(await readFile(new URL('./migrations/015_correlation_lease_ownership.sql', import.meta.url), 'utf8'));
+    const appliedVersions = new Set<number>(
+      exists.rows[0].name
+        ? (
+            await client.query<{ version: number }>('SELECT version FROM schema_migrations')
+          ).rows.map((row) => Number(row.version))
+        : [],
+    );
+    for (const { version, name } of await migrationFiles()) {
+      if (appliedVersions.has(version)) continue;
+      await client.query(await readFile(new URL(`./migrations/${name}`, import.meta.url), 'utf8'));
+    }
     await client.query('COMMIT');
   } catch (e) {
     failed = true;

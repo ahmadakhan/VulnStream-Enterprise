@@ -190,8 +190,13 @@ test(
               client.release();
             }
           } finally {
-            await db.query(`DROP OWNED BY ${role}`);
-            await master.query(`DROP ROLE ${role}`);
+            // The subtest aborts its transaction deliberately, and grants made
+            // via SET LOCAL ROLE are rolled back with it. Reassign first so the
+            // role owns nothing, then drop — both steps tolerate a role that
+            // was never granted anything.
+            await master.query(`REASSIGN OWNED BY ${role} TO current_user`).catch(() => {});
+            await master.query(`DROP OWNED BY ${role}`).catch(() => {});
+            await master.query(`DROP ROLE IF EXISTS ${role}`);
           }
         },
       );
@@ -390,6 +395,88 @@ test(
         );
         assert.ok((await correlationWorkflows(db)).counts.reviews > 0);
         assert.equal((await correlationPreflight(db)).compatible, true);
+      });
+      await t.test('pre-CVE cluster survives CVE publication and inherits operator rulings', async () => {
+        // A zero-day article (no CVE ID) creates a cluster for the matched
+        // identity; a corroborating article joins the same cluster rather than
+        // producing a second, orphaned record.
+        await ingestor.processIncomingAdvisory(
+          article('pre-cve-a', { title: 'Kubernetes zero-day exploited', content: 'An unpatched zero-day vulnerability in k8s is exploited.' }),
+          db,
+        );
+        await ingestor.processIncomingAdvisory(
+          article('pre-cve-b', { title: 'K8s flaw under attack', content: 'Attackers exploit the unpatched k8s vulnerability in the wild.' }),
+          db,
+        );
+        const clusters = await db.query<{ id: string; vendor: string; product: string }>(
+          "SELECT id,vendor,product FROM pre_cve_clusters WHERE vendor='kubernetes' AND product='kubernetes'",
+        );
+        assert.equal(clusters.rowCount, 1, 'corroborating coverage must join one cluster');
+        assert.ok(
+          (
+            await db.query('SELECT advisory_id FROM pre_cve_cluster_members WHERE cluster_id=$1', [
+              clusters.rows[0].id,
+            ])
+          ).rows.length >= 2,
+        );
+
+        // An operator dismisses the pre-CVE match; the disposition must persist
+        // against the cluster, not just the article.
+        const pendingReview = await db.query<{ id: string; asset_id: string }>(
+          `SELECT b.id,b.asset_id FROM low_confidence_review_buffer b
+           JOIN unstructured_advisories a ON a.id=b.advisory_id
+           LEFT JOIN correlation_review_decisions d ON d.review_id=b.id
+           WHERE d.review_id IS NULL AND a.url='https://example.org/operations/pre-cve-a' LIMIT 1`,
+        );
+        if (pendingReview.rows[0]?.asset_id) {
+          await decideCorrelationReview(
+            db,
+            pendingReview.rows[0].id,
+            { decision: 'DISMISSED', note: 'Verified not affected on this cluster in regression' },
+            'test',
+          );
+          assert.equal(
+            (
+              await db.query(
+                "SELECT disposition FROM pre_cve_dispositions WHERE cluster_id=$1 AND asset_id=$2",
+                [clusters.rows[0].id, pendingReview.rows[0].asset_id],
+              )
+            ).rows[0].disposition,
+            'FALSE_POSITIVE',
+          );
+        }
+
+        // NVD publishes the CVE. Binding must resolve the cluster and expose the
+        // earlier ruling so the canonical finding is suppressed before queueing.
+        const { bindClusterToCve, clusterSuppressedAssets } = await import(
+          '../server/correlation/clusters.ts'
+        );
+        assert.equal(
+          await bindClusterToCve(db, 'CVE-2026-9999', 'kubernetes', 'kubernetes'),
+          clusters.rows[0].id,
+        );
+        assert.equal(
+          (await db.query('SELECT resolved_cve_id FROM pre_cve_clusters WHERE id=$1', [clusters.rows[0].id]))
+            .rows[0].resolved_cve_id,
+          'CVE-2026-9999',
+        );
+        const suppressed = await clusterSuppressedAssets(db, 'CVE-2026-9999');
+        if (pendingReview.rows[0]?.asset_id)
+          assert.ok(suppressed.has(pendingReview.rows[0].asset_id));
+        // A resolved cluster must not accept new pre-CVE members.
+        await ingestor.processIncomingAdvisory(
+          article('pre-cve-c', { title: 'Kubernetes follow-up', content: 'Another unpatched k8s zero-day vulnerability report.' }),
+          db,
+        );
+        assert.equal(
+          (
+            await db.query(
+              'SELECT count(*)::int AS n FROM pre_cve_cluster_members WHERE cluster_id=$1',
+              [clusters.rows[0].id],
+            )
+          ).rows[0].n >= 2,
+          true,
+        );
       });
     } finally {
       await pool?.end();

@@ -6,6 +6,7 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg';
 import { AdvisoryInputSchema } from './validation.ts';
 import { extractText } from './extraction.ts';
 import { TextCorrelationEngine, type TimedQuery } from './engine.ts';
+import { linkPreCveClusters, clusterWindowDays, DEFAULT_CLUSTER_OPEN_WINDOW_DAYS } from './clusters.ts';
 import type { CorrelationTelemetry } from './telemetry.ts';
 import type { DeadLetterQueue } from './deadLetter.ts';
 export type IngestionResult = 'PROCESSED' | 'DUPLICATE' | 'DEAD_LETTER';
@@ -25,6 +26,20 @@ export class AdvisoryIngestor {
     readonly deadLetterQueue: DeadLetterQueue,
     private readonly engine = new TextCorrelationEngine(),
   ) {}
+  /** Resolve the operator-configured cluster window; falls back to the
+   * default when the policy row is absent (pre-021 database mid-migration). */
+  private async clusterWindowDays(query: TimedQuery): Promise<number> {
+    try {
+      const row = (
+        await query<{ days: number | null }>(
+          'SELECT pre_cve_cluster_window_days AS days FROM correlation_policy WHERE id=1',
+        )
+      ).rows[0];
+      return clusterWindowDays(row?.days);
+    } catch {
+      return DEFAULT_CLUSTER_OPEN_WINDOW_DAYS;
+    }
+  }
   async processIncomingAdvisory(
     rawInput: unknown,
     dbPool: Pool,
@@ -110,6 +125,20 @@ export class AdvisoryIngestor {
           }
           const advisoryId = inserted.rows[0].id;
           const matches = await this.engine.correlate(input, extracted, query);
+          // Pre-CVE cluster linkage runs inside the same transaction: the
+          // advisory, its matches, and its cluster membership commit atomically.
+          // The window is read here rather than cached so an operator policy
+          // change takes effect on the next advisory without a restart.
+          const entities = matches
+            .filter((match) => match.vendor && match.product)
+            .map((match) => ({ vendor: match.vendor, product: match.product }));
+          const windowDays = await this.clusterWindowDays(query);
+          // Adapt the transaction-bound TimedQuery to the structural query
+          // interface used by the cluster module (both are the same client).
+          const clusterDb = {
+            query: (sql: string, values?: unknown[]) => query<Record<string, unknown>>(sql, values),
+          };
+          await linkPreCveClusters(clusterDb, advisoryId, entities, matches.length, extracted.cveIds, windowDays);
           for (const match of matches) {
             if (match.confidence === 'LOW')
               await query(
@@ -145,7 +174,7 @@ export class AdvisoryIngestor {
           failed = true;
           if (client && !released) await client.query(timedQuery('ROLLBACK', [], 1000)).catch(() => {});
           if (signal?.aborted || !transientDatabaseError(error) || attempt === 3) throw error;
-          this.telemetry.log('WARN', 'database.transaction_retry', { trackingId, attempt: attempt + 1 });
+      this.telemetry.log('WARN', 'database.transaction_retry', { trackingId, attempt: attempt + 1 });
         } finally {
           signal?.removeEventListener('abort', abort);
           client?.removeListener('error', onClientError);

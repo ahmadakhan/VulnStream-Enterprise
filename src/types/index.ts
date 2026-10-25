@@ -56,6 +56,16 @@ export interface IntelligenceArticle {
   sourceFeeds: string[];
   /** True when the article describes a vulnerability without an assigned CVE ID (potential zero-day). */
   zeroDay?: boolean;
+  /**
+   * Pre-CVE cluster identity assigned by the correlation layer when this
+   * article was ingested before a CVE existed. When the CVE is later
+   * published, articles in the same cluster are linked to it so the
+   * canonical identifier inherits the accumulated evidence and operator
+   * dispositions instead of alerting as a brand-new incident.
+   */
+  clusterId?: string;
+  /** CVE ID this cluster was resolved to by the CVE-publication linkage. */
+  resolvedCveId?: string;
 }
 export interface IntelligenceMatch {
   id: string;

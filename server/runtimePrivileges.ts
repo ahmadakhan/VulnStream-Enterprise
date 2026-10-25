@@ -15,6 +15,13 @@ export async function grantRuntimePrivileges(db: Db, role = 'vulnstream_app'): P
     GRANT SELECT,INSERT,UPDATE,DELETE ON low_confidence_review_buffer TO ${target};
     GRANT SELECT,INSERT,UPDATE,DELETE ON correlation_pending,correlation_managed_assets,correlation_match_evidence,
       correlation_review_decisions,correlation_dead_letter_actions,correlation_notifications TO ${target};
+    -- Pre-CVE cluster state is written by the ingestion path (membership) and
+    -- by the review-decision path (dispositions), and read by the pipeline when
+    -- it binds a published CVE. Without these grants every ingest and review
+    -- failed with 42501 under the least-privilege runtime role.
+    GRANT SELECT,INSERT,UPDATE ON pre_cve_clusters TO ${target};
+    GRANT SELECT,INSERT ON pre_cve_cluster_members,pre_cve_dispositions TO ${target};
+    GRANT UPDATE ON pre_cve_dispositions TO ${target};
     GRANT SELECT,UPDATE ON correlation_policy TO ${target};
     GRANT USAGE,SELECT ON SEQUENCE audit_seq_seq,operational_events_id_seq TO ${target};
     GRANT EXECUTE ON FUNCTION consume_rate_limit_token(text,double precision,double precision) TO ${target};`);

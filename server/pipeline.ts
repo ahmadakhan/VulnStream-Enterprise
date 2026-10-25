@@ -14,11 +14,12 @@ import type {
   WatchListItem,
   AliasEntry,
 } from '../src/types/index.ts';
-import { buildAliasMap } from '../src/utils/cpeMatcher';
+import { buildAliasMap, parseCPE23 } from '../src/utils/cpeMatcher';
 import { mergeCveRecords, normalizeCveId, stableJson } from '../src/utils/deduplicator';
 import { reconcileFindings } from '../src/engine/reconcileFindings';
 import { applyVexSuppression, determineExploitRisk, rankAndRateLimitZeroDays, runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { ingestFeed, type IngestContext } from './ingestion';
+import { bindClusterToCve, clusterSuppressedAssets } from './correlation/clusters.ts';
 import { refreshCandidatePairs } from './versionIndex';
 import { recoveryDue, recoveryAt, shouldStartAutomaticRun } from './feedRecovery';
 import { ingestionWindow, type FeedCursor } from './ingestionState';
@@ -55,6 +56,24 @@ const inventorySignature = (assets: WatchListItem[]) => {
   for (const asset of [...assets].sort((a, b) => a.id.localeCompare(b.id))) digest.update(stableJson(asset));
   return digest.digest('hex');
 };
+/** (vendor, product) identities a CVE asserts, used to join pre-CVE clusters.
+ * Derived only from non-wildcard CPE criteria; a CVE with no parseable
+ * structured identity cannot bind a cluster (binding on prose would let a
+ * poisoned CVE claim another vulnerability's rulings). */
+function cveClusterIdentities(cve: NormalizedCVE): { vendor: string; product: string }[] {
+  const criteria = cve.cpeMatchDetails?.length
+    ? cve.cpeMatchDetails.map((detail) => detail.criteria)
+    : cve.cpeMatches;
+  const identities = new Map<string, { vendor: string; product: string }>();
+  for (const criterion of criteria) {
+    const parsed = parseCPE23(criterion);
+    if (!parsed.isValid || /[?*]/.test(parsed.vendor) || /[?*]/.test(parsed.product)) continue;
+    const vendor = parsed.vendor.toLowerCase();
+    const product = parsed.product.toLowerCase();
+    identities.set(`${vendor}\u0000${product}`, { vendor, product });
+  }
+  return [...identities.values()];
+}
 export async function queueRun(
   pool: pg.Pool,
   scope: number | undefined,
@@ -671,6 +690,15 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         const old = oldCveMap.get(cve.cveId);
         return !old || stableJson(old) !== stableJson(cve);
       });
+      // Bind published CVEs to their pre-CVE clusters so early-intelligence
+      // evidence and operator rulings travel with the canonical identifier.
+      // Only CVEs that are new to the corpus (not merely re-versioned) can
+      // establish the publication event; a re-publication never re-binds.
+      for (const cve of changedCves) {
+        if (oldCveMap.has(cve.cveId)) continue;
+        for (const identity of cveClusterIdentities(cve))
+          await bindClusterToCve(db, cve.cveId, identity.vendor, identity.product);
+      }
       await putMany(db, 'cveData', changedCves.map((cve) => ({ id: cve.cveId, data: cve })));
       const keys = await db.query("SELECT id FROM records WHERE kind='cveData'");
       for (const { id } of keys.rows) {
@@ -731,19 +759,47 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           )
         ).rows.map((row) => row.advisory_id),
       );
+      // Pre-CVE operator rulings suppress their canonical CVE's new findings
+      // before reconciliation or any delivery queue sees them. A finding whose
+      // asset an operator ruled FALSE_POSITIVE/NOT_AFFECTED during the pre-CVE
+      // window is created MONITORED with the ruling recorded, never queued.
+      const suppressedNewFindings: Finding[] = [];
+      const survivingNewFindings: Finding[] = [];
+      {
+        const suppressionCache = new Map<string, Set<string>>();
+        for (const finding of correlated.newFindings) {
+          let suppressed = suppressionCache.get(finding.cveId);
+          if (!suppressed) {
+            suppressed = await clusterSuppressedAssets(db, finding.cveId);
+            suppressionCache.set(finding.cveId, suppressed);
+          }
+          if (suppressed.has(finding.matchedAssetId))
+            suppressedNewFindings.push({
+              ...finding,
+              status: 'FALSE_POSITIVE',
+              notificationStatus: 'NOT_APPLICABLE',
+              matchingEvidence:
+                'Suppressed by operator ruling on the pre-CVE cluster; canonical CVE inherits the earlier decision',
+            });
+          else survivingNewFindings.push(finding);
+        }
+      }
       const reconciled = reconcileFindings(
         snapshot.findings.map((f) =>
           f.advisoryId && staleBundles.has(f.advisoryId) && !f.autoDispatchedAt
             ? { ...f, advisoryId: null }
             : f,
         ),
-        correlated.newFindings,
+        survivingNewFindings,
       );
       const vexEnforced = applyVexSuppression(reconciled);
+      // Suppressed findings are persisted alongside the surviving set: dropping
+      // them would let the next run re-create and queue the same finding.
+      const persistedFindings = [...vexEnforced, ...suppressedNewFindings];
       await putMany(
         db,
         'findings',
-        vexEnforced.map((f) => ({ id: f.id, data: f })),
+        persistedFindings.map((f) => ({ id: f.id, data: f })),
       );
       const intelligenceMatches = matchIntelligence(
         articles,

@@ -36,6 +36,15 @@ parentPort.on('message', ({ text }) => {
       if (ranges.length >= 100) throw new Error('limit');
       ranges.push({ productPhrase: match[1].replace(/ versions?$/, ''), range: (['before','prior to','below'].includes(match[2]) ? '<' : '<=') + match[3] });
     }
+    // Inclusive bands phrased in prose: "vulnerable between 2.1.0 and 2.3.4".
+    // The strict single-bound rangePattern cannot express these; without this
+    // second pass the comparator falls back to identity matching.
+    const bandPattern = /(?:^| )(?:between|from) (v?[0-9]{1,9}(?:\.[0-9]{1,9}){1,2}) (?:and|to|through) (v?[0-9]{1,9}(?:\.[0-9]{1,9}){1,2})(?= |$)/g;
+    while ((match = bandPattern.exec(normalized)) !== null) {
+      check();
+      if (ranges.length >= 100) throw new Error('limit');
+      ranges.push({ productPhrase: '', range: '>=' + match[1] + ' <=' + match[2] });
+    }
     const density = signals / Math.max(1,tokens.length);
     parentPort.postMessage({ text: normalized, cleanContent: plain.trim(), ranges, cveIds: [...cves],
       zeroDay: cves.size === 0 && signals >= 2 && density >= 0.002,

@@ -45,6 +45,8 @@ export interface CorrelationPolicy {
   notificationsEnabled: boolean;
   retentionEnabled: boolean;
   retentionHours: number;
+  /** Days a pre-CVE vulnerability cluster stays open for corroboration. */
+  preCveClusterWindowDays: number;
 }
 export interface CorrelationWorkflows {
   policy: CorrelationPolicy;

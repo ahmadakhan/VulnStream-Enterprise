@@ -85,35 +85,67 @@ export class CorrelationTelemetry {
     this.flushOutput();
   }
   /** Write-ahead logging: persist telemetry entries to operational_events before commit.
-   * Caller MUST call this inside the same transaction that commits the advisory. */
+   * Caller MUST call this inside the same transaction that commits the advisory.
+   *
+   * Values are bound as parameters, never interpolated: event names and
+   * tracking ids originate outside the process, and the previous string-built
+   * INSERT both broke on any embedded quote and allowed SQL injection through
+   * a crafted log event. */
   async persistBeforeCommit(db: PoolClient): Promise<void> {
     if (!this.logs.length) return;
-    const entries = this.logs.map((log) => ({
-      sequence: log.sequence,
-      timestamp: log.timestamp,
-      level: log.level,
-      event: log.event,
-      tracking_id: log.trackingId ?? null,
-      ingestion_latency_ms: log.ingestionLatencyMs ?? null,
-      extraction_latency_ms: log.extractionLatencyMs ?? null,
-      total_database_time_ms: log.totalDatabaseTimeMs ?? null,
-      count: log.count ?? null,
-      attempt: log.attempt ?? null,
-    }));
-    // Use COPY for bulk insert performance
-    const values = entries.map((e) =>
-      `(${e.sequence},'${e.timestamp}','${e.level}','${e.event}',
-        ${e.tracking_id ? `'${e.tracking_id}'` : 'NULL'},
-        ${e.ingestion_latency_ms ?? 'NULL'},
-        ${e.extraction_latency_ms ?? 'NULL'},
-        ${e.total_database_time_ms ?? 'NULL'},
-        ${e.count ?? 'NULL'},
-        ${e.attempt ?? 'NULL'})`
-    ).join(',');
+    const entries = this.logs;
+    const values: unknown[] = [];
+    const params = entries.map((log, index) => {
+      const first = index * 15 + 1;
+      // The pipeline-event columns (category/code/message) are NOT NULL in
+      // migration 002. Telemetry rows are correlation-worker events, so they
+      // are classified explicitly rather than left null and rejected.
+      const category = 'PIPELINE' as const;
+      // Map the correlation severity vocabulary onto the stored one. Ingest
+      // emits 'WARN' and 'CRITICAL', neither of which the 002 CHECK constraint
+      // accepts ('INFO','WARNING','ERROR'); persisting them unvalidated failed
+      // the whole advisory transaction.
+      const level =
+        log.level === 'WARN' ? 'WARNING' : log.level === 'CRITICAL' ? 'ERROR' : log.level;
+      const message = `${log.event}${log.trackingId ? ` [${log.trackingId}]` : ''}`;
+      values.push(
+        log.sequence,
+        log.timestamp,
+        level,
+        log.event,
+        log.trackingId ?? null,
+        log.ingestionLatencyMs ?? null,
+        log.extractionLatencyMs ?? null,
+        log.totalDatabaseTimeMs ?? null,
+        log.count ?? null,
+        log.attempt ?? null,
+        category,
+        log.event,
+        message,
+        null,
+        JSON.stringify({
+          sequence: log.sequence,
+          timestamp: log.timestamp,
+          level: log.level,
+          event: log.event,
+          trackingId: log.trackingId ?? null,
+          ingestionLatencyMs: log.ingestionLatencyMs ?? null,
+          extractionLatencyMs: log.extractionLatencyMs ?? null,
+          totalDatabaseTimeMs: log.totalDatabaseTimeMs ?? null,
+          count: log.count ?? null,
+          attempt: log.attempt ?? null,
+        }),
+      );
+      return `($${first},$${first + 1},$${first + 2},$${first + 3},$${first + 4}::uuid,
+        $${first + 5},$${first + 6},$${first + 7},$${first + 8},$${first + 9},
+        $${first + 10},$${first + 11},$${first + 12},$${first + 13}::uuid,$${first + 14}::jsonb)`;
+    });
     await db.query(
       `INSERT INTO operational_events(sequence,timestamp,level,event,tracking_id,
-        ingestion_latency_ms,extraction_latency_ms,total_database_time_ms,count,attempt)
-       VALUES ${values}`,
+        ingestion_latency_ms,extraction_latency_ms,total_database_time_ms,count,attempt,
+        category,code,message,run_id,context)
+       VALUES ${params.join(',')}`,
+      values,
     );
     // Clear in-memory buffer after successful persistence
     this.logs.length = 0;

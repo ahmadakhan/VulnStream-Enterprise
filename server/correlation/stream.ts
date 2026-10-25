@@ -88,12 +88,16 @@ export class AdvisoryStreamProcessor {
     }
     if (failure) throw failure;
   }
-  /** Infer priority from advisory content. HIGH = CVE present or critical keywords. */
-  private inferPriority(raw: AdvisoryInput): 'HIGH' | 'MEDIUM' | 'LOW' {
-    // HIGH: Has CVE IDs or explicit critical keywords
-    if (raw.cpes.length > 0 || raw.purls.length > 0) return 'HIGH';
+  /** Infer priority from advisory content. HIGH = CVE present or critical keywords.
+   * The record is untrusted stream input and may not match the advisory shape
+   * at all, so every field is validated before it is dereferenced. */
+  private inferPriority(raw: AdvisoryRecord): 'HIGH' | 'MEDIUM' | 'LOW' {
+    if (!raw || typeof raw !== 'object' || 'invalidFrame' in raw) return 'LOW';
+    const advisory = raw as Partial<AdvisoryInput>;
+    // HIGH: structured identity or explicit critical keywords
+    if ((advisory.cpes?.length ?? 0) > 0 || (advisory.purls?.length ?? 0) > 0) return 'HIGH';
     // Check for critical keywords in title/content
-    const text = `${raw.title} ${raw.content}`.toLowerCase();
+    const text = `${advisory.title ?? ''} ${advisory.content ?? ''}`.toLowerCase();
     if (/\b(remote code execution|rce|zero.day|zero-day|actively exploited|in.the.wild|unpatched|critical|severity)\b/.test(text))
       return 'HIGH';
     // MEDIUM: Has security signals but no CVE

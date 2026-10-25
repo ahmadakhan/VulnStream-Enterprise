@@ -4,6 +4,7 @@ import { appendAudit } from '../db.ts';
 import { decrypt } from '../secrets.ts';
 import { HttpError } from '../validation.ts';
 import { AdvisoryInputSchema } from './validation.ts';
+import { recordClusterDisposition, MIN_CLUSTER_OPEN_WINDOW_DAYS, MAX_CLUSTER_OPEN_WINDOW_DAYS } from './clusters.ts';
 import type { CorrelationPolicy, CorrelationWorkflows } from '../../shared/correlation.ts';
 const noteSchema = z.string().trim().min(5).max(1000);
 export const correlationPolicySchema = z
@@ -11,11 +12,20 @@ export const correlationPolicySchema = z
     notificationsEnabled: z.boolean(),
     retentionEnabled: z.boolean(),
     retentionHours: z.number().int().min(24).max(87600),
+    // Bounded to match the CHECK constraint in migration 021; omitted values
+    // preserve the stored setting so older clients cannot reset the window.
+    preCveClusterWindowDays: z
+      .number()
+      .int()
+      .min(MIN_CLUSTER_OPEN_WINDOW_DAYS)
+      .max(MAX_CLUSTER_OPEN_WINDOW_DAYS)
+      .optional(),
   })
   .strict();
 export async function getCorrelationPolicy(db: Db): Promise<CorrelationPolicy> {
   const result = await db.query<CorrelationPolicy>(`SELECT notifications_enabled AS "notificationsEnabled",
-    retention_enabled AS "retentionEnabled",retention_hours AS "retentionHours" FROM correlation_policy WHERE id=1`);
+    retention_enabled AS "retentionEnabled",retention_hours AS "retentionHours",
+    pre_cve_cluster_window_days AS "preCveClusterWindowDays" FROM correlation_policy WHERE id=1`);
   if (!result.rows[0]) throw new Error('CORRELATION_POLICY_MISSING');
   return result.rows[0];
 }
@@ -28,11 +38,12 @@ export async function updateCorrelationPolicy(
   // Enabling starts a fresh window. Historical matches never create an alert storm.
   await db.query(
     `UPDATE correlation_policy SET notifications_since=CASE WHEN NOT notifications_enabled AND $1
-    THEN now() ELSE notifications_since END,notifications_enabled=$1,retention_enabled=$2,retention_hours=$3,updated_at=now() WHERE id=1`,
-    [input.notificationsEnabled, input.retentionEnabled, input.retentionHours],
+    THEN now() ELSE notifications_since END,notifications_enabled=$1,retention_enabled=$2,retention_hours=$3,
+    pre_cve_cluster_window_days=COALESCE($4,pre_cve_cluster_window_days),updated_at=now() WHERE id=1`,
+    [input.notificationsEnabled, input.retentionEnabled, input.retentionHours, input.preCveClusterWindowDays ?? null],
   );
   await appendAudit(db, 'Correlation policy updated', 'Notification and retention policy changed', actor);
-  return input;
+  return getCorrelationPolicy(db);
 }
 export async function correlationWorkflows(db: Db): Promise<CorrelationWorkflows> {
   const policy = await getCorrelationPolicy(db);
@@ -95,6 +106,16 @@ export async function decideCorrelationReview(
     `INSERT INTO correlation_review_decisions(review_id,decision,asset_id,actor,note) VALUES($1,$2,$3,$4,$5)`,
     [id, input.decision, assetId, actor, input.note],
   );
+  // Persist the ruling against the pre-CVE cluster so it survives CVE
+  // publication. Without this, the canonical CVE finding re-alerts on an asset
+  // the operator already dismissed.
+  if (assetId)
+    await recordClusterDisposition(
+      db,
+      row.rows[0].advisory_id,
+      assetId,
+      input.decision === 'APPROVED' ? 'CONFIRMED' : 'FALSE_POSITIVE',
+    );
   await appendAudit(db, 'Correlation review decided', `Review ${id}: ${input.decision}`, actor);
 }
 export async function decideDeadLetter(

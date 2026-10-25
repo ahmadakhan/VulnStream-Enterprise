@@ -84,6 +84,11 @@ export function mergeArticles(records: IntelligenceArticle[]): IntelligenceArtic
       ...winner,
       sourceFeeds: [...new Set([...(old?.sourceFeeds || []), ...article.sourceFeeds])].sort(),
       zeroDay: (winner.zeroDay || old?.zeroDay || article.zeroDay) && mergedCveIds.length === 0,
+      // Cluster identity and resolution travel with the merged article: a
+      // zero-day report and its later CVE announcement may arrive from
+      // different feeds, but they describe one incident.
+      clusterId: article.clusterId || old?.clusterId,
+      resolvedCveId: article.resolvedCveId || old?.resolvedCveId,
       cveIds: mergedCveIds,
     });
   }
@@ -140,7 +145,12 @@ export function matchIntelligence(
         if (finding && ['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(finding.status)) continue;
         // News cannot override a structured exclusion (for example, an installed patched version).
         if (cveId && authoritative.has(cveId) && !finding) continue;
-        if (!finding && !(vendorMentioned && productMentioned)) continue;
+        // A pre-CVE cluster that was resolved to a published CVE contributes
+        // to the canonical identifier even without keyword corroboration:
+        // the earlier zero-day report was the same incident and the cluster
+        // linkage (not loose phrasing) establishes that continuity.
+        const clusterResolved = article.resolvedCveId && article.resolvedCveId === cveId;
+        if (!finding && !(vendorMentioned && productMentioned) && !clusterResolved) continue;
         const id = quickHash(`${cveId || article.id}:${asset.id}`);
         // NOT_APPLICABLE and VEX-suppressed findings are explicit exclusions:
         // news coverage must not turn them back into corroborated evidence.

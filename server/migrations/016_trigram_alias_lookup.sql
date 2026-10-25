@@ -1,37 +1,75 @@
--- Normalized alias lookup with trigram index for fuzzy matching
--- This replaces exact-match lookup with normalized token matching and pg_trgm
+-- Normalized alias lookup with a trigram index for fuzzy matching.
+--
+-- Two hard constraints this file must respect:
+--   1. The migration runner executes every file inside ONE transaction, and
+--      PostgreSQL rejects CREATE INDEX CONCURRENTLY there. Using it rolled
+--      back the entire migration history (verified against PostgreSQL 16).
+--      Plain CREATE INDEX is used instead; it is transactional and safe.
+--   2. pg_trgm may not be installed. Requiring superuser to add it would make
+--      migration fail for least-privilege deployments, so the extension is
+--      created only when available and the trigram indexes are skipped
+--      otherwise. The normalized columns and the fuzzy functions below are
+--      still created — the hardening in migration 019 is what the ingestion
+--      path depends on, not the index.
 
--- Enable pg_trgm extension (requires superuser)
--- CREATE EXTENSION IF NOT EXISTS pg_trgm;
+DO $$
+BEGIN
+  BEGIN
+    -- Install into the CURRENT schema so gin_trgm_ops and similarity() are
+    -- visible to this deployment's search_path. Installing into public from a
+    -- schema-isolated tenant would leave the functions unreachable.
+    EXECUTE format('CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA %I', current_schema());
+  EXCEPTION WHEN insufficient_privilege OR undefined_file THEN
+    RAISE NOTICE 'pg_trgm unavailable; trigram indexes and fuzzy helpers will be skipped';
+  END;
+END $$;
 
--- Add normalized alias column for fuzzy matching
-ALTER TABLE vendor_product_aliases 
-  ADD COLUMN IF NOT EXISTS normalized_alias TEXT 
+-- True when the extension is actually installed in a schema this session can
+-- resolve. pg_extension alone lies when the install lives outside search_path
+-- and pg_opclass alone retains rows for a dropped extension.
+CREATE OR REPLACE FUNCTION pg_temp_has_trgm() RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM pg_extension e
+    JOIN pg_namespace n ON n.oid = e.extnamespace
+    WHERE e.extname = 'pg_trgm'
+      AND n.nspname = ANY (current_schemas(true))
+  )
+$$;
+
+-- Add a normalized alias column for fuzzy matching.
+ALTER TABLE vendor_product_aliases
+  ADD COLUMN IF NOT EXISTS normalized_alias TEXT
   GENERATED ALWAYS AS (regexp_replace(lower(alias), '[^a-z0-9]', '', 'g')) STORED;
 
--- Trigram index for fuzzy alias matching (Levenshtein distance <= 2)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS correlation_alias_trigram 
-  ON vendor_product_aliases USING GIN (normalized_alias gin_trgm_ops);
+-- NOTE: migration 011 declares `assets` an owner-managed relation that the
+-- correlation pipeline must never alter. An earlier revision of this file
+-- added generated normalized_vendor/normalized_product columns to `assets`
+-- and a fuzzy_asset_lookup() function over them. Both were removed here: they
+-- violate the protected-schema contract (the regression suite asserts the
+-- assets column list is byte-identical after migration) and the fuzzy helpers
+-- were never called by the ingestion path. Only vendor_product_aliases, which
+-- this module owns, gains a derived column.
 
--- Add normalized columns to assets for fuzzy vendor/product matching
-ALTER TABLE assets 
-  ADD COLUMN IF NOT EXISTS normalized_vendor TEXT 
-  GENERATED ALWAYS AS (regexp_replace(lower(vendor), '[^a-z0-9]', '', 'g')) STORED,
-  ADD COLUMN IF NOT EXISTS normalized_product TEXT 
-  GENERATED ALWAYS AS (regexp_replace(lower(product), '[^a-z0-9]', '', 'g')) STORED;
+-- Trigram indexes are an optimization only. Build them conditionally so the
+-- migration succeeds whether or not pg_trgm is usable.
+DO $$
+BEGIN
+  IF pg_temp_has_trgm() THEN
+    CREATE INDEX IF NOT EXISTS correlation_alias_trigram
+      ON vendor_product_aliases USING GIN (normalized_alias gin_trgm_ops);
+  ELSE
+    RAISE NOTICE 'pg_trgm not installed in this schema; trigram indexes skipped';
+  END IF;
+END $$;
 
--- Trigram indexes for fuzzy asset matching
-CREATE INDEX CONCURRENTLY IF NOT EXISTS correlation_assets_vendor_trigram 
-  ON assets USING GIN (normalized_vendor gin_trgm_ops);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS correlation_assets_product_trigram 
-  ON assets USING GIN (normalized_product gin_trgm_ops);
-
--- Fuzzy alias lookup function (Levenshtein distance <= 2)
--- Uses pg_trgm similarity with threshold 0.6 (~edit distance <= 2 for typical lengths)
+-- Fuzzy alias lookup. Migration 019 tightens these thresholds; the versions
+-- here exist so an installation that stops at 016 is not left without the
+-- functions. Both refuse short inputs, which is what caused the historical
+-- "java" -> "kafka"/"jboss" cross-matches.
 CREATE OR REPLACE FUNCTION fuzzy_alias_lookup(
   input_alias TEXT,
   max_distance INT DEFAULT 2,
-  similarity_threshold REAL DEFAULT 0.6
+  similarity_threshold REAL DEFAULT 0.75
 )
 RETURNS TABLE (
   alias TEXT,
@@ -43,60 +81,27 @@ DECLARE
   normalized_input TEXT;
 BEGIN
   normalized_input := regexp_replace(lower(input_alias), '[^a-z0-9]', '', 'g');
+  IF normalized_input IS NULL OR length(normalized_input) < 6 THEN
+    RETURN;
+  END IF;
   RETURN QUERY
   SELECT a.alias, a.vendor, a.product,
          similarity(normalized_input, a.normalized_alias) AS sim
   FROM vendor_product_aliases a
-  WHERE similarity(normalized_input, a.normalized_alias) >= similarity_threshold
+  WHERE length(a.normalized_alias) >= 6
+    AND similarity(normalized_input, a.normalized_alias) >= similarity_threshold
   ORDER BY similarity(normalized_input, a.normalized_alias) DESC
   LIMIT 5;
 END;
 $$;
 
--- Fuzzy asset lookup function
-CREATE OR REPLACE FUNCTION fuzzy_asset_lookup(
-  input_vendor TEXT,
-  input_product TEXT,
-  similarity_threshold REAL DEFAULT 0.6
-)
-RETURNS TABLE (
-  id UUID,
-  vendor TEXT,
-  product TEXT,
-  version TEXT,
-  vendor_similarity REAL,
-  product_similarity REAL
-) LANGUAGE plpgsql STABLE AS $$
-DECLARE
-  norm_vendor TEXT;
-  norm_product TEXT;
-BEGIN
-  norm_vendor := regexp_replace(lower(input_vendor), '[^a-z0-9]', '', 'g');
-  norm_product := regexp_replace(lower(input_product), '[^a-z0-9]', '', 'g');
-  RETURN QUERY
-  SELECT a.id, a.vendor, a.product, a.version,
-         similarity(norm_vendor, a.normalized_vendor) AS vendor_sim,
-         similarity(norm_product, a.normalized_product) AS product_sim
-  FROM assets a
-  WHERE similarity(norm_vendor, a.normalized_vendor) >= similarity_threshold
-     OR similarity(norm_product, a.normalized_product) >= similarity_threshold
-  ORDER BY GREATEST(similarity(norm_vendor, a.normalized_vendor), similarity(norm_product, a.normalized_product)) DESC
-  LIMIT 20;
-END;
-$$;
 
--- Grant execute permissions
-GRANT EXECUTE ON FUNCTION fuzzy_alias_lookup(TEXT, INT, REAL) TO PUBLIC;
-GRANT EXECUTE ON FUNCTION fuzzy_asset_lookup(TEXT, TEXT, REAL) TO PUBLIC;
+-- Fuzzy helpers are operator utilities, not part of the ingestion boundary.
+REVOKE EXECUTE ON FUNCTION fuzzy_alias_lookup(TEXT, INT, REAL) FROM PUBLIC;
 
--- Populate normalized columns for existing data
-UPDATE vendor_product_aliases 
-SET normalized_alias = regexp_replace(lower(alias), '[^a-z0-9]', '', 'g')
-WHERE normalized_alias IS NULL;
 
-UPDATE assets 
-SET normalized_vendor = regexp_replace(lower(vendor), '[^a-z0-9]', '', 'g'),
-    normalized_product = regexp_replace(lower(product), '[^a-z0-9]', '', 'g')
-WHERE normalized_vendor IS NULL OR normalized_product IS NULL;
+-- The generated columns are computed by PostgreSQL on write; the UPDATE
+-- statements previously here targeted generated columns and would have been
+-- rejected. Nothing to backfill.
 
 INSERT INTO schema_migrations(version) VALUES(16) ON CONFLICT DO NOTHING;

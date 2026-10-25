@@ -201,13 +201,17 @@ export class PipelineSupervisor {
     }
     const signal = AbortSignal.any([controller.signal, this.shutdown.signal]);
     await this.ingestor.telemetry.ready(signal);
-    // HIGH confidence alerts bypass backpressure entirely
+    // HIGH confidence alerts bypass *soft* backpressure (memory shedding and
+    // DB-severance recovery) but never the hard global worker ceiling. The
+    // previous condition skipped every check for HIGH, so a burst of
+    // CVE-bearing advisories could open unbounded workers, exhaust the pool,
+    // and starve the very queue it was meant to prioritize.
     const isHighPriority = priority === 'HIGH';
     while (
       !this.stopped &&
-      !isHighPriority &&
-      (this.health === 'RECOVERING_DB_SEVERANCE' ||
-        this.memoryPressure ||
+      ((!isHighPriority &&
+        (this.health === 'RECOVERING_DB_SEVERANCE' || this.memoryPressure)) ||
+        this.active.size >= this.concurrencyLimit ||
         this.activeCount[priority] >= this.getPoolLimit(priority))
     )
       await delay(50, undefined, { signal });

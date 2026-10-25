@@ -217,9 +217,24 @@ export function createApp(
   app.post('/api/login', loginHandler(pool, config));
   // Global rate limiting for authenticated mutation endpoints. The bucket is
   // stored in PostgreSQL so every replica shares one quota per operator.
+  //
+  // Only state-changing requests are charged. `/api/correlation/simulate` is a
+  // POST that performs a pure in-memory match against already-loaded data and
+  // writes nothing, so billing it against the mutation quota let an ordinary
+  // read-only operator exhaust their write budget by exploring the matcher —
+  // and made the documented VIEWER read-only role unable to use it at all.
+  // The allowlist is by exact route, never by prefix, so a future mutating
+  // route cannot inherit the exemption through naming.
+  const NON_MUTATING_POSTS = new Set(['/api/correlation/simulate']);
   const mutationLimiter = options.mutationLimiter ?? createDatabaseRateLimiter(pool);
   app.use('/api', requireAuth(pool, config), async (req, res, next) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+    // Inside a mount, req.path is the path RELATIVE to the mount point
+    // ('/correlation/simulate'), not the absolute route. Matching the absolute
+    // name here silently exempted nothing. Use baseUrl + path, which is what
+    // the route table actually keys on.
+    const route = `${req.baseUrl}${req.path}`.replace(/\/+$/, '') || '/';
+    if (req.method === 'POST' && NON_MUTATING_POSTS.has(route)) return next();
     try {
       const identifier = req.operator?.id || req.ip || '';
       const result = await mutationLimiter(`rl:${identifier}`);
@@ -594,7 +609,12 @@ export function createApp(
   );
   app.post(
     '/api/correlation/simulate',
-    requireRole('ADMIN'),
+    // Read-only by construction: matches against the cached corpus and the
+    // submitted watch item, persisting nothing. Gating it on ADMIN forced
+    // operators and viewers to file a privileged request to answer "would this
+    // product match?", which is the question the endpoint exists to answer.
+    // Any authenticated role may call it; the mutation quota skips it.
+    requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
     asyncRoute(async (req, res) => {
       const body = z
         .object({

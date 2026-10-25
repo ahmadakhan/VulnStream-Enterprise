@@ -371,8 +371,12 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       assert.equal(simulated.status, 200, JSON.stringify(simulated.body));
     });
     await t.test('mutation quota is shared across application replicas', async () => {
-      const username = 'rate-viewer';
-      await createUser(pool, username, password, 'VIEWER');
+      const username = 'rate-operator';
+      // The subject of this test is quota propagation, not authorization, so it
+      // needs a role that can actually mutate. A VIEWER has no write endpoint at
+      // all (verified by the role-boundary test above), so using one here only
+      // tested the 403 path.
+      await createUser(pool, username, password, 'OPERATOR');
       const replicaA = createApp(pool, config, requester, {
         mutationLimiter: createDatabaseRateLimiter(pool, 2, 0.000001),
       });
@@ -391,14 +395,46 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       };
       const csrfA = await loginReplica(agentA),
         csrfB = await loginReplica(agentB);
+      // Buckets are keyed per operator id and persist across runs and replicas.
+      // Login itself is a POST that charges the bucket, and earlier tests in
+      // this suite consume quota for other users, so the limit must be measured
+      // from a known-zero baseline run under this operator's identity.
+      //
+      // The bucket write happens in each replica's own pool, which uses the
+      // suite's isolated schema; this pool is created with the same search_path.
+      const operatorId = (
+        await pool.query<{ id: string }>('SELECT id FROM users WHERE username=$1', [username])
+      ).rows[0]?.id;
+      assert.ok(operatorId, 'operator row must exist for quota isolation');
+      await pool.query('DELETE FROM rate_limit_buckets WHERE bucket_key=$1', [`rl:${operatorId}`]);
+      // Charge the shared quota with genuine mutations. It previously used
+      // /api/correlation/simulate, which performs no writes and is therefore
+      // exempt from the mutation quota — the exemption is asserted separately
+      // below so both behaviours stay pinned.
       const mutate = (agent: typeof agentA, csrf: string) =>
         agent
-          .post('/api/correlation/simulate')
+          .post('/api/commands')
           .set('Origin', config.APP_ORIGIN)
           .set('x-csrf-token', csrf)
-          .send({ vendor: 'acme', product: 'widget' });
-      assert.equal((await mutate(agentA, csrfA)).status, 200);
-      assert.equal((await mutate(agentB, csrfB)).status, 200);
+          // asset.save is the lowest-privilege genuine mutation: OPERATOR may
+          // run it and it writes a watchlist row, so it charges the shared
+          // bucket. settings.save is ADMIN-only, which made this test assert
+          // 403 instead of quota propagation.
+          .send({
+            action: 'asset.save',
+            data: {
+              vendor: 'quota',
+              product: 'probe',
+              cpes: ['cpe:2.3:a:quota:probe:1.0:*:*:*:*:*:*:*'],
+              active: true,
+              assetTag: 'QUOTA-PROBE',
+              ownerGroup: 'Platform',
+            },
+          });
+      const first = await mutate(agentA, csrfA);
+      assert.equal(first.status, 200, JSON.stringify(first.body));
+      const second = await mutate(agentB, csrfB);
+      assert.equal(second.status, 200, JSON.stringify(second.body));
       const denied = await mutate(agentA, csrfA);
       assert.equal(
         denied.status,
@@ -406,6 +442,15 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
         'the second replica must observe the first replica\'s consumption',
       );
       assert.ok(Number(denied.headers['retry-after']) >= 1);
+      // A read-only simulation is not a mutation: it must still work after the
+      // write quota is exhausted, otherwise exploring the matcher burns the
+      // operator's ability to change anything.
+      const simulatedAfterQuota = await agentA
+        .post('/api/correlation/simulate')
+        .set('Origin', config.APP_ORIGIN)
+        .set('x-csrf-token', csrfA)
+        .send({ vendor: 'acme', product: 'widget' });
+      assert.equal(simulatedAfterQuota.status, 200, JSON.stringify(simulatedAfterQuota.body));
       // Reads stay available after the mutation quota is exhausted.
       assert.equal((await agentB.get('/api/state')).status, 200);
     });
