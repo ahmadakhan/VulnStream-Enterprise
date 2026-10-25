@@ -280,6 +280,30 @@ export interface ThreatFeed {
   circuitOpenUntil?: string | null;
 }
 
+/**
+ * A single CPE 2.3 entry returned by the NVD CPE dictionary search. These are
+ * NVD-maintained official CPE names offered as verified alternatives when an
+ * operator registers a monitored product.
+ */
+export interface NvdCpeSearchResult {
+  cpeName: string;
+  cpeNameId: string;
+  part: string;
+  vendor: string;
+  product: string;
+  version: string;
+  update: string;
+  targetSw: string;
+  targetHw: string;
+  /** Human-readable title from the NVD CPE dictionary, when available. */
+  title?: string;
+}
+
+export interface NvdCpeSearchResponse {
+  results: NvdCpeSearchResult[];
+  totalResults: number;
+}
+
 export interface Advisory {
   id: string;
   title: string;

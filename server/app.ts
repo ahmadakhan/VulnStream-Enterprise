@@ -39,6 +39,12 @@ import { emailIsConfigured } from './emailProviders';
 import { parseSyndication, RSS_MAX_BYTES } from './rss';
 import { readEvents, writeEvent } from './events';
 import { createDatabaseRateLimiter, type MutationLimiter } from './rateLimit';
+import {
+  searchNvdCpes,
+  loadNvdApiKey,
+  isNvdRateLimitError,
+  nvdRetryAfterSeconds,
+} from './cpeSearch';
 import type { AppState } from '../shared/state.ts';
 import type {
   AppSettings,
@@ -50,6 +56,7 @@ import type {
   NormalizedCVE,
   AliasEntry,
   WatchListItem,
+  NvdCpeSearchResponse,
 } from '../src/types/index.ts';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler.ts';
 function publicState(data: AppState): AppState {
@@ -323,14 +330,41 @@ export function createApp(
       }),
     );
   }
-  app.get('/api/session', (req, res) =>
-    res.json({
-      username: req.operator!.username,
-      role: req.operator!.role,
-      csrfToken: req.operator!.csrf,
-      expiresAt: req.operator!.expiresAt,
-    }),
-  );
+   app.get('/api/session', (req, res) =>
+     res.json({
+       username: req.operator!.username,
+       role: req.operator!.role,
+       csrfToken: req.operator!.csrf,
+       expiresAt: req.operator!.expiresAt,
+     }),
+   );
+   app.get(
+     '/api/cpes/search',
+     requireRole('ADMIN', 'OPERATOR'),
+     asyncRoute(async (req, res) => {
+       const { vendor, product, limit } = z
+         .object({
+           vendor: z.string().trim().min(1).max(200),
+           product: z.string().trim().max(200).default(''),
+           limit: z.coerce.number().int().min(1).max(200).default(50),
+         })
+         .parse(req.query);
+       const apiKey = await loadNvdApiKey(pool, config);
+       try {
+         res.json(await searchNvdCpes(request, apiKey, vendor, product, limit));
+       } catch (error) {
+         if (isNvdRateLimitError(error)) {
+           const retryAfter = nvdRetryAfterSeconds(error);
+           if (retryAfter) res.setHeader('Retry-After', String(retryAfter));
+           throw new HttpError(429, 'NVD rate limit reached; retry later');
+         }
+         throw new HttpError(
+           502,
+           error instanceof Error ? error.message : 'NVD CPE search failed',
+         );
+       }
+     }),
+   );
   app.post(
     '/api/session/renew',
     asyncRoute(async (req, res) => {

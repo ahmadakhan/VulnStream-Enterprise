@@ -15,10 +15,11 @@ import type {
   EmailConfiguration,
   SystemHealth,
   EmailQueueItem,
-  AliasEntry,
+   AliasEntry,
   RetentionRunResult,
   RetentionPreview,
   CorrelationSimulation,
+  NvdCpeSearchResponse,
 } from '../types';
 import { compileCustomizedTemplate } from '../utils/templateCompiler';
 function useApplication() {
@@ -336,8 +337,12 @@ function useApplication() {
       targetHw?: string;
       assetTag?: string;
     }) => safely(() => request<CorrelationSimulation>('/correlation/simulate', asset)),
-    addWatchlistItem: (item: Omit<WatchListItem, 'id' | 'createdAt'>) => save('asset.save', item),
+     addWatchlistItem: (item: Omit<WatchListItem, 'id' | 'createdAt'>) => save('asset.save', item),
     updateWatchlistItem: (item: WatchListItem) => save('asset.save', item, item.id),
+    searchNvdCpes: async (vendor: string, product: string, limit = 50) => {
+      const params = new URLSearchParams({ vendor, product, limit: String(limit) });
+      return request<NvdCpeSearchResponse>(`/cpes/search?${params}`);
+    },
     toggleWatchlistItemActive: async (id: string) => {
       const updated = !!(await command('asset.toggle', undefined, id));
       if (updated) await refreshAfterMutation();

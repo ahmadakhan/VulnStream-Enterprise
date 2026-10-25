@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { WatchListItem, NormalizedCVE } from '../types';
+import { WatchListItem, NormalizedCVE, NvdCpeSearchResult } from '../types';
 import {
   generateCPE23,
   parseCPE23,
@@ -23,20 +23,21 @@ import {
   Edit2,
   Search,
   X,
-  Code,
-  FlaskConical,
-  CheckCircle2,
-  AlertCircle,
-  ExternalLink,
-  Zap,
-  ArrowRight,
-  Shield,
-  Layers,
-  Sparkles,
-  Check,
-  Package,
-  Cpu,
-} from 'lucide-react';
+   Code,
+   FlaskConical,
+   CheckCircle2,
+   AlertCircle,
+   ExternalLink,
+   Zap,
+   ArrowRight,
+   Shield,
+   Layers,
+   Sparkles,
+   Check,
+   Package,
+   Cpu,
+   Loader2,
+ } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { editedWatchlistCpe } from '../utils/watchlist';
 import { CveLink } from './CveLink';
@@ -48,10 +49,11 @@ export const WatchListView: React.FC = () => {
     updateWatchlistItem,
     toggleWatchlistItemActive,
     deleteWatchlistItem,
-    bulkImportWatchlist,
-    simulateCorrelation,
-    settings,
-  } = useApp();
+     bulkImportWatchlist,
+     simulateCorrelation,
+     searchNvdCpes,
+     settings,
+   } = useApp();
 
   // Primary view mode: Inventory vs Simulator Lab
   const [viewMode, setViewMode] = useState<'inventory' | 'simulator'>('inventory');
@@ -81,8 +83,14 @@ export const WatchListView: React.FC = () => {
   const [assetTagInput, setAssetTagInput] = useState('');
   const [ownerGroupInput, setOwnerGroupInput] = useState('SecOps-Core');
   const [notesInput, setNotesInput] = useState('');
-  const [purlInput, setPurlInput] = useState('');
+   const [purlInput, setPurlInput] = useState('');
   const [cpeExpressionInput, setCpeExpressionInput] = useState('');
+
+  // NVD Verified CPE search
+  const [nvdResults, setNvdResults] = useState<NvdCpeSearchResult[]>([]);
+  const [nvdLoading, setNvdLoading] = useState(false);
+  const [nvdError, setNvdError] = useState<string | null>(null);
+  const [selectedNvdCpes, setSelectedNvdCpes] = useState<string[]>([]);
 
   const [bulkJsonText, setBulkJsonText] = useState('');
   const [bulkFeedback, setBulkFeedback] = useState<{ imported: number; errors: string[] } | null>(null);
@@ -148,7 +156,14 @@ export const WatchListView: React.FC = () => {
             part: cpePart,
           }]
         : [];
-      return [...current, ...additions, ...customAddition];
+      const nvdAdditions = selectedNvdCpes
+        .filter((cpe) => cpe && !current.some((item) => item.cpe === cpe) && !additions.some((item) => item.cpe === cpe) && !customAddition.some((item) => item.cpe === cpe))
+        .map((cpe) => ({
+          product: 'NVD verified',
+          cpe,
+          part: parseCPE23(cpe).part as 'a' | 'o' | 'h',
+        }));
+      return [...current, ...additions, ...customAddition, ...nvdAdditions];
     }
     const list: Array<{ product: string; cpe: string; part: 'a' | 'o' | 'h' }> = [];
     const v = vendorInput.trim() || 'vendor';
@@ -174,7 +189,15 @@ export const WatchListView: React.FC = () => {
       list.push({ product: 'product', cpe, part: cpePart });
     }
 
-    return list;
+    const nvdAdditions = selectedNvdCpes
+      .filter((cpe) => cpe && !list.some((item) => item.cpe === cpe))
+      .map((cpe) => ({
+        product: 'NVD verified',
+        cpe,
+        part: parseCPE23(cpe).part as 'a' | 'o' | 'h',
+      }));
+
+    return [...list, ...nvdAdditions];
   }, [
     vendorInput,
     selectedProductIds,
@@ -186,6 +209,7 @@ export const WatchListView: React.FC = () => {
     catalogProducts,
     editingItem,
     cpeExpressionInput,
+    selectedNvdCpes,
   ]);
 
   const filteredAssets = watchlist.filter((item) => {
@@ -217,6 +241,10 @@ export const WatchListView: React.FC = () => {
     setNotesInput('');
     setPurlInput('');
     setCpeExpressionInput('');
+    setNvdResults([]);
+    setNvdLoading(false);
+    setNvdError(null);
+    setSelectedNvdCpes([]);
     setEditingItem(null);
     setShowAddModal(true);
   };
@@ -237,6 +265,10 @@ export const WatchListView: React.FC = () => {
     setNotesInput(item.notes || '');
     setPurlInput((item.purls || []).join('\n'));
     setCpeExpressionInput(item.cpes[0] || '');
+    setNvdResults([]);
+    setNvdLoading(false);
+    setNvdError(null);
+    setSelectedNvdCpes([]);
     setEditingItem(item);
     setShowAddModal(true);
   };
@@ -251,10 +283,58 @@ export const WatchListView: React.FC = () => {
     });
   };
 
-  const selectVendorQuick = (vendorName: string) => {
-    setVendorInput(vendorName);
-    setSelectedProductIds([]);
-  };
+   const selectVendorQuick = (vendorName: string) => {
+     setVendorInput(vendorName);
+     setSelectedProductIds([]);
+   };
+
+   const nvdSearchProductTerm = useMemo(() => {
+     const custom = customProductInput.trim();
+     if (custom) return custom;
+     if (selectedProductIds.length === 1) {
+       const catProd = catalogProducts.find((p) => p.normalizedId === selectedProductIds[0]);
+       return catProd ? catProd.name : '';
+     }
+     return '';
+   }, [customProductInput, selectedProductIds, catalogProducts]);
+
+   const dedupeCpes = (cpes: string[]): string[] => {
+     const seen = new Set<string>();
+     return cpes.filter((c) => {
+       const key = c.toLowerCase();
+       if (seen.has(key)) return false;
+       seen.add(key);
+       return true;
+     });
+   };
+
+   const handleNvdSearch = async () => {
+     if (!vendorInput.trim()) return;
+     setNvdLoading(true);
+     setNvdError(null);
+     setNvdResults([]);
+     try {
+       const result = await searchNvdCpes(vendorInput.trim(), nvdSearchProductTerm, 50);
+       const found = result?.results || [];
+       setNvdResults(found);
+       if (found.length === 0)
+         setNvdError('No verified CPEs found in the NVD dictionary for this vendor/product.');
+     } catch (e) {
+       setNvdError(e instanceof Error ? e.message : 'NVD CPE search failed');
+     } finally {
+       setNvdLoading(false);
+     }
+   };
+
+   const addNvdCpe = (cpe: string) => {
+     setSelectedNvdCpes((prev) => dedupeCpes([...prev, cpe]));
+     setNvdResults((prev) => prev.filter((r) => r.cpeName !== cpe));
+     setNvdError(null);
+   };
+
+   const removeNvdCpe = (cpe: string) =>
+     setSelectedNvdCpes((prev) => prev.filter((c) => c !== cpe));
+
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -336,7 +416,7 @@ export const WatchListView: React.FC = () => {
         vendor: parsedCpe.vendor,
         product: parsedCpe.product,
         version: parsedCpe.version,
-        cpes: [cpe, ...additionalCpes],
+        cpes: dedupeCpes([cpe, ...additionalCpes, ...selectedNvdCpes]),
         purls: purlList.length > 0 ? purlList : undefined,
         targetHw: parsedCpe.targetHw !== '*' ? parsedCpe.targetHw : undefined,
         assetTag: assetTagInput.trim() || editingItem.assetTag,
@@ -402,11 +482,12 @@ export const WatchListView: React.FC = () => {
       const baseTag =
         assetTagInput.trim() ||
         `${vendorInput.toUpperCase().slice(0, 4)}-${p.normalizedId.toUpperCase().slice(0, 6)}`;
+      const isPrimary = idx === 0;
 
       return {
         vendor: vendorInput.trim(),
         product: p.name,
-        cpes: [cpe],
+        cpes: isPrimary ? dedupeCpes([cpe, ...selectedNvdCpes]) : [cpe],
         purls: purlList.length > 0 ? purlList : undefined,
         targetHw: targetHwInput !== '*' ? targetHwInput : undefined,
         assetTag: `${baseTag}${tagSuffix}`,
@@ -1012,12 +1093,105 @@ export const WatchListView: React.FC = () => {
                   type="text"
                   placeholder="e.g. pan-os, custom-gateway, http_server"
                   value={customProductInput}
-                  onChange={(e) => setCustomProductInput(e.target.value)}
-                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
-                />
-              </div>
+                   onChange={(e) => setCustomProductInput(e.target.value)}
+                   className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
+                 />
+               </div>
 
-              {editingItem && (
+               {/* NVD Verified CPE 2.3 Search */}
+               <div className="space-y-3">
+                 <div className="flex items-center justify-between">
+                   <label className="block text-[11px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                     NVD Verified CPE 2.3 Expressions
+                   </label>
+                   <button
+                     type="button"
+                     onClick={handleNvdSearch}
+                     disabled={nvdLoading || !vendorInput.trim()}
+                     className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-sky-900/40 dark:bg-sky-900/40 light:bg-sky-100 border border-sky-800 dark:border-sky-800 light:border-sky-300 text-sky-300 dark:text-sky-300 light:text-sky-700 hover:bg-sky-900/60 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                   >
+                     {nvdLoading ? (
+                       <Loader2 className="w-3 h-3 animate-spin" />
+                     ) : (
+                       <Search className="w-3 h-3" />
+                     )}
+                     {nvdLoading ? 'Searching...' : 'Search NVD'}
+                   </button>
+                 </div>
+                 <p className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
+                   Verified against the NIST NVD CPE dictionary for {vendorInput.trim() || 'vendor'}
+                   {nvdSearchProductTerm && ` / ${nvdSearchProductTerm}`}. Matching CPEs can be added to this
+                   product below. Subject to NVD rate limits.
+                 </p>
+                 {nvdError && (
+                   <div
+                     className="rounded-lg border border-rose-800 bg-rose-950/40 p-2 text-[10px] text-rose-300"
+                     role="alert"
+                   >
+                     {nvdError}
+                   </div>
+                 )}
+                 {nvdResults.length > 0 && (
+                   <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                     {nvdResults.map((r) => (
+                       <div
+                         key={r.cpeNameId || r.cpeName}
+                         className="bg-zinc-950/70 dark:bg-zinc-950/70 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 flex items-center justify-between"
+                       >
+                         <div className="min-w-0 flex-1">
+                           <code
+                             className="block text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono truncate"
+                             title={r.cpeName}
+                           >
+                             {r.cpeName}
+                           </code>
+                           <div className="text-[9px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
+                             {r.vendor} / {r.product} · part {r.part} · arch{' '}
+                             {r.targetHw || '*'}
+                           </div>
+                         </div>
+                         <button
+                           type="button"
+                           onClick={() => addNvdCpe(r.cpeName)}
+                           className="shrink-0 ml-2 text-[10px] font-mono px-2 py-0.75 rounded bg-emerald-900/40 dark:bg-emerald-900/40 light:bg-emerald-100 border border-emerald-800 dark:border-emerald-800 light:border-emerald-300 text-emerald-300 dark:text-emerald-300 light:text-emerald-700 hover:bg-emerald-900/60"
+                         >
+                           Add
+                         </button>
+                       </div>
+                     ))}
+                   </div>
+                 )}
+                 {selectedNvdCpes.length > 0 && (
+                   <div className="space-y-1">
+                     <div className="text-[10px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                       Selected verified CPEs ({selectedNvdCpes.length}):
+                     </div>
+                     {selectedNvdCpes.map((cpe) => (
+                       <div
+                         key={cpe}
+                         className="flex items-center gap-2"
+                       >
+                         <code
+                           className="min-w-0 flex-1 truncate text-xs text-zinc-300 dark:text-zinc-300 light:text-zinc-700"
+                           title={cpe}
+                         >
+                           {cpe}
+                         </code>
+                         <button
+                           type="button"
+                           onClick={() => removeNvdCpe(cpe)}
+                           aria-label={`Remove verified CPE ${cpe}`}
+                           className="shrink-0 rounded-lg p-1 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400"
+                         >
+                           <X className="h-3.5 w-3.5" />
+                         </button>
+                       </div>
+                     ))}
+                   </div>
+                 )}
+               </div>
+
+               {editingItem && (
                 <div>
                   <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
                     CPE 2.3 Expression (editable)
