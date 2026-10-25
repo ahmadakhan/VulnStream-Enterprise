@@ -1,31 +1,7 @@
+import { pages, type PageId } from '../design/pages';
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import {
-  LayoutDashboard,
-  Server,
-  ShieldAlert,
-  Database,
-  FileText,
-  Activity,
-  Zap,
-  Bell,
-  Radio,
-  Users,
-  FileCode,
-  Mail,
-  Inbox,
-  FileCode2,
-  Cpu,
-  Settings,
-  Shield,
-  Sun,
-  Moon,
-  Clock,
-  KeyRound,
-  RotateCw,
-  Archive,
-  Tags,
-} from 'lucide-react';
+import { Server, Shield, Sun, Moon, KeyRound } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
   const [isMobileView, setIsMobileView] = useState(
@@ -60,44 +36,46 @@ export const Sidebar: React.FC = () => {
     return () => media.removeEventListener('change', update);
   }, []);
 
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileNavOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mobileNavOpen, setMobileNavOpen]);
+
   const navSections = [
     {
       title: 'OPERATIONS',
       items: [
-        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'watchlist', label: 'Monitored Products', icon: Server, count: watchlist.length },
-        { id: 'findings', label: 'Vulnerabilities', icon: ShieldAlert, count: activeFindingsCount },
-        { id: 'threat-data', label: 'Threat Cache', icon: Database },
-        { id: 'advisories', label: 'Advisories', icon: FileText },
+        { id: 'dashboard' },
+        { id: 'watchlist', count: watchlist.length },
+        { id: 'findings', count: activeFindingsCount },
+        { id: 'threat-data' },
+        { id: 'advisories' },
       ],
     },
     {
       title: 'AUTONOMOUS PIPELINE',
       items: [
-        { id: 'correlation', label: 'Live Correlation', icon: Zap },
-        { id: 'pipeline', label: 'Executions', icon: Activity },
-        { id: 'alerted-cves', label: 'Sent History', icon: Bell },
-        { id: 'feeds', label: 'Threat Feeds', icon: Radio, count: feeds.length },
-        { id: 'recipients', label: 'Recipients & Webhooks', icon: Users },
-        { id: 'template', label: 'HTML Template', icon: FileCode },
-        { id: 'emails', label: 'Delivery Log', icon: Mail },
-        { id: 'email-queue', label: 'Email Queue', icon: Inbox },
+        { id: 'correlation' },
+        { id: 'pipeline' },
+        { id: 'alerted-cves' },
+        { id: 'feeds', count: feeds.length },
+        { id: 'recipients' },
+        { id: 'template' },
+        { id: 'emails' },
+        { id: 'email-queue' },
       ],
     },
     {
       title: 'ARCHIVE & RETENTION',
-      items: [
-        { id: 'archive', label: 'Archives & Retention', icon: Archive },
-      ],
+      items: [{ id: 'archive' }],
     },
     {
       title: 'SYSTEM & AUDIT',
-      items: [
-        { id: 'logs', label: 'Logs & Audit', icon: FileCode2 },
-        { id: 'health', label: 'System Health', icon: Cpu },
-        { id: 'aliases', label: 'Alias Thesaurus', icon: Tags },
-        { id: 'settings', label: 'Settings', icon: Settings },
-      ],
+      items: [{ id: 'logs' }, { id: 'health' }, { id: 'aliases' }, { id: 'settings' }],
     },
   ];
 
@@ -106,7 +84,7 @@ export const Sidebar: React.FC = () => {
       id="primary-navigation"
       aria-hidden={isMobileView && !mobileNavOpen}
       inert={isMobileView && !mobileNavOpen}
-      className={`fixed inset-y-0 left-0 z-40 w-64 bg-zinc-950 dark:bg-zinc-950 light:bg-white border-r border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 flex flex-col shrink-0 select-none transition-transform duration-200 md:sticky md:top-0 md:h-screen md:translate-x-0 md:z-30 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}
+      className={`ui-sidebar fixed inset-y-0 left-0 z-40 w-64 bg-zinc-950 dark:bg-zinc-950 light:bg-white border-r border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 flex flex-col shrink-0 select-none transition-transform duration-200 md:sticky md:top-0 md:h-screen md:translate-x-0 md:z-30 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}
     >
       {/* Brand Header */}
       <div className="p-4 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
@@ -128,15 +106,16 @@ export const Sidebar: React.FC = () => {
                 Auto
               </span>
             </div>
-            <div className="text-[10px] text-zinc-500 font-mono tracking-tight">
-              Vulnerability Operations
-            </div>
+            <div className="text-[10px] text-zinc-500 font-mono tracking-tight">Vulnerability Operations</div>
           </div>
         </button>
       </div>
 
       {/* Nav List with Sections & SVG Icons */}
-      <nav aria-label="Primary navigation" className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
+      <nav
+        aria-label="Primary navigation"
+        className="ui-navigation flex-1 overflow-y-auto px-3 py-4 space-y-6"
+      >
         {navSections.map((section) => (
           <div key={section.title}>
             <div className="px-3 mb-2 text-[10px] font-bold tracking-wider text-zinc-500 font-mono uppercase">
@@ -144,7 +123,7 @@ export const Sidebar: React.FC = () => {
             </div>
             <div className="space-y-0.5">
               {section.items.map((item) => {
-                const Icon = item.icon;
+                const Icon = pages[item.id as PageId].icon;
                 const isActive = activeTab === item.id;
                 return (
                   <button
@@ -165,7 +144,7 @@ export const Sidebar: React.FC = () => {
                             : 'text-zinc-500 light:text-zinc-400'
                         }`}
                       />
-                      <span className="truncate">{item.label}</span>
+                      <span className="truncate">{pages[item.id as PageId].title}</span>
                     </div>
 
                     {item.count !== undefined && (
@@ -203,9 +182,7 @@ export const Sidebar: React.FC = () => {
             ) : (
               <Sun className="w-3.5 h-3.5 text-amber-500" />
             )}
-            <span className="font-medium text-[11px]">
-              {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
-            </span>
+            <span className="font-medium text-[11px]">{theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</span>
           </div>
           <span className="text-[10px] font-mono text-zinc-500 uppercase">
             {theme === 'dark' ? 'Switch Light' : 'Switch Dark'}

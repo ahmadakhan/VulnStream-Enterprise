@@ -1,5 +1,5 @@
 import { CorrelationDashboard } from './components/CorrelationDashboard';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { LogOut, ShieldCheck } from 'lucide-react';
 import { LoginView } from './components/LoginView';
 import { AppProvider, useApp } from './context/AppContext';
@@ -26,9 +26,20 @@ import { AliasesView } from './components/AliasesView';
 
 export const MainContent: React.FC = () => {
   const { activeTab } = useApp();
+  const previousTab = useRef(activeTab);
+  useEffect(() => {
+    if (previousTab.current === activeTab) return;
+    previousTab.current = activeTab;
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    document.getElementById('page-title')?.focus({ preventScroll: true });
+  }, [activeTab]);
 
   return (
-    <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6 pb-16 overflow-y-auto">
+    <main
+      id="main-content"
+      aria-labelledby="page-title"
+      className="ui-main flex-1 px-4 sm:px-6 lg:px-8 py-6 pb-16"
+    >
       {activeTab === 'dashboard' && <DashboardView />}
       {activeTab === 'watchlist' && <WatchListView />}
       {activeTab === 'findings' && <FindingsView />}
@@ -76,7 +87,8 @@ const Footer: React.FC = () => {
 };
 
 const AppShell: React.FC = () => {
-  const { theme, session, loading, error, clearError, logout, pending, activeTab } = useApp();
+  const { theme, session, loading, error, clearError, logout, pending, mobileNavOpen, setMobileNavOpen } =
+    useApp();
   if (loading || !session) return <LoginView />;
 
   return (
@@ -85,13 +97,24 @@ const AppShell: React.FC = () => {
         theme === 'dark' ? 'dark bg-[#09090b] text-zinc-100' : 'light bg-zinc-50 text-zinc-900'
       }`}
     >
+      <a className="ui-skip-link" href="#main-content">
+        Skip to main content
+      </a>
       {/* Left Side Panel Navigation */}
+      {mobileNavOpen && (
+        <button
+          type="button"
+          className="ui-nav-backdrop md:hidden"
+          aria-label="Close navigation"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
       <Sidebar />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 min-h-screen">
         <TopHeader />
-        <div className="flex items-center justify-between gap-3 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 bg-zinc-900/30 dark:bg-zinc-900/30 light:bg-white/70 px-4 sm:px-6 py-2.5 text-xs">
+        <div className="ui-session-bar flex items-center justify-between gap-3 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 bg-zinc-900/30 dark:bg-zinc-900/30 light:bg-white/70 px-4 sm:px-6 py-2.5 text-xs">
           <div className="flex min-w-0 items-center gap-2.5">
             <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-zinc-700/70 dark:border-zinc-700/70 light:border-zinc-300 bg-zinc-800/70 dark:bg-zinc-800/70 light:bg-zinc-100 font-semibold text-zinc-200 dark:text-zinc-200 light:text-zinc-700">
               {session.username.slice(0, 1).toUpperCase()}
@@ -128,9 +151,7 @@ const AppShell: React.FC = () => {
             </button>
           </div>
         )}
-        <div
-          className={`flex-1 min-w-0 flex flex-col w-full mx-auto ${activeTab === 'feeds' ? 'max-w-none' : 'max-w-7xl'}`}
-        >
+        <div className="ui-workspace flex-1 min-w-0 flex flex-col w-full mx-auto">
           <MainContent />
           <Footer />
         </div>

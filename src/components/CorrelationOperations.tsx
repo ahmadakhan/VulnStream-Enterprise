@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import {
+  ClipboardCheck,
+  Database,
+  Inbox,
+  Search,
+  ShieldCheck,
+  SlidersHorizontal,
+  AlertTriangle,
+} from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import type { CorrelationPolicy, CorrelationWorkflows } from '../../shared/correlation';
 interface InventoryRow {
@@ -9,13 +18,16 @@ interface InventoryRow {
   recordId: string | null;
   assetTag: string | null;
 }
-const field = 'bg-transparent border border-zinc-600 rounded-lg p-2 text-sm';
-const button = 'rounded-lg border border-cyan-700 px-3 py-2 text-sm disabled:opacity-40';
+const field = 'ui-field cr-operation-field';
+const button = 'ui-secondary';
 export function CorrelationOperations() {
   const { session, csrfToken } = useApp();
   const [state, setState] = useState<CorrelationWorkflows | null>(null);
   const [policy, setPolicy] = useState<CorrelationPolicy | null>(null);
   const [notice, setNotice] = useState('');
+  const [noticeError, setNoticeError] = useState(false);
+  const [refreshError, setRefreshError] = useState('');
+  const [hasSearched, setHasSearched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState('');
   const [assetId, setAssetId] = useState('');
@@ -24,6 +36,10 @@ export function CorrelationOperations() {
   const [assets, setAssets] = useState<InventoryRow[]>([]);
   const [query, setQuery] = useState('');
   const [assetCursor, setAssetCursor] = useState<string | null>(null);
+  const decisionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selected) decisionRef.current?.focus();
+  }, [selected]);
   const admin = session?.role === 'ADMIN';
   const operator = admin || session?.role === 'OPERATOR';
   const refresh = useCallback(async (signal?: AbortSignal) => {
@@ -32,6 +48,7 @@ export function CorrelationOperations() {
     const data = (await response.json()) as CorrelationWorkflows;
     if (!signal?.aborted) {
       setState(data);
+      setRefreshError('');
       setPolicy((current) => current || data.policy);
     }
   }, []);
@@ -42,7 +59,8 @@ export function CorrelationOperations() {
       try {
         await refresh(AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]));
       } catch {
-        if (!controller.signal.aborted) setNotice('Workflow data could not be refreshed');
+        if (!controller.signal.aborted)
+          setRefreshError('Workflow data could not be refreshed. Retrying automatically.');
       } finally {
         if (!controller.signal.aborted) timer = setTimeout(() => void tick(), 5000);
       }
@@ -57,6 +75,7 @@ export function CorrelationOperations() {
     if (busy) return;
     setBusy(true);
     setNotice('');
+    setNoticeError(false);
     try {
       const response = await fetch('/api/correlation/' + path, {
         method,
@@ -78,6 +97,7 @@ export function CorrelationOperations() {
       setCorrection('');
       await refresh();
     } catch (reason) {
+      setNoticeError(true);
       setNotice(reason instanceof Error ? reason.message : 'Action failed');
     } finally {
       setBusy(false);
@@ -95,8 +115,10 @@ export function CorrelationOperations() {
       if (!response.ok) throw new Error('Inventory search failed');
       const data = (await response.json()) as { assets: InventoryRow[]; nextCursor: string | null };
       setAssets(data.assets);
+      setHasSearched(true);
       setAssetCursor(data.nextCursor);
     } catch (reason) {
+      setNoticeError(true);
       setNotice(reason instanceof Error ? reason.message : 'Inventory search failed');
     } finally {
       setBusy(false);
@@ -108,6 +130,7 @@ export function CorrelationOperations() {
       try {
         payload = JSON.parse(correction);
       } catch {
+        setNoticeError(true);
         setNotice('Corrected advisory must be valid JSON');
         return;
       }
@@ -119,89 +142,133 @@ export function CorrelationOperations() {
     });
   };
   return (
-    <section className="space-y-5 rounded-xl border border-zinc-800 light:border-zinc-200 p-5">
-      <div>
-        <h2 className="font-semibold">Review, delivery policy and retention</h2>
-        <p className="text-xs text-zinc-500 mt-1">
-          {state?.counts.pending ?? '—'} pending · {state?.counts.reviews ?? '—'} open reviews ·{' '}
-          {state?.counts.deadLetters ?? '—'} unresolved dead letters
-        </p>
+    <section className="cr-workflows cr-view-content" aria-labelledby="correlation-review-title">
+      <div className="ui-panel cr-control-card">
+        <div className="cr-section-title">
+          <span className="ui-section-icon">
+            <ClipboardCheck size={18} />
+          </span>
+          <div>
+            <h2 id="correlation-review-title">Review & delivery workspace</h2>
+            <p>Resolve uncertain evidence and manage what happens after a match.</p>
+          </div>
+        </div>
+        <div className="cr-queue-summary">
+          <div>
+            <span>Pending processing</span>
+            <strong>{state?.counts.pending ?? '—'}</strong>
+          </div>
+          <div>
+            <span>Open reviews</span>
+            <strong>{state?.counts.reviews ?? '—'}</strong>
+          </div>
+          <div>
+            <span>Unresolved dead letters</span>
+            <strong>{state?.counts.deadLetters ?? '—'}</strong>
+          </div>
+        </div>
       </div>
+      {refreshError && (
+        <div className="cr-notice cr-notice-warning" role="alert">
+          <AlertTriangle size={16} />
+          <p>{refreshError}</p>
+        </div>
+      )}
       {policy && (
         <form
-          className="flex flex-wrap items-center gap-4"
+          className="ui-panel cr-control-card cr-policy-form"
           onSubmit={(event) => {
             event.preventDefault();
             void mutate('policy', policy, 'PATCH');
           }}
         >
-          <label className="text-sm flex gap-2 items-center">
-            <input
-              type="checkbox"
+          <div className="cr-section-title">
+            <span className="ui-section-icon">
+              <SlidersHorizontal size={18} />
+            </span>
+            <div>
+              <h3>Delivery & retention policy</h3>
+              <p>Configure native notifications and resolved-data retention.</p>
+            </div>
+          </div>
+          <div className="cr-policy-controls">
+            <label className="ui-check-row">
+              <input
+                type="checkbox"
+                disabled={!admin || busy}
+                checked={policy.notificationsEnabled}
+                onChange={(event) => setPolicy({ ...policy, notificationsEnabled: event.target.checked })}
+              />
+              Enable native notifications
+            </label>
+            <label className="ui-check-row">
+              <input
+                type="checkbox"
+                disabled={!admin || busy}
+                checked={policy.retentionEnabled}
+                onChange={(event) => setPolicy({ ...policy, retentionEnabled: event.target.checked })}
+              />
+              Retain resolved data for
+            </label>
+            <label className="text-sm">
+              <input
+                aria-label="Correlation retention hours"
+                className={field + ' w-24'}
+                type="number"
+                min={24}
+                max={87600}
+                disabled={!admin || busy}
+                value={policy.retentionHours}
+                onChange={(event) => setPolicy({ ...policy, retentionHours: Number(event.target.value) })}
+              />{' '}
+              hours
+            </label>
+            <button
+              className={button}
+              disabled={
+                !admin ||
+                busy ||
+                !Number.isInteger(policy.retentionHours) ||
+                policy.retentionHours < 24 ||
+                policy.retentionHours > 87600
+              }
+            >
+              Save policy
+            </button>
+            <button
+              type="button"
+              className={button}
               disabled={!admin || busy}
-              checked={policy.notificationsEnabled}
-              onChange={(event) => setPolicy({ ...policy, notificationsEnabled: event.target.checked })}
-            />
-            Enable native notifications
-          </label>
-          <label className="text-sm flex gap-2 items-center">
-            <input
-              type="checkbox"
-              disabled={!admin || busy}
-              checked={policy.retentionEnabled}
-              onChange={(event) => setPolicy({ ...policy, retentionEnabled: event.target.checked })}
-            />
-            Retain resolved data for
-          </label>
-          <label className="text-sm">
-            <input
-              aria-label="Correlation retention hours"
-              className={field + ' w-24'}
-              type="number"
-              min={24}
-              max={87600}
-              disabled={!admin || busy}
-              value={policy.retentionHours}
-              onChange={(event) => setPolicy({ ...policy, retentionHours: Number(event.target.value) })}
-            />{' '}
-            hours
-          </label>
-          <button
-            className={button}
-            disabled={
-              !admin ||
-              busy ||
-              !Number.isInteger(policy.retentionHours) ||
-              policy.retentionHours < 24 ||
-              policy.retentionHours > 87600
-            }
-          >
-            Save policy
-          </button>
-          <button
-            type="button"
-            className={button}
-            disabled={!admin || busy}
-            onClick={() => void mutate('retention/run', {})}
-          >
-            Run retention batch
-          </button>
+              onClick={() => void mutate('retention/run', {})}
+            >
+              Run retention batch
+            </button>
+          </div>
         </form>
       )}
-      <p className="text-xs text-zinc-500">
+      <p className="cr-caption cr-policy-explanation">
         Enabling notifications starts with new matches. HIGH evidence follows configured subscriptions; MEDIUM
         email requires approval in Email Queue. LOW evidence stays in review. Retention preserves open work
         and owner-managed tables.
       </p>
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-        <div>
-          <h3 className="font-medium mb-2">Low-confidence review</h3>
+        <div className="ui-panel cr-control-card">
+          <div className="cr-section-title">
+            <span className="ui-section-icon">
+              <ClipboardCheck size={17} />
+            </span>
+            <div>
+              <h3>Low-confidence review</h3>
+              <p>Validate applicability before taking action.</p>
+            </div>
+          </div>
           <div className="max-h-64 overflow-auto space-y-2">
             {state?.reviews.map((review) => (
               <button
                 key={review.id}
                 disabled={!operator || busy}
-                className={button + ' text-left w-full ' + (selected === review.id ? 'bg-cyan-900/30' : '')}
+                className="cr-work-item"
+                aria-pressed={selected === review.id}
                 onClick={() => {
                   setSelected(review.id);
                   setAssetId(review.assetId || '');
@@ -213,17 +280,33 @@ export function CorrelationOperations() {
                 <span className="block text-xs text-zinc-500">{review.reason}</span>
               </button>
             ))}
-            {state?.reviews.length === 0 && <p className="text-sm text-zinc-500">No open reviews.</p>}
+            {state?.reviews.length === 0 && (
+              <div className="cr-empty cr-empty-compact">
+                <ShieldCheck size={23} />
+                <h3>Review queue clear</h3>
+                <p>New evidence requiring review will appear here.</p>
+              </div>
+            )}
+            {!state && <p className="cr-caption">Loading review queue…</p>}
           </div>
         </div>
-        <div>
-          <h3 className="font-medium mb-2">Encrypted dead letters</h3>
+        <div className="ui-panel cr-control-card">
+          <div className="cr-section-title">
+            <span className="ui-section-icon">
+              <Inbox size={17} />
+            </span>
+            <div>
+              <h3>Encrypted dead letters</h3>
+              <p>Investigate records that could not be processed.</p>
+            </div>
+          </div>
           <div className="max-h-64 overflow-auto space-y-2">
             {state?.deadLetters.map((letter) => (
               <button
                 key={letter.id}
                 disabled={!admin || busy}
-                className={button + ' text-left w-full ' + (selected === letter.id ? 'bg-cyan-900/30' : '')}
+                className="cr-work-item"
+                aria-pressed={selected === letter.id}
                 onClick={() => {
                   setSelected(letter.id);
                   setNote('');
@@ -237,14 +320,33 @@ export function CorrelationOperations() {
               </button>
             ))}
             {state?.deadLetters.length === 0 && (
-              <p className="text-sm text-zinc-500">No unresolved dead letters.</p>
+              <div className="cr-empty cr-empty-compact">
+                <Inbox size={23} />
+                <h3>No unresolved dead letters</h3>
+                <p>Failed records will appear here for replay or dismissal.</p>
+              </div>
             )}
+            {!state && <p className="cr-caption">Loading dead letters…</p>}
           </div>
         </div>
       </div>
       {selected && (
-        <div className="border-t border-zinc-700 pt-4 space-y-3">
-          <p className="text-xs font-mono break-all">Selected: {selected}</p>
+        <div
+          ref={decisionRef}
+          tabIndex={-1}
+          role="region"
+          aria-label="Record decision"
+          className="ui-panel cr-control-card space-y-3"
+        >
+          <div className="cr-selection-header">
+            <div>
+              <h3>Record decision</h3>
+              <p className="cr-caption font-mono break-all">{selected}</p>
+            </div>
+            <button type="button" className="ui-secondary" onClick={() => setSelected('')}>
+              Close decision
+            </button>
+          </div>
           {state?.reviews
             .filter((review) => review.id === selected)
             .map((review) => (
@@ -297,6 +399,7 @@ export function CorrelationOperations() {
               <label className="block text-sm">
                 Corrected advisory JSON (optional)
                 <textarea
+                  id="correlation-correction"
                   className={field + ' block w-full mt-1 min-h-24 font-mono'}
                   maxLength={262144}
                   value={correction}
@@ -320,8 +423,16 @@ export function CorrelationOperations() {
           )}
         </div>
       )}
-      <div className="border-t border-zinc-700 pt-4">
-        <h3 className="font-medium mb-2">Connected native and monitored inventory</h3>
+      <div className="ui-panel cr-control-card">
+        <div className="cr-section-title">
+          <span className="ui-section-icon">
+            <Database size={17} />
+          </span>
+          <div>
+            <h3>Connected inventory</h3>
+            <p>Find a native or monitored asset to associate with a review.</p>
+          </div>
+        </div>
         <form
           className="flex flex-wrap gap-2"
           onSubmit={(event) => {
@@ -338,7 +449,8 @@ export function CorrelationOperations() {
             placeholder="Vendor or product"
           />
           <button className={button} disabled={busy}>
-            Search inventory
+            <Search size={14} />
+            {busy ? 'Searching…' : 'Search inventory'}
           </button>
           {assetCursor && (
             <button
@@ -355,7 +467,8 @@ export function CorrelationOperations() {
           {assets.map((asset) => (
             <button
               key={asset.id}
-              className="block text-left text-xs border-t border-zinc-800 p-2 w-full"
+              className="cr-work-item"
+              aria-pressed={assetId === asset.id}
               disabled={!operator}
               onClick={() => setAssetId(asset.id)}
             >
@@ -368,12 +481,22 @@ export function CorrelationOperations() {
               </span>
             </button>
           ))}
+          {assets.length === 0 && (
+            <p className="cr-caption">
+              {hasSearched
+                ? 'No inventory matches. Try another vendor or product.'
+                : 'Search inventory to find a target asset.'}
+            </p>
+          )}
         </div>
       </div>
       {notice && (
-        <p role="status" className="text-sm text-cyan-500">
-          {notice}
-        </p>
+        <div
+          role={noticeError ? 'alert' : 'status'}
+          className={`cr-notice ${noticeError ? 'cr-notice-warning' : ''}`}
+        >
+          <p>{notice}</p>
+        </div>
       )}
     </section>
   );

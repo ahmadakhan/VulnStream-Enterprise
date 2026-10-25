@@ -1,25 +1,66 @@
+import { PageHeading } from './PageHeading';
 import { CorrelationOperations } from './CorrelationOperations';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Database, Gauge, ShieldCheck, Terminal, Zap } from 'lucide-react';
+import {
+  Activity,
+  AlertTriangle,
+  ArrowDownToLine,
+  ArrowRight,
+  CheckCircle2,
+  Clock3,
+  Code2,
+  Database,
+  Gauge,
+  Layers3,
+  LoaderCircle,
+  Search,
+  Settings2,
+  ShieldCheck,
+  Terminal,
+  Workflow,
+  Zap,
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { CorrelationSnapshot } from '../../shared/correlation';
+import './correlation.css';
+
 const sample = JSON.stringify({
   title: 'Kubernetes unpatched vulnerability actively exploited',
   content: 'Researchers report a zero-day vulnerability in k8s. Affected releases are under investigation.',
   url: 'https://example.org/security/kubernetes-early-warning',
 });
+const tabs = [
+  { id: 'telemetry', label: 'Live telemetry', icon: Activity },
+  { id: 'review', label: 'Review & policy', icon: ShieldCheck },
+  { id: 'controls', label: 'Stream controls', icon: Settings2 },
+] as const;
+const healthLabels = {
+  HEALTHY: 'Healthy',
+  DEGRADED_BACKPRESSURE: 'Backpressure detected',
+  RECOVERING_DB_SEVERANCE: 'Database recovering',
+};
+const percent = (value: number) => Math.min(100, Math.max(0, value));
+
 export function CorrelationDashboard() {
   const { csrfToken, session } = useApp();
   const [snapshot, setSnapshot] = useState<CorrelationSnapshot | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [noticeError, setNoticeError] = useState(false);
   const [limit, setLimit] = useState(4);
   const [ndjson, setNdjson] = useState(sample);
   const [filter, setFilter] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [pendingAction, setPendingAction] = useState('');
   const [follow, setFollow] = useState(true);
-  const consoleRef = useRef<HTMLPreElement>(null);
+  const [rawLogs, setRawLogs] = useState(false);
+  const [logLevel, setLogLevel] = useState('ALL');
+  const [view, setView] = useState<(typeof tabs)[number]['id']>('telemetry');
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const consoleRef = useRef<HTMLDivElement>(null);
+  const initializedLimit = useRef(false);
+  const busy = !!pendingAction;
   const canControl = session?.role === 'ADMIN' || session?.role === 'OPERATOR';
+
   useEffect(() => {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -34,7 +75,12 @@ export function CorrelationDashboard() {
         const data = (await response.json()) as CorrelationSnapshot;
         if (!disposed) {
           setSnapshot(data);
+          setUpdatedAt(new Date());
           setError('');
+          if (!initializedLimit.current) {
+            setLimit(data.concurrencyLimit);
+            initializedLimit.current = true;
+          }
         }
       } catch (reason) {
         if (!disposed) setError(reason instanceof Error ? reason.message : 'Telemetry unavailable');
@@ -51,20 +97,32 @@ export function CorrelationDashboard() {
   }, []);
   useEffect(() => {
     if (follow && consoleRef.current) consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
-  }, [snapshot?.logs, follow]);
+  }, [snapshot?.logs, follow, logLevel, rawLogs, view]);
+
   const matches = useMemo(
     () =>
       (snapshot?.matches || []).filter((match) =>
-        `${match.vendor} ${match.product} ${match.confidence} ${match.reason}`
+        `${match.assetId} ${match.vendor} ${match.product} ${match.confidence} ${match.reason}`
           .toLowerCase()
           .includes(filter.toLowerCase()),
       ),
     [snapshot?.matches, filter],
   );
+  const logs = useMemo(
+    () =>
+      (snapshot?.logs || []).filter(
+        (log) =>
+          logLevel === 'ALL' ||
+          (logLevel === 'ERROR' ? ['ERROR', 'CRITICAL'].includes(log.level) : log.level === logLevel),
+      ),
+    [snapshot?.logs, logLevel],
+  );
+
   const mutate = async (path: string, body: unknown) => {
     if (busy) return;
-    setBusy(true);
+    setPendingAction(path);
     setNotice('');
+    setNoticeError(false);
     try {
       const response = await fetch(`/api/correlation/${path}`, {
         method: 'POST',
@@ -73,227 +131,496 @@ export function CorrelationDashboard() {
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(10000),
       });
-      if (!response.ok) throw new Error(`Action rejected (HTTP ${response.status})`);
+      if (!response.ok) {
+        const details = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(details.error || `Action rejected (HTTP ${response.status})`);
+      }
       const result = (await response.json()) as { queued?: number };
-      setNotice(result.queued !== undefined ? `${result.queued} records durably queued` : 'Control accepted');
+      setNotice(
+        result.queued !== undefined
+          ? `${result.queued} ${result.queued === 1 ? 'record' : 'records'} durably queued`
+          : 'Control accepted',
+      );
     } catch (reason) {
+      setNoticeError(true);
       setNotice(reason instanceof Error ? reason.message : 'Action failed');
     } finally {
-      setBusy(false);
+      setPendingAction('');
     }
   };
+
+  const connected = !!snapshot && !error;
+  const healthy = connected && snapshot.health === 'HEALTHY';
   const metrics = [
-    { label: 'Throughput', value: `${snapshot?.itemsPerSecond.toFixed(2) ?? '—'} items/s`, icon: Activity },
-    { label: 'Memory / capacity', value: `${snapshot?.memoryPercent.toFixed(1) ?? '—'}%`, icon: Gauge },
-    { label: 'Average ingestion', value: `${snapshot?.averageLatencyMs.toFixed(1) ?? '—'} ms`, icon: Zap },
-    { label: 'Dead letters captured', value: snapshot?.deadLetters ?? '—', icon: ShieldCheck },
     {
-      label: 'Database connections',
-      value: snapshot
-        ? `${snapshot.pool.total} total / ${snapshot.pool.idle} idle / ${snapshot.pool.waiting} waiting`
-        : '—',
-      icon: Database,
+      label: 'Throughput',
+      value: snapshot?.itemsPerSecond.toFixed(2) ?? '—',
+      unit: 'items / sec',
+      icon: Zap,
+      detail: 'Current processing rate',
     },
     {
-      label: 'Worker allocation',
-      value: snapshot ? `${snapshot.activeWorkers} active / ${snapshot.concurrencyLimit} limit` : '—',
-      icon: Terminal,
+      label: 'Ingestion latency',
+      value: snapshot?.averageLatencyMs.toFixed(1) ?? '—',
+      unit: 'ms',
+      icon: Clock3,
+      detail: 'Average ingestion time',
+    },
+    {
+      label: 'Active workers',
+      value: snapshot?.activeWorkers ?? '—',
+      unit: snapshot ? `/ ${snapshot.concurrencyLimit}` : '',
+      icon: Layers3,
+      detail: 'Allocated concurrency',
+      progress: snapshot
+        ? percent((snapshot.activeWorkers / Math.max(1, snapshot.concurrencyLimit)) * 100)
+        : undefined,
+    },
+    {
+      label: 'Memory capacity',
+      value: snapshot?.memoryPercent.toFixed(1) ?? '—',
+      unit: '%',
+      icon: Gauge,
+      detail: 'Current memory utilization',
+      progress: snapshot ? percent(snapshot.memoryPercent) : undefined,
+    },
+    {
+      label: 'Database pool',
+      value: snapshot?.pool.total ?? '—',
+      unit: 'connections',
+      icon: Database,
+      detail: snapshot
+        ? `${snapshot.pool.idle} idle · ${snapshot.pool.waiting} waiting`
+        : 'Waiting for connection data',
+    },
+    {
+      label: 'Dead letters',
+      value: snapshot?.deadLetters ?? '—',
+      unit: 'captured',
+      icon: ShieldCheck,
+      detail: 'Captured by this instance',
     },
   ];
+
   return (
-    <div className="space-y-6 text-zinc-200 light:text-zinc-800">
-      <div className="flex flex-wrap justify-between gap-3 items-center">
-        <div>
-          <h1 className="text-2xl font-semibold">Live text correlation</h1>
-          <p className="text-sm text-zinc-500 mt-1">
-            Native inventory · early intelligence · bounded stream processing
+    <div className="correlation-page space-y-6">
+      <div className="ui-page-header">
+        <PageHeading page="correlation">
+          Follow intelligence as it connects to your inventory. Monitor processing, inspect matches, and
+          resolve evidence that needs review.
+        </PageHeading>
+        <div className="cr-connection" role="status">
+          <span className={`cr-status ${healthy ? 'cr-status-good' : 'cr-status-warning'}`}>
+            <i aria-hidden="true" />
+            {error ? 'Reconnecting' : snapshot ? healthLabels[snapshot.health] : 'Connecting'}
+          </span>
+          <span className="cr-caption">{error ? 'Retrying automatically' : 'Refreshes every second'}</span>
+        </div>
+      </div>
+
+      {error && (
+        <div role="alert" className="cr-notice cr-notice-warning">
+          <AlertTriangle size={16} />
+          <div>
+            <strong>Live updates interrupted</strong>
+            <p>
+              {error}.{' '}
+              {snapshot
+                ? 'The last received metrics remain visible while the connection recovers.'
+                : 'Waiting for the first telemetry snapshot.'}
+            </p>
+          </div>
+        </div>
+      )}
+      {!!snapshot?.droppedLogs && (
+        <div role="alert" className="cr-notice cr-notice-warning">
+          <AlertTriangle size={16} />
+          <p>
+            {snapshot.droppedLogs} events exceeded the log queue. Check the log collector for missing
+            activity.
           </p>
         </div>
-        <span
-          className={`rounded-full px-3 py-2 text-xs font-mono ${snapshot?.health === 'HEALTHY' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-amber-500/15 text-amber-500'}`}
-          role="status"
-        >
-          {snapshot?.health || 'CONNECTING'}
+      )}
+
+      <div className="cr-viewbar">
+        <div className="ui-segmented cr-view-switch" role="group" aria-label="Correlation views">
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button
+              type="button"
+              key={id}
+              aria-pressed={view === id}
+              aria-controls={`correlation-${id}`}
+              onClick={() => setView(id)}
+            >
+              <Icon size={15} aria-hidden="true" />
+              {label}
+            </button>
+          ))}
+        </div>
+        <span className="cr-instance" title={snapshot?.instanceId}>
+          <span className={`cr-indicator ${connected ? 'is-connected' : ''}`} />
+          {snapshot ? `Instance ${snapshot.instanceId}` : 'Awaiting instance'}
         </span>
       </div>
-      {snapshot && (
-        <p className="text-xs font-mono text-zinc-500">
-          Instance {snapshot.instanceId} · per-instance metrics
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="rounded-xl border border-red-500/40 p-3 text-red-400">
-          {error}
-        </p>
-      )}
-      {snapshot && snapshot.droppedLogs > 0 && (
-        <p role="alert" className="text-amber-400">
-          {snapshot.droppedLogs} log events exceeded the bounded stdout queue. Check the log collector.
-        </p>
-      )}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {metrics.map((metric) => (
-          <div
-            key={metric.label}
-            className="rounded-xl border border-zinc-800 light:border-zinc-200 bg-zinc-900/40 light:bg-white p-5"
-          >
-            <metric.icon className="h-4 w-4 text-cyan-500 mb-3" />
-            <p className="text-xs text-zinc-500">{metric.label}</p>
-            <p className="text-lg font-semibold mt-1">{metric.value}</p>
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-        <section className="rounded-xl border border-zinc-800 light:border-zinc-200 p-5 space-y-4">
-          <h2 className="font-semibold">Stream controls</h2>
-          <div className="flex flex-wrap gap-3 items-end">
-            <label className="text-sm">
-              Concurrency (1–32)
+
+      <div id="correlation-telemetry" hidden={view !== 'telemetry'} className="cr-view-content">
+        <div className="cr-metrics">
+          {metrics.map(({ label, value, unit, icon: Icon, detail, progress }) => (
+            <div className="cr-metric ui-panel" key={label}>
+              <div className="cr-metric-label">
+                <span>{label}</span>
+                <Icon size={16} aria-hidden="true" />
+              </div>
+              <div className="cr-metric-value">
+                {value}
+                <span>{unit}</span>
+              </div>
+              <div className="cr-metric-detail">{detail}</div>
+              {progress !== undefined && (
+                <div
+                  className="cr-meter"
+                  role="meter"
+                  aria-label={label}
+                  aria-valuenow={Math.round(progress)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <span style={{ width: `${progress}%` }} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <section className="ui-panel cr-panel" aria-labelledby="correlation-matches-title">
+          <div className="cr-panel-header">
+            <div className="cr-section-title">
+              <span className="ui-section-icon">
+                <Workflow size={17} />
+              </span>
+              <div>
+                <h2 id="correlation-matches-title">
+                  Correlation matches <span className="cr-count">{snapshot?.matches.length ?? '—'}</span>
+                </h2>
+                <p>Identity and version evidence linked to monitored assets.</p>
+              </div>
+            </div>
+            <div className="cr-search">
+              <Search size={15} aria-hidden="true" />
               <input
+                aria-label="Filter correlation matches"
+                placeholder="Search assets, products, or confidence…"
+                maxLength={200}
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+              />
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="cr-match-table text-left">
+              <thead>
+                <tr>
+                  {['Monitored asset', 'Vendor / product', 'Confidence', 'Match evidence'].map((label) => (
+                    <th key={label}>{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {matches.map((match) => (
+                  <tr key={`${match.advisoryId}:${match.assetId}`}>
+                    <td>
+                      <span className="cr-asset">
+                        <Database size={14} aria-hidden="true" />
+                        <span title={match.assetId}>{match.assetId}</span>
+                      </span>
+                    </td>
+                    <td>
+                      <strong className="cr-product">{match.product}</strong>
+                      <span className="cr-vendor">{match.vendor}</span>
+                    </td>
+                    <td>
+                      <span
+                        className={`cr-status ${match.confidence === 'HIGH' ? 'cr-status-good' : 'cr-status-warning'}`}
+                      >
+                        <i aria-hidden="true" />
+                        {match.confidence === 'HIGH'
+                          ? 'High'
+                          : match.confidence === 'MEDIUM'
+                            ? 'Medium'
+                            : 'Low'}
+                      </span>
+                    </td>
+                    <td className="cr-evidence">{match.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {matches.length === 0 && (
+            <div className="cr-empty">
+              <Workflow size={25} strokeWidth={1.5} aria-hidden="true" />
+              <h3>
+                {filter
+                  ? 'No matching results'
+                  : snapshot
+                    ? 'Waiting for correlated matches'
+                    : 'Connecting to the correlation engine'}
+              </h3>
+              <p>
+                {filter
+                  ? 'Try another asset, vendor, product, or confidence level.'
+                  : 'Matches appear here as intelligence is linked to inventory. Low-confidence evidence stays in review.'}
+              </p>
+              {filter && (
+                <button type="button" className="cr-text-button" onClick={() => setFilter('')}>
+                  Clear search <ArrowRight size={13} />
+                </button>
+              )}
+            </div>
+          )}
+          <div className="cr-panel-footer">
+            <span>
+              {matches.length} shown{snapshot ? ` of ${snapshot.matches.length} recent matches` : ''}
+            </span>
+            <span>Per-instance telemetry</span>
+          </div>
+        </section>
+
+        <section className="ui-panel cr-panel" aria-labelledby="correlation-activity-title">
+          <div className="cr-panel-header">
+            <div className="cr-section-title">
+              <span className="ui-section-icon">
+                <Terminal size={17} />
+              </span>
+              <div>
+                <h2 id="correlation-activity-title">Live activity</h2>
+                <p>Structured events from the correlation engine.</p>
+              </div>
+            </div>
+            <div className="cr-log-controls">
+              <select
+                aria-label="Filter activity level"
+                value={logLevel}
+                onChange={(event) => setLogLevel(event.target.value)}
+              >
+                <option value="ALL">All levels</option>
+                <option value="INFO">Info</option>
+                <option value="WARN">Warning</option>
+                <option value="ERROR">Error & critical</option>
+              </select>
+              <button
+                type="button"
+                className="cr-icon-button"
+                aria-label="Show raw JSON logs"
+                aria-pressed={rawLogs}
+                onClick={() => setRawLogs(!rawLogs)}
+                title="Toggle raw JSON"
+              >
+                <Code2 size={16} />
+              </button>
+              <label className="cr-follow">
+                <input
+                  type="checkbox"
+                  checked={follow}
+                  onChange={(event) => setFollow(event.target.checked)}
+                />
+                Auto-follow
+              </label>
+            </div>
+          </div>
+          <div
+            ref={consoleRef}
+            className="cr-console"
+            role="region"
+            aria-label="Structured correlation logs"
+            tabIndex={0}
+          >
+            {logs.map((log) => (
+              <div key={log.sequence} className="cr-log-row" data-level={log.level}>
+                {rawLogs ? (
+                  <pre>{JSON.stringify(log)}</pre>
+                ) : (
+                  <>
+                    <time dateTime={log.timestamp}>
+                      {new Date(log.timestamp).toLocaleTimeString([], { hour12: false })}
+                    </time>
+                    <span className="cr-log-level">{log.level}</span>
+                    <div className="cr-log-message">
+                      <span>{log.event.replace(/[_\.]+/g, ' ')}</span>
+                      {log.trackingId && <small>Tracking: {log.trackingId}</small>}
+                    </div>
+                    <span className="cr-log-duration">
+                      {log.ingestionLatencyMs !== undefined
+                        ? `${log.ingestionLatencyMs.toFixed(1)} ms`
+                        : `#${log.sequence}`}
+                    </span>
+                  </>
+                )}
+              </div>
+            ))}
+            {!logs.length && (
+              <div className="cr-empty">
+                <Terminal size={24} strokeWidth={1.5} />
+                <h3>{logLevel === 'ALL' ? 'Listening for activity' : 'No events at this level'}</h3>
+                <p>
+                  {logLevel === 'ALL'
+                    ? 'New events will appear here when the engine processes intelligence.'
+                    : 'Choose another level to see more activity.'}
+                </p>
+              </div>
+            )}
+          </div>
+          <div className="cr-panel-footer">
+            <span className="cr-inline">
+              <span className={`cr-indicator ${connected ? 'is-connected' : ''}`} />
+              {connected ? 'Receiving telemetry' : 'Awaiting connection'}
+            </span>
+            <span>
+              {updatedAt
+                ? `Last received ${updatedAt.toLocaleTimeString([], { hour12: false })}`
+                : 'No snapshot received'}
+            </span>
+          </div>
+        </section>
+      </div>
+
+      <div id="correlation-review" hidden={view !== 'review'}>
+        <CorrelationOperations />
+      </div>
+
+      <div id="correlation-controls" hidden={view !== 'controls'} className="cr-view-content">
+        {!canControl && (
+          <div className="cr-notice">
+            <ShieldCheck size={16} />
+            <p>You have read-only access. An operator or administrator can update stream controls.</p>
+          </div>
+        )}
+        <div className="cr-controls-grid">
+          <section className="ui-panel cr-control-card" aria-labelledby="advisory-stream-title">
+            <div className="cr-section-title">
+              <span className="ui-section-icon">
+                <ArrowDownToLine size={18} />
+              </span>
+              <div>
+                <h2 id="advisory-stream-title">Advisory stream</h2>
+                <p>Submit intelligence to the durable processing queue.</p>
+              </div>
+            </div>
+            <label htmlFor="advisory-ndjson">
+              Advisory NDJSON <span className="cr-caption">One JSON object per line</span>
+            </label>
+            <textarea
+              id="advisory-ndjson"
+              className="cr-code-input"
+              maxLength={524288}
+              value={ndjson}
+              onChange={(event) => setNdjson(event.target.value)}
+              spellCheck={false}
+              disabled={!canControl || busy}
+            />
+            <div className="cr-control-actions">
+              <span className="cr-caption">{ndjson.length.toLocaleString()} / 524,288 characters</span>
+              <button
+                type="button"
+                className="ui-primary"
+                disabled={!canControl || busy || !ndjson.trim()}
+                onClick={() => void mutate('ingest', { ndjson })}
+              >
+                {pendingAction === 'ingest' ? (
+                  <LoaderCircle size={15} className="animate-spin" />
+                ) : (
+                  <ArrowDownToLine size={15} />
+                )}
+                {pendingAction === 'ingest' ? 'Queueing…' : 'Queue advisory stream'}
+              </button>
+            </div>
+          </section>
+          <section className="ui-panel cr-control-card" aria-labelledby="worker-allocation-title">
+            <div className="cr-section-title">
+              <span className="ui-section-icon">
+                <Layers3 size={18} />
+              </span>
+              <div>
+                <h2 id="worker-allocation-title">Worker allocation</h2>
+                <p>Set the concurrency limit for this instance.</p>
+              </div>
+            </div>
+            <div className="cr-allocation">
+              <span>Current allocation</span>
+              <strong>
+                {snapshot?.activeWorkers ?? '—'}{' '}
+                <small>active / {snapshot?.concurrencyLimit ?? '—'} limit</small>
+              </strong>
+            </div>
+            <label htmlFor="correlation-concurrency">
+              Concurrency limit <span className="cr-caption">1–32 workers</span>
+            </label>
+            <div className="cr-concurrency">
+              <input
+                id="correlation-concurrency"
                 aria-label="Concurrency limit"
-                className="block mt-2 bg-transparent border border-zinc-600 rounded-lg p-2 w-32"
                 type="number"
                 min={1}
                 max={32}
                 value={limit}
+                disabled={!canControl || busy}
                 onChange={(event) => setLimit(Number(event.target.value))}
               />
-            </label>
-            <button
-              className="rounded-lg bg-cyan-700 text-white px-4 py-2 disabled:opacity-40"
-              disabled={!canControl || busy || !Number.isInteger(limit) || limit < 1 || limit > 32}
-              onClick={() => void mutate('concurrency', { limit })}
-            >
-              Apply limit
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="border border-amber-600 rounded-lg p-2 text-sm disabled:opacity-40"
-              disabled={session?.role !== 'ADMIN' || busy}
-              onClick={() => void mutate('fault', { fault: 'database' })}
-            >
-              Simulate DB disconnect
-            </button>
-            <button
-              className="border border-amber-600 rounded-lg p-2 text-sm disabled:opacity-40"
-              disabled={session?.role !== 'ADMIN' || busy}
-              onClick={() => void mutate('fault', { fault: 'memory' })}
-            >
-              Simulate memory pressure
-            </button>
-          </div>
-          <p className="text-xs text-zinc-500">
-            Simulations last five seconds and are disabled in production. Controls and counters apply to this
-            server instance.
-          </p>
-          <label className="block text-sm" htmlFor="advisory-ndjson">
-            Advisory NDJSON (one JSON object per line)
-          </label>
-          <textarea
-            id="advisory-ndjson"
-            className="w-full min-h-44 bg-zinc-950 light:bg-zinc-50 rounded-lg p-3 font-mono text-xs border border-zinc-700"
-            maxLength={524288}
-            value={ndjson}
-            onChange={(event) => setNdjson(event.target.value)}
-            spellCheck={false}
-          />
-          <button
-            className="rounded-lg bg-cyan-700 text-white px-4 py-2 disabled:opacity-40"
-            disabled={!canControl || busy || !ndjson.trim()}
-            onClick={() => void mutate('ingest', { ndjson })}
-          >
-            {busy ? 'Submitting…' : 'Queue advisory stream'}
-          </button>
-          {notice && (
-            <p className="text-sm text-cyan-500" role="status">
-              {notice}
-            </p>
-          )}
-        </section>
-        <section className="rounded-xl border border-zinc-800 light:border-zinc-200 p-5 min-w-0">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="font-semibold">Structured live logs</h2>
-            <label className="text-xs">
-              <input type="checkbox" checked={follow} onChange={(event) => setFollow(event.target.checked)} />{' '}
-              Follow
-            </label>
-          </div>
-          <pre
-            ref={consoleRef}
-            className="h-[440px] overflow-auto bg-zinc-950 rounded-lg p-3 text-[11px] leading-5"
-            aria-label="Structured correlation logs"
-          >
-            {snapshot?.logs.map((log) => (
-              <div
-                key={log.sequence}
-                className={
-                  log.level === 'INFO'
-                    ? 'text-cyan-300'
-                    : log.level === 'WARN'
-                      ? 'text-amber-300'
-                      : 'text-red-400'
-                }
+              <button
+                type="button"
+                className="ui-secondary"
+                disabled={!canControl || busy || !Number.isInteger(limit) || limit < 1 || limit > 32}
+                onClick={() => void mutate('concurrency', { limit })}
               >
-                {JSON.stringify(log)}
-              </div>
-            ))}
-          </pre>
-        </section>
-      </div>
-      <CorrelationOperations />
-      <section className="rounded-xl border border-zinc-800 light:border-zinc-200 p-5">
-        <div className="flex flex-wrap justify-between gap-3 mb-4">
-          <h2 className="font-semibold">Confirmed identity and version matches</h2>
-          <input
-            aria-label="Filter correlation matches"
-            className="bg-transparent rounded-lg border border-zinc-600 px-3 py-2 text-sm"
-            placeholder="Filter vendor, product, confidence"
-            maxLength={200}
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-          />
-        </div>
-        <div className="overflow-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="text-zinc-500">
-              <tr>
-                {['Asset', 'Vendor / product', 'Confidence', 'Reason'].map((label) => (
-                  <th key={label} className="p-3">
-                    {label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {matches.map((match) => (
-                <tr
-                  key={`${match.advisoryId}:${match.assetId}`}
-                  className="border-t border-zinc-800 light:border-zinc-200"
-                >
-                  <td className="p-3 font-mono text-xs">{match.assetId}</td>
-                  <td className="p-3">
-                    {match.vendor} / {match.product}
-                  </td>
-                  <td className="p-3">
-                    <span
-                      className={`rounded px-2 py-1 text-xs ${match.confidence === 'HIGH' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-amber-500/15 text-amber-500'}`}
-                    >
-                      {match.confidence}
-                    </span>
-                  </td>
-                  <td className="p-3">{match.reason}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {matches.length === 0 && (
-            <p className="text-sm text-zinc-500 p-6 text-center">
-              No matches. Low-confidence evidence is stored separately for review.
+                {pendingAction === 'concurrency' && <LoaderCircle size={14} className="animate-spin" />}
+                {pendingAction === 'concurrency' ? 'Applying…' : 'Apply limit'}
+              </button>
+            </div>
+            <p className="cr-caption">
+              Controls and counters apply to this server instance. Changes are reflected in live telemetry.
             </p>
-          )}
+          </section>
         </div>
-      </section>
+        <details className="ui-panel cr-diagnostics">
+          <summary>
+            <span>
+              <AlertTriangle size={16} />
+              Resilience diagnostics
+            </span>
+            <span className="cr-caption">Administrator access</span>
+          </summary>
+          <div>
+            <p className="cr-caption">Simulations last five seconds and are disabled in production.</p>
+            <div className="cr-control-actions">
+              <button
+                type="button"
+                className="ui-secondary"
+                disabled={session?.role !== 'ADMIN' || busy}
+                onClick={() => void mutate('fault', { fault: 'database' })}
+              >
+                Simulate DB disconnect
+              </button>
+              <button
+                type="button"
+                className="ui-secondary"
+                disabled={session?.role !== 'ADMIN' || busy}
+                onClick={() => void mutate('fault', { fault: 'memory' })}
+              >
+                Simulate memory pressure
+              </button>
+            </div>
+          </div>
+        </details>
+        {notice && (
+          <div
+            className={`cr-notice ${noticeError ? 'cr-notice-warning' : ''}`}
+            role={noticeError ? 'alert' : 'status'}
+          >
+            {noticeError ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
+            <p>{notice}</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

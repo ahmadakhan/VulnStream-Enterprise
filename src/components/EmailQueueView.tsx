@@ -1,3 +1,4 @@
+import { PageHeading } from './PageHeading';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -109,21 +110,10 @@ export function EmailQueueView() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-            Autonomous pipeline
-          </p>
-          <h1 className="mt-1 flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
-            <span className="grid h-9 w-9 place-items-center rounded-xl border border-blue-500/20 bg-blue-500/10 text-blue-300 light:text-blue-700">
-              <Inbox className="h-4 w-4" aria-hidden="true" />
-            </span>
-            Email queue
-          </h1>
-          <p className="ui-description mt-2 max-w-2xl text-sm">
-            Review notifications for everyone before delivery, and track pending and failed email jobs.
-          </p>
-        </div>
+      <header className="ui-page-header">
+        <PageHeading page="email-queue">
+          Review notifications for everyone before delivery, and track pending and failed email jobs.
+        </PageHeading>
         <button
           type="button"
           onClick={() => void refresh()}
@@ -401,7 +391,7 @@ export function EmailQueueView() {
             </div>
             {reviewing.cveIds?.length ? (
               <p className="mt-4 text-xs text-zinc-400">
-                CVEs: {' '}
+                CVEs:{' '}
                 {reviewing.cveIds.map((cveId, index) => (
                   <React.Fragment key={cveId}>
                     {index > 0 && ', '}

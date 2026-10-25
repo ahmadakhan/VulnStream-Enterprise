@@ -1,35 +1,8 @@
+import { PageHeading } from './PageHeading';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { copyText } from '../utils/clipboard';
-import {
-  FileCode,
-  Send,
-  RotateCcw,
-  CheckCircle2,
-  AlertCircle,
-  Copy,
-  Check,
-  X,
-  Type,
-  Palette,
-  Stamp,
-  Sliders,
-  Smartphone,
-  Monitor,
-  Sparkles,
-  ShieldAlert,
-  Maximize2,
-  Minimize2,
-  ZoomIn,
-  ZoomOut,
-  ArrowUp,
-  ArrowDown,
-  Eye,
-  Code2,
-  Download,
-  Layers,
-  Sparkle,
-} from 'lucide-react';
+import { FileCode, Send, RotateCcw, CheckCircle2, AlertCircle, Copy, Check, X, Type, Palette, Stamp, Sliders, Smartphone, Monitor, Maximize2, Minimize2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Eye, Code2, Download } from 'lucide-react';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../utils/templateCompiler';
 
 export const AdvisoryTemplateView: React.FC = () => {
@@ -177,17 +150,11 @@ export const AdvisoryTemplateView: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight flex items-center gap-2">
-            <FileCode className="w-5 h-5 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
-            Email Template Studio
-          </h1>
-          <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Design clear, professional security advisories. Preview desktop and mobile layouts, customize your
-            branding, then save to apply the template to future notifications.
-          </p>
-        </div>
+      <div className="ui-page-header">
+        <PageHeading page="template">
+          Design clear, professional security advisories. Preview desktop and mobile layouts, customize your
+          branding, then save to apply the template to future notifications.
+        </PageHeading>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -217,7 +184,7 @@ export const AdvisoryTemplateView: React.FC = () => {
       </div>
 
       {/* Live Controls Toolbar (Direct Customization) */}
-      <div className="bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 shadow-sm space-y-4 transition-colors">
+      <div className="ui-panel bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 shadow-sm space-y-4 transition-colors">
         {/* Tool Sub-Tabs */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 dark:border-zinc-800 light:border-zinc-200 pb-3">
           <div className="flex min-w-0 max-w-full overflow-x-auto items-center space-x-1 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 p-1 rounded-xl">
@@ -301,7 +268,9 @@ export const AdvisoryTemplateView: React.FC = () => {
         {toolTab === 'colors' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
             <div>
-                            <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">Canvas Background</label>
+              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">
+                Canvas Background
+              </label>
               <div className="flex items-center space-x-2">
                 <input
                   type="color"
@@ -329,7 +298,9 @@ export const AdvisoryTemplateView: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">Card Background</label>
+              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">
+                Card Background
+              </label>
               <div className="flex items-center space-x-2">
                 <input
                   type="color"
@@ -357,7 +328,9 @@ export const AdvisoryTemplateView: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">Header Banner Bg</label>
+              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">
+                Header Banner Bg
+              </label>
               <div className="flex items-center space-x-2">
                 <input
                   type="color"
@@ -385,7 +358,9 @@ export const AdvisoryTemplateView: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">Accent &amp; Link Color</label>
+              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">
+                Accent &amp; Link Color
+              </label>
               <div className="flex items-center space-x-2">
                 <input
                   type="color"
@@ -418,7 +393,9 @@ export const AdvisoryTemplateView: React.FC = () => {
         {toolTab === 'typography' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
             <div>
-              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">Font Style / Family</label>
+              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">
+                Font Style / Family
+              </label>
               <select
                 value={templateCustomization.fontFamily}
                 onChange={(e) =>
@@ -436,7 +413,9 @@ export const AdvisoryTemplateView: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">Heading Font Color</label>
+              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">
+                Heading Font Color
+              </label>
               <div className="flex items-center space-x-2">
                 <input
                   type="color"
@@ -503,7 +482,9 @@ export const AdvisoryTemplateView: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono">Security Stamp Object</label>
+                <label className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono">
+                  Security Stamp Object
+                </label>
                 <input
                   type="checkbox"
                   checked={templateCustomization.showStamp}
@@ -534,7 +515,9 @@ export const AdvisoryTemplateView: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">Stamp Color</label>
+              <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono mb-1.5">
+                Stamp Color
+              </label>
               <div className="flex items-center space-x-2">
                 <input
                   type="color"
@@ -565,7 +548,9 @@ export const AdvisoryTemplateView: React.FC = () => {
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono">Classification Banner</label>
+                <label className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono">
+                  Classification Banner
+                </label>
                 <input
                   type="checkbox"
                   checked={templateCustomization.showClassificationBanner}
@@ -592,7 +577,9 @@ export const AdvisoryTemplateView: React.FC = () => {
         {/* Tab 4: Dynamic Tokens */}
         {toolTab === 'tokens' && (
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono text-[11px] font-medium">Click to Copy:</span>
+            <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono text-[11px] font-medium">
+              Click to Copy:
+            </span>
             {[
               '{{advisory_id}}',
               '{{advisory_title}}',
@@ -619,7 +606,7 @@ export const AdvisoryTemplateView: React.FC = () => {
       </div>
 
       {/* RENDERED CLIENT PREVIEW: RENAMED TO "HTML template" WITH ENTERPRISE SCROLL ENGINE */}
-      <div className="bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm space-y-4 transition-colors">
+      <div className="ui-panel bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm space-y-4 transition-colors">
         {/* Studio Control Header */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 pb-3.5">
           <div className="flex flex-wrap items-center gap-2.5">
@@ -775,7 +762,7 @@ export const AdvisoryTemplateView: React.FC = () => {
           </div>
         ) : (
           /* View Mode 2: Visual Client Canvas with Enterprise Chrome & Non-Trapping Scrolling */
-          <div className="w-full flex justify-center py-6 px-2 bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 rounded-2xl border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-300 overflow-x-auto relative">
+          <div className="ui-panel w-full flex justify-center py-6 px-2 bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 rounded-2xl border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-300 overflow-x-auto relative">
             {/* Device Container Frame */}
             <div
               className={`transition-all duration-300 shadow-2xl relative ${
@@ -935,7 +922,7 @@ export const AdvisoryTemplateView: React.FC = () => {
       {/* Send Test Email Modal */}
       {showTestModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               onClick={() => setShowTestModal(false)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200"
@@ -1003,7 +990,7 @@ export const AdvisoryTemplateView: React.FC = () => {
       {/* Reset Confirmation Modal */}
       {showResetConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
             <h3 className="text-sm font-bold text-zinc-100 mb-2">Apply professional default?</h3>
             <p className="text-xs text-zinc-400 leading-relaxed mb-6">
               Replace the preview with the professional navy-and-white preset. Save the template to apply it

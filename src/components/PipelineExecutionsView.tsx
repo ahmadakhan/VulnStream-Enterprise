@@ -1,3 +1,4 @@
+import { PageHeading } from './PageHeading';
 import React, { useEffect, useState } from 'react';
 import {
   Activity,
@@ -128,18 +129,10 @@ export const PipelineExecutionsView: React.FC = () => {
   };
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-widest text-blue-400 light:text-blue-700 mb-2">
-            Pipeline operations
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-100 light:text-zinc-900">
-            Execution telemetry
-          </h1>
-          <p className="mt-2 text-sm text-zinc-400 light:text-zinc-600">
-            Track intelligence ingestion, correlation and notification preparation.
-          </p>
-        </div>
+      <div className="ui-page-header">
+        <PageHeading page="pipeline">
+          Track intelligence ingestion, correlation and notification preparation.
+        </PageHeading>
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-xs text-zinc-400 light:text-zinc-600">
             Ingestion window

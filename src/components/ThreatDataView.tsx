@@ -1,3 +1,4 @@
+import { PageHeading } from './PageHeading';
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { NormalizedCVE, IntelligenceArticle, IntelligenceMatch } from '../types';
@@ -131,7 +132,11 @@ const CveCacheView: React.FC = () => {
   const scopeHours = settings.scopeHours || 24;
   const now = Date.now();
   const scopeMillis = scopeHours * 60 * 60 * 1000;
-  const { items: cveData, total, loading } = useCollection<NormalizedCVE>('cveData', {
+  const {
+    items: cveData,
+    total,
+    loading,
+  } = useCollection<NormalizedCVE>('cveData', {
     page: currentPage,
     pageSize,
     search: searchTerm,
@@ -302,8 +307,7 @@ const CveCacheView: React.FC = () => {
                 <strong className="font-mono text-zinc-300 light:text-zinc-800">
                   {startRecord}–{endRecord}
                 </strong>{' '}
-                of{' '}
-                <strong className="font-mono text-zinc-300 light:text-zinc-800">{total}</strong>{' '}
+                of <strong className="font-mono text-zinc-300 light:text-zinc-800">{total}</strong>{' '}
                 {hasActiveFilters && <span className="text-zinc-500">({totalCves} total)</span>}
               </>
             )}
@@ -835,16 +839,14 @@ const NewsEvidenceView: React.FC = () => {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <a
                     className="group inline-flex min-w-0 items-start gap-1.5 text-sm font-semibold text-blue-400 underline-offset-4 hover:underline light:text-blue-700"
-                    href={
-                      (() => {
-                        try {
-                          const u = new URL(article.url);
-                          return ['http:', 'https:'].includes(u.protocol) ? article.url : '#';
-                        } catch {
-                          return '#';
-                        }
-                      })()
-                    }
+                    href={(() => {
+                      try {
+                        const u = new URL(article.url);
+                        return ['http:', 'https:'].includes(u.protocol) ? article.url : '#';
+                      } catch {
+                        return '#';
+                      }
+                    })()}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -949,22 +951,11 @@ export const ThreatDataView: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-            Threat intelligence
-          </p>
-          <h1 className="mt-1 flex items-center gap-2.5 text-2xl font-semibold tracking-tight text-zinc-100 light:text-zinc-900">
-            <span className="grid h-9 w-9 place-items-center rounded-xl border border-blue-500/20 bg-blue-500/10 text-blue-300 light:text-blue-700">
-              <Database className="h-4 w-4" aria-hidden="true" />
-            </span>
-            Threat intelligence feed cache
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-zinc-400 light:text-zinc-600">
-            Normalized CVE records unified from NVD, OpenCVE, FIRST.org EPSS, CISA KEV, and VulnCheck. Records
-            are correlated by both published and last-modified dates.
-          </p>
-        </div>
+      <header className="ui-page-header">
+        <PageHeading page="threat-data">
+          Normalized CVE records unified from NVD, OpenCVE, FIRST.org EPSS, CISA KEV, and VulnCheck. Records
+          are correlated by both published and last-modified dates.
+        </PageHeading>
 
         <span className="inline-flex items-center gap-2 self-start rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-[11px] font-medium text-zinc-400 shadow-sm light:border-zinc-200 light:bg-white light:text-zinc-600">
           <Clock className="h-3.5 w-3.5 text-emerald-400 light:text-emerald-700" aria-hidden="true" />

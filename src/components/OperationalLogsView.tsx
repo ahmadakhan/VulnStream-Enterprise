@@ -1,3 +1,4 @@
+import { PageHeading } from './PageHeading';
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { EVENT_CATEGORIES, OperationalEvent, AuditLog } from '../types';
@@ -128,21 +129,10 @@ const AuditTrailView: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-            Integrity &amp; accountability
-          </p>
-          <h1 className="mt-1 flex items-center gap-2.5 text-2xl font-semibold tracking-tight text-zinc-100 light:text-zinc-900">
-            <span className="grid h-9 w-9 place-items-center rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-indigo-300 light:text-indigo-700">
-              <FileCode2 className="h-4 w-4" />
-            </span>
-            Audit trail
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-zinc-400 light:text-zinc-600">
-            Review administrative actions and verify the retained server-side record chain.
-          </p>
-        </div>
+      <div className="ui-page-header">
+        <PageHeading page="logs">
+          Review administrative actions and verify the retained server-side record chain.
+        </PageHeading>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -200,7 +190,7 @@ const AuditTrailView: React.FC = () => {
       )}
 
       {/* Filter Bar */}
-      <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-4 shadow-sm transition-colors light:border-zinc-200 light:bg-white">
+      <div className="ui-panel rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-4 shadow-sm transition-colors light:border-zinc-200 light:bg-white">
         <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
           <Filter className="h-3.5 w-3.5" />
           Filter retained entries
@@ -260,7 +250,7 @@ const AuditTrailView: React.FC = () => {
       </div>
 
       {/* Logs Table */}
-      <div className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white">
+      <div className="ui-panel overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/70 px-4 py-3.5 light:border-zinc-200 sm:px-5">
           <div>
             <h2 className="text-sm font-semibold">Retained entries</h2>
@@ -454,19 +444,11 @@ export const OperationalLogsView: React.FC = () => {
         <AuditTrailView />
       ) : (
         <>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                System &amp; audit
-              </p>
-              <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-100 light:text-zinc-900">
-                Operational events
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm text-zinc-400 light:text-zinc-600">
-                Pipeline, feeds, matching, delivery, system health, and issues. Search includes structured
-                event context.
-              </p>
-            </div>
+          <div className="ui-page-header">
+            <PageHeading page="logs" title="Operational events">
+              Pipeline, feeds, matching, delivery, system health, and issues. Search includes structured event
+              context.
+            </PageHeading>
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               {loading && <RotateCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
               {events.length > 0 && !loading && error === '' && (
@@ -482,7 +464,7 @@ export const OperationalLogsView: React.FC = () => {
               <span>{loading ? 'Loading events…' : `${events.length} events in this view`}</span>
             </div>
           </div>
-          <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-4 shadow-sm light:border-zinc-200 light:bg-white">
+          <div className="ui-panel rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-4 shadow-sm light:border-zinc-200 light:bg-white">
             <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
               <Filter className="h-3.5 w-3.5" />
               Search and filter
@@ -577,12 +559,14 @@ export const OperationalLogsView: React.FC = () => {
             {events.length === 0 && !loading && !error && (
               <div className="p-8 text-center text-zinc-500">
                 <LogOut className="mx-auto h-6 w-6" />
-                <p className="mt-3 text-sm font-medium text-zinc-300 light:text-zinc-700">No matching events.</p>
+                <p className="mt-3 text-sm font-medium text-zinc-300 light:text-zinc-700">
+                  No matching events.
+                </p>
                 <p className="mt-1 text-xs text-zinc-600">Adjust your search or filters to see results.</p>
               </div>
             )}
             {events.length > 0 && (
-              <div className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white">
+              <div className="ui-panel overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[1080px] table-fixed text-left text-xs">
                     <colgroup>
@@ -675,9 +659,9 @@ export const OperationalLogsView: React.FC = () => {
                                 <summary className="cursor-pointer text-[10px] font-medium text-blue-300 underline decoration-blue-300/30 underline-offset-2 light:text-blue-700">
                                   View event details
                                 </summary>
-    <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-700/50 bg-zinc-950/80 p-3 text-[11px] leading-relaxed text-zinc-300 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-700">
-      {formatEventContext(event.context)}
-    </pre>
+                                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-700/50 bg-zinc-950/80 p-3 text-[11px] leading-relaxed text-zinc-300 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-700">
+                                  {formatEventContext(event.context)}
+                                </pre>
                               </details>
                             )}
                           </td>

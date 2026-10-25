@@ -1,24 +1,7 @@
+import { PageHeading } from './PageHeading';
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import {
-  Shield,
-  Flame,
-  Radio,
-  FileText,
-  Server,
-  ArrowUpRight,
-  Cpu,
-  MailCheck,
-  Send,
-  ExternalLink,
-  Layers,
-  ChevronRight,
-  Database,
-  Bell,
-  Code,
-  Package,
-  CheckCircle2,
-} from 'lucide-react';
+import { Shield, Flame, Radio, FileText, Server, ArrowUpRight, Cpu, MailCheck, Send, ChevronRight, Code, Package, CheckCircle2 } from 'lucide-react';
 import { Finding } from '../types';
 import { CveLink } from './CveLink';
 import { compareFindingsByRecency } from '../utils/findingSort';
@@ -39,11 +22,13 @@ export const DashboardView: React.FC = () => {
   // The snapshot carries only recent slices of findings/email logs. Exact KPI
   // totals come from the server-computed summary so a large installation does
   // not under-report once those slices are capped.
-  const activeVulnerabilities = findings.filter(
-    (f) =>
-      !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status) &&
-      f.notificationStatus !== 'NOT_APPLICABLE',
-  ).sort(compareFindingsByRecency);
+  const activeVulnerabilities = findings
+    .filter(
+      (f) =>
+        !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status) &&
+        f.notificationStatus !== 'NOT_APPLICABLE',
+    )
+    .sort(compareFindingsByRecency);
 
   const totalCpesCount = watchlist.reduce((acc, curr) => acc + curr.cpes.length, 0);
   const totalPurlsCount = watchlist.reduce((acc, curr) => acc + (curr.purls ? curr.purls.length : 0), 0);
@@ -55,40 +40,18 @@ export const DashboardView: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Hero Welcome Card */}
-      <div className="bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl p-6 shadow-sm relative overflow-hidden transition-colors">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center space-x-2 text-xs font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1">
-              <span
-                className={`w-2 h-2 rounded-full ${settings.schedulerEnabled ? 'bg-emerald-500' : 'bg-zinc-500'}`}
-              />
-              <span>
-                SCHEDULER {settings.schedulerEnabled ? 'ENABLED' : 'DISABLED'} • CPE &amp; PURL CORRELATION
-              </span>
-            </div>
-            <h1 className="text-xl font-bold tracking-tight text-zinc-100 dark:text-zinc-100 light:text-zinc-900">
-              Product Vulnerability Tracking &amp; Notification System
-            </h1>
-            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 max-w-2xl mt-1 leading-relaxed">
-              Ingest configured NVD, CISA KEV, FIRST EPSS, OpenCVE, VulnCheck KEV and normalized JSON feeds,
-              correlate them with inventory, and queue notifications when automatic dispatch is enabled.
-              Review uncertain applicability before remediation.
-            </p>
-          </div>
-          <div className="flex items-center space-x-2.5 shrink-0">
-            <button
-              onClick={() => setActiveTab('watchlist')}
-              className="text-xs px-3.5 py-2 rounded-xl bg-zinc-800/80 hover:bg-zinc-700/80 dark:bg-zinc-800/80 dark:hover:bg-zinc-700/80 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 border border-zinc-700/50 dark:border-zinc-700/50 light:border-zinc-300 font-medium transition"
-            >
-              Monitored Products ({watchlist.length})
-            </button>
-          </div>
-        </div>
+      <div className="ui-page-header">
+        <PageHeading page="dashboard">
+          Monitor your product exposure, prioritize correlated vulnerabilities, and track intelligence
+          ingestion and notification delivery across your workspace.
+        </PageHeading>
+        <button onClick={() => setActiveTab('watchlist')} className="ui-secondary">
+          Monitored products ({watchlist.length})
+        </button>
       </div>
 
       {/* ALL KPI Cards CLICKABLE with direct navigation */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="ui-metrics grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-3">
         {/* 1. Monitored Products -> Watchlist */}
         <button
           type="button"
@@ -211,7 +174,7 @@ export const DashboardView: React.FC = () => {
       {/* Two Column Section: Correlated Vulnerabilities + Monitored Product Protection Telemetry */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Monitored Product Vulnerabilities (2 cols) */}
-        <div className="lg:col-span-2 bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm transition-colors">
+        <div className="ui-panel lg:col-span-2 bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm transition-colors">
           <div className="flex items-center justify-between mb-4 pb-3 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
             <div className="flex items-center space-x-2">
               <Shield className="w-4 h-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
@@ -300,7 +263,7 @@ export const DashboardView: React.FC = () => {
         </div>
 
         {/* Monitored Products Protection Status (All products treated equally) */}
-        <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between transition-colors">
+        <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between transition-colors">
           <div>
             <div className="flex items-center space-x-2 mb-4 pb-3 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
               <Server className="w-4 h-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
@@ -404,7 +367,7 @@ export const DashboardView: React.FC = () => {
       </div>
 
       {/* Autonomous Pipeline Steps (CLICKABLE CARDS) */}
-      <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm transition-colors">
+      <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm transition-colors">
         <div className="flex items-center justify-between mb-4 pb-3 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
           <div className="flex items-center space-x-2">
             <Cpu className="w-4 h-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />

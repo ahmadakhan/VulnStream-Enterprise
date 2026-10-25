@@ -45,7 +45,7 @@ export const Pagination: React.FC<PaginationProps> = ({
   };
 
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+    <div className="ui-pagination flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
       {/* Items count & page size */}
       <div className="flex items-center space-x-3">
         <span className="font-mono text-[11px]">
@@ -79,12 +79,13 @@ export const Pagination: React.FC<PaginationProps> = ({
       </div>
 
       {/* Pagination Controls */}
-      <div className="flex items-center space-x-1">
+      <nav aria-label="Table pagination" className="flex items-center space-x-1">
         <button
           onClick={() => onPageChange(1)}
           disabled={currentPage === 1}
           className="p-1 rounded-lg border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 disabled:opacity-30 disabled:pointer-events-none text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
           title="First Page"
+          aria-label="First Page"
         >
           <ChevronsLeft className="w-3.5 h-3.5" />
         </button>
@@ -93,6 +94,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           disabled={currentPage === 1}
           className="p-1 rounded-lg border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 disabled:opacity-30 disabled:pointer-events-none text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
           title="Previous Page"
+          aria-label="Previous Page"
         >
           <ChevronLeft className="w-3.5 h-3.5" />
         </button>
@@ -129,6 +131,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           disabled={currentPage === totalPages}
           className="p-1 rounded-lg border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 disabled:opacity-30 disabled:pointer-events-none text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
           title="Next Page"
+          aria-label="Next Page"
         >
           <ChevronRight className="w-3.5 h-3.5" />
         </button>
@@ -137,10 +140,11 @@ export const Pagination: React.FC<PaginationProps> = ({
           disabled={currentPage === totalPages}
           className="p-1 rounded-lg border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 disabled:opacity-30 disabled:pointer-events-none text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
           title="Last Page"
+          aria-label="Last Page"
         >
           <ChevronsRight className="w-3.5 h-3.5" />
         </button>
-      </div>
+      </nav>
     </div>
   );
 };

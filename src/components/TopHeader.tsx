@@ -1,36 +1,7 @@
+import { pages, type PageId } from '../design/pages';
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import {
-  RotateCw,
-  Play,
-  ChevronDown,
-  CheckCircle2,
-  Clock,
-  Radio,
-  Cpu,
-  Sun,
-  Moon,
-  Search,
-  Menu,
-} from 'lucide-react';
-
-const TAB_TITLES: Record<string, { section: string; title: string }> = {
-  dashboard: { section: 'OPERATIONS', title: 'Intelligence Dashboard' },
-  watchlist: { section: 'OPERATIONS', title: 'Monitored Product Inventory' },
-  findings: { section: 'OPERATIONS', title: 'Product Vulnerability Tracker' },
-  'threat-data': { section: 'OPERATIONS', title: 'Normalized Threat Cache' },
-  advisories: { section: 'OPERATIONS', title: 'Generated Security Bulletins' },
-  pipeline: { section: 'AUTONOMOUS PIPELINE', title: 'Execution Telemetry' },
-  'alerted-cves': { section: 'AUTONOMOUS PIPELINE', title: 'Sent Alert Registry' },
-  feeds: { section: 'AUTONOMOUS PIPELINE', title: 'Threat Feed Sources' },
-  recipients: { section: 'AUTONOMOUS PIPELINE', title: 'Notification Channels & Webhooks' },
-  template: { section: 'AUTONOMOUS PIPELINE', title: 'HTML Template Studio' },
-  emails: { section: 'AUTONOMOUS PIPELINE', title: 'Email Delivery Audit' },
-  'email-queue': { section: 'AUTONOMOUS PIPELINE', title: 'Email Queue' },
-  logs: { section: 'SYSTEM & AUDIT', title: 'Operational Logs & Audit' },
-  health: { section: 'SYSTEM & AUDIT', title: 'Infrastructure & Readiness Health' },
-  settings: { section: 'SYSTEM & AUDIT', title: 'Engine Configuration & Policies' },
-};
+import { RotateCw, Play, ChevronDown, CheckCircle2, Clock, Cpu, Sun, Moon, Menu } from 'lucide-react';
 
 export const TopHeader: React.FC = () => {
   const {
@@ -59,10 +30,10 @@ export const TopHeader: React.FC = () => {
     await triggerPipelineRun(selectedScope);
   };
 
-  const meta = TAB_TITLES[activeTab] || { section: 'OPERATIONS', title: 'Vulnerability Intelligence' };
+  const meta = pages[activeTab as PageId] || { section: 'OPERATIONS', title: 'Vulnerability Intelligence' };
 
   return (
-    <header className="border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-white/80 backdrop-blur-md sticky top-0 z-20 transition-colors duration-200">
+    <header className="ui-topbar border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-white/80 backdrop-blur-md sticky top-0 z-20 transition-colors duration-200">
       <div className="px-3 sm:px-6 py-3.5 flex items-center justify-between gap-2">
         {/* Active View Breadcrumb Title */}
         <div className="flex items-center gap-2 min-w-0">
@@ -92,7 +63,7 @@ export const TopHeader: React.FC = () => {
         {/* Center / Right Telemetry & Actions */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {/* Status chips */}
-          <div className="hidden lg:flex items-center space-x-2 text-xs">
+          <div className="hidden xl:flex items-center space-x-2 text-xs">
             <div className="flex items-center space-x-1.5 bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-2.5 py-1 rounded-full text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
               <span
                 className={`w-1.5 h-1.5 rounded-full ${feeds.some((feed) => feed.enabled) ? 'bg-emerald-500' : 'bg-zinc-500'}`}
@@ -118,7 +89,7 @@ export const TopHeader: React.FC = () => {
           {/* Quick Theme Toggle Icon */}
           <button
             onClick={toggleTheme}
-            className="p-1.5 rounded-xl border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/80 dark:bg-zinc-900/80 light:bg-zinc-100 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 hover:text-zinc-100 dark:hover:text-zinc-100 light:hover:text-zinc-900 transition"
+            className="ui-theme-toggle p-1.5 rounded-xl border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/80 dark:bg-zinc-900/80 light:bg-zinc-100 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 hover:text-zinc-100 dark:hover:text-zinc-100 light:hover:text-zinc-900 transition"
             title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             aria-pressed={theme === 'light'}
@@ -132,7 +103,7 @@ export const TopHeader: React.FC = () => {
 
           {/* Run Pipeline Button & Scope Selector */}
           <div className="relative">
-            <div className="flex rounded-xl overflow-hidden shadow-sm border border-zinc-700/80 dark:border-zinc-700/80 light:border-zinc-300">
+            <div className="ui-pipeline-action flex rounded-xl overflow-hidden shadow-sm border border-zinc-700/80 dark:border-zinc-700/80 light:border-zinc-300">
               <button
                 onClick={() => void handleRunPipeline()}
                 disabled={isPipelineRunning}

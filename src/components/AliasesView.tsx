@@ -1,3 +1,4 @@
+import { PageHeading } from './PageHeading';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { AliasEntry } from '../types';
@@ -78,17 +79,11 @@ export const AliasesView: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight flex items-center gap-2">
-            <Tags className="w-5 h-5 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
-            Alias Thesaurus
-          </h1>
-          <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1 max-w-2xl">
-            Vendor and product name synonyms the matching engine uses to correlate inventory with CVE
-            identifiers when a strict CPE/PURL match isn't available.
-          </p>
-        </div>
+      <div className="ui-page-header">
+        <PageHeading page="aliases">
+          Vendor and product name synonyms the matching engine uses to correlate inventory with CVE
+          identifiers when a strict CPE/PURL match isn't available.
+        </PageHeading>
         {admin ? (
           <button
             onClick={openAdd}
@@ -217,14 +212,14 @@ export const AliasesView: React.FC = () => {
         </div>
         <p className="text-[11px] text-zinc-500 mt-2 flex items-start gap-1.5">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-          These ship with the matching engine and are code-reviewed for correctness. Custom aliases above
-          add to this list &mdash; they can't remove or override a built-in mapping.
+          These ship with the matching engine and are code-reviewed for correctness. Custom aliases above add
+          to this list &mdash; they can't remove or override a built-in mapping.
         </p>
       </div>
 
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               onClick={() => setShowModal(false)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200"
@@ -259,8 +254,8 @@ export const AliasesView: React.FC = () => {
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono text-[11px] focus:border-zinc-600 focus:outline-none"
                 />
                 <p className="text-[10px] text-zinc-500 mt-1">
-                  The name as it appears in a CVE's CPE or PURL {activeTab === 'VENDOR' ? 'vendor' : 'product'}{' '}
-                  field.
+                  The name as it appears in a CVE's CPE or PURL{' '}
+                  {activeTab === 'VENDOR' ? 'vendor' : 'product'} field.
                 </p>
               </div>
 
@@ -312,11 +307,11 @@ export const AliasesView: React.FC = () => {
 
       {deletingId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
             <h3 className="text-sm font-bold text-zinc-100 mb-2">Remove this alias?</h3>
             <p className="text-xs text-zinc-400 leading-relaxed mb-6">
-              The matching engine will stop treating these names as equivalent. This does not affect
-              existing findings.
+              The matching engine will stop treating these names as equivalent. This does not affect existing
+              findings.
             </p>
             <div className="flex justify-end space-x-2">
               <button

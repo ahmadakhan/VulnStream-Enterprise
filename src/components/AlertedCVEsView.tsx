@@ -1,17 +1,8 @@
+import { PageHeading } from './PageHeading';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { AlertedCVE } from '../types';
-import {
-  Bell,
-  RotateCcw,
-  Search,
-  CheckCircle2,
-  Clock,
-  Mail,
-  Send,
-  X,
-  ShieldCheck,
-} from 'lucide-react';
+import { Search, Send, X, ShieldCheck } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { useCollection } from '../hooks/useCollection';
 import { CveLink } from './CveLink';
@@ -45,16 +36,11 @@ export const AlertedCVEsView: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight flex items-center gap-2">
-            <Bell className="w-5 h-5 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
-            Sent Notification History &amp; Suppression Registry
-          </h1>
-          <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Canonical O(1) deduplication cache preventing redundant email alerts across periodic runs. Records all automated dispatches.
-          </p>
-        </div>
+      <div className="ui-page-header">
+        <PageHeading page="alerted-cves">
+          Canonical O(1) deduplication cache preventing redundant email alerts across periodic runs. Records
+          all automated dispatches.
+        </PageHeading>
 
         <div className="flex items-center space-x-2 text-xs font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-3 py-1.5 rounded-xl shadow-sm">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
@@ -63,14 +49,14 @@ export const AlertedCVEsView: React.FC = () => {
       </div>
 
       {/* Search Bar */}
-      <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm transition-colors">
+      <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm transition-colors">
         <div className="relative w-full sm:w-80">
           <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
           <input
             type="text"
             placeholder="Search by CVE, Advisory ID, or recipient..."
             value={searchTerm}
-            onChange={e => {
+            onChange={(e) => {
               setSearchTerm(e.target.value);
               setCurrentPage(1);
             }}
@@ -79,12 +65,15 @@ export const AlertedCVEsView: React.FC = () => {
         </div>
 
         <div className="text-xs font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-          Total Tracked: <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{counts.alertedCves}</strong>
+          Total Tracked:{' '}
+          <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">
+            {counts.alertedCves}
+          </strong>
         </div>
       </div>
 
       {/* Table */}
-      <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
+      <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
@@ -99,7 +88,7 @@ export const AlertedCVEsView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
-              {paginatedItems.map(item => (
+              {paginatedItems.map((item) => (
                 <tr
                   key={item.cveId}
                   className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition"
@@ -164,7 +153,7 @@ export const AlertedCVEsView: React.FC = () => {
       {/* Resend Modal */}
       {selectedCve && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               onClick={() => setSelectedCve(null)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900"
@@ -188,7 +177,7 @@ export const AlertedCVEsView: React.FC = () => {
               required
               placeholder="e.g. Vendor released critical updated patch; re-notifying engineering."
               value={resendReason}
-              onChange={e => setResendReason(e.target.value)}
+              onChange={(e) => setResendReason(e.target.value)}
               className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:outline-none focus:border-zinc-600"
             />
 

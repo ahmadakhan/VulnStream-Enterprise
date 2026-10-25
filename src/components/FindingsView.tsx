@@ -1,23 +1,8 @@
+import { PageHeading } from './PageHeading';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Finding, FindingStatus } from '../types';
-import {
-  Shield,
-  Flame,
-  CheckCircle2,
-  ExternalLink,
-  ChevronRight,
-  Filter,
-  Search,
-  RotateCcw,
-  Terminal,
-  FileCheck,
-  Copy,
-  Check,
-  X,
-  Send,
-  Cpu,
-} from 'lucide-react';
+import { Flame, ExternalLink, ChevronRight, Filter, Search, Terminal, FileCheck, Copy, Check, X, Send } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { useCollection } from '../hooks/useCollection';
 import { copyText } from '../utils/clipboard';
@@ -42,7 +27,11 @@ export const FindingsView: React.FC = () => {
   const [resendModalOpen, setResendModalOpen] = useState(false);
   const [resendReason, setResendReason] = useState('');
 
-  const { items: findings, total, reload } = useCollection<Finding>('findings', {
+  const {
+    items: findings,
+    total,
+    reload,
+  } = useCollection<Finding>('findings', {
     page: currentPage,
     pageSize,
     search: searchTerm,
@@ -86,21 +75,15 @@ export const FindingsView: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight flex items-center gap-2">
-            <Shield className="w-5 h-5 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
-            Product Vulnerability Tracker
-          </h1>
-          <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Correlated vulnerabilities matching monitored products with uniform enterprise protection.
-            Confirmed matches can enter configured delivery channels; uncertain applicability requires review.
-          </p>
-        </div>
+      <div className="ui-page-header">
+        <PageHeading page="findings">
+          Correlated vulnerabilities matching monitored products with uniform enterprise protection. Confirmed
+          matches can enter configured delivery channels; uncertain applicability requires review.
+        </PageHeading>
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm transition-colors">
+      <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm transition-colors">
         <div className="relative w-full sm:w-72">
           <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
           <input
@@ -162,7 +145,7 @@ export const FindingsView: React.FC = () => {
       <div className="grid grid-cols-1 gap-6 items-start">
         {/* Table column */}
         <div className="w-full min-w-0">
-          <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
+          <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1200px] text-left text-xs">
                 <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
@@ -324,7 +307,7 @@ export const FindingsView: React.FC = () => {
 
         {/* Detailed Drawer Column */}
         {selectedFinding && (
-          <div className="w-full bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm space-y-4 transition-colors">
+          <div className="ui-panel w-full bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-5 shadow-sm space-y-4 transition-colors">
             {/* Drawer Header */}
             <div className="flex items-start justify-between border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 pb-3">
               <div>
@@ -515,7 +498,7 @@ export const FindingsView: React.FC = () => {
       {/* Change Status Modal */}
       {statusModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               onClick={() => setStatusModalOpen(false)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900"
@@ -572,7 +555,7 @@ export const FindingsView: React.FC = () => {
       {/* Resend Notification Modal */}
       {resendModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               onClick={() => setResendModalOpen(false)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900"

@@ -1,0 +1,43 @@
+import {
+  LayoutDashboard,
+  Server,
+  ShieldAlert,
+  Database,
+  FileText,
+  Zap,
+  Activity,
+  Bell,
+  Radio,
+  Users,
+  FileCode,
+  Mail,
+  Inbox,
+  Archive,
+  FileCode2,
+  Cpu,
+  Tags,
+  Settings,
+} from 'lucide-react';
+
+/** One source of truth for page identity, headings, and workspace breadcrumbs. */
+export const pages = {
+  dashboard: { section: 'Operations', title: 'Intelligence overview', icon: LayoutDashboard },
+  watchlist: { section: 'Operations', title: 'Monitored products', icon: Server },
+  findings: { section: 'Operations', title: 'Vulnerabilities', icon: ShieldAlert },
+  'threat-data': { section: 'Operations', title: 'Threat intelligence', icon: Database },
+  advisories: { section: 'Operations', title: 'Security advisories', icon: FileText },
+  correlation: { section: 'Autonomous pipeline', title: 'Live correlation', icon: Zap },
+  pipeline: { section: 'Autonomous pipeline', title: 'Pipeline executions', icon: Activity },
+  'alerted-cves': { section: 'Autonomous pipeline', title: 'Sent notification history', icon: Bell },
+  feeds: { section: 'Autonomous pipeline', title: 'Threat feeds', icon: Radio },
+  recipients: { section: 'Autonomous pipeline', title: 'Recipients & webhooks', icon: Users },
+  template: { section: 'Autonomous pipeline', title: 'Email template studio', icon: FileCode },
+  emails: { section: 'Autonomous pipeline', title: 'Delivery log', icon: Mail },
+  'email-queue': { section: 'Autonomous pipeline', title: 'Email queue', icon: Inbox },
+  archive: { section: 'Archive & retention', title: 'Archives & retention', icon: Archive },
+  logs: { section: 'System & audit', title: 'Audit trail', icon: FileCode2 },
+  health: { section: 'System & audit', title: 'System health', icon: Cpu },
+  aliases: { section: 'System & audit', title: 'Alias thesaurus', icon: Tags },
+  settings: { section: 'System & audit', title: 'Settings', icon: Settings },
+} as const;
+export type PageId = keyof typeof pages;

@@ -1,6 +1,7 @@
+import { PageHeading } from './PageHeading';
 import React, { useState } from 'react';
 import { Advisory } from '../types';
-import { FileText, Download, Printer, Copy, Check, Send, X, ShieldAlert } from 'lucide-react';
+import { Download, Printer, Copy, Check, Send, X } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { useCollection } from '../hooks/useCollection';
 import { copyText } from '../utils/clipboard';
@@ -130,23 +131,15 @@ ${adv.remediationInstructions}
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight flex items-center gap-2">
-            <FileText className="w-5 h-5 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
-            Product Security Advisories
-          </h1>
-          <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Generated bulletins and their actual transport status. Provider acceptance is not confirmation of
-            inbox delivery.
-          </p>
-        </div>
+      <div className="ui-page-header">
+        <PageHeading page="advisories">
+          Generated bulletins and their actual transport status. Provider acceptance is not confirmation of
+          inbox delivery.
+        </PageHeading>
 
         <div className="text-xs font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-3 py-1.5 rounded-xl shadow-sm">
           Total Generated:{' '}
-          <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">
-            {total}
-          </strong>
+          <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-900">{total}</strong>
         </div>
       </div>
 
@@ -199,10 +192,7 @@ ${adv.remediationInstructions}
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {adv.cveIds.map((cve) => (
-                    <span
-                      key={cve}
-                      className="px-1.5 py-0.5"
-                    >
+                    <span key={cve} className="px-1.5 py-0.5">
                       <CveLink cveId={cve} className="text-[10px]" />
                     </span>
                   ))}
@@ -250,7 +240,7 @@ ${adv.remediationInstructions}
         ))}
 
         {/* Pagination */}
-        <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm">
           <Pagination
             currentPage={currentPage}
             totalItems={total}
@@ -268,7 +258,7 @@ ${adv.remediationInstructions}
       {/* Advisory Modal */}
       {activeModalAdvisory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setActiveModalAdvisory(null)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900"

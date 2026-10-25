@@ -1,7 +1,8 @@
+import { PageHeading } from './PageHeading';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { useCollection } from '../hooks/useCollection';
-import { Mail, RotateCw, CheckCircle2, Clock, Search, ShieldCheck, Inbox, RefreshCw } from 'lucide-react';
+import { RotateCw, CheckCircle2, Search, ShieldCheck, Inbox, RefreshCw } from 'lucide-react';
 import { Pagination } from './Pagination';
 import type { EmailDeliveryLog } from '../types';
 
@@ -15,7 +16,12 @@ export const EmailHistoryView: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const { items: emailLogs, total, loading, reload } = useCollection<EmailDeliveryLog>('emailLogs', {
+  const {
+    items: emailLogs,
+    total,
+    loading,
+    reload,
+  } = useCollection<EmailDeliveryLog>('emailLogs', {
     page: currentPage,
     pageSize,
     search: searchTerm,
@@ -40,17 +46,11 @@ export const EmailHistoryView: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight flex items-center gap-2">
-            <Mail className="w-5 h-5 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
-            Automated Notification Delivery Log
-          </h1>
-          <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Provider acceptance is not confirmation of inbox delivery. Notification attempts with retry
-            schedules (1m / 2m / 4m / 8m / 16m).
-          </p>
-        </div>
+      <div className="ui-page-header">
+        <PageHeading page="emails">
+          Provider acceptance is not confirmation of inbox delivery. Notification attempts with retry
+          schedules (1m / 2m / 4m / 8m / 16m).
+        </PageHeading>
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center space-x-2 text-xs font-mono bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 px-3 py-1.5 rounded-xl shadow-sm">
@@ -81,7 +81,7 @@ export const EmailHistoryView: React.FC = () => {
       </div>
 
       {/* Search Bar */}
-      <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm transition-colors">
+      <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm transition-colors">
         <div className="relative w-full sm:w-80">
           <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
           <input
@@ -103,7 +103,7 @@ export const EmailHistoryView: React.FC = () => {
       </div>
 
       {/* Email History Table */}
-      <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
+      <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">

@@ -1,21 +1,8 @@
+import { PageHeading } from './PageHeading';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { EmailRecipient, WebhookEndpoint } from '../types';
-import {
-  Users,
-  Plus,
-  Trash2,
-  Mail,
-  AlertCircle,
-  X,
-  Search,
-  Webhook,
-  Send,
-  CheckCircle2,
-  ShieldCheck,
-  Zap,
-  Lock,
-} from 'lucide-react';
+import { Plus, Trash2, Mail, AlertCircle, X, Search, Webhook, Send, CheckCircle2 } from 'lucide-react';
 
 export const RecipientsView: React.FC = () => {
   const {
@@ -155,17 +142,11 @@ export const RecipientsView: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header & Sub-Tab Navigation */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 tracking-tight flex items-center gap-2">
-            <Users className="w-5 h-5 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
-            Autonomous Notification Channels &amp; Recipients
-          </h1>
-          <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mt-1">
-            Enterprise distribution lists and webhook pipelines receiving automated alerts with zero human
-            intervention.
-          </p>
-        </div>
+      <div className="ui-page-header">
+        <PageHeading page="recipients">
+          Enterprise distribution lists and webhook pipelines receiving automated alerts with zero human
+          intervention.
+        </PageHeading>
 
         <div className="flex items-center space-x-2">
           {activeTab === 'email' ? (
@@ -196,9 +177,10 @@ export const RecipientsView: React.FC = () => {
 
       {/* Channel Switcher Tabs (NextUI Style) */}
       <div className="flex items-center justify-between border-b border-zinc-800 dark:border-zinc-800 light:border-zinc-200 pb-3">
-        <div className="flex items-center space-x-1.5 bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 p-1 rounded-xl">
+        <div className="ui-segmented flex items-center space-x-1.5 bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 p-1 rounded-xl">
           <button
             onClick={() => setActiveTab('email')}
+            aria-pressed={activeTab === 'email'}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center space-x-1.5 ${
               activeTab === 'email'
                 ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm'
@@ -206,10 +188,11 @@ export const RecipientsView: React.FC = () => {
             }`}
           >
             <Mail className="w-3.5 h-3.5" />
-            <span>Email Distribution Lists ({recipients.length})</span>
+            <span>Email recipients ({recipients.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('webhooks')}
+            aria-pressed={activeTab === 'webhooks'}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center space-x-1.5 ${
               activeTab === 'webhooks'
                 ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm'
@@ -217,7 +200,7 @@ export const RecipientsView: React.FC = () => {
             }`}
           >
             <Webhook className="w-3.5 h-3.5" />
-            <span>Autonomous Webhooks ({webhooks.length})</span>
+            <span>Webhooks ({webhooks.length})</span>
           </button>
         </div>
 
@@ -236,7 +219,7 @@ export const RecipientsView: React.FC = () => {
       {/* TAB 1: Email Recipients */}
       {activeTab === 'email' && (
         <div className="space-y-4">
-          <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
+          <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm transition-colors">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
@@ -259,15 +242,22 @@ export const RecipientsView: React.FC = () => {
                     </tr>
                   ) : (
                     filteredRecipients.map((r) => (
-                      <tr key={r.id} className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition">
+                      <tr
+                        key={r.id}
+                        className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition"
+                      >
                         <td className="py-3 px-4 font-semibold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 flex items-center space-x-2">
                           <div className="w-6 h-6 rounded-full bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 border border-zinc-700/60 dark:border-zinc-700/60 light:border-zinc-300 flex items-center justify-center text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
                             {r.name.slice(0, 1)}
                           </div>
                           <span>{r.name}</span>
                         </td>
-                        <td className="py-3 px-4 font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-700">{r.email}</td>
-                        <td className="py-3 px-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600">{r.role}</td>
+                        <td className="py-3 px-4 font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
+                          {r.email}
+                        </td>
+                        <td className="py-3 px-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                          {r.role}
+                        </td>
                         <td className="py-3 px-4">
                           <span
                             className={`mb-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
@@ -327,7 +317,7 @@ export const RecipientsView: React.FC = () => {
       {/* TAB 2: Autonomous Webhooks */}
       {activeTab === 'webhooks' && (
         <div className="space-y-4">
-          <div className="bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm">
+          <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
@@ -344,13 +334,19 @@ export const RecipientsView: React.FC = () => {
                 <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
                   {filteredWebhooks.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
+                      <td
+                        colSpan={7}
+                        className="py-8 text-center text-zinc-500 dark:text-zinc-500 light:text-zinc-600"
+                      >
                         No webhooks configured. Register a Slack, Teams, or SIEM webhook above.
                       </td>
                     </tr>
                   ) : (
                     filteredWebhooks.map((w) => (
-                      <tr key={w.id} className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition">
+                      <tr
+                        key={w.id}
+                        className="hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition"
+                      >
                         <td className="py-3 px-4 font-semibold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 flex items-center space-x-2">
                           <Webhook className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-400 light:text-zinc-500" />
                           <span>{w.name}</span>
@@ -360,13 +356,18 @@ export const RecipientsView: React.FC = () => {
                             {w.provider}
                           </span>
                         </td>
-                        <td className="py-3 px-4 font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 max-w-xs truncate" title={w.url}>
+                        <td
+                          className="py-3 px-4 font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 max-w-xs truncate"
+                          title={w.url}
+                        >
                           {w.url}
                         </td>
                         <td className="py-3 px-4 font-mono text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
                           {w.events.join(', ')}
                         </td>
-                        <td className="py-3 px-4 font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-700">{w.deliveryCount} sent</td>
+                        <td className="py-3 px-4 font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
+                          {w.deliveryCount} sent
+                        </td>
                         <td className="py-3 px-4">
                           <button
                             onClick={() => toggleWebhookEnabled(w.id)}
@@ -391,8 +392,8 @@ export const RecipientsView: React.FC = () => {
                             </button>
                             <button
                               onClick={() => setDeletingWebhookId(w.id)}
-                            className="p-1 rounded hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 text-zinc-400 dark:text-zinc-400 light:text-zinc-500 hover:text-red-400 transition"
-                            title="Delete"
+                              className="p-1 rounded hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 text-zinc-400 dark:text-zinc-400 light:text-zinc-500 hover:text-red-400 transition"
+                              title="Delete"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -411,7 +412,7 @@ export const RecipientsView: React.FC = () => {
       {/* Webhook Test Result Modal */}
       {testResult && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               onClick={() => setTestResult(null)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200"
@@ -460,7 +461,7 @@ export const RecipientsView: React.FC = () => {
       {/* Add Email Recipient Modal */}
       {showAddEmailModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               onClick={() => setShowAddEmailModal(false)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200"
@@ -581,7 +582,7 @@ export const RecipientsView: React.FC = () => {
       {/* Add Webhook Modal */}
       {showAddWebhookModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               onClick={() => setShowAddWebhookModal(false)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200"
@@ -683,7 +684,7 @@ export const RecipientsView: React.FC = () => {
       {/* Delete Recipient Confirmation */}
       {deletingRecipientId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
             <h3 className="text-sm font-bold text-zinc-100 mb-2">Remove Recipient?</h3>
             <p className="text-xs text-zinc-400 leading-relaxed mb-6">
               This recipient will stop receiving automated vulnerability notifications.
@@ -711,7 +712,7 @@ export const RecipientsView: React.FC = () => {
       {/* Delete Webhook Confirmation */}
       {deletingWebhookId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
             <h3 className="text-sm font-bold text-zinc-100 mb-2">Remove Webhook Endpoint?</h3>
             <p className="text-xs text-zinc-400 leading-relaxed mb-6">
               Automated payload delivery to this endpoint will be terminated.

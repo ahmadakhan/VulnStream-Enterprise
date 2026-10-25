@@ -1,16 +1,6 @@
+import { PageHeading } from './PageHeading';
 import React, { useEffect, useState } from 'react';
-import {
-  Activity,
-  AlertTriangle,
-  CheckCircle2,
-  Clock3,
-  Cpu,
-  Database,
-  Mail,
-  RefreshCw,
-  Server,
-  ShieldCheck,
-} from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock3, Cpu, Database, Mail, RefreshCw, Server, ShieldCheck } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { SystemHealth } from '../types';
 
@@ -91,21 +81,10 @@ export function SystemHealthView() {
 
   return (
     <div className="space-y-6 text-zinc-100 light:text-zinc-900" aria-busy={busy}>
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-            System &amp; audit
-          </p>
-          <h1 className="mt-1 flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
-            <span className="grid h-9 w-9 place-items-center rounded-xl border border-blue-500/20 bg-blue-500/10 text-blue-300 light:text-blue-700">
-              <Activity className="h-4 w-4" />
-            </span>
-            System health
-          </h1>
-          <p className={`mt-2 max-w-2xl text-sm ${muted}`}>
-            Infrastructure status, worker activity, delivery backlog, and runtime safeguards.
-          </p>
-        </div>
+      <header className="ui-page-header">
+        <PageHeading page="health">
+          Infrastructure status, worker activity, delivery backlog, and runtime safeguards.
+        </PageHeading>
         <button
           className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3.5 py-2.5 text-xs font-medium text-zinc-200 transition hover:border-zinc-600 hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100"
           disabled={busy}
