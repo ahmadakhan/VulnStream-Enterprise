@@ -594,6 +594,7 @@ export function createApp(
   );
   app.post(
     '/api/correlation/simulate',
+    requireRole('ADMIN'),
     asyncRoute(async (req, res) => {
       const body = z
         .object({

@@ -7,7 +7,7 @@ import { redactEventContext, writeEvent, readEvents } from '../server/events';
 import { createPool, migrate, put, state } from '../server/db.ts';
 import { queueRun, processPipeline } from '../server/pipeline';
 import { loadConfig } from '../server/config.ts';
-import type { WatchListItem, NormalizedCVE, Finding } from '../src/types/index.ts';
+import type { WatchListItem, NormalizedCVE, Finding, IntelligenceArticle } from '../src/types/index.ts';
 const now = new Date('2026-10-21T12:00:00Z');
 const rss = (items: string) => `<rss version="2.0"><channel><title>Security</title>${items}</channel></rss>`;
 const item = (
@@ -308,4 +308,55 @@ test('built-in vendor aliases still work after custom-alias merge', () => {
   );
   assert.equal(matches.length, 1);
   assert.equal(matches[0].assetId, 'asset-pan');
+});
+
+test('CVE-less article without urgency language is not misclassified as zero-day', () => {
+  const routine: IntelligenceArticle = {
+    id: 'routine-feature-1',
+    url: 'https://example.com/feature',
+    title: 'Acme Widget quarterly feature update',
+    summary: 'The Acme Widget platform receives a routine maintenance update.',
+    publishedDate: '2026-10-01T00:00:00Z',
+    modifiedDate: '2026-10-01T00:00:00Z',
+    cveIds: [],
+    sourceFeeds: ['test'],
+    zeroDay: false,
+  };
+  const matches = matchIntelligence([routine], [asset], []);
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].status, 'REVIEW_REQUIRED');
+  assert.equal(matches[0].zeroDay, false);
+});
+
+test('zero-day flag clears once a merged record carries a CVE ID', () => {
+  const preCve: IntelligenceArticle = {
+    id: 'zeroday-cve-later',
+    url: 'https://example.com/story',
+    title: 'Acme Widget zero-day exploit in the wild',
+    summary: 'Acme Widget is being actively exploited in the wild without a patch.',
+    publishedDate: '2026-10-01T00:00:00Z',
+    modifiedDate: '2026-10-01T00:00:00Z',
+    cveIds: [],
+    sourceFeeds: ['feed1'],
+    zeroDay: true,
+  };
+  const postCve: IntelligenceArticle = {
+    ...preCve,
+    modifiedDate: '2026-10-02T00:00:00Z',
+    cveIds: ['CVE-2026-12345'],
+    sourceFeeds: ['feed2'],
+    zeroDay: false,
+  };
+  const merged = mergeArticles([preCve, postCve]);
+  assert.equal(merged.length, 1);
+  assert.deepEqual(merged[0].cveIds, ['CVE-2026-12345']);
+  assert.equal(merged[0].zeroDay, false);
+
+  // Zero-day persists when no CVE ID is ever attached.
+  const stillZero = mergeArticles([
+    preCve,
+    { ...preCve, modifiedDate: '2026-10-02T00:00:00Z', sourceFeeds: ['feed2'] },
+  ]);
+  assert.equal(stillZero[0].zeroDay, true);
+  assert.equal(stillZero[0].cveIds.length, 0);
 });

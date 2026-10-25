@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Config } from './config';
 import { checkPassword, passwordHash, randomToken, tokenHash, secureEqual } from './secrets';
+import { WorkCapacityError } from './workLimiter.ts';
 import { transaction, appendAudit, get } from './db';
 import { DEFAULT_SETTINGS, type Role } from '../shared/state.ts';
 import type { AppSettings } from '../src/types/index.ts';
@@ -149,7 +150,19 @@ export function loginHandler(pool: pg.Pool, config: Config) {
     const user = (await pool.query('SELECT * FROM users WHERE username=$1', [username])).rows[0];
     // A fixed valid dummy hash keeps nonexistent accounts on the same password KDF path.
     const dummy = 'scrypt131072$00000000000000000000000000000000$' + '0'.repeat(128);
-    const valid = await checkPassword(password, user?.password_hash || dummy);
+    const valid = await (async () => {
+      try {
+        return await checkPassword(password, user?.password_hash || dummy);
+      } catch (error) {
+        // Bounded scrypt admission is exhausted: fail closed with a controlled
+        // 429 (not a 500) and let the client retry once a work slot frees.
+        if (error instanceof WorkCapacityError) {
+          res.setHeader('Retry-After', '5');
+          throw new HttpError(429, 'Too many concurrent login attempts; retry shortly');
+        }
+        throw error;
+      }
+    })();
     if (!user || user.disabled || !valid) throw new HttpError(401, 'Invalid username or password');
     const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
     const token = randomToken(),

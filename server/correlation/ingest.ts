@@ -100,7 +100,7 @@ export class AdvisoryIngestor {
           }
           const inserted = await query<{ id: string }>(
             `INSERT INTO unstructured_advisories(id,title,content,url,fingerprint)
-            VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING id`,
+            VALUES($1,$2,$3,$4,$5) ON CONFLICT (fingerprint) DO UPDATE SET processed_at=now() WHERE unstructured_advisories.fingerprint = EXCLUDED.fingerprint AND unstructured_advisories.id = EXCLUDED.id RETURNING id`,
             [randomUUID(), input.title, extracted.cleanContent, input.url, fingerprint],
           );
           if (!inserted.rowCount) {
@@ -131,6 +131,8 @@ export class AdvisoryIngestor {
                 [advisoryId, match.assetId, match.assetRevision],
               );
           await query('UPDATE unstructured_advisories SET processed_at=now() WHERE id=$1', [advisoryId]);
+          // Persist telemetry to operational_events BEFORE commit for crash durability
+          await this.telemetry.persistBeforeCommit(client);
           await query('COMMIT');
           this.telemetry.log('INFO', 'ingestion.committed', {
             trackingId,

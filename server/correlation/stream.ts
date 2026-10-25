@@ -1,10 +1,12 @@
 import { Readable } from 'node:stream';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import type { PipelineSupervisor } from './supervisor.ts';
+import type { PipelineSupervisor, IngestPriority } from './supervisor.ts';
+import type { AdvisoryInput } from './validation.ts';
 const MAX_RECORD_BYTES = 262144;
+type AdvisoryRecord = AdvisoryInput | { invalidFrame: string; raw?: string };
 /** Object-mode records or UTF-8 NDJSON. A record is bounded even across chunks. */
-export async function* advisoryRecords(input: Readable): AsyncGenerator<unknown> {
+export async function* advisoryRecords(input: Readable): AsyncGenerator<AdvisoryRecord> {
   if (input.readableObjectMode) {
     for await (const item of input) yield item;
     return;
@@ -13,13 +15,13 @@ export async function* advisoryRecords(input: Readable): AsyncGenerator<unknown>
   const record = Buffer.allocUnsafe(MAX_RECORD_BYTES);
   let bytes = 0;
   let oversized = false;
-  const decode = (): unknown => {
+  const decode = (): AdvisoryRecord => {
     if (oversized) return { invalidFrame: 'OVERSIZED_NDJSON' };
     let raw: string;
     try { raw = new TextDecoder('utf-8', { fatal: true }).decode(record.subarray(0, bytes)); }
     catch { return { invalidFrame: 'INVALID_UTF8_NDJSON' }; }
     try { return JSON.parse(raw); }
-    catch { return { invalidFrame: 'MALFORMED_NDJSON', raw }; }
+    catch { return { invalidFrame: 'MALFORMED_NDJSON', raw: '' }; }
   };
   for await (const chunk of input) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
@@ -51,11 +53,18 @@ export class AdvisoryStreamProcessor {
     let failure: unknown;
     try {
       for await (const raw of advisoryRecords(inputStream)) {
+        // Skip invalid frames but log them
+        if (typeof raw === 'object' && raw !== null && 'invalidFrame' in raw) {
+          this.supervisor.ingestor.telemetry.log('WARN', 'stream.invalid_frame', { trackingId: 'stream', count: 1 });
+          continue;
+        }
         while (running.size >= concurrencyLimit) await Promise.race(running);
         if (failure) throw failure;
         const trackingId = randomUUID();
         const controller = new AbortController();
-        await this.supervisor.acquire(trackingId, controller);
+        // Determine priority from advisory content
+        const priority = this.inferPriority(raw);
+        await this.supervisor.acquire(trackingId, controller, priority);
         // A separate timer enforces the deadline even when a health probe is slow.
         const timer = setTimeout(() => controller.abort(), 15_000);
         const promise = this.supervisor.ingestor
@@ -70,7 +79,7 @@ export class AdvisoryStreamProcessor {
           .finally(() => {
             clearTimeout(timer);
             running.delete(promise);
-            this.supervisor.active.delete(trackingId);
+            this.supervisor.release(trackingId);
           });
         running.add(promise);
       }
@@ -78,5 +87,18 @@ export class AdvisoryStreamProcessor {
       await Promise.all(running);
     }
     if (failure) throw failure;
+  }
+  /** Infer priority from advisory content. HIGH = CVE present or critical keywords. */
+  private inferPriority(raw: AdvisoryInput): 'HIGH' | 'MEDIUM' | 'LOW' {
+    // HIGH: Has CVE IDs or explicit critical keywords
+    if (raw.cpes.length > 0 || raw.purls.length > 0) return 'HIGH';
+    // Check for critical keywords in title/content
+    const text = `${raw.title} ${raw.content}`.toLowerCase();
+    if (/\b(remote code execution|rce|zero.day|zero-day|actively exploited|in.the.wild|unpatched|critical|severity)\b/.test(text))
+      return 'HIGH';
+    // MEDIUM: Has security signals but no CVE
+    if (/\b(vulnerability|exploit|patch|update|security|advisory)\b/.test(text))
+      return 'MEDIUM';
+    return 'LOW';
   }
 }

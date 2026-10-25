@@ -19,6 +19,13 @@ export interface CorrelationLog {
   totalDatabaseTimeMs?: number;
   count?: number;
   attempt?: number;
+  // Extended fields for supervisor and stream telemetry
+  highPool?: number;
+  mediumPool?: number;
+  lowPool?: number;
+  crashCount?: number;
+  pauseDurationMs?: number;
+  frame?: string;
 }
 export interface CorrelationSnapshot {
   instanceId: string;

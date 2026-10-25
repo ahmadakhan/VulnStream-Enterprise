@@ -57,6 +57,11 @@ test('version ranges preserve release candidates and refuse vendor backport coer
   assert.equal(evaluateVersion('1.2.3-8.el8_6', '<2.0'), 'REVIEW');
   assert.equal(evaluateVersion('1.2.3+vendor.patch', '<2.0'), 'REVIEW');
   assert.equal(evaluateVersion('1.2.3', '*'), 'REVIEW');
+  assert.equal(evaluateVersion('2.4.41-2', '<2.4.41'), 'REVIEW');
+  assert.equal(evaluateVersion('2.4.41-2', '>=2.0.0 <2.4.41'), 'REVIEW');
+  assert.equal(evaluateVersion('1.0.0-rc.1', '<1.0.0'), 'AFFECTED');
+  assert.equal(evaluateVersion('1.0.0-beta', '<1.0.0'), 'AFFECTED');
+  assert.equal(evaluateVersion('1.0.0-preview.2', '<1.0.0'), 'AFFECTED');
 });
 test('NDJSON framing survives arbitrary UTF-8 splits and bounds malformed giant frames', async () => {
   const payload = Buffer.from(JSON.stringify(advisory({ title: 'Kubernetes 漏洞' })) + '\n');

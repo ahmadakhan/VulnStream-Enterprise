@@ -79,11 +79,12 @@ export function mergeArticles(records: IntelligenceArticle[]): IntelligenceArtic
       (article.modifiedDate === old.modifiedDate && JSON.stringify(article) > JSON.stringify(old))
         ? article
         : old;
+    const mergedCveIds = [...new Set([...(old?.cveIds || []), ...(winner.cveIds || []), ...(article.cveIds || [])])].sort();
     byId.set(article.id, {
       ...winner,
       sourceFeeds: [...new Set([...(old?.sourceFeeds || []), ...article.sourceFeeds])].sort(),
-      zeroDay: winner.zeroDay || old?.zeroDay || article.zeroDay,
-      cveIds: [...new Set([...(winner.cveIds || []), ...(article.cveIds || [])])].sort(),
+      zeroDay: (winner.zeroDay || old?.zeroDay || article.zeroDay) && mergedCveIds.length === 0,
+      cveIds: mergedCveIds,
     });
   }
   return [...byId.values()];
@@ -153,7 +154,7 @@ export function matchIntelligence(
           finding.status !== 'RESOLVED' &&
           finding.status !== 'FALSE_POSITIVE';
         const old = matches.get(id);
-        const isZeroDay = !cveId || article.zeroDay === true;
+        const isZeroDay = article.zeroDay === true;
         const credibilityScore = computeCredibilityScore(
           { id, cveId, assetId: asset.id, assetName: '', articleIds: [], status: confirmed ? 'CORROBORATED' : 'REVIEW_REQUIRED', evidence: '', zeroDay: isZeroDay },
           article.sourceFeeds,

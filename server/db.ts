@@ -35,7 +35,7 @@ export const schemaLockKey = 'hashtext(COALESCE(current_schema(), current_databa
  * The newest migration this build depends on. Production startup refuses to
  * run against an older schema instead of failing later on a missing column.
  */
-export const REQUIRED_SCHEMA_VERSION = 15;
+export const REQUIRED_SCHEMA_VERSION = 16;
 
 export async function migrate(pool: pg.Pool) {
   const client = await pool.connect();
