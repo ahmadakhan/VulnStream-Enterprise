@@ -59,7 +59,12 @@ export class AdvisoryStreamProcessor {
           continue;
         }
         while (running.size >= concurrencyLimit) await Promise.race(running);
-        if (failure) throw failure;
+        // A durability failure on one record is recorded and reported after the
+        // stream drains (see the final `if (failure) throw failure` below), but
+        // must not stop this loop from reading and dispatching the records that
+        // follow it — that would silently drop every remaining item in the
+        // batch for one bad record. Only an explicit stop (abort/shutdown)
+        // short-circuits here, not an ingest-level failure.
         const trackingId = randomUUID();
         const controller = new AbortController();
         // Determine priority from advisory content
