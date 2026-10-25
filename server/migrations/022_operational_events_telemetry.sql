@@ -20,9 +20,12 @@
 -- (the pipeline shape does not supply it) and a generated column cannot be
 -- overridden by a DEFAULT.
 --
--- Timestamp agreement. The two clocks cannot silently diverge because
--- occurred_at is derived from timestamp whenever timestamp is present; a caller
--- cannot persist a durable clock that contradicts its own telemetry clock.
+-- Timestamp agreement. On INSERT, occurred_at is derived from timestamp
+-- whenever the caller supplies one, so a telemetry row can never carry a
+-- durable clock that contradicts its own telemetry clock. On UPDATE, an
+-- explicit correction to either clock is respected and mirrored to the other —
+-- the trigger maintains the invariant (neither clock NULL, the two agree) but
+-- never reverts a deliberate maintenance change.
 
 ALTER TABLE operational_events
   ADD COLUMN IF NOT EXISTS sequence integer,
@@ -48,19 +51,38 @@ BEGIN
   -- defaulted value from an explicitly supplied one, and trying to guess made
   -- the disagreement check unreachable — so provenance is not guessed at all.
   --
-  -- Instead the two clocks are reconciled by one rule: occurred_at is derived
-  -- from timestamp whenever timestamp is present. Telemetry rows therefore
-  -- always carry the precise event time, pipeline rows fall back to now(), and
-  -- a row can never exist with a durable clock that disagrees with its own
-  -- telemetry clock. A caller cannot supply contradictory values, because only
-  -- one of them survives.
-  IF NEW."timestamp" IS NOT NULL THEN
+  -- One rule per operation. Guessing provenance from values was wrong twice:
+  -- first it made the contradiction check unreachable, then it silently
+  -- reverted an operator's deliberate UPDATE of occurred_at (the row appeared
+  -- to update but kept its old clock).
+  IF TG_OP = 'INSERT' THEN
+    -- occurred_at is derived from timestamp whenever the caller supplies one,
+    -- so a telemetry row can never be written with a durable clock that
+    -- disagrees with its own telemetry clock, and it is never NULL (which would
+    -- make the row invisible to retention and immortal).
+    IF NEW."timestamp" IS NOT NULL THEN
+      NEW.occurred_at := NEW."timestamp";
+    ELSE
+      NEW.occurred_at := COALESCE(NEW.occurred_at, now());
+      NEW."timestamp" := NEW.occurred_at;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- UPDATE: respect what the caller explicitly changed. Only fill a NULL so the
+  -- invariant (neither clock is ever NULL) holds after any mutation, and mirror
+  -- a change so the two clocks stay in agreement — but never undo a deliberate
+  -- correction.
+  IF NEW.occurred_at IS NULL THEN
+    NEW.occurred_at := COALESCE(NEW."timestamp", now());
+  END IF;
+  IF NEW."timestamp" IS NULL THEN
+    NEW."timestamp" := NEW.occurred_at;
+  ELSIF NEW.occurred_at IS DISTINCT FROM OLD.occurred_at THEN
+    -- The durable clock was changed on purpose; carry it to the mirror column.
+    NEW."timestamp" := NEW.occurred_at;
+  ELSIF NEW."timestamp" IS DISTINCT FROM OLD."timestamp" THEN
     NEW.occurred_at := NEW."timestamp";
-  ELSIF NEW.occurred_at IS NULL THEN
-    NEW.occurred_at := now();
-    NEW."timestamp" := NEW.occurred_at;
-  ELSE
-    NEW."timestamp" := NEW.occurred_at;
   END IF;
   RETURN NEW;
 END;

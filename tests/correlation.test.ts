@@ -480,6 +480,31 @@ test(
         reconciled.timestamp.getTime(),
         'the durable clock must be derived from the telemetry clock',
       );
+      // A deliberate correction to the durable clock must take effect and be
+      // mirrored. An earlier version of the trigger reset it back to timestamp,
+      // so the UPDATE reported success while changing nothing.
+      const corrected = (
+        await pool.query<{ occurred_at: Date; timestamp: Date }>(
+          `UPDATE operational_events SET occurred_at = occurred_at - interval '1 day'
+           WHERE code='x' RETURNING occurred_at,"timestamp"`,
+        )
+      ).rows[0];
+      assert.ok(
+        Date.now() - corrected.occurred_at.getTime() > 20 * 3600_000,
+        'a maintenance correction to occurred_at must stick',
+      );
+      assert.equal(
+        corrected.occurred_at.getTime(),
+        corrected.timestamp.getTime(),
+        'both clocks must move together',
+      );
+      // An unrelated column update must not touch either clock.
+      const untouched = (
+        await pool.query<{ occurred_at: Date }>(
+          "UPDATE operational_events SET message='x2' WHERE code='x' RETURNING occurred_at",
+        )
+      ).rows[0];
+      assert.equal(untouched.occurred_at.getTime(), corrected.occurred_at.getTime());
     } finally {
       await pool?.end();
       await master.query(`DROP SCHEMA ${schema} CASCADE`);
