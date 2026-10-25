@@ -1,12 +1,28 @@
 -- operational_events was created in migration 002 with only the pipeline-event
 -- shape (category/code/message/run_id/context), but the correlation telemetry
 -- writer (server/correlation/telemetry.ts) persists a different, per-worker
--- shape (sequence/event/tracking_id/latency columns). On a fresh database every
--- advisory ingest therefore failed with "column sequence does not exist" and
--- was dead-lettered — the correlation pipeline had never worked end to end.
+-- shape. On a fresh database every advisory ingest therefore failed with
+-- "column sequence does not exist" and was dead-lettered — the correlation
+-- pipeline had never worked end to end.
 --
 -- Both shapes are supported additively: the pipeline columns stay, and the
 -- telemetry columns are added nullable so existing rows remain valid.
+--
+-- Durable clock. The telemetry writer supplies its own `timestamp`, but every
+-- consumer of this table reads `occurred_at`:
+--   * retention deletes WHERE occurred_at < cutoff (server/retention.ts)
+--   * the event reader orders by id and reports occurred_at (server/events.ts)
+-- A telemetry row therefore arrived with occurred_at NULL: invisible to the
+-- event viewer and, critically, never matched by retention. Instead of relying
+-- on the writer to always populate both clocks, occurred_at is made to default
+-- from timestamp here, so no caller can create an immortal row. A BEFORE
+-- trigger is used rather than a generated column because timestamp is nullable
+-- (the pipeline shape does not supply it) and a generated column cannot be
+-- overridden by a DEFAULT.
+--
+-- Timestamp agreement. The two clocks cannot silently diverge because
+-- occurred_at is derived from timestamp whenever timestamp is present; a caller
+-- cannot persist a durable clock that contradicts its own telemetry clock.
 
 ALTER TABLE operational_events
   ADD COLUMN IF NOT EXISTS sequence integer,
@@ -19,8 +35,51 @@ ALTER TABLE operational_events
   ADD COLUMN IF NOT EXISTS count integer,
   ADD COLUMN IF NOT EXISTS attempt integer;
 
--- Worker-local sequence numbers restart with every process, so uniqueness must
--- be scoped per writer. Dropping duplicates is safe: telemetry is diagnostic.
+-- Backfill the rows written before this migration under the incomplete shape.
+-- Without this they remain invisible to retention permanently.
+UPDATE operational_events
+  SET occurred_at = COALESCE("timestamp", now())
+  WHERE occurred_at IS NULL AND "timestamp" IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION operational_events_sync_clock()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  -- occurred_at has a column DEFAULT of now(). A BEFORE trigger cannot tell a
+  -- defaulted value from an explicitly supplied one, and trying to guess made
+  -- the disagreement check unreachable — so provenance is not guessed at all.
+  --
+  -- Instead the two clocks are reconciled by one rule: occurred_at is derived
+  -- from timestamp whenever timestamp is present. Telemetry rows therefore
+  -- always carry the precise event time, pipeline rows fall back to now(), and
+  -- a row can never exist with a durable clock that disagrees with its own
+  -- telemetry clock. A caller cannot supply contradictory values, because only
+  -- one of them survives.
+  IF NEW."timestamp" IS NOT NULL THEN
+    NEW.occurred_at := NEW."timestamp";
+  ELSIF NEW.occurred_at IS NULL THEN
+    NEW.occurred_at := now();
+    NEW."timestamp" := NEW.occurred_at;
+  ELSE
+    NEW."timestamp" := NEW.occurred_at;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS operational_events_sync_clock ON operational_events;
+CREATE TRIGGER operational_events_sync_clock
+  BEFORE INSERT OR UPDATE OF "timestamp", occurred_at ON operational_events
+  FOR EACH ROW EXECUTE FUNCTION operational_events_sync_clock();
+
+-- Exactly one tracking index. An earlier revision of this migration created a
+-- second one on the same column and predicate under a different name, which
+-- doubles write cost for no benefit.
+DROP INDEX IF EXISTS operational_events_tracking_id_idx;
+
+-- Retention and the event viewer both filter on occurred_at; without an index
+-- the retention sweep degrades to a full scan of the largest table as it grows.
+CREATE INDEX IF NOT EXISTS operational_events_occurred_at
+  ON operational_events (occurred_at DESC);
 CREATE INDEX IF NOT EXISTS operational_events_tracking
   ON operational_events (tracking_id) WHERE tracking_id IS NOT NULL;
 

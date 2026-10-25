@@ -417,3 +417,73 @@ test(
     }
   },
 );
+test(
+  'telemetry rows carry the durable clock retention and the event reader use',
+  { skip: !process.env.TEST_DATABASE_URL },
+  async () => {
+    const master = createPool(process.env.TEST_DATABASE_URL!);
+    const schema = 'correlation_clock_' + randomBytes(12).toString('hex');
+    let pool: pg.Pool | undefined;
+    try {
+      await master.query(`CREATE SCHEMA ${schema}`);
+      pool = new pg.Pool({
+        connectionString: process.env.TEST_DATABASE_URL,
+        options: `-c search_path=${schema}`,
+        max: 2,
+      });
+      await migrate(pool);
+      const telemetry = silent();
+      const trackingId = randomUUID();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        telemetry.log('INFO', 'ingestion.started', { trackingId });
+        await telemetry.persistBeforeCommit(client, trackingId);
+        await client.query('COMMIT');
+      } finally {
+        client.release();
+      }
+      // The pipeline shape supplies neither clock.
+      await pool.query(
+        "INSERT INTO operational_events(category,level,code,message) VALUES('PIPELINE','INFO','pipeline.started','x')",
+      );
+      const rows = (
+        await pool.query<{ occurred_at: Date | null; timestamp: Date | null }>(
+          'SELECT occurred_at,"timestamp" FROM operational_events',
+        )
+      ).rows;
+      assert.equal(rows.length, 2);
+      for (const row of rows) {
+        // occurred_at NULL is the defect: retention filters on it and the event
+        // reader reports it, so such a row is both unreadable and immortal.
+        assert.ok(row.occurred_at, 'every row must carry the durable clock');
+        assert.ok(row.timestamp, 'every row must carry a telemetry clock');
+      }
+      // Retention as the sweeper performs it: it must match the rows.
+      const swept = await pool.query(
+        "DELETE FROM operational_events WHERE occurred_at < now() + interval '1 second'",
+      );
+      assert.equal(swept.rowCount, 2, 'retention must be able to see telemetry rows');
+      // A caller cannot persist two contradictory clocks: timestamp wins, so
+      // ordering and retention always agree.
+      await pool.query(
+        `INSERT INTO operational_events(category,level,code,message,"timestamp",occurred_at)
+         VALUES('PIPELINE','INFO','x','x',now()-interval '1 hour',now())`,
+      );
+      const reconciled = (
+        await pool.query<{ occurred_at: Date; timestamp: Date }>(
+          "SELECT occurred_at,\"timestamp\" FROM operational_events WHERE code='x'",
+        )
+      ).rows[0];
+      assert.equal(
+        reconciled.occurred_at.getTime(),
+        reconciled.timestamp.getTime(),
+        'the durable clock must be derived from the telemetry clock',
+      );
+    } finally {
+      await pool?.end();
+      await master.query(`DROP SCHEMA ${schema} CASCADE`);
+      await master.end();
+    }
+  },
+);

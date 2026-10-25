@@ -117,6 +117,10 @@ export class CorrelationTelemetry {
       const message = `${log.event}${log.trackingId ? ` [${log.trackingId}]` : ''}`;
       values.push(
         log.sequence,
+        // Single clock. occurred_at (the durable column retention and the event
+        // viewer use) is derived from this value by the
+        // operational_events_sync_clock trigger, so the writer cannot produce a
+        // row that one consumer sees and the other does not.
         log.timestamp,
         level,
         log.event,
