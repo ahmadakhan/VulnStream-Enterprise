@@ -174,10 +174,13 @@ test(
               assert.equal((await limiter('runtime-permissions')).allowed, true);
               assert.equal((await limiter('runtime-permissions')).allowed, false);
               const input = article('restricted-role');
-              await client.query(
-                'INSERT INTO unstructured_advisories(title,content,url,fingerprint) VALUES($1,$2,$3,$4)',
+              const insertedArticle = await client.query(
+                'INSERT INTO unstructured_advisories(title,content,url,fingerprint) VALUES($1,$2,$3,$4) RETURNING id',
                 [input.title, input.content, input.url, randomBytes(32).toString('hex')],
               );
+              const review = await client.query('INSERT INTO low_confidence_review_buffer(advisory_id,asset_id,reason) VALUES($1,$2,$3) RETURNING id', [insertedArticle.rows[0].id,nativeId,'Restricted review verification']);
+              await decideCorrelationReview(client,review.rows[0].id,{decision:'APPROVED',note:'Verified applicability in regression'},'test');
+              assert.equal((await client.query('SELECT confidence FROM correlation_matches WHERE advisory_id=$1',[insertedArticle.rows[0].id])).rows[0].confidence,'MEDIUM');
               assert.ok((await client.query('SELECT id FROM correlation_asset_inventory')).rowCount);
               await assert.rejects(client.query("UPDATE assets SET vendor='must-not-write'"), {
                 code: '42501',
@@ -248,7 +251,7 @@ test(
           ),
         );
         await letters.capture({ invalid: 'malformed' }, 'VALIDATION_FAILED', randomUUID(), db);
-        await letters.flush(db);
+        await Promise.all([letters.flush(db),new DeadLetterQueue(directory,key,telemetry).flush(db)]);
         workflows = await correlationWorkflows(db);
         const letter = workflows.deadLetters[0];
         assert.ok(letter);

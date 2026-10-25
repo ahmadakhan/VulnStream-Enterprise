@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { timedQuery } from './query.ts';
 import { getHeapStatistics } from 'node:v8';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -5,6 +6,7 @@ import type { Pool } from 'pg';
 import type { PipelineHealth, CorrelationSnapshot } from '../../shared/correlation.ts';
 import type { AdvisoryIngestor } from './ingest.ts';
 export class PipelineSupervisor {
+  readonly instanceId = randomUUID();
   health: PipelineHealth = 'HEALTHY';
   desiredConcurrency = 4;
   concurrencyLimit = 4;
@@ -12,6 +14,7 @@ export class PipelineSupervisor {
   private timer?: ReturnType<typeof setInterval>;
   private checking = false;
   private stopped = false;
+  private shutdown = new AbortController();
   private simulatedUntil = 0;
   private simulated: 'memory' | 'database' | null = null;
   readonly active = new Map<string, { started: number; controller: AbortController }>();
@@ -39,6 +42,7 @@ export class PipelineSupervisor {
   start(): void {
     if (this.timer) return;
     this.stopped = false;
+    this.shutdown = new AbortController();
     this.ingestor.telemetry.log('INFO', 'supervisor.started');
     this.timer = setInterval(() => {
       void this.check();
@@ -48,6 +52,7 @@ export class PipelineSupervisor {
   }
   async stop(): Promise<void> {
     this.stopped = true;
+    this.shutdown.abort();
     clearInterval(this.timer);
     this.timer = undefined;
     for (const task of this.active.values()) task.controller.abort();
@@ -84,6 +89,11 @@ export class PipelineSupervisor {
       try {
         if (this.simulated === 'database') throw new Error('SIMULATED_DATABASE_OUTAGE');
         await this.pool.query(timedQuery('SELECT 1', [], 2000));
+        const policy = await this.pool.query<{ concurrency_limit: number }>(
+          timedQuery('SELECT concurrency_limit FROM correlation_policy WHERE id=1', [], 2000),
+        );
+        if (policy.rows[0] && policy.rows[0].concurrency_limit !== this.desiredConcurrency)
+          this.setConcurrency(policy.rows[0].concurrency_limit);
         const next = this.memoryPressure ? 'DEGRADED_BACKPRESSURE' : 'HEALTHY';
         if (this.health !== next)
           log.log(
@@ -105,14 +115,16 @@ export class PipelineSupervisor {
     }
   }
   async acquire(trackingId: string, controller: AbortController): Promise<void> {
-    await this.ingestor.telemetry.ready();
+    const signal = AbortSignal.any([controller.signal, this.shutdown.signal]);
+    await this.ingestor.telemetry.ready(signal);
     while (
       !this.stopped &&
       (this.health === 'RECOVERING_DB_SEVERANCE' ||
         this.memoryPressure ||
         this.active.size >= this.concurrencyLimit)
     )
-      await delay(50);
+      await delay(50, undefined, { signal });
+    signal.throwIfAborted();
     if (this.stopped) throw new Error('SUPERVISOR_STOPPED');
     this.active.set(trackingId, { started: Date.now(), controller });
   }
@@ -130,6 +142,7 @@ export class PipelineSupervisor {
       )
       .catch(() => ({ rows: [] }));
     return {
+      instanceId: this.instanceId,
       health: this.health,
       concurrencyLimit: this.concurrencyLimit,
       activeWorkers: this.active.size,

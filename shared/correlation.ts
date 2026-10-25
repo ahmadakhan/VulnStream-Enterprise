@@ -21,6 +21,7 @@ export interface CorrelationLog {
   attempt?: number;
 }
 export interface CorrelationSnapshot {
+  instanceId: string;
   health: PipelineHealth;
   concurrencyLimit: number;
   activeWorkers: number;

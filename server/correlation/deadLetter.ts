@@ -1,19 +1,27 @@
 import { timedQuery } from './query.ts';
-import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
+import { mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { z } from 'zod';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import { encrypt } from '../secrets.ts';
+import { encrypt, decrypt } from '../secrets.ts';
 import type { CorrelationTelemetry } from './telemetry.ts';
+import { boundedJson } from './boundedJson.ts';
 interface Letter {
   id: string;
   trackingId: string;
   errorCode: string;
   encryptedPayload: string;
 }
+const letterSchema = z.object({
+  id: z.uuid(), trackingId: z.uuid(), errorCode: z.string().regex(/^[A-Z0-9_]{1,100}$/),
+  encryptedPayload: z.string().max(360000),
+}).strict();
 /** Durable encrypted fallback, with a strict disk ceiling. A full spool fails closed. */
 export class DeadLetterQueue {
   private tail: Promise<unknown> = Promise.resolve();
+  private readonly corruptFiles = new Set<string>();
   constructor(
     private readonly directory: string,
     private readonly key: string,
@@ -24,21 +32,7 @@ export class DeadLetterQueue {
   async capture(raw: unknown, errorCode: string, trackingId: string, pool: Pool): Promise<void> {
     // JSON inputs from HTTP/NDJSON are bounded upstream. Never serialize arbitrary
     // class instances, cycles, or unlimited object-mode inputs into the fallback.
-    let serialized: string;
-    try {
-      let remaining = 262144;
-      let nodes = 0;
-      serialized = JSON.stringify(raw, (_field: string, value: unknown) => {
-        if (++nodes > 4096) throw new Error('SERIALIZATION_BUDGET');
-        if (typeof value === 'string') remaining -= Buffer.byteLength(value);
-        if (remaining < 0 || (Array.isArray(value) && value.length > 4096))
-          throw new Error('SERIALIZATION_BUDGET');
-        return value;
-      });
-    } catch {
-      serialized = '"[unserializable input]"';
-    }
-    if (!serialized || Buffer.byteLength(serialized) > 262144) serialized = '"[oversized input omitted]"';
+    const serialized = boundedJson(raw) ?? '"[unsafe or oversized input omitted]"';
     const letter: Letter = {
       id: randomUUID(),
       trackingId,
@@ -77,10 +71,39 @@ export class DeadLetterQueue {
   async flush(pool: Pool): Promise<void> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const files = (await readdir(this.directory))
-      .filter((file) => /^[a-f0-9-]{36}\.json$/.test(file))
-      .slice(0, 10);
+      .filter((file) => /^[a-f0-9-]{36}\.json$/.test(file)).slice(0, 256);
+    let flushed = 0;
     for (const name of files) {
-      const letter = JSON.parse(await readFile(join(this.directory, name), 'utf8')) as Letter;
+      if (flushed >= 10) break;
+      let letter: Letter;
+      try {
+        const file = await open(join(this.directory, name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+        try {
+          const stat = await file.stat();
+          if (!stat.isFile() || stat.size > 360000) throw new Error('INVALID_SPOOL_FILE');
+          // Bounded read even if a file is enlarged after stat().
+          const buffer = Buffer.allocUnsafe(360001);
+          let bytes = 0;
+          while (bytes < buffer.length) {
+            const read = await file.read(buffer, bytes, buffer.length - bytes, bytes);
+            if (!read.bytesRead) break;
+            bytes += read.bytesRead;
+          }
+          if (bytes > 360000) throw new Error('INVALID_SPOOL_FILE');
+          letter = letterSchema.parse(JSON.parse(buffer.subarray(0, bytes).toString('utf8')));
+          if (name !== letter.id + '.json') throw new Error('SPOOL_IDENTITY_MISMATCH');
+          decrypt(letter.encryptedPayload, this.key, 'correlation-dlq');
+        } finally { await file.close(); }
+      } catch (error) {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
+        if (!this.corruptFiles.has(name)) {
+          if (this.corruptFiles.size >= 256) this.corruptFiles.clear();
+          this.corruptFiles.add(name);
+          this.telemetry.log('CRITICAL', 'dead_letter.corrupt_spool');
+        }
+        // Preserve evidence for repair; a poison file must not starve valid letters.
+        continue;
+      }
       await pool.query(
         timedQuery(
           `INSERT INTO correlation_dead_letters(id,tracking_id,error_code,encrypted_payload)
@@ -89,7 +112,11 @@ export class DeadLetterQueue {
           2000,
         ),
       );
-      await unlink(join(this.directory, name));
+      await unlink(join(this.directory, name)).catch((error) => {
+        if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ENOENT') throw error;
+      });
+      this.corruptFiles.delete(name);
+      flushed++;
     }
   }
 }

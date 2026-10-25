@@ -35,7 +35,7 @@ export const schemaLockKey = 'hashtext(COALESCE(current_schema(), current_databa
  * The newest migration this build depends on. Production startup refuses to
  * run against an older schema instead of failing later on a missing column.
  */
-export const REQUIRED_SCHEMA_VERSION = 13;
+export const REQUIRED_SCHEMA_VERSION = 15;
 
 export async function migrate(pool: pg.Pool) {
   const client = await pool.connect();
@@ -103,6 +103,10 @@ export async function migrate(pool: pg.Pool) {
       );
     if (!(await client.query('SELECT version FROM schema_migrations WHERE version=13')).rowCount)
       await client.query(await readFile(new URL('./migrations/013_correlation_operations.sql', import.meta.url), 'utf8'));
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=14')).rowCount)
+      await client.query(await readFile(new URL('./migrations/014_shared_correlation_concurrency.sql', import.meta.url), 'utf8'));
+    if (!(await client.query('SELECT version FROM schema_migrations WHERE version=15')).rowCount)
+      await client.query(await readFile(new URL('./migrations/015_correlation_lease_ownership.sql', import.meta.url), 'utf8'));
     await client.query('COMMIT');
   } catch (e) {
     failed = true;
@@ -134,6 +138,9 @@ export async function transaction<T>(
 ): Promise<T> {
   const db = client || (await pool.connect());
   let failed = false;
+  let connectionError: Error | undefined;
+  const onError = (error: Error) => { connectionError = error; failed = true; };
+  db.on('error', onError);
   try {
     await db.query('BEGIN');
     // Named, transaction-scoped locks replace the former global mutation lock.
@@ -142,19 +149,21 @@ export async function transaction<T>(
     for (const lock of [...(options.locks ?? [])].sort())
       await db.query(`SELECT pg_advisory_xact_lock(hashtext($1), ${schemaLockKey})`, [lock]);
     const result = await fn(db);
+    if (connectionError) throw connectionError;
     await db.query('COMMIT');
     return result;
   } catch (error) {
     failed = true;
     // ROLLBACK can itself fail when the connection is already broken; swallow
     // that secondary failure so the caller sees the original, more useful error.
-    await db.query('ROLLBACK').catch(() => {});
+    if (!connectionError) await db.query('ROLLBACK').catch(() => {});
     throw error;
   } finally {
     // Release with the failure flag so a connection left in a bad state by a
     // transport-level error is destroyed rather than returned to the pool,
     // where a future caller would otherwise inherit an unusable connection.
     if (!client) db.release(failed);
+    db.removeListener('error', onError);
   }
 }
 export async function put(db: Db, kind: string, id: string, data: unknown) {
@@ -220,7 +229,11 @@ export async function appendAudit(
   // The audit chain is a single linked list; a dedicated named lock serializes
   // only audit appends instead of every state mutation in the installation.
   await db.query(`SELECT pg_advisory_xact_lock(hashtext($1), ${schemaLockKey})`, ['audit-chain']);
-  const previous = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 1 FOR UPDATE')).rows[0]
+  // SELECT ... FOR KEY SHARE needs only table SELECT privilege (not UPDATE),
+  // so the least-privilege runtime role can read the chain head without being
+  // able to tamper with audit rows. The pg_advisory_xact_lock above already
+  // serializes appends per schema, so this lock is purely defensive.
+  const previous = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 1 FOR KEY SHARE')).rows[0]
     ?.data;
   const entry = chainAuditLogs(
     [

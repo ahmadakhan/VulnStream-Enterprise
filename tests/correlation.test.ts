@@ -215,6 +215,7 @@ test(
       assert.equal((await pool.query('SELECT * FROM correlation_dead_letters')).rowCount, 1);
       assert.equal(JSON.stringify(telemetry.logs).includes('customer-secret'), false);
       const supervisor = new PipelineSupervisor(pool, ingestor);
+      await pool.query('UPDATE correlation_policy SET concurrency_limit=8 WHERE id=1');
       supervisor.setConcurrency(8);
       supervisor.memoryPercent = () => 90;
       await supervisor.check();

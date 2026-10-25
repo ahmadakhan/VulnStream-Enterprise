@@ -35,6 +35,7 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
+      NODE_OPTIONS: --max-old-space-size=320
       NODE_ENV: production
       PORT: 8080
       DATABASE_URL: postgresql://vulnstream_app:${APP_DB_PASSWORD:?Set runtime password}@db:5432/vulnstream
@@ -53,11 +54,49 @@ services:
       CORRELATION_DLQ_DIRECTORY: /var/lib/vulnstream/deadletters
     volumes:
       - correlation-deadletters:/var/lib/vulnstream/deadletters
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     stop_grace_period: 35s
+    networks: [backend, egress]
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    profiles: [observability]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --storage.tsdb.retention.size=512MB
+    secrets:
+      - source: vulnstream_metrics_token
+        target: vulnstream_metrics_token
+    ports: ['127.0.0.1:${PROMETHEUS_PORT:-9091}:9090']
+    volumes:
+      - prometheus-data:/prometheus
+      - ./deploy/monitoring/prometheus-compose.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/monitoring/vulnstream-alerts.yml:/etc/prometheus/vulnstream-alerts.yml:ro
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:9090/-/ready]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     networks: [backend, egress]
   proxy:
     image: caddy:2-alpine
@@ -73,6 +112,7 @@ services:
     networks: [backend, egress]
 volumes:
   postgres-data:
+  prometheus-data:
   correlation-deadletters:
   caddy-data:
   caddy-config:
@@ -80,3 +120,7 @@ networks:
   backend:
     internal: true
   egress:
+
+secrets:
+  vulnstream_metrics_token:
+    file: ./.runtime/metrics.token

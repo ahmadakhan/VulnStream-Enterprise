@@ -14,6 +14,6 @@ RUN npm ci --include=dev
 
 COPY . .
 
-RUN npx tsc --noEmit || true
+RUN npm run lint
 
 CMD ["npm", "run", "test:vitest"]

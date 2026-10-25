@@ -8,6 +8,7 @@ import { DeadLetterQueue } from './deadLetter.ts';
 import { AdvisoryIngestor } from './ingest.ts';
 import { PipelineSupervisor } from './supervisor.ts';
 import { AdvisoryStreamProcessor } from './stream.ts';
+import { claimPending, renewPending, acknowledgePending } from './pending.ts';
 export class CorrelationRuntime {
   readonly supervisor: PipelineSupervisor;
   readonly processor: AdvisoryStreamProcessor;
@@ -26,6 +27,8 @@ export class CorrelationRuntime {
     this.processor = new AdvisoryStreamProcessor(this.supervisor);
   }
   start(): void {
+    if (this.timer) return;
+    this.stopped = false;
     this.supervisor.start();
     this.timer = setInterval(() => {
       if (this.draining || this.stopped || this.supervisor.health !== 'HEALTHY') return;
@@ -40,37 +43,49 @@ export class CorrelationRuntime {
     this.timer.unref();
   }
   private async drain(): Promise<void> {
-    await transaction(this.pool, (db) => queueNativeNotifications(db));
+    await this.queueNotifications();
     if (Date.now() - this.lastMaintenance >= 60_000) {
-      await transaction(this.pool, (db) => retainCorrelationData(db));
+      await transaction(this.pool, (db) => retainCorrelationData(db)).catch(() => {
+        this.supervisor.ingestor.telemetry.log('ERROR', 'retention.failed');
+      });
       this.lastMaintenance = Date.now();
     }
     while (!this.stopped && this.supervisor.health === 'HEALTHY') {
       // Leased SKIP LOCKED claims survive crashes; final ingestion is idempotent.
       // Claim at most concurrency slots, so leases don't expire behind a local queue.
-      const jobs = await this.pool.query<{ id: string; payload: unknown }>(
-        `WITH selected AS (
-      SELECT id FROM correlation_pending WHERE lease_until IS NULL OR lease_until<now()
-      ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED)
-      UPDATE correlation_pending p SET lease_until=now()+interval '60 seconds'
-      FROM selected s WHERE p.id=s.id RETURNING p.id,p.payload`,
-        [this.supervisor.concurrencyLimit],
-      );
-      if (!jobs.rowCount) return;
-      await this.processor.processAdvisoryStream(
-        Readable.from(jobs.rows.map((job) => job.payload)),
-        this.supervisor.concurrencyLimit,
-        this.pool,
-      );
-      await transaction(this.pool, (db) => queueNativeNotifications(db));
-      await this.pool.query('DELETE FROM correlation_pending WHERE id=ANY($1::text[])', [
-        jobs.rows.map((job) => job.id),
-      ]);
+      const batch = await claimPending(this.pool, this.supervisor.concurrencyLimit);
+      if (!batch.jobs.length) return;
+      let renewing: Promise<unknown> | undefined;
+      const heartbeat = setInterval(() => {
+        if (renewing) return;
+        renewing = renewPending(this.pool, batch).catch(() => {
+          this.supervisor.ingestor.telemetry.log('WARN', 'pending.lease_renewal_failed');
+        }).finally(() => { renewing = undefined; });
+      }, 20_000);
+      heartbeat.unref();
+      try {
+        await this.processor.processAdvisoryStream(
+          Readable.from(batch.jobs.map((job) => job.payload)),
+          this.supervisor.concurrencyLimit,
+          this.pool,
+        );
+        await acknowledgePending(this.pool, batch);
+      } finally {
+        clearInterval(heartbeat);
+        await renewing;
+      }
+      await this.queueNotifications();
     }
+  }
+  private async queueNotifications(): Promise<void> {
+    await transaction(this.pool, (db) => queueNativeNotifications(db)).catch(() => {
+      this.supervisor.ingestor.telemetry.log('ERROR', 'notifications.queue_failed');
+    });
   }
   async stop(): Promise<void> {
     this.stopped = true;
     clearInterval(this.timer);
+    this.timer = undefined;
     await this.supervisor.stop();
     await this.draining;
   }

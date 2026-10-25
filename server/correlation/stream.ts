@@ -9,45 +9,38 @@ export async function* advisoryRecords(input: Readable): AsyncGenerator<unknown>
     for await (const item of input) yield item;
     return;
   }
-  let chunks: Buffer[] = [];
+  // One allocation per stream: one-byte chunks must not create 262,144 Buffer objects.
+  const record = Buffer.allocUnsafe(MAX_RECORD_BYTES);
   let bytes = 0;
   let oversized = false;
+  const decode = (): unknown => {
+    if (oversized) return { invalidFrame: 'OVERSIZED_NDJSON' };
+    let raw: string;
+    try { raw = new TextDecoder('utf-8', { fatal: true }).decode(record.subarray(0, bytes)); }
+    catch { return { invalidFrame: 'INVALID_UTF8_NDJSON' }; }
+    try { return JSON.parse(raw); }
+    catch { return { invalidFrame: 'MALFORMED_NDJSON', raw }; }
+  };
   for await (const chunk of input) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
     let offset = 0;
     while (offset < buffer.length) {
       const newline = buffer.indexOf(10, offset);
       const end = newline < 0 ? buffer.length : newline;
-      const piece = buffer.subarray(offset, end);
-      bytes += piece.length;
-      if (bytes > MAX_RECORD_BYTES) {
-        oversized = true;
-        chunks = [];
-      } else if (!oversized) chunks.push(Buffer.from(piece));
+      const length = end - offset;
+      if (!oversized) {
+        if (length > MAX_RECORD_BYTES - bytes) oversized = true;
+        else { buffer.copy(record, bytes, offset, end); bytes += length; }
+      }
       if (newline >= 0) {
-        if (oversized) yield { invalidFrame: 'OVERSIZED_NDJSON' };
-        else if (bytes) {
-          try {
-            yield JSON.parse(Buffer.concat(chunks).toString('utf8'));
-          } catch {
-            yield { invalidFrame: 'MALFORMED_NDJSON', raw: Buffer.concat(chunks).toString('utf8') };
-          }
-        }
-        chunks = [];
+        if (oversized || bytes) yield decode();
         bytes = 0;
         oversized = false;
       }
       offset = newline < 0 ? buffer.length : newline + 1;
     }
   }
-  if (oversized) yield { invalidFrame: 'OVERSIZED_NDJSON' };
-  else if (bytes) {
-    try {
-      yield JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    } catch {
-      yield { invalidFrame: 'MALFORMED_NDJSON', raw: Buffer.concat(chunks).toString('utf8') };
-    }
-  }
+  if (oversized || bytes) yield decode();
 }
 export class AdvisoryStreamProcessor {
   constructor(readonly supervisor: PipelineSupervisor) {}

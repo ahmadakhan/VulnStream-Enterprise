@@ -15,7 +15,7 @@ This change adds an independent native-table ingestion path to the existing Vuln
 | No native stream supervision or controls | Heartbeat probes, memory hysteresis, per-task cancellation, bounded queue admission, persistent pending jobs and authenticated dashboard |
 | Existing mutation limiter restored tokens after allowing a request | Migration 012 exits the PL/pgSQL function immediately after its successful result; existing replica-sharing tests now pass |
 
-The configured local database initially exposed none of `assets`, `unstructured_advisories`, or `vendor_product_aliases` and was at schema version 4. It has now been upgraded to version 13. Both existing inventory records were projected, and a before/after digest verified that their stored data remained unchanged. See `correlation-deployment-report.json`. All test and benchmark records used disposable schemas.
+The configured local database initially exposed none of `assets`, `unstructured_advisories`, or `vendor_product_aliases` and was at schema version 4. It has now been upgraded to version 14. Both existing inventory records were projected, and a before/after digest verified that their stored data remained unchanged. See `correlation-deployment-report.json`. All test and benchmark records used disposable schemas.
 
 ## Eight implementation layers
 
@@ -74,7 +74,7 @@ Neither 100% uptime nor a zero false-positive rate can be guaranteed by applicat
 
 1. Build using `npm run lint && npm run build`.
 2. Review the protected-table contract and index-build window.
-3. Run the existing migration entry point with the migration role. Schema version 13 is required. The runtime grant list now includes the new tables.
+3. Run the existing migration entry point with the migration role. Schema version 14 is required. The runtime grant list now includes the new tables.
 4. Provide the existing base64 32-byte `ENCRYPTION_KEY`, a writable HA `DATABASE_URL`, and persistent `CORRELATION_DLQ_DIRECTORY` storage. Compose mounts the named `correlation-deadletters` volume, whose directory is initialized for the unprivileged Node user.
 5. Start at a conservative concurrency and measure workload-specific latency and pool wait times.
 
@@ -95,7 +95,7 @@ Stdout telemetry permits UUID tracking IDs and numeric metrics; raw payloads, UR
 ## Verification
 
 - Strict TypeScript compilation and client/server production builds.
-- Full Node suite against PostgreSQL in isolated schemas: 255 tests passed with zero failures or skipped tests, including the restricted-runtime-role regression.
+- Full Node suite against PostgreSQL in isolated schemas: 261 tests passed with zero failures or skipped tests, including the restricted-runtime-role regression.
 - Native correlation coverage includes parallel duplicate races, transaction rollback/retry, exact identifiers, conservative versions/backports, explicit exclusion precedence, early intelligence review routing, encrypted dead letters, Unicode chunk framing, concurrent-stream admission, and preservation of existing inventory columns and rows.
 - Disposable browser fixture `tests/fixtures/correlationPreview.ts` supports visual verification without touching application data. It requires `TEST_DATABASE_URL`, creates a unique temporary schema, and removes it on SIGTERM/SIGINT. Its test-only login is `preview` / `Disposable-preview-password-2026!`.
 
@@ -121,4 +121,18 @@ The recorded local 500-item run used four workers, processed 450 unique articles
 
 `deploy/kubernetes/ha.yaml` supplies two instances on distinct nodes, independent retained spool volumes, process probes, and a disruption budget. `deploy/monitoring` supplies authenticated Prometheus scraping and alert rules. The cluster, writable HA PostgreSQL endpoint, ingress, persistent storage and external alert/log destinations must be supplied by the deployment environment. No Kubernetes client/context or external HA endpoint was available here, so cross-node rollout and database-primary promotion have not been performed. See `deploy/kubernetes/README.md` for the exact secret and deployment contract.
 
-Final verification: strict compilation, client/server builds and 255 tests passed with no skipped cases. The production image was built locally as `vulnstream-enterprise:local-verified`. Browser checks verified an audited review approval, inventory selection and corrected dead-letter replay; `correlation-operations-verification.png` records the resulting UI. No external notifications were sent.
+Final verification: strict compilation, client/server builds and 261 tests passed with no skipped cases. The production image was built locally as `vulnstream-enterprise:local-verified`. Browser checks verified an audited review approval, inventory selection and corrected dead-letter replay; `correlation-operations-verification.png` records the resulting UI. No external notifications were sent.
+
+## Local deployment verification (October 25, 2026)
+
+The existing Docker deployment was upgraded from schema 4 to 14 after retaining an encrypted PostgreSQL backup and the previous application image under the private, ignored `.runtime` directory. Two app replicas now run with a 512 MiB memory limit and one CPU each. Caddy resolves replica addresses dynamically and retries GET/HEAD requests against healthy upstreams. Its default TLS server name supports the configured IP-address origin without disabling certificate verification ([Caddy reference](https://caddyserver.com/docs/caddyfile/options#default-sni)).
+
+Migration 014 adds shared concurrency policy only to the application-owned policy table. Operator changes persist in PostgreSQL and propagate on supervisor heartbeats; throughput, memory and log metrics remain per instance. Concurrent encrypted-spool flushing tolerates another replica completing the same file first.
+
+The optional Compose `observability` profile runs Prometheus with authenticated discovery of both replicas. Its UI binds only to `127.0.0.1:9091` (override `PROMETHEUS_PORT`). The running deployment has its bearer credential mounted from `.runtime/metrics.token`; the parent directory is mode 0700. Fresh deployments must populate this file with the same `METRICS_TOKEN` configured for the app before starting the observability profile. Never commit either credential.
+
+`npm run deployment:verify` checks the configured HTTPS origin, both container health states and both monitored instances. Use the deployed HTTPS `APP_ORIGIN` when the developer environment instead uses an HTTP origin. The explicit `--exercise` option stops only the second verified app container, checks ten proxy requests and restores that replica in a finally block. Certificate validation uses system roots plus the deployment's local Caddy CA where present. Results are recorded in `correlation-proxy-failover-report.json`.
+
+This verifies application-replica recovery on one host. The host, proxy and bundled PostgreSQL instance remain single points of failure. Cross-node availability and actual PostgreSQL primary promotion still require the external infrastructure described above.
+
+Final recovery check: 11 verified HTTPS proxy requests, zero failures, maximum observed latency 2,306 ms during replica loss; the second replica was restored and both monitoring targets returned healthy. The complete final database-backed Node suite passed 261 tests with zero skipped cases. Strict compilation and both production builds passed.

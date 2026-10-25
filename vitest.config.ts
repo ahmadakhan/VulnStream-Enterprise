@@ -34,6 +34,7 @@ export default defineConfig({
     exclude: ['node_modules', 'dist', 'server-dist'],
     isolate: true,
     maxConcurrency: 4,
+    maxWorkers: 4,
     // Database suites execute their nested subtests inline, so the enclosing
     // test owns the full duration of the file's database scenario.
     testTimeout: 120000,

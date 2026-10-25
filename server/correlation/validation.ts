@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { parseCPE23 } from '../../src/utils/cpeMatcher.ts';
 import { canonicalArticleUrl } from '../rss.ts';
+import { boundedJson } from './boundedJson.ts';
 const bounded = (max: number) =>
   z
     .string()
@@ -49,7 +50,7 @@ const advisoryShape = z
   .strict();
 // Reject hostile array lengths before Zod traverses their elements. This also
 // prevents refinements from processing giant identity strings after a max error.
-export const AdvisoryInputSchema = z
+const guardedShape = z
   .unknown()
   .refine((raw) => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
@@ -71,6 +72,10 @@ export const AdvisoryInputSchema = z
     return true;
   }, 'Input exceeds ingestion boundary budget')
   .pipe(advisoryShape);
+export const AdvisoryInputSchema = z.preprocess((raw) => {
+  const encoded = boundedJson(raw);
+  return encoded === null ? null : JSON.parse(encoded);
+}, guardedShape);
 export type AdvisoryInput = z.infer<typeof AdvisoryInputSchema>;
 export interface ExtractedText {
   text: string;

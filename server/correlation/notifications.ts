@@ -4,6 +4,8 @@ import type { EmailRecipient, WebhookEndpoint } from '../../src/types/index.ts';
 import { readNativeEvidence } from './notificationEvidence.ts';
 /** Runs inside a transaction: event claim and existing outbox insertion commit together. */
 export async function queueNativeNotifications(db: Db): Promise<number> {
+  const policy = await db.query<{ notifications_enabled: boolean }>('SELECT notifications_enabled FROM correlation_policy WHERE id=1');
+  if (!policy.rows[0]?.notifications_enabled) return 0;
   const recipientRows = await db.query<{
     data: EmailRecipient;
   }>(`SELECT data FROM records WHERE kind='recipients'
@@ -20,6 +22,13 @@ export async function queueNativeNotifications(db: Db): Promise<number> {
     CROSS JOIN correlation_policy p LEFT JOIN correlation_notifications n ON n.advisory_id=m.advisory_id
     WHERE p.id=1 AND p.notifications_enabled AND m.created_at>=p.notifications_since
     AND (n.advisory_id IS NULL OR m.created_at>n.queued_at)
+    AND NOT EXISTS (
+      SELECT 1 FROM correlation_matches candidate
+      LEFT JOIN correlation_match_evidence e ON e.advisory_id=candidate.advisory_id AND e.asset_id=candidate.asset_id
+      LEFT JOIN correlation_asset_inventory i ON i.id=candidate.asset_id
+      WHERE candidate.advisory_id=m.advisory_id AND (e.asset_revision IS NULL OR i.revision IS NULL OR e.asset_revision<>i.revision)
+    )
+    AND (SELECT count(*) FROM (SELECT 1 FROM correlation_matches fanout WHERE fanout.advisory_id=m.advisory_id LIMIT 1001) bounded)<=1000
     AND ($1::boolean OR NOT EXISTS(SELECT 1 FROM correlation_matches other WHERE other.advisory_id=m.advisory_id AND other.confidence<>'HIGH'))
     ORDER BY m.advisory_id LIMIT 20`,
     [recipients.length > 0],

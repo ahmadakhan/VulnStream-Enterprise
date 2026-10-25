@@ -30,6 +30,7 @@ export class TextCorrelationEngine {
   ): Promise<CorrelationMatch[]> {
     const matches = new Map<string, CorrelationMatch>();
     const add = (asset: Asset, confidence: CorrelationMatch['confidence'], reason: string) => {
+      if (!matches.has(asset.id) && matches.size >= 1000) throw new Error('MATCH_FANOUT_LIMIT');
       const old = matches.get(asset.id);
       if (old && (old.confidence === 'HIGH' || (old.confidence === 'MEDIUM' && confidence === 'LOW'))) return;
       if (extracted.negated) {
@@ -104,14 +105,18 @@ export class TextCorrelationEngine {
       for (const asset of names.rows)
         add(asset, 'LOW', 'Vendor/product tokens present; contextual applicability requires review');
     }
+    // One bounded inventory lookup for all entities avoids hundreds of sequential
+    // queries and enforces the ceiling across products, not just per product.
+    const assets = entities.length ? await query<Asset>(
+      `SELECT id,vendor,product,version,revision FROM correlation_asset_inventory i
+       WHERE EXISTS (SELECT 1 FROM jsonb_to_recordset($1::jsonb) AS e(vendor text,product text)
+       WHERE lower(i.vendor)=e.vendor AND lower(i.product)=e.product) LIMIT 1001`,
+      [JSON.stringify(entities.map(entity => ({vendor: entity.vendor.toLowerCase(), product: entity.product.toLowerCase()})))],
+    ) : { rows: [] };
+    if (assets.rows.length > 1000) throw new Error('MATCH_FANOUT_LIMIT');
     for (const entity of entities) {
-      const assets = await query<Asset>(
-        `SELECT id,vendor,product,version,revision FROM correlation_asset_inventory
-        WHERE lower(vendor)=$1 AND lower(product)=$2 LIMIT 1001`,
-        [entity.vendor.toLowerCase(), entity.product.toLowerCase()],
-      );
       if (assets.rows.length > 1000) throw new Error('MATCH_FANOUT_LIMIT');
-      for (const asset of assets.rows) {
+      for (const asset of assets.rows.filter(asset => asset.vendor?.toLowerCase() === entity.vendor.toLowerCase() && asset.product?.toLowerCase() === entity.product.toLowerCase())) {
         if (!entity.affectedRange) {
           add(
             asset,

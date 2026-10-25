@@ -19,8 +19,6 @@ services:
     tmpfs:
       - /var/lib/postgresql/data
       - /tmp
-    ports:
-      - "5433:5432"
     healthcheck:
       test:
         - CMD-SHELL

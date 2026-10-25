@@ -1,9 +1,16 @@
 import { correlationMetrics } from './correlation/metrics.ts';
-import { correlationWorkflows, decideCorrelationReview, decideDeadLetter, updateCorrelationPolicy, retainCorrelationData } from './correlation/operations.ts';
+import {
+  correlationWorkflows,
+  decideCorrelationReview,
+  decideDeadLetter,
+  updateCorrelationPolicy,
+  retainCorrelationData,
+} from './correlation/operations.ts';
 import type { CorrelationRuntime } from './correlation/runtime.ts';
 import { advisoryRecords } from './correlation/stream.ts';
 import { Readable } from 'node:stream';
 import express from 'express';
+import { WorkCapacityError } from './workLimiter.ts';
 import compression from 'compression';
 import helmet from 'helmet';
 import path from 'node:path';
@@ -39,12 +46,7 @@ import { emailIsConfigured } from './emailProviders';
 import { parseSyndication, RSS_MAX_BYTES } from './rss';
 import { readEvents, writeEvent } from './events';
 import { createDatabaseRateLimiter, type MutationLimiter } from './rateLimit';
-import {
-  searchNvdCpes,
-  loadNvdApiKey,
-  isNvdRateLimitError,
-  nvdRetryAfterSeconds,
-} from './cpeSearch';
+import { searchNvdCpes, loadNvdApiKey, isNvdRateLimitError, nvdRetryAfterSeconds } from './cpeSearch';
 import type { AppState } from '../shared/state.ts';
 import type {
   AppSettings,
@@ -199,9 +201,10 @@ export function createApp(
     next();
   });
   app.get('/live', (_req, res) => res.json({ status: 'live' }));
-  app.get('/metrics',(req,res)=>{
-    if(!options.correlation || !config.METRICS_TOKEN) return res.sendStatus(404);
-    if(!secureEqual(req.headers.authorization || '',`Bearer ${config.METRICS_TOKEN}`)) return res.sendStatus(401);
+  app.get('/metrics', (req, res) => {
+    if (!options.correlation || !config.METRICS_TOKEN) return res.sendStatus(404);
+    if (!secureEqual(req.headers.authorization || '', `Bearer ${config.METRICS_TOKEN}`))
+      return res.sendStatus(401);
     res.type('text/plain; version=0.0.4').send(correlationMetrics(options.correlation.supervisor));
   });
   app.get(
@@ -231,38 +234,78 @@ export function createApp(
   });
   if (options.correlation) {
     const runtime = options.correlation;
-    app.get('/api/correlation/workflows',asyncRoute(async (_req,res)=>res.json(await correlationWorkflows(pool))));
-    app.patch('/api/correlation/policy',requireRole('ADMIN'),asyncRoute(async(req,res)=>{
-      const policy = await transaction(pool,db=>updateCorrelationPolicy(db,req.body,req.operator!.username));
-      res.json(policy);
-    }));
-    app.post('/api/correlation/reviews/:id/decision',requireRole('ADMIN','OPERATOR'),asyncRoute(async(req,res)=>{
-      const id = z.uuid().parse(req.params.id);
-      await transaction(pool,db=>decideCorrelationReview(db,id,req.body,req.operator!.username));
-      res.json({success:true});
-    }));
-    app.post('/api/correlation/dead-letters/:id/decision',requireRole('ADMIN'),asyncRoute(async(req,res)=>{
-      const id = z.uuid().parse(req.params.id);
-      await transaction(pool,db=>decideDeadLetter(db,id,req.body,req.operator!.username,config.ENCRYPTION_KEY));
-      res.json({success:true});
-    }));
-    app.post('/api/correlation/retention/run',requireRole('ADMIN'),asyncRoute(async(req,res)=>{
-      const removed = await transaction(pool,async db=>{
-        const count = await retainCorrelationData(db);
-        await appendAudit(db,'Correlation retention run',`${count} resolved or expired records removed`,req.operator!.username);
-        return count;
-      });
-      res.json({removed});
-    }));
-    app.get('/api/correlation/assets',asyncRoute(async(req,res)=>{
-      const query = z.object({q:z.string().trim().max(200).default(''),after:z.uuid().optional()}).strict().parse(req.query);
-      const rows = await pool.query(`SELECT i.id,i.vendor,i.product,i.version,m.record_id AS "recordId",r.data->>'assetTag' AS "assetTag"
+    app.get(
+      '/api/correlation/workflows',
+      asyncRoute(async (_req, res) => res.json(await correlationWorkflows(pool))),
+    );
+    app.patch(
+      '/api/correlation/policy',
+      requireRole('ADMIN'),
+      asyncRoute(async (req, res) => {
+        const policy = await transaction(pool, (db) =>
+          updateCorrelationPolicy(db, req.body, req.operator!.username),
+        );
+        res.json(policy);
+      }),
+    );
+    app.post(
+      '/api/correlation/reviews/:id/decision',
+      requireRole('ADMIN', 'OPERATOR'),
+      asyncRoute(async (req, res) => {
+        const id = z.uuid().parse(req.params.id);
+        await transaction(pool, (db) => decideCorrelationReview(db, id, req.body, req.operator!.username));
+        res.json({ success: true });
+      }),
+    );
+    app.post(
+      '/api/correlation/dead-letters/:id/decision',
+      requireRole('ADMIN'),
+      asyncRoute(async (req, res) => {
+        const id = z.uuid().parse(req.params.id);
+        await transaction(pool, (db) =>
+          decideDeadLetter(db, id, req.body, req.operator!.username, config.ENCRYPTION_KEY),
+        );
+        res.json({ success: true });
+      }),
+    );
+    app.post(
+      '/api/correlation/retention/run',
+      requireRole('ADMIN'),
+      asyncRoute(async (req, res) => {
+        const removed = await transaction(pool, async (db) => {
+          const count = await retainCorrelationData(db);
+          await appendAudit(
+            db,
+            'Correlation retention run',
+            `${count} resolved or expired records removed`,
+            req.operator!.username,
+          );
+          return count;
+        });
+        res.json({ removed });
+      }),
+    );
+    app.get(
+      '/api/correlation/assets',
+      asyncRoute(async (req, res) => {
+        const query = z
+          .object({ q: z.string().trim().max(200).default(''), after: z.uuid().optional() })
+          .strict()
+          .parse(req.query);
+        const rows = await pool.query(
+          `SELECT i.id,i.vendor,i.product,i.version,m.record_id AS "recordId",r.data->>'assetTag' AS "assetTag"
         FROM correlation_asset_inventory i LEFT JOIN correlation_managed_assets m ON m.native_id=i.id
         LEFT JOIN records r ON r.kind='watchlist' AND r.id=m.record_id
         WHERE ($1::uuid IS NULL OR i.id>$1) AND ($2='' OR strpos(lower(i.vendor||' '||i.product),lower($2))>0)
-        ORDER BY i.id LIMIT 51`,[query.after || null,query.q]);
-      res.json({assets:rows.rows.slice(0,50),nextCursor:rows.rows.length>50 ? rows.rows[49].id : null});
-    }));
+        ORDER BY i.id LIMIT 51`,
+          [query.after || null, query.q],
+        );
+        res.json({
+          assets: rows.rows.slice(0, 50),
+          nextCursor: rows.rows.length > 50 ? rows.rows[49].id : null,
+        });
+      }),
+    );
 
     app.get(
       '/api/correlation',
@@ -276,6 +319,17 @@ export function createApp(
           .object({ limit: z.number().int().min(1).max(32) })
           .strict()
           .parse(req.body);
+        await transaction(pool, async (db) => {
+          await db.query('UPDATE correlation_policy SET concurrency_limit=$1,updated_at=now() WHERE id=1', [
+            limit,
+          ]);
+          await appendAudit(
+            db,
+            'Correlation concurrency changed',
+            `Per-instance limit ${limit}`,
+            req.operator!.username,
+          );
+        });
         runtime.supervisor.setConcurrency(limit);
         res.json({ concurrencyLimit: runtime.supervisor.concurrencyLimit });
       }),
@@ -330,41 +384,38 @@ export function createApp(
       }),
     );
   }
-   app.get('/api/session', (req, res) =>
-     res.json({
-       username: req.operator!.username,
-       role: req.operator!.role,
-       csrfToken: req.operator!.csrf,
-       expiresAt: req.operator!.expiresAt,
-     }),
-   );
-   app.get(
-     '/api/cpes/search',
-     requireRole('ADMIN', 'OPERATOR'),
-     asyncRoute(async (req, res) => {
-       const { vendor, product, limit } = z
-         .object({
-           vendor: z.string().trim().min(1).max(200),
-           product: z.string().trim().max(200).default(''),
-           limit: z.coerce.number().int().min(1).max(200).default(50),
-         })
-         .parse(req.query);
-       const apiKey = await loadNvdApiKey(pool, config);
-       try {
-         res.json(await searchNvdCpes(request, apiKey, vendor, product, limit));
-       } catch (error) {
-         if (isNvdRateLimitError(error)) {
-           const retryAfter = nvdRetryAfterSeconds(error);
-           if (retryAfter) res.setHeader('Retry-After', String(retryAfter));
-           throw new HttpError(429, 'NVD rate limit reached; retry later');
-         }
-         throw new HttpError(
-           502,
-           error instanceof Error ? error.message : 'NVD CPE search failed',
-         );
-       }
-     }),
-   );
+  app.get('/api/session', (req, res) =>
+    res.json({
+      username: req.operator!.username,
+      role: req.operator!.role,
+      csrfToken: req.operator!.csrf,
+      expiresAt: req.operator!.expiresAt,
+    }),
+  );
+  app.get(
+    '/api/cpes/search',
+    requireRole('ADMIN', 'OPERATOR'),
+    asyncRoute(async (req, res) => {
+      const { vendor, product, limit } = z
+        .object({
+          vendor: z.string().trim().min(1).max(200),
+          product: z.string().trim().max(200).default(''),
+          limit: z.coerce.number().int().min(1).max(200).default(50),
+        })
+        .parse(req.query);
+      const apiKey = await loadNvdApiKey(pool, config);
+      try {
+        res.json(await searchNvdCpes(request, apiKey, vendor, product, limit));
+      } catch (error) {
+        if (isNvdRateLimitError(error)) {
+          const retryAfter = nvdRetryAfterSeconds(error);
+          if (retryAfter) res.setHeader('Retry-After', String(retryAfter));
+          throw new HttpError(429, 'NVD rate limit reached; retry later');
+        }
+        throw new HttpError(502, error instanceof Error ? error.message : 'NVD CPE search failed');
+      }
+    }),
+  );
   app.post(
     '/api/session/renew',
     asyncRoute(async (req, res) => {
@@ -1140,6 +1191,10 @@ export function createApp(
   );
   app.get('*', (_req, res) => res.sendFile(path.resolve('dist/index.html')));
   app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    if (error instanceof WorkCapacityError) {
+      res.setHeader('Retry-After', '2');
+      return res.status(503).json({ error: 'Authentication capacity is busy; retry shortly' });
+    }
     if (error instanceof z.ZodError)
       return res.status(400).json({
         error: 'Validation failed',

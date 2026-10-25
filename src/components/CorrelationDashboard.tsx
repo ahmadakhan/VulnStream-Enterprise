@@ -116,6 +116,11 @@ export function CorrelationDashboard() {
           {snapshot?.health || 'CONNECTING'}
         </span>
       </div>
+      {snapshot && (
+        <p className="text-xs font-mono text-zinc-500">
+          Instance {snapshot.instanceId} · per-instance metrics
+        </p>
+      )}
       {error && (
         <p role="alert" className="rounded-xl border border-red-500/40 p-3 text-red-400">
           {error}

@@ -6,8 +6,12 @@ import {
   timingSafeEqual,
   createHash,
 } from 'node:crypto';
+import { WorkLimiter } from './workLimiter.ts';
+// A single scrypt operation consumes about 128 MiB. libuv's default four-way
+// concurrency can exceed the entire application container's memory allowance.
+const passwordWork = new WorkLimiter(1, 8, 5000);
 const scrypt = (password: string, salt: string, length: number) =>
-  new Promise<Buffer>((resolve, reject) =>
+  passwordWork.run(() => new Promise<Buffer>((resolve, reject) =>
     scryptCallback(
       password,
       salt,
@@ -15,7 +19,7 @@ const scrypt = (password: string, salt: string, length: number) =>
       { N: 131072, r: 8, p: 1, maxmem: 256 * 1024 * 1024 },
       (error, result) => (error ? reject(error) : resolve(result)),
     ),
-  );
+  ));
 export const tokenHash = (value: string) => createHash('sha256').update(value).digest('hex');
 export const randomToken = () => randomBytes(32).toString('base64url');
 export async function passwordHash(password: string) {
@@ -25,7 +29,7 @@ export async function passwordHash(password: string) {
 }
 export async function checkPassword(password: string, stored: string) {
   const [algorithm, salt, expected] = stored.split('$');
-  if (algorithm !== 'scrypt131072' || !salt || !/^[0-9a-f]{128}$/.test(expected || '')) return false;
+  if (algorithm !== 'scrypt131072' || !/^[0-9a-f]{32}$/.test(salt || '') || !/^[0-9a-f]{128}$/.test(expected || '')) return false;
   const result = (await scrypt(password, salt, 64)) as Buffer;
   return timingSafeEqual(result, Buffer.from(expected, 'hex'));
 }
