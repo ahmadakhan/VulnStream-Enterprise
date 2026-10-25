@@ -18,10 +18,16 @@ export async function* advisoryRecords(input: Readable): AsyncGenerator<Advisory
   const decode = (): AdvisoryRecord => {
     if (oversized) return { invalidFrame: 'OVERSIZED_NDJSON' };
     let raw: string;
-    try { raw = new TextDecoder('utf-8', { fatal: true }).decode(record.subarray(0, bytes)); }
-    catch { return { invalidFrame: 'INVALID_UTF8_NDJSON' }; }
-    try { return JSON.parse(raw); }
-    catch { return { invalidFrame: 'MALFORMED_NDJSON', raw: '' }; }
+    try {
+      raw = new TextDecoder('utf-8', { fatal: true }).decode(record.subarray(0, bytes));
+    } catch {
+      return { invalidFrame: 'INVALID_UTF8_NDJSON' };
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return { invalidFrame: 'MALFORMED_NDJSON', raw: '' };
+    }
   };
   for await (const chunk of input) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
@@ -32,7 +38,10 @@ export async function* advisoryRecords(input: Readable): AsyncGenerator<Advisory
       const length = end - offset;
       if (!oversized) {
         if (length > MAX_RECORD_BYTES - bytes) oversized = true;
-        else { buffer.copy(record, bytes, offset, end); bytes += length; }
+        else {
+          buffer.copy(record, bytes, offset, end);
+          bytes += length;
+        }
       }
       if (newline >= 0) {
         if (oversized || bytes) yield decode();
@@ -55,7 +64,10 @@ export class AdvisoryStreamProcessor {
       for await (const raw of advisoryRecords(inputStream)) {
         // Skip invalid frames but log them
         if (typeof raw === 'object' && raw !== null && 'invalidFrame' in raw) {
-          this.supervisor.ingestor.telemetry.log('WARN', 'stream.invalid_frame', { trackingId: 'stream', count: 1 });
+          this.supervisor.ingestor.telemetry.log('WARN', 'stream.invalid_frame', {
+            trackingId: 'stream',
+            count: 1,
+          });
           continue;
         }
         while (running.size >= concurrencyLimit) await Promise.race(running);
@@ -107,11 +119,14 @@ export class AdvisoryStreamProcessor {
     if ((advisory.cpes?.length ?? 0) > 0 || (advisory.purls?.length ?? 0) > 0) return 'HIGH';
     // Check for critical keywords in title/content
     const text = `${advisory.title ?? ''} ${advisory.content ?? ''}`.toLowerCase();
-    if (/\b(remote code execution|rce|zero.day|zero-day|actively exploited|in.the.wild|unpatched|critical|severity)\b/.test(text))
+    if (
+      /\b(remote code execution|rce|zero.day|zero-day|actively exploited|in.the.wild|unpatched|critical|severity)\b/.test(
+        text,
+      )
+    )
       return 'HIGH';
     // MEDIUM: Has security signals but no CVE
-    if (/\b(vulnerability|exploit|patch|update|security|advisory)\b/.test(text))
-      return 'MEDIUM';
+    if (/\b(vulnerability|exploit|patch|update|security|advisory)\b/.test(text)) return 'MEDIUM';
     return 'LOW';
   }
 }
