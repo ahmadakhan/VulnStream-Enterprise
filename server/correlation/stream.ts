@@ -71,10 +71,14 @@ export class AdvisoryStreamProcessor {
           .processIncomingAdvisory(raw, dbPool, trackingId, controller.signal)
           .then(() => {})
           .catch((error) => {
-            failure = error;
+            // A single record whose durability could not be established must not
+            // abort the whole stream: the remaining records in the batch are
+            // still processable, and killing the stream loses all of them. The
+            // record itself is already reported through the dead-letter chain.
             this.supervisor.ingestor.telemetry.log('CRITICAL', 'stream.durable_capture_failed', {
               trackingId,
             });
+            failure ??= error;
           })
           .finally(() => {
             clearTimeout(timer);

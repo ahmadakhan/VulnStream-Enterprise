@@ -160,11 +160,17 @@ export async function bindClusterToCve(
       // bindable within a grace period: NVD frequently publishes weeks after
       // the disclosure, and the operator dispositions recorded in the window
       // must still reach the canonical identifier.
+      //
+      // No SKIP LOCKED here. Skipping a locked row during a concurrent bind
+      // would make this function return null and silently drop the disposition
+      // inheritance — the one guarantee the cluster exists to provide. Waiting
+      // is bounded by the ingest statement_timeout, and the UPDATE below is
+      // idempotent if another transaction bound the cluster first.
       `SELECT id FROM pre_cve_clusters
       WHERE vendor=$1 AND product=$2 AND resolved_cve_id IS NULL
         AND (closed_at IS NULL OR closed_at > now() - interval '180 days')
       ORDER BY closed_at NULLS FIRST, last_seen DESC
-      LIMIT 1 FOR UPDATE SKIP LOCKED`,
+      LIMIT 1 FOR UPDATE`,
       [vendor.toLowerCase(), product.toLowerCase()],
     )
   ).rows as { id: string }[];

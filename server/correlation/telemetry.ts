@@ -91,9 +91,16 @@ export class CorrelationTelemetry {
    * tracking ids originate outside the process, and the previous string-built
    * INSERT both broke on any embedded quote and allowed SQL injection through
    * a crafted log event. */
-  async persistBeforeCommit(db: PoolClient): Promise<void> {
-    if (!this.logs.length) return;
-    const entries = this.logs;
+  async persistBeforeCommit(db: PoolClient, trackingId?: string): Promise<void> {
+    // Only drain the entries that belong to this advisory. The buffer is shared
+    // by every in-flight ingest in the worker, so clearing all of it on one
+    // commit discarded (and misattributed) the telemetry of concurrent
+    // advisories — silent data loss that scales with concurrency.
+    const inFlight = trackingId
+      ? this.logs.filter((entry) => entry.trackingId === trackingId)
+      : this.logs;
+    if (!inFlight.length) return;
+    const entries = inFlight;
     const values: unknown[] = [];
     const params = entries.map((log, index) => {
       const first = index * 15 + 1;
@@ -147,8 +154,11 @@ export class CorrelationTelemetry {
        VALUES ${params.join(',')}`,
       values,
     );
-    // Clear in-memory buffer after successful persistence
-    this.logs.length = 0;
+    // Remove only the persisted entries; anything logged by another advisory
+    // stays buffered for its own transaction.
+    const persisted = new Set(entries);
+    for (let index = this.logs.length - 1; index >= 0; index--)
+      if (persisted.has(this.logs[index])) this.logs.splice(index, 1);
   }
   private flushOutput(): void {
     if (this.outputBlocked || this.outputError) return;

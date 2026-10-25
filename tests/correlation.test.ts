@@ -124,6 +124,58 @@ test('dead-letter fallback encrypts payload before filesystem persistence', asyn
     await rm(directory, { recursive: true, force: true });
   }
 });
+test('telemetry persistence drains only the entries of the committing advisory', async () => {
+  // The buffer is shared by every in-flight ingest in the worker. Draining all
+  // of it on one commit silently discards (and misattributes) the logs of other
+  // concurrent advisories.
+  const telemetry = silent();
+  const A = randomUUID();
+  const B = randomUUID();
+  telemetry.log('INFO', 'advisory.a.first', { trackingId: A });
+  telemetry.log('INFO', 'advisory.b.first', { trackingId: B });
+  telemetry.log('INFO', 'advisory.a.second', { trackingId: A });
+  const inserted: unknown[][] = [];
+  const client = {
+    query: async (sql: string, values?: unknown[]) => {
+      if (/INSERT INTO operational_events/.test(sql)) inserted.push(values ?? []);
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as import('pg').PoolClient;
+  await telemetry.persistBeforeCommit(client, A);
+  assert.equal(inserted.length, 1);
+  // 15 bound parameters per entry, two entries for advisory a.
+  assert.equal(inserted[0].length, 30);
+  // Advisory b's entry survives for its own commit.
+  assert.deepEqual(
+    telemetry.logs.map((entry) => entry.event),
+    ['advisory.b.first'],
+    "another advisory's telemetry must stay buffered",
+  );
+});
+test('a full dead-letter spool must not silently discard the advisory', async () => {
+  // The spool exists to guarantee a failed advisory is never lost. When it is
+  // full, throwing loses the very record it was meant to protect; the caller
+  // then reports a rejection instead of DEAD_LETTER and the stream aborts.
+  const directory = await mkdtemp(join(tmpdir(), 'correlation-dlq-full-'));
+  try {
+    const queue = new DeadLetterQueue(directory, key, silent());
+    // Fill the spool to its documented ceiling (file i is the (i+1)th letter).
+    for (let i = 0; i < 255; i++)
+      await queue.capture({ i }, 'VALIDATION_FAILED', randomUUID(), {} as pg.Pool);
+    assert.equal(await queue.capture({ i: 255 }, 'VALIDATION_FAILED', randomUUID(), {} as pg.Pool), 'SPOOLED');
+    const outcome = await queue.capture({ overflow: true }, 'VALIDATION_FAILED', randomUUID(), {} as pg.Pool);
+    assert.equal(
+      outcome,
+      'capacity',
+      'a full spool must be reported so the caller can use the database fallback',
+    );
+    // Exactly the ceiling, no partial writes left behind.
+    const files = (await readdir(directory)).filter((f) => f.endsWith('.json'));
+    assert.equal(files.length, 256);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test(
   'native correlation transactions, schema coexistence and stream concurrency',

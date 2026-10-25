@@ -52,7 +52,7 @@ export class AdvisoryIngestor {
     const parsed = AdvisoryInputSchema.safeParse(rawInput);
     if (!parsed.success) {
       this.telemetry.log('WARN', 'validation.failed', { trackingId, count: parsed.error.issues.length });
-      await this.deadLetterQueue.capture(rawInput, 'VALIDATION_FAILED', trackingId, dbPool);
+      await this.persistFailure(rawInput, 'VALIDATION_FAILED', trackingId, dbPool);
       this.telemetry.completed++;
       this.telemetry.latencyTotal += performance.now() - started;
       return 'DEAD_LETTER';
@@ -161,7 +161,7 @@ export class AdvisoryIngestor {
               );
           await query('UPDATE unstructured_advisories SET processed_at=now() WHERE id=$1', [advisoryId]);
           // Persist telemetry to operational_events BEFORE commit for crash durability
-          await this.telemetry.persistBeforeCommit(client);
+          await this.telemetry.persistBeforeCommit(client, trackingId);
           await query('COMMIT');
           this.telemetry.log('INFO', 'ingestion.committed', {
             trackingId,
@@ -188,11 +188,39 @@ export class AdvisoryIngestor {
       throw new Error('RETRIES_EXHAUSTED');
     } catch (error) {
       this.telemetry.log('ERROR', 'ingestion.failed', { trackingId, totalDatabaseTimeMs: databaseTime });
-      await this.deadLetterQueue.capture(rawInput, databaseCode(error), trackingId, dbPool);
+      await this.persistFailure(rawInput, databaseCode(error), trackingId, dbPool);
       return 'DEAD_LETTER';
     } finally {
       this.telemetry.completed++;
       this.telemetry.latencyTotal += performance.now() - started;
     }
+  }
+
+  /**
+   * Durable fallback chain: encrypted spool first, then the database.
+   *
+   * A failed advisory must never be dropped. The previous implementation let a
+   * full spool throw out of the caller, which both lost the record and aborted
+   * the surrounding stream — turning a disk-pressure event into a pipeline-wide
+   * outage precisely when load was highest. Every failure here is contained and
+   * reported, never propagated.
+   */
+  private async persistFailure(
+    raw: unknown,
+    errorCode: string,
+    trackingId: string,
+    dbPool: Pool,
+  ): Promise<void> {
+    try {
+      const outcome = await this.deadLetterQueue.capture(raw, errorCode, trackingId, dbPool);
+      if (outcome === 'SPOOLED') return;
+    } catch (error) {
+      this.telemetry.log('CRITICAL', 'dead_letter.spool_failed', { trackingId });
+    }
+    if (await this.deadLetterQueue.captureToDatabase(raw, errorCode, trackingId, dbPool)) return;
+    // Both stores are unavailable. This is the only remaining loss window, so it
+    // is logged at CRITICAL with enough identifiers to reconstruct the record
+    // from the source feed, and the ingest outcome stays DEAD_LETTER.
+    this.telemetry.log('CRITICAL', 'dead_letter.undurable', { trackingId });
   }
 }

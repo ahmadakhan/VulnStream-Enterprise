@@ -29,7 +29,21 @@ export class DeadLetterQueue {
   ) {
     if (Buffer.from(key, 'base64').length !== 32) throw new Error('DLQ_KEY_REQUIRED');
   }
-  async capture(raw: unknown, errorCode: string, trackingId: string, pool: Pool): Promise<void> {
+  /**
+   * Persist a failed advisory. Returns the durability outcome instead of
+   * throwing when the spool is full: the spool is the *last* resort, so a full
+   * spool must hand the record back to the caller for the database path rather
+   * than discard the very data it exists to protect.
+   *
+   * Encryption happens before any I/O, so even the capacity-rejected payload is
+   * already ciphertext in memory and never reaches disk or a log in the clear.
+   */
+  async capture(
+    raw: unknown,
+    errorCode: string,
+    trackingId: string,
+    pool: Pool,
+  ): Promise<'SPOOLED' | 'capacity'> {
     // JSON inputs from HTTP/NDJSON are bounded upstream. Never serialize arbitrary
     // class instances, cycles, or unlimited object-mode inputs into the fallback.
     const serialized = boundedJson(raw) ?? '"[unsafe or oversized input omitted]"';
@@ -39,11 +53,11 @@ export class DeadLetterQueue {
       errorCode,
       encryptedPayload: encrypt(serialized, this.key, 'correlation-dlq'),
     };
-    const persist = async () => {
+    const persist = async (): Promise<'SPOOLED' | 'capacity'> => {
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
       const files = await readdir(this.directory);
       // Each serialized letter is <= 351 KiB. 256 files cap disk at ~90 MiB.
-      if (files.length >= 256) throw new Error('DLQ_CAPACITY_EXHAUSTED');
+      if (files.length >= 256) return 'capacity';
       const temporary = join(this.directory, letter.id + '.tmp');
       const file = await open(temporary, 'wx', 0o600);
       try {
@@ -60,13 +74,49 @@ export class DeadLetterQueue {
         await dir.close();
       }
       this.telemetry.deadLetters++;
+      return 'SPOOLED' as const;
     };
     const pending = this.tail.then(persist);
     this.tail = pending.catch(() => {});
-    await pending;
+    const outcome = await pending;
+    if (outcome === 'capacity') {
+      this.telemetry.log('CRITICAL', 'dead_letter.spool_exhausted', { trackingId });
+      return outcome;
+    }
     this.telemetry.log('WARN', 'dead_letter.persisted', { trackingId });
     // Flush is handled by the supervisor; never wait for an unavailable DB here.
     void pool;
+    return outcome;
+  }
+
+  /**
+   * Last-resort database persistence, used when the spool is full. This is the
+   * only path that keeps an advisory durable when the failure being recorded is
+   * itself a database failure, so it is attempted at most once with a short
+   * timeout and never blocks the caller.
+   */
+  async captureToDatabase(
+    raw: unknown,
+    errorCode: string,
+    trackingId: string,
+    pool: Pool,
+  ): Promise<boolean> {
+    const serialized = boundedJson(raw) ?? '"[unsafe or oversized input omitted]"';
+    try {
+      await pool.query(
+        timedQuery(
+          `INSERT INTO correlation_dead_letters(id,tracking_id,error_code,encrypted_payload)
+           VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING`,
+          [randomUUID(), trackingId, errorCode, encrypt(serialized, this.key, 'correlation-dlq')],
+          2000,
+        ),
+      );
+      this.telemetry.deadLetters++;
+      this.telemetry.log('WARN', 'dead_letter.persisted_database', { trackingId });
+      return true;
+    } catch {
+      return false;
+    }
   }
   async flush(pool: Pool): Promise<void> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
