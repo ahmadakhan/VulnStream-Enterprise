@@ -229,11 +229,11 @@ export async function appendAudit(
   // The audit chain is a single linked list; a dedicated named lock serializes
   // only audit appends instead of every state mutation in the installation.
   await db.query(`SELECT pg_advisory_xact_lock(hashtext($1), ${schemaLockKey})`, ['audit-chain']);
-  // SELECT ... FOR KEY SHARE needs only table SELECT privilege (not UPDATE),
-  // so the least-privilege runtime role can read the chain head without being
-  // able to tamper with audit rows. The pg_advisory_xact_lock above already
-  // serializes appends per schema, so this lock is purely defensive.
-  const previous = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 1 FOR KEY SHARE')).rows[0]
+  // Plain SELECT (no row lock). pg_advisory_xact_lock above already serializes
+  // all audit-append calls per schema, so a row lock here was redundant; dropping
+  // it lets the least-privilege runtime role read the chain head with table SELECT
+  // only and never requires UPDATE on the tamper-sensitive audit table.
+  const previous = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 1')).rows[0]
     ?.data;
   const entry = chainAuditLogs(
     [
