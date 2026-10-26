@@ -397,6 +397,16 @@ function useApplication() {
       if (result?.success) await refreshAfterMutation();
       return result?.success || false;
     },
+    promoteAlias: async (id: string) => {
+      const result = await command('alias.promote', undefined, id);
+      if (result?.success) await refreshAfterMutation();
+      return result?.success || false;
+    },
+    revokeAlias: async (id: string) => {
+      const result = await command('alias.revoke', undefined, id);
+      if (result?.success) await refreshAfterMutation();
+      return result?.success || false;
+    },
     resendNotification: (cveId: string, reason: string) => call('/resend', { cveId, reason }),
     retryEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/retry`),
     approveEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/approve`),

@@ -63,6 +63,13 @@ export async function migrate(pool: pg.Pool) {
     // Migrations may include index builds; do not inherit the 15-second API
     // statement timeout.
     await client.query("SET LOCAL statement_timeout = '300000ms'");
+    // Extensions live in the database-global `pg_extension` catalog, not in the
+    // per-schema search path. Two schemas migrating at the same time can both
+    // see `pg_trgm` as absent and race on `CREATE EXTENSION`, failing with
+    // `pg_extension_name_index`. Serialize migration transactions across
+    // schemas; the per-schema lock below still allows independent operation
+    // once migrations have completed.
+    await client.query('SELECT pg_advisory_xact_lock(800004)');
     await client.query(`SELECT pg_advisory_xact_lock(800001, ${schemaLockKey})`);
     const nativeContract = await correlationPreflight(client);
     if (!nativeContract.compatible) throw new Error('Protected correlation schema incompatible: '+nativeContract.issues.join('; '));

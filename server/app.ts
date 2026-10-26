@@ -654,6 +654,8 @@ export function createApp(
         false,
         buildAliasMap(aliases, 'VENDOR'),
         buildAliasMap(aliases, 'PRODUCT'),
+        undefined,
+        aliases,
       );
       const matchedCves = correlation.newFindings.map((finding) => ({
         cve: finding.cve,
@@ -1175,6 +1177,8 @@ export function createApp(
         'email.configure',
         'alias.save',
         'alias.delete',
+        'alias.promote',
+        'alias.revoke',
       ];
       if (adminActions.includes(action) && req.operator!.role !== 'ADMIN')
         throw new HttpError(403, 'Administrator role required');

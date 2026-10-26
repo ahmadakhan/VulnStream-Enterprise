@@ -51,6 +51,18 @@ The UI retains the latest 500 audit entries while the database retains the full 
 
 Matching does not implement every vendor version convention or full NIST applicability logic. Review flagged matches and vendor advisories. Live provider compatibility, public TLS issuance, restore objectives, accessibility and deployment load require acceptance testing in the target environment.
 
+## Matching quality and alias governance
+
+Run `npm run matching:evaluate` (also enforced in CI) to measure precision and recall on the labelled corpus in `tests/fixtures/matching-corpus.ts`. The report is broken down by evidence class and flags any expected-negative case that reaches the 90% auto-dispatch threshold. Adding a production mismatch to that corpus is the required regression step; the corpus currently covers 29 labelled cases and is a curated gate, not a statistical estimate over a full historical CVE mirror.
+
+Alias behavior is deliberately conservative:
+
+- Inventory aliases are derived from active assets and their own CPE identities, so they reconcile when the asset is renamed or removed.
+- Correlation aliases are learned only from confirmed findings. Review-only fallback matches are not evidence.
+- Automatic rows expire after 30 days without fresh support, then are deleted. Promote a row to make it a permanent operator alias; the automatic lifecycle will not modify or expire it.
+- Revoke a row to create a tombstone. Revoked relations are not used for matching and are not re-learned; delete the tombstone to allow learning again.
+- Text fallback requires whole identity words and ignores identities made only of words shorter than three characters (`os`, `ai`, `go`). Those products need CPE, PURL or explicit alias evidence.
+
 ### Feed timeout recovery
 
 Threat Sources supports a request timeout (5–120 seconds) and recovery delay (1–60 minutes) per source. Existing sources retain adapter timeout defaults until configured. Failed ingestion schedules recovery after five minutes by default, doubling after repeated failures up to one hour. Automatic scheduled, catch-up, and recovery runs are opt-in through **Enable server scheduler**, which defaults off so starting the stack does not launch ingestion. Manual pipeline runs remain available. Successful ingestion clears the failure counter and retry deadline; disabling a source prevents automatic recovery. Retry deadlines appear beside failed sources and persist across server restarts. Automatic recovery requires both the scheduler and `WORKER_ENABLED=true` and can wait for an active pipeline to finish.

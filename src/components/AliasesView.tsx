@@ -3,10 +3,10 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { AliasEntry } from '../types';
 import { DEFAULT_VENDOR_ALIASES, DEFAULT_PRODUCT_ALIASES } from '../utils/cpeMatcher';
-import { Tags, Plus, Trash2, Pencil, X, Search, AlertCircle, Lock, Info } from 'lucide-react';
+import { Tags, Plus, Trash2, Pencil, X, Search, AlertCircle, Lock, Info, ShieldCheck, Ban, Clock } from 'lucide-react';
 
 export const AliasesView: React.FC = () => {
-  const { aliases, addAlias, updateAlias, deleteAlias, session } = useApp();
+  const { aliases, addAlias, updateAlias, deleteAlias, promoteAlias, revokeAlias, session } = useApp();
   const admin = session?.role === 'ADMIN';
 
   const [activeTab, setActiveTab] = useState<'VENDOR' | 'PRODUCT'>('VENDOR');
@@ -21,8 +21,10 @@ export const AliasesView: React.FC = () => {
   const customForTab = aliases.filter((a) => a.scope === activeTab);
 
   const term = searchTerm.toLowerCase();
+  const aliasesFor = (entry: AliasEntry) =>
+    entry.source === 'REVOKED' ? entry.revokedAliases ?? [] : entry.aliases;
   const filteredCustom = customForTab.filter(
-    (a) => a.canonical.toLowerCase().includes(term) || a.aliases.some((x) => x.toLowerCase().includes(term)),
+    (a) => a.canonical.toLowerCase().includes(term) || aliasesFor(a).some((x) => x.toLowerCase().includes(term)),
   );
   const filteredDefaults = Object.entries(defaultsForTab).filter(
     ([canonical, list]) =>
@@ -132,6 +134,12 @@ export const AliasesView: React.FC = () => {
         <h2 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 mb-2">
           Managed {activeTab === 'VENDOR' ? 'vendor' : 'product'} aliases ({filteredCustom.length})
         </h2>
+        {errorMsg && !showModal && (
+          <div className="mb-2 p-2.5 bg-zinc-950 border border-rose-800/60 rounded-xl text-xs text-rose-300 flex items-center space-x-1.5">
+            <AlertCircle className="w-4 h-4" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
         {filteredCustom.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-800 dark:border-zinc-800 light:border-zinc-300 p-6 text-center text-xs text-zinc-500">
             No managed aliases yet{searchTerm ? ' matching your search' : ''}.
@@ -151,16 +159,56 @@ export const AliasesView: React.FC = () => {
                     {entry.source === 'AUTO' && (
                       <span
                         className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                        title="Derived automatically from inventory and correlation evidence; rebuilt each pipeline run"
+                        title={
+                          entry.provenance === 'CONFIRMED_CORRELATION'
+                            ? 'Learned from a confirmed correlation; expires without fresh evidence unless promoted'
+                            : 'Derived from the inventory record and its CPE identity; expires without fresh evidence unless promoted'
+                        }
                       >
                         Auto
                       </span>
                     )}
+                    {entry.source === 'REVOKED' && (
+                      <span
+                        className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-red-500/10 text-red-400 border border-red-500/20"
+                        title="Operator revocation: this relation is never used for matching and will not be re-learned"
+                      >
+                        Revoked
+                      </span>
+                    )}
+                    {entry.source === 'AUTO' && entry.provenance && (
+                      <span
+                        className="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-zinc-800 light:bg-zinc-100 text-zinc-400"
+                        title={[
+                          entry.provenance === 'CONFIRMED_CORRELATION' ? 'Correlation evidence' : 'Inventory evidence',
+                          entry.firstSeenAt ? `first learned ${new Date(entry.firstSeenAt).toLocaleString()}` : '',
+                          entry.evidenceCount ? `${entry.evidenceCount} confirmed finding(s)` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      >
+                        {entry.provenance === 'CONFIRMED_CORRELATION' ? 'Correlation' : 'Inventory'}
+                        {entry.evidenceCount && entry.evidenceCount > 1 ? ` ×${entry.evidenceCount}` : ''}
+                      </span>
+                    )}
+                    {entry.source === 'AUTO' && entry.expiresAt && (
+                      <span
+                        className="text-[9px] text-zinc-500 flex items-center gap-1"
+                        title="Automatic rows are removed when this date passes without fresh evidence"
+                      >
+                        <Clock className="w-3 h-3" />
+                        {new Date(entry.expiresAt).toLocaleDateString()}
+                      </span>
+                    )}
                     <span className="text-zinc-600">&rarr;</span>
-                    {entry.aliases.map((a) => (
+                    {(entry.source === 'REVOKED' ? entry.revokedAliases ?? [] : entry.aliases).map((a) => (
                       <span
                         key={a}
-                        className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-100 text-zinc-300 dark:text-zinc-300 light:text-zinc-700"
+                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-100 ${
+                          entry.source === 'REVOKED'
+                            ? 'text-red-300 line-through'
+                            : 'text-zinc-300 dark:text-zinc-300 light:text-zinc-700'
+                        }`}
                       >
                         {a}
                       </span>
@@ -168,19 +216,49 @@ export const AliasesView: React.FC = () => {
                   </div>
                   {entry.notes && <p className="text-[11px] text-zinc-500 mt-1.5">{entry.notes}</p>}
                 </div>
-                {admin && entry.source !== 'AUTO' && (
+                {admin && (
                   <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => openEdit(entry)}
-                      className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 transition"
-                      title="Edit"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
+                    {entry.source === 'AUTO' && (
+                      <>
+                        <button
+                          onClick={async () => {
+                            if (!(await promoteAlias(entry.id)))
+                              setErrorMsg('Could not promote this alias.');
+                          }}
+                          className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 transition"
+                          title="Promote to a permanent operator alias"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!(await revokeAlias(entry.id)))
+                              setErrorMsg('Could not revoke this alias.');
+                          }}
+                          className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 transition"
+                          title="Revoke: stop using and re-learning this relation"
+                        >
+                          <Ban className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
+                    {entry.source !== 'AUTO' && entry.source !== 'REVOKED' && (
+                      <button
+                        onClick={() => openEdit(entry)}
+                        className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 transition"
+                        title="Edit"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button
                       onClick={() => setDeletingId(entry.id)}
                       className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 transition"
-                      title="Delete"
+                      title={
+                        entry.source === 'REVOKED'
+                          ? 'Delete the revocation (allows automatic re-learning)'
+                          : 'Delete'
+                      }
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -192,9 +270,11 @@ export const AliasesView: React.FC = () => {
         )}
         <p className="text-[11px] text-zinc-500 mt-2 flex items-start gap-1.5">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-          Auto aliases are rebuilt from active inventory and successful correlations on every pipeline run. They
-          disappear automatically when the supporting asset or CPE identity is removed; operator aliases are never
-          deleted automatically.
+          Inventory aliases come from each active asset&rsquo;s declared vendor/product and its own CPE spellings.
+          Correlation aliases are learned only from findings that were auto-dispatched, delivered, or resolved by an
+          operator &mdash; never from unreviewed text matches. Automatic rows expire 30 days after their last
+          supporting evidence; promote one to keep it permanently, or revoke it to block re-learning. Operator
+          aliases are never changed automatically.
         </p>
       </div>
 

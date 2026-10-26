@@ -400,10 +400,25 @@ export interface AliasEntry {
   aliases: string[];
   notes?: string;
   createdAt: string;
-  /** AUTO rows are derived from the current inventory/correlation evidence and
-   * are rebuilt by the pipeline; MANUAL rows are operator-managed and are
-   * never deleted by the automatic lifecycle. */
-  source?: 'MANUAL' | 'AUTO';
+  /** MANUAL rows are operator-managed. AUTO rows are derived from current
+   * inventory/confirmed-correlation evidence and expire when that evidence
+   * lapses. REVOKED rows are operator tombstones: they are never used for
+   * matching and they block the automatic lifecycle from re-learning the
+   * relation. */
+  source?: 'MANUAL' | 'AUTO' | 'REVOKED';
+  /** How an automatic relation was learned. Operator rows are `OPERATOR`. */
+  provenance?: 'INVENTORY' | 'CONFIRMED_CORRELATION' | 'OPERATOR';
+  /** First time the automatic relation was observed. */
+  firstSeenAt?: string;
+  /** Last time current inventory/correlation evidence supported the row. */
+  lastSeenAt?: string;
+  /** Automatic rows are retained until this time, then removed. */
+  expiresAt?: string;
+  /** Number of distinct confirmed findings supporting a learned relation. */
+  evidenceCount?: number;
+  /** Pairs blocked by an operator revocation. Only present on REVOKED rows. */
+  revokedAliases?: string[];
+  revokedAt?: string;
 }
 
 export interface EmailRecipient {

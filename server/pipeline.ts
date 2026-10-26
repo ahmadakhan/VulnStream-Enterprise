@@ -494,6 +494,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       vendorAliases,
       productAliases,
       preliminaryPairs.size ? preliminaryPairs : undefined,
+      aliasEntries,
     );
     preliminaryCveSignature = matchingCveSignature(preliminaryCves);
     preliminaryInventorySignature = inventorySignature(inventory);
@@ -765,6 +766,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             finalVendorAliases,
             finalProductAliases,
             finalPairs?.size ? finalPairs : undefined,
+            aliasEntries,
           );
       // A wholly rejected stale bundle may be rebuilt from current matches. Never
       // automatically resend a bundle with any acceptance or an in-flight delivery.
@@ -824,7 +826,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       // matching also sees the freshly learned names.
       const desiredAutoAliases = [
         ...deriveInventoryAliases(snapshot.watchlist, aliasEntries),
-        ...deriveCorrelationAliases(persistedFindings, snapshot.watchlist, byId),
+        ...deriveCorrelationAliases(persistedFindings, snapshot.watchlist, byId, aliasEntries),
       ];
       const autoAliases = reconcileAutoAliases(aliasEntries, desiredAutoAliases);
       for (const entry of autoAliases.upserts) await put(db, 'aliases', entry.id, entry);

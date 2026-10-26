@@ -71,14 +71,14 @@ test('inventory aliases are added and stale automatic rows are removed without t
     cpes: [cpe('newco_inc', 'widget_pro_x', '1.5')],
   });
   const desired = deriveInventoryAliases([renamed], first.aliases);
-  const second = reconcileAutoAliases(first.aliases, desired);
+  const second = reconcileAutoAliases(first.aliases, desired, undefined, { ttlDays: 0 });
   assert.deepEqual(second.removals, [autoAliasId('VENDOR', 'acme corp')]);
   assert.deepEqual(second.added.map((entry) => entry.id), [autoAliasId('VENDOR', 'newco')]);
   assert.ok(second.entries.some((entry) => entry.canonical === 'widget pro'));
   assert.ok(second.aliases.some((entry) => entry.id === manualAlias.id));
 
   // Empty inventory removes every automatic row and leaves the operator row.
-  const empty = reconcileAutoAliases(second.aliases, []);
+  const empty = reconcileAutoAliases(second.aliases, [], undefined, { ttlDays: 0 });
   assert.deepEqual(empty.entries, []);
   assert.deepEqual(empty.removals.sort(), second.entries.map((entry) => entry.id).sort());
   assert.deepEqual(empty.aliases, [manualAlias]);
@@ -101,16 +101,25 @@ test('correlation aliases are learned only from current, non-rejected matches', 
     cve,
     matchedAssetId: watch.id,
     matchingMethod: 'VENDOR_PRODUCT_FALLBACK' as const,
-    notificationStatus: 'REVIEW_REQUIRED' as const,
+    notificationStatus: 'AUTO_DISPATCHED' as const,
     status: 'MONITORED' as const,
     advisoryId: null,
-    autoDispatchedAt: null,
+    autoDispatchedAt: '2026-10-25T00:00:00.000Z',
   };
   const byId = new Map([[cve.cveId, cve]]);
   const learned = deriveCorrelationAliases([finding], [watch], byId);
   const vendor = learned.find((entry) => entry.scope === 'VENDOR');
   assert.equal(vendor?.canonical, 'acme corp');
   assert.deepEqual(vendor?.aliases, ['acme_holdings']);
+  assert.equal(vendor?.provenance, 'CONFIRMED_CORRELATION');
+
+  // An unreviewed fallback is the weakest signal and must not teach aliases.
+  const review = {
+    ...finding,
+    notificationStatus: 'REVIEW_REQUIRED' as const,
+    autoDispatchedAt: null,
+  };
+  assert.deepEqual(deriveCorrelationAliases([review], [watch], byId), []);
 
   // A finding that no longer applies (or that an operator rejected) cannot
   // keep an automatic alias alive on the next reconciliation.

@@ -444,6 +444,8 @@ export async function deliverNext(
                 false,
                 vendorAliases,
                 productAliases,
+                undefined,
+                aliasEntries,
               ).newFindings[0]
             : undefined;
         if (match) currentFindings.push(match);

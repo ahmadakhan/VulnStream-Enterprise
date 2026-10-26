@@ -27,7 +27,8 @@
     "db:migrate": "node --import tsx --env-file=.env server/migrate.ts",
     "correlation:benchmark": "node --import tsx --env-file=.env scripts/correlation-benchmark.ts",
     "deployment:verify": "node --import tsx --env-file=.env scripts/verify-deployment.ts",
-    "dev:all": "concurrently -k -n server,client -c blue,green \"npm:dev:server\" \"npm:dev\""
+    "dev:all": "concurrently -k -n server,client -c blue,green \"npm:dev:server\" \"npm:dev\"",
+    "matching:evaluate": "node --import tsx scripts/matching-evaluate.ts"
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",

@@ -64,10 +64,13 @@ test('automatic aliases are added and removed without touching operator rows', (
   assert.ok(first.aliases.some((entry) => entry.source === 'AUTO'));
 
   // The asset disappears/its CPE becomes generic: the derived relation is no
-  // longer supported, so the next reconciliation removes only the auto row.
+  // longer supported. With no TTL grace the next reconciliation removes only
+  // the auto row (the TTL path is covered separately).
   const second = reconcileAutoAliases(
     first.aliases,
     deriveInventoryAliases([asset({ cpes: ['cpe:2.3:a:*:*:*:*:*:*:*:*:*:*'] })]),
+    new Date().toISOString(),
+    { ttlDays: 0 },
   );
   assert.equal(second.removed.length, 1);
   assert.deepEqual(
@@ -76,35 +79,129 @@ test('automatic aliases are added and removed without touching operator rows', (
   );
 });
 
-test('correlation evidence can teach an alias and loses it when rejected', () => {
-  const finding = {
+test('correlation evidence teaches an alias only after confirmation', () => {
+  const review = {
     cveId: 'CVE-2026-90001',
     matchedAssetId: 'asset-auto',
     matchingMethod: 'VENDOR_PRODUCT_FALLBACK',
     notificationStatus: 'REVIEW_REQUIRED',
     status: 'MONITORED',
+    autoDispatchedAt: null,
     cve: {
       cveId: 'CVE-2026-90001',
       cpeMatches: [cpe('acme_corp', 'widget_pro', '1.0')],
     },
   } as unknown as Finding;
 
-  const learned = deriveCorrelationAliases([finding], [asset()]);
+  // The fallback path is the weakest matcher. An unreviewed fallback must not
+  // become permanent alias evidence, or one false positive would raise every
+  // later correlation from 70% to the 85% structured tier.
+  assert.deepEqual(deriveCorrelationAliases([review], [asset()]), []);
+
+  const confirmed = {
+    ...review,
+    notificationStatus: 'AUTO_DISPATCHED' as const,
+    autoDispatchedAt: '2026-10-26T00:00:00Z',
+  };
+  const learned = deriveCorrelationAliases([confirmed], [asset()], undefined, [], '2026-10-26T00:00:00Z');
   assert.deepEqual(
-    learned.map(({ scope, canonical, aliases }) => ({ scope, canonical, aliases })),
-    [{ scope: 'VENDOR', canonical: 'acme corporation', aliases: ['acme_corp'] }],
+    learned.map(({ scope, canonical, aliases, provenance, evidenceCount }) => ({
+      scope,
+      canonical,
+      aliases,
+      provenance,
+      evidenceCount,
+    })),
+    [
+      {
+        scope: 'VENDOR',
+        canonical: 'acme corporation',
+        aliases: ['acme_corp'],
+        provenance: 'CONFIRMED_CORRELATION',
+        evidenceCount: 1,
+      },
+    ],
   );
 
-  const rejected = { ...finding, status: 'FALSE_POSITIVE' as const };
+  // Multiple criteria in one finding still count as one piece of evidence.
+  const multiCriteria = {
+    ...confirmed,
+    cve: {
+      cveId: 'CVE-2026-90001',
+      cpeMatches: [cpe('acme_corp', 'widget_pro', '1.0'), cpe('acme_corp', 'widget_pro', '1.1')],
+    },
+  } as unknown as Finding;
+  assert.equal(deriveCorrelationAliases([multiCriteria], [asset()])[0].evidenceCount, 1);
+
+  // Delivery and operator closure are confirmation; a rejection is permanent.
+  const delivered = { ...review, notificationStatus: 'DELIVERED' as const };
+  assert.equal(deriveCorrelationAliases([delivered], [asset()]).length, 1);
+  const resolved = { ...review, status: 'RESOLVED' as const };
+  assert.equal(deriveCorrelationAliases([resolved], [asset()]).length, 1);
+  const rejected = { ...confirmed, status: 'FALSE_POSITIVE' as const };
   assert.deepEqual(deriveCorrelationAliases([rejected], [asset()]), []);
 
-  // Remediation does not disprove the naming relation: the finding remains a
-  // valid source until it ages out of retention.
-  const resolved = { ...finding, status: 'RESOLVED' as const };
-  assert.equal(deriveCorrelationAliases([resolved], [asset()]).length, 1);
-
-  const strict = { ...finding, matchingMethod: 'STRICT_CPE' as const };
+  // A strict match means the names already agree, so there is nothing to learn.
+  const strict = { ...confirmed, matchingMethod: 'STRICT_CPE' as const };
   assert.deepEqual(deriveCorrelationAliases([strict], [asset()]), []);
+});
+
+test('automatic aliases expire after their evidence TTL and can be promoted', () => {
+  const derived = deriveInventoryAliases([asset()], [], '2026-10-01T00:00:00Z');
+  const first = reconcileAutoAliases([], derived, '2026-10-01T00:00:00Z', { ttlDays: 30 });
+  assert.equal(first.added.length, 1);
+  assert.equal(first.added[0].expiresAt, '2026-10-31T00:00:00.000Z');
+  assert.equal(first.added[0].firstSeenAt, '2026-10-01T00:00:00Z');
+
+  // Inside the grace window the relation is still used even though current
+  // inventory no longer supports it.
+  const during = reconcileAutoAliases(first.aliases, [], '2026-10-20T00:00:00Z', { ttlDays: 30 });
+  assert.equal(during.removed.length, 0);
+  assert.equal(during.entries.length, 1);
+
+  // Past the window it disappears.
+  const after = reconcileAutoAliases(during.aliases, [], '2026-11-01T00:00:00Z', { ttlDays: 30 });
+  assert.equal(after.removed.length, 1);
+  assert.deepEqual(after.aliases, []);
+
+  // A promoted row is operator-managed: the lifecycle neither expires nor
+  // overwrites it, even when derivation proposes the same canonical name.
+  const promoted: AliasEntry = {
+    ...first.added[0],
+    source: 'MANUAL',
+    provenance: 'OPERATOR',
+    expiresAt: undefined,
+    revokedAliases: undefined,
+    revokedAt: undefined,
+  };
+  const reconciled = reconcileAutoAliases([promoted], deriveInventoryAliases([asset()], [promoted]));
+  assert.deepEqual(reconciled.upserts, []);
+  assert.deepEqual(reconciled.removals, []);
+  assert.equal(reconciled.aliases[0].source, 'MANUAL');
+});
+
+test('an operator revocation blocks re-learning until the tombstone is removed', () => {
+  const now = '2026-10-26T00:00:00.000Z';
+  const first = reconcileAutoAliases([], deriveInventoryAliases([asset()], [], now), now, {
+    ttlDays: 0,
+  });
+  const row = first.added[0];
+  const revoked: AliasEntry = {
+    ...row,
+    source: 'REVOKED',
+    aliases: [],
+    revokedAliases: [...row.aliases],
+    revokedAt: now,
+  };
+
+  assert.deepEqual(deriveInventoryAliases([asset()], [revoked]), []);
+  const reconciled = reconcileAutoAliases([revoked], [], now);
+  assert.deepEqual(reconciled.upserts, []);
+  assert.deepEqual(reconciled.removals, []);
+  assert.ok(reconciled.aliases.some((entry) => entry.source === 'REVOKED'));
+
+  // Removing the tombstone allows the relation to be learned again.
+  assert.equal(deriveInventoryAliases([asset()], []).length, 1);
 });
 
 test('a generic inventory CPE is constrained by the inventory product', () => {

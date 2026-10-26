@@ -22,7 +22,7 @@ import { emailConfigSchema } from './validation.ts';
 import { emailEndpoint } from './emailProviders.ts';
 import { compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
 import type { Config } from './config';
-import { isSmtpEmailProvider, type AppSettings, type Finding, type EmailConfiguration, type WatchListItem } from '../src/types/index.ts';
+import { isSmtpEmailProvider, type AliasEntry, type AppSettings, type Finding, type EmailConfiguration, type WatchListItem } from '../src/types/index.ts';
 
 export interface CommandRequest {
   action: string;
@@ -193,6 +193,72 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     if (!id) throw new HttpError(400, 'Record ID required');
     if (!(await getForUpdate<any>(db, 'aliases', id))) throw new HttpError(404, 'Record not found');
     await remove(db, 'aliases', id);
+  } else if (action === 'alias.promote') {
+    // Promoting turns a learned relation into a permanent operator alias. It
+    // keeps the row id but stops the automatic lifecycle from expiring it.
+    if (!id) throw new HttpError(400, 'Record ID required');
+    const row = await getForUpdate<AliasEntry>(db, 'aliases', id);
+    if (!row) throw new HttpError(404, 'Record not found');
+    if (row.source !== 'AUTO')
+      throw new HttpError(400, 'Only an automatically learned alias can be promoted');
+    await put(db, 'aliases', id, {
+      ...row,
+      source: 'MANUAL',
+      provenance: 'OPERATOR',
+      aliases: [...row.aliases].sort(),
+      createdAt: row.createdAt || now,
+      firstSeenAt: row.firstSeenAt || row.createdAt || now,
+      lastSeenAt: now,
+      expiresAt: undefined,
+      revokedAliases: undefined,
+      revokedAt: undefined,
+      notes: row.notes
+        ? `${row.notes} Promoted to a permanent operator alias.`
+        : 'Promoted to a permanent operator alias.',
+    });
+    await appendAudit(
+      db,
+      'Alias promoted',
+      `${row.scope} ${row.canonical} -> ${row.aliases.join(', ')}`,
+      actor,
+      'SECURITY',
+      'INFO',
+      ipAddress,
+    );
+  } else if (action === 'alias.revoke') {
+    // Revocation is a tombstone, not a deletion: the relation must not be
+    // re-learned on the next pipeline run just because the same evidence is
+    // still present. The pairs move to `revokedAliases`, which is never used
+    // for matching.
+    if (!id) throw new HttpError(400, 'Record ID required');
+    const row = await getForUpdate<AliasEntry>(db, 'aliases', id);
+    if (!row) throw new HttpError(404, 'Record not found');
+    if (row.source !== 'AUTO')
+      throw new HttpError(400, 'Only an automatically learned alias can be revoked');
+    // The tombstone gets its own id so a *different* spelling of the same
+    // canonical name can still be learned later. It carries the rejected pairs
+    // in `revokedAliases`, which is never used for matching.
+    await remove(db, 'aliases', id);
+    await put(db, 'aliases', `revoked:${id}`, {
+      ...row,
+      id: `revoked:${id}`,
+      source: 'REVOKED',
+      provenance: undefined,
+      aliases: [],
+      revokedAliases: [...row.aliases].sort(),
+      expiresAt: undefined,
+      revokedAt: now,
+      notes: 'Revoked by an operator. This naming relation will not be learned again automatically.',
+    });
+    await appendAudit(
+      db,
+      'Alias revoked',
+      `${row.scope} ${row.canonical} -/-> ${row.aliases.join(', ')}`,
+      actor,
+      'SECURITY',
+      'INFO',
+      ipAddress,
+    );
   } else if (action === 'recipient.save') {
     const input = recipientSchema.parse(data);
     // A row lock cannot protect a uniqueness predicate for a row that does not

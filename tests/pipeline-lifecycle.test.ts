@@ -9,7 +9,8 @@ import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import { MITRE_DELTA_URL } from '../server/mitre';
 import { mitreRecord, mitreDelta } from './fixtures/mitre';
 import { applyCommand } from '../server/commands.ts';
-import type { Finding, NormalizedCVE, WatchListItem } from '../src/types/index.ts';
+import type { AliasEntry, Finding, NormalizedCVE, WatchListItem } from '../src/types/index.ts';
+import { deriveInventoryAliases } from '../src/utils/aliasLifecycle.ts';
 const database = process.env.TEST_DATABASE_URL;
 const cpe = (version: string) => `cpe:2.3:a:example:widget:${version}:*:*:*:*:*:*:*`;
 const asset = (version = '1.5'): WatchListItem => ({
@@ -983,6 +984,71 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         body: JSON.stringify([original]),
       }));
       assert.equal(await get(pool, 'cveData', original.cveId), undefined);
+    });
+    await t.test('alias promotion freezes a learned relation and revocation tombstones it', async () => {
+      await reset();
+      const createdAt = new Date().toISOString();
+      const auto: AliasEntry = {
+        id: 'auto:vendor:acme corp',
+        scope: 'VENDOR',
+        canonical: 'acme corp',
+        aliases: ['acme_inc'],
+        source: 'AUTO',
+        provenance: 'INVENTORY',
+        createdAt,
+        firstSeenAt: createdAt,
+        lastSeenAt: createdAt,
+        expiresAt: new Date(Date.parse(createdAt) + 86400000).toISOString(),
+      };
+      await save('aliases', auto.id, auto);
+      await transaction(pool, (db) =>
+        applyCommand(db, config, { action: 'alias.promote', id: auto.id, actor: 'test' }),
+      );
+      const promoted = await get<AliasEntry>(pool, 'aliases', auto.id);
+      assert.equal(promoted?.source, 'MANUAL');
+      assert.equal(promoted?.provenance, 'OPERATOR');
+      assert.equal(promoted?.expiresAt, undefined);
+      assert.deepEqual(promoted?.aliases, ['acme_inc']);
+
+      const product: AliasEntry = {
+        id: 'auto:product:widget pro',
+        scope: 'PRODUCT',
+        canonical: 'widget pro',
+        aliases: ['widget_pro'],
+        source: 'AUTO',
+        provenance: 'INVENTORY',
+        createdAt,
+        firstSeenAt: createdAt,
+        lastSeenAt: createdAt,
+        expiresAt: new Date(Date.parse(createdAt) + 86400000).toISOString(),
+      };
+      await save('aliases', product.id, product);
+      await transaction(pool, (db) =>
+        applyCommand(db, config, { action: 'alias.revoke', id: product.id, actor: 'test' }),
+      );
+      assert.equal(await get(pool, 'aliases', product.id), undefined);
+      const tombstone = await get<AliasEntry>(pool, 'aliases', `revoked:${product.id}`);
+      assert.equal(tombstone?.source, 'REVOKED');
+      assert.deepEqual(tombstone?.aliases, []);
+      assert.deepEqual(tombstone?.revokedAliases, ['widget_pro']);
+
+      // The revocation blocks re-learning while the promoted row is preserved
+      // as an operator decision.
+      const persisted = await list<AliasEntry>(pool, 'aliases');
+      assert.deepEqual(
+        deriveInventoryAliases(
+          [
+            {
+              vendor: 'Acme Corp',
+              product: 'Widget Pro',
+              cpes: ['cpe:2.3:a:acme_inc:widget_pro:1.0:*:*:*:*:*:*:*'],
+              active: true,
+            },
+          ],
+          persisted,
+        ),
+        [],
+      );
     });
   } finally {
     await pool.end();

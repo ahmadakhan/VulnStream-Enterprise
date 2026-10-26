@@ -263,6 +263,70 @@ function isGenericCpeComponent(value: string): boolean {
 }
 
 /**
+ * Free text is the weakest matching path, so a substring test is not enough:
+ * a two-letter vendor such as `os` or `ai` occurs inside `most`, `cost` and
+ * `maintain`. Require each identity word to appear as a whole token, and treat
+ * identities made only of very short words as too ambiguous for prose. Those
+ * still match through strict CPE, alias or PURL evidence.
+ */
+const TEXT_IDENTITY_MIN_WORD = 3;
+const textWordPatterns = new Map<string, RegExp>();
+const MAX_TEXT_WORD_PATTERNS = 2000;
+
+function textWordPattern(word: string): RegExp {
+  const cached = textWordPatterns.get(word);
+  if (cached) return cached;
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`);
+  if (textWordPatterns.size >= MAX_TEXT_WORD_PATTERNS) textWordPatterns.clear();
+  textWordPatterns.set(word, pattern);
+  return pattern;
+}
+
+function containsIdentityWords(text: string, value: string): boolean {
+  const words = value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  const significant = words.filter((word) => word.length >= TEXT_IDENTITY_MIN_WORD);
+  // `os`, `ai`, `go` and `3m` are real names but not usable as prose evidence.
+  if (!significant.length) return false;
+  // Prefer the long words; for a multi-word identity that also contains short
+  // tokens (for example `f5 big_ip`) keep the short ones so `f5` cannot be
+  // dropped from its own name.
+  const required = significant.length >= 2 || words.length === 1 ? significant : words;
+  return required.every((word) => textWordPattern(word).test(text));
+}
+
+/**
+ * Fixed CPE criteria that describe the platform rather than the product name.
+ * Once two CPEs describe the same identity (directly or through the alias
+ * thesaurus), a conflict here is an authoritative exclusion, not a spelling
+ * difference.
+ */
+const CPE_PLATFORM_FIELDS = [
+  'part',
+  'update',
+  'edition',
+  'language',
+  'swEdition',
+  'targetSw',
+  'targetHw',
+  'other',
+] as const;
+
+function cpeCriterionConflict(asset: ParsedCPE, vuln: ParsedCPE): boolean {
+  if (CPE_PLATFORM_FIELDS.some((field) => !matchComponent(asset[field], vuln[field]))) return true;
+  return (
+    asset.version !== '*' &&
+    asset.version !== '-' &&
+    vuln.version !== '*' &&
+    vuln.version !== '-' &&
+    !matchComponent(asset.version, vuln.version)
+  );
+}
+
+/**
  * A CPE whose vendor or product is a wildcard is not evidence of either
  * identity: without help it intersects every advisory for the same part.
  * Resolve the wildcard side from the inventory's own vendor/product fields so
@@ -807,31 +871,7 @@ export function matchesWatchlistItem(
     return vulnCpeMatches.some((vulnCpe) => {
       const vuln = parseCPE23(vulnCpe);
       if (!vuln.isValid || !sameStructuredIdentity(asset, vuln)) return false;
-      if (!matchComponent(asset.part, vuln.part)) return true;
-      if (
-        asset.targetHw !== '*' &&
-        vuln.targetHw !== '*' &&
-        !matchComponent(asset.targetHw, vuln.targetHw)
-      )
-        return true;
-      if (
-        asset.targetSw !== '*' &&
-        vuln.targetSw !== '*' &&
-        !matchComponent(asset.targetSw, vuln.targetSw)
-      )
-        return true;
-      for (const field of ['update', 'edition', 'language', 'swEdition', 'other'] as const) {
-        if (!matchComponent(asset[field], vuln[field])) return true;
-      }
-      const assetVersionToken = asset.version;
-      const vulnVersionToken = vuln.version;
-      return (
-        assetVersionToken !== '*' &&
-        assetVersionToken !== '-' &&
-        vulnVersionToken !== '*' &&
-        vulnVersionToken !== '-' &&
-        !matchComponent(assetVersionToken, vulnVersionToken)
-      );
+      return cpeCriterionConflict(asset, vuln);
     });
   });
   if (assetCpes.length > 0 && cpeIdentityExcluded) {
@@ -843,6 +883,10 @@ export function matchesWatchlistItem(
     };
   }
 
+  const resolvedAssetCpes = assetCpes
+    .map((cpe) => parseCPE23(resolveGenericCpeIdentity(cpe, assetVendor, assetProduct).cpe))
+    .filter((parsed) => parsed.isValid);
+
   for (const vulnCpe of vulnCpeMatches) {
     const parsedVuln = parseCPE23(vulnCpe);
     if (parsedVuln.isValid) {
@@ -850,6 +894,16 @@ export function matchesWatchlistItem(
         matchVendorWithAliases(normVendor, parsedVuln.vendor, customVendorAliases) &&
         matchProductWithAliases(normProduct, parsedVuln.product, customProductAliases)
       ) {
+        // An alias only broadens the vendor/product names. The remaining CPE
+        // criteria (part, architecture, target OS, edition, language, update
+        // and concrete version) stay authoritative on this path too, so a
+        // Windows-only advisory cannot correlate a Linux asset merely because
+        // the vendor spellings differ.
+        if (
+          resolvedAssetCpes.length > 0 &&
+          !resolvedAssetCpes.some((asset) => !cpeCriterionConflict(asset, parsedVuln))
+        )
+          continue;
         let applicabilityRequiresReview = rangeHasBounds;
         let versionVerified = false;
         if (rangeHasBounds && versionRange && assetVersion) {
@@ -875,7 +929,12 @@ export function matchesWatchlistItem(
 
   // 5. Fallback Heuristic
   const fullText = `${vulnTitle} ${vulnDescription}`.toLowerCase();
-  if (normVendor && normProduct && fullText.includes(normVendor) && fullText.includes(normProduct)) {
+  if (
+    normVendor &&
+    normProduct &&
+    containsIdentityWords(fullText, normVendor) &&
+    containsIdentityWords(fullText, normProduct)
+  ) {
     // Do not let the text fallback re-admit a release that the advisory range
     // explicitly excludes when the inventory version is comparable.
     if (

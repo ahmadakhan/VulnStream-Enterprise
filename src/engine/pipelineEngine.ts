@@ -11,6 +11,7 @@ import type {
   IntelligenceMatch,
   EmailDeliveryLog,
   AuditLog,
+  AliasEntry,
 } from '../types';
 import { normalizeCveId, isWithinTimelineScope, mergeCveRecords } from '../utils/deduplicator';
 import {
@@ -151,6 +152,7 @@ export function runVulnerabilityPipeline(
   vendorAliases: Record<string, string[]> = {},
   productAliases: Record<string, string[]> = {},
   candidatePairs?: Map<string, Set<string>>,
+  aliasEntries: readonly AliasEntry[] = [],
 ): PipelineRunResult {
   const started = new Date(),
     known = new Set(existing.map((f) => `${normalizeCveId(f.cveId)}:${f.matchedAssetId}`));
@@ -166,7 +168,7 @@ export function runVulnerabilityPipeline(
   // server pipeline, so both the browser simulation and server correlation
   // resolve the same spellings. Manual aliases always take precedence and are
   // never removed by this merge.
-  const autoAliasEntries = deriveInventoryAliases(activeAssets);
+  const autoAliasEntries = deriveInventoryAliases(activeAssets, aliasEntries);
   const mergeAliasMaps = (
     base: Record<string, string[]>,
     extra: Record<string, string[]>,
