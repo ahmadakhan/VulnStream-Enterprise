@@ -72,7 +72,7 @@ export class AdvisoryIngestor {
   async processIncomingAdvisory(
     rawInput: unknown,
     dbPool: Pool,
-    trackingId = randomUUID(),
+     trackingId: string = randomUUID(),
     signal?: AbortSignal,
   ): Promise<IngestionResult> {
     const started = performance.now();

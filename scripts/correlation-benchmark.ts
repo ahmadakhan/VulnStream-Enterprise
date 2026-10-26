@@ -7,7 +7,7 @@ import { Readable, Writable } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import pg from 'pg';
 import { createPool, migrate } from '../server/db.ts';
-import { AdvisoryIngestor } from '../server/correlation/ingest.ts';
+import { AdvisoryIngestor, type IngestionResult } from '../server/correlation/ingest.ts';
 import { AdvisoryStreamProcessor } from '../server/correlation/stream.ts';
 import { PipelineSupervisor } from '../server/correlation/supervisor.ts';
 import { CorrelationTelemetry } from '../server/correlation/telemetry.ts';
@@ -62,7 +62,7 @@ try {
   const original = ingestor.processIncomingAdvisory.bind(ingestor);
   let peakWorkers = 0,
     peakRss = process.memoryUsage().rss;
-  const results = { PROCESSED: 0, DUPLICATE: 0, DEAD_LETTER: 0 };
+  const results: Record<IngestionResult, number> = { PROCESSED: 0, DUPLICATE: 0, DEAD_LETTER: 0, UNDURABLE: 0 };
   ingestor.processIncomingAdvisory = async (...args) => {
     const start = performance.now();
     peakWorkers = Math.max(peakWorkers, supervisor.active.size);

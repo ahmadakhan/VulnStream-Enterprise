@@ -367,8 +367,9 @@ export function runVulnerabilityPipeline(
         );
       const result = matches.filter((match) => match.matched).sort((a, b) => b.confidence - a.confidence)[0];
       if (!result?.matched) continue;
-      if (cve.applicabilityRequiresReview || result.applicabilityRequiresReview) result.confidence = 0;
-      const confirmed = result.confidence >= (settings.autoDispatchConfidenceThreshold ?? 90);
+      const requiresReview = cve.applicabilityRequiresReview || result.applicabilityRequiresReview;
+      if (requiresReview) result.confidence = 0;
+      const confirmed = !requiresReview && result.confidence >= (settings.autoDispatchConfidenceThreshold ?? 90);
       const evidence = confirmed
         ? 'Structured package/version correlation'
         : 'Product correlation; version or applicability requires review';
