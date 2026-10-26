@@ -356,6 +356,21 @@ test(
           .rowCount,
         1,
       );
+      // URL conflict with a different fingerprint: the updated advisory should
+      // merge into the existing row instead of dead-lettering on a 23505 error.
+      await ingestor.processIncomingAdvisory(
+        advisory({ url: 'https://example.org/security/1', title: 'UPDATED TITLE' }),
+        pool,
+      );
+      assert.equal(
+        (
+          await pool.query(
+            "SELECT title FROM unstructured_advisories WHERE url='https://example.org/security/1'",
+          )
+        ).rows[0].title,
+        'UPDATED TITLE',
+        'advisory content should be merged on URL conflict',
+      );
       await ingestor.processIncomingAdvisory({ poison: 'customer-secret' }, pool);
       await queue.flush(pool);
       assert.equal((await pool.query('SELECT * FROM correlation_dead_letters')).rowCount, 1);
