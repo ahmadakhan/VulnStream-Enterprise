@@ -17,6 +17,7 @@ import {
   Cpu,
   Tags,
   Settings,
+  Search,
 } from 'lucide-react';
 
 /** One source of truth for page identity, headings, and workspace breadcrumbs. */
@@ -24,6 +25,7 @@ export const pages = {
   dashboard: { section: 'Operations', title: 'Intelligence overview', icon: LayoutDashboard },
   watchlist: { section: 'Operations', title: 'Monitored products', icon: Server },
   findings: { section: 'Operations', title: 'Vulnerabilities', icon: ShieldAlert },
+  'threat-intelligence-search': { section: 'Operations', title: 'Threat intelligence search', icon: Search },
   'threat-data': { section: 'Operations', title: 'Threat intelligence', icon: Database },
   advisories: { section: 'Operations', title: 'Security advisories', icon: FileText },
   correlation: { section: 'Autonomous pipeline', title: 'Live correlation', icon: Zap },

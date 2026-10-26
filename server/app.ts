@@ -47,18 +47,20 @@ import { parseSyndication, RSS_MAX_BYTES } from './rss';
 import { readEvents, writeEvent } from './events';
 import { createDatabaseRateLimiter, type MutationLimiter, INGEST_LIMIT_CAPACITY, INGEST_LIMIT_REFILL_PER_MS } from './rateLimit';
 import { searchNvdCpes, loadNvdApiKey, isNvdRateLimitError, nvdRetryAfterSeconds } from './cpeSearch';
+import { searchThreatIntelligence, ThreatSearchRateLimitError } from './threatSearch';
 import type { AppState } from '../shared/state.ts';
 import type {
   AppSettings,
-  ThreatFeed,
-  WebhookEndpoint,
-  Advisory,
-  TemplateCustomization,
-  EmailConfiguration,
-  NormalizedCVE,
-  AliasEntry,
-  WatchListItem,
-  NvdCpeSearchResponse,
+   ThreatFeed,
+   WebhookEndpoint,
+   Advisory,
+   TemplateCustomization,
+   EmailConfiguration,
+   NormalizedCVE,
+   AliasEntry,
+   WatchListItem,
+   NvdCpeSearchResponse,
+   ThreatSearchResponse,
 } from '../src/types/index.ts';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler.ts';
 function publicState(data: AppState): AppState {
@@ -347,7 +349,10 @@ export function createApp(
           await appendAudit(
             db,
             'Correlation concurrency changed',
-            `Per-instance limit ${limit}`,
+            // The value is persisted in correlation_policy and adopted by every
+            // replica on its heartbeat. Calling it "per-instance" made a
+            // fleet-wide change read like a local one in the audit trail.
+            `Fleet-wide limit ${limit} (applies to all replicas)`,
             req.operator!.username,
           );
         });
@@ -359,13 +364,21 @@ export function createApp(
       '/api/correlation/fault',
       requireRole('ADMIN'),
       asyncRoute(async (req, res) => {
-        if (config.NODE_ENV === 'production')
-          throw new HttpError(403, 'Fault simulation is disabled in production');
+        // Two independent gates: the explicit opt-in (absence of which is the
+        // default) and the environment. NODE_ENV alone was not a boundary -- a
+        // production image started with NODE_ENV=development exposed an
+        // endpoint that can open the shared circuit breaker and stop ingestion
+        // on every replica for five minutes.
+        if (config.NODE_ENV === 'production' || config.FAULT_SIMULATION_ENABLED !== 'true')
+          throw new HttpError(403, 'Fault simulation is disabled in this deployment');
         const { fault } = z
           .object({ fault: z.enum(['memory', 'database']) })
           .strict()
           .parse(req.body);
         runtime.supervisor.simulate(fault);
+        await transaction(pool, (db) =>
+          appendAudit(db, 'Correlation fault simulated', `Simulated ${fault} fault via dashboard`, req.operator!.username),
+        ).catch(() => {});
         res.json({ accepted: true });
       }),
     );
@@ -440,6 +453,37 @@ export function createApp(
           throw new HttpError(429, 'NVD rate limit reached; retry later');
         }
         throw new HttpError(502, error instanceof Error ? error.message : 'NVD CPE search failed');
+      }
+    }),
+  );
+  app.get(
+    '/api/threat/intelligence/search',
+    requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
+    asyncRoute(async (req, res) => {
+      const { vendor, product, limit } = z
+        .object({
+          vendor: z.string().trim().min(1).max(200),
+          product: z.string().trim().max(200).default(''),
+          limit: z.coerce.number().int().min(1).max(200).default(50),
+        })
+        .parse(req.query);
+      try {
+        const result: ThreatSearchResponse = await searchThreatIntelligence(request, pool, config, {
+          vendor,
+          product,
+          limit,
+        });
+        if (result.rateLimited) {
+          if (result.retryAfter) res.setHeader('Retry-After', String(result.retryAfter));
+          throw new HttpError(429, 'NVD rate limit reached; retry later');
+        }
+        res.json(result);
+      } catch (error) {
+        if (error instanceof ThreatSearchRateLimitError) {
+          if (error.retryAfter !== null) res.setHeader('Retry-After', String(error.retryAfter));
+          throw new HttpError(429, 'NVD rate limit reached; retry later');
+        }
+        throw error;
       }
     }),
   );

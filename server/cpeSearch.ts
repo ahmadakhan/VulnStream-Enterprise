@@ -104,7 +104,7 @@ export async function searchNvdCpes(
   return { results, totalResults: total };
 }
 
-interface NvdRateLimitError {
+export interface NvdRateLimitError {
   __nvdRateLimit: boolean;
   retryAfter: string | string[] | undefined;
   status: 429;

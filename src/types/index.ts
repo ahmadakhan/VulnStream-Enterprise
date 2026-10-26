@@ -325,6 +325,23 @@ export interface NvdCpeSearchResponse {
   totalResults: number;
 }
 
+export interface ThreatSearchHit {
+  cve: NormalizedCVE;
+  /** CPE 2.3 strings that matched the requested vendor/product. */
+  matchingCpes: string[];
+  /** Origin of the result: `NVD_API` for the CVE Search API, `KEYWORD_FALLBACK` for keyword-search results. */
+  source: 'NVD_API' | 'KEYWORD_FALLBACK';
+}
+
+export interface ThreatSearchResponse {
+  hits: ThreatSearchHit[];
+  totalResults: number;
+  vendor: string;
+  product: string;
+  rateLimited: boolean;
+  retryAfter?: number;
+}
+
 export interface Advisory {
   id: string;
   title: string;
