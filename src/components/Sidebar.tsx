@@ -54,6 +54,7 @@ export const Sidebar: React.FC = () => {
         { id: 'findings', count: activeFindingsCount },
          { id: 'threat-intelligence-search' },
          { id: 'threat-analytics' },
+         { id: 'cpe-matcher' },
          { id: 'threat-data' },
         { id: 'advisories' },
       ],

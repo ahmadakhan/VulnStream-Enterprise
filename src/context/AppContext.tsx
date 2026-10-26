@@ -22,6 +22,7 @@ import type {
    NvdCpeSearchResponse,
    ThreatSearchResponse,
    ThreatAnalytics,
+   CpeMatchSimulation,
 } from '../types';
 import { compileCustomizedTemplate } from '../utils/templateCompiler';
 function useApplication() {
@@ -353,6 +354,19 @@ function useApplication() {
        const params = new URLSearchParams({ range, limit: String(limit) });
        return request<ThreatAnalytics>(`/threat/analytics?${params}`);
      },
+     simulateCpeMatch: async (payload: {
+       assetCpe: string;
+       vulnerabilityCpe: string;
+       assetVendor: string;
+       assetProduct: string;
+       versionRange?: {
+         versionStartIncluding?: string;
+         versionStartExcluding?: string;
+         versionEndIncluding?: string;
+         versionEndExcluding?: string;
+       };
+       assetVersion?: string;
+     }) => request<CpeMatchSimulation>('/threat/cpe-simulate', payload, 'POST'),
     toggleWatchlistItemActive: async (id: string) => {
       const updated = !!(await command('asset.toggle', undefined, id));
       if (updated) await refreshAfterMutation();

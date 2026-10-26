@@ -393,6 +393,82 @@ export interface ThreatAnalytics {
   generatedAt: string;
 }
 
+/** Classification tiers for the severity classifier. */
+export type SeverityTier = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFORMATIONAL';
+
+export interface SeverityClassification {
+  tier: SeverityTier;
+  score: number;
+  vector: string;
+  source: string;
+  rationale: string[];
+}
+
+export interface CpeParseComponent {
+  field: string;
+  value: string;
+  isWildcard: boolean;
+  isAmbiguous: boolean;
+}
+
+export interface CpeParseResult {
+  cpe: string;
+  parsed: {
+    prefix: string;
+    part: string;
+    vendor: string;
+    product: string;
+    version: string;
+    update: string;
+    edition: string;
+    language: string;
+    swEdition: string;
+    targetSw: string;
+    targetHw: string;
+    other: string;
+    raw: string;
+    isValid: boolean;
+  } | null;
+  components: CpeParseComponent[];
+  errors: string[];
+}
+
+export interface AliasExpansion {
+  canonical: string;
+  scope: 'VENDOR' | 'PRODUCT';
+  matchedAliases: string[];
+  builtInMatches: boolean;
+  customMatches: boolean;
+}
+
+export interface FalsePositiveCheck {
+  name: string;
+  passed: boolean;
+  severity: 'BLOCK' | 'WARN';
+  detail: string;
+}
+
+export interface CpeMatchSimulation {
+  assetCpe: CpeParseResult;
+  vulnerabilityCpe: CpeParseResult;
+  assetVendorAlias: AliasExpansion | null;
+  assetProductAlias: AliasExpansion | null;
+  match: {
+    matched: boolean;
+    method: string;
+    confidence: number;
+    viaAlias: boolean;
+    evidence: string;
+    reason?: string;
+  };
+  versionRangeCheck: {
+    inRange: boolean;
+    reason: string;
+  } | null;
+  falsePositiveChecks: FalsePositiveCheck[];
+  severity: SeverityClassification | null;
+}
+
 export interface Advisory {
   id: string;
   title: string;

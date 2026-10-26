@@ -32,6 +32,7 @@ import { queryCollection } from './collections';
 import { runRetention, previewRetention } from './retention';
 import { merkleRoot, verifyAuditChain } from '../src/utils/cryptoChain.ts';
 import { buildAliasMap } from '../src/utils/cpeMatcher.ts';
+import { runCpeSimulation } from '../src/utils/cpeSimulation.ts';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine.ts';
 import { HttpError } from './validation';
 import { applyCommand } from './commands';
@@ -48,6 +49,7 @@ import { readEvents, writeEvent } from './events';
 import { createDatabaseRateLimiter, type MutationLimiter, INGEST_LIMIT_CAPACITY, INGEST_LIMIT_REFILL_PER_MS } from './rateLimit';
 import { searchNvdCpes, loadNvdApiKey, isNvdRateLimitError, nvdRetryAfterSeconds } from './cpeSearch';
 import { searchThreatIntelligence, ThreatSearchRateLimitError } from './threatSearch';
+import { computeThreatAnalytics } from './analytics';
 import type { AppState } from '../shared/state.ts';
 import type {
   AppSettings,
@@ -61,6 +63,8 @@ import type {
    WatchListItem,
    NvdCpeSearchResponse,
    ThreatSearchResponse,
+   ThreatAnalytics,
+   CpeMatchSimulation,
 } from '../src/types/index.ts';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler.ts';
 function publicState(data: AppState): AppState {
@@ -550,6 +554,63 @@ export function createApp(
         }
         throw error;
       }
+    }),
+  );
+  app.get(
+    '/api/threat/analytics',
+    requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
+    asyncRoute(async (req, res) => {
+      const { range, limit } = z
+        .object({
+          range: z.enum(['7d', '30d', '90d', '365d', 'all']).default('30d'),
+          limit: z.coerce.number().int().min(1).max(50).default(10),
+        })
+        .parse(req.query);
+      const analytics: ThreatAnalytics = await computeThreatAnalytics(pool, range, limit);
+      res.json(analytics);
+    }),
+  );
+  app.post(
+    '/api/threat/cpe-simulate',
+    requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
+    asyncRoute(async (req, res) => {
+      const body = z
+        .object({
+          assetCpe: z.string().min(1).max(600),
+          vulnerabilityCpe: z.string().min(1).max(600),
+          assetVendor: z.string().trim().min(1).max(200),
+          assetProduct: z.string().trim().min(1).max(200),
+          versionRange: z
+            .object({
+              versionStartIncluding: z.string().optional(),
+              versionStartExcluding: z.string().optional(),
+              versionEndIncluding: z.string().optional(),
+              versionEndExcluding: z.string().optional(),
+            })
+            .optional(),
+          assetVersion: z.string().optional(),
+        })
+        .parse(req.body);
+      const aliasEntries = await list<AliasEntry>(pool, 'aliases');
+      const customVendorAliases = buildAliasMap(
+        aliasEntries.filter((e) => e.scope === 'VENDOR'),
+        'VENDOR',
+      );
+      const customProductAliases = buildAliasMap(
+        aliasEntries.filter((e) => e.scope === 'PRODUCT'),
+        'PRODUCT',
+      );
+      const result = runCpeSimulation(
+        body.assetCpe,
+        body.vulnerabilityCpe,
+        body.assetVendor,
+        body.assetProduct,
+        customVendorAliases,
+        customProductAliases,
+        body.versionRange,
+        body.assetVersion,
+      );
+      res.json(result);
     }),
   );
   app.post(

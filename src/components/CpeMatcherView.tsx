@@ -1,0 +1,530 @@
+import { PageHeading } from './PageHeading';
+import React, { useState } from 'react';
+import { useApp } from '../context/AppContext';
+import {
+  CpeMatchSimulation,
+  CpeParseResult,
+  SeverityClassification,
+} from '../types';
+import {
+  ScanLine,
+  Check,
+  X,
+  Copy,
+  Loader2,
+  AlertCircle,
+  Shield,
+  ShieldCheck,
+  ShieldX,
+  Search,
+  Database,
+  Hash,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react';
+import { copyText } from '../utils/clipboard';
+
+const SEVERITY_TONES: Record<string, { border: string; bg: string; text: string; light: string }> = {
+  CRITICAL: {
+    border: 'border-rose-500/30',
+    bg: 'bg-rose-500/10',
+    text: 'text-rose-300',
+    light: 'light:text-rose-800',
+  },
+  HIGH: {
+    border: 'border-orange-500/30',
+    bg: 'bg-orange-500/10',
+    text: 'text-orange-300',
+    light: 'light:text-orange-800',
+  },
+  MEDIUM: {
+    border: 'border-amber-500/30',
+    bg: 'bg-amber-500/10',
+    text: 'text-amber-300',
+    light: 'light:text-amber-800',
+  },
+  LOW: {
+    border: 'border-emerald-500/30',
+    bg: 'bg-emerald-500/10',
+    text: 'text-emerald-300',
+    light: 'light:text-emerald-800',
+  },
+  INFORMATIONAL: {
+    border: 'border-zinc-500/30',
+    bg: 'bg-zinc-800/60',
+    text: 'text-zinc-300',
+    light: 'light:text-zinc-600',
+  },
+};
+
+export const CpeMatcherView: React.FC = () => {
+  const { simulateCpeMatch } = useApp();
+  const [assetCpe, setAssetCpe] = useState('cpe:2.3:a:microsoft:windows_10:10.0.19041:*:*:*:*:*:*:*');
+  const [vulnerabilityCpe, setVulnerabilityCpe] = useState('cpe:2.3:a:microsoft:windows_10:*:*:*:*:*:*:*:*');
+  const [assetVendor, setAssetVendor] = useState('microsoft');
+  const [assetProduct, setAssetProduct] = useState('windows_10');
+  const [assetVersion, setAssetVersion] = useState('10.0.19041');
+  const [versionStartIncluding, setVersionStartIncluding] = useState('');
+  const [versionEndExcluding, setVersionEndExcluding] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const [result, setResult] = useState<CpeMatchSimulation | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleSimulate = async () => {
+    if (!assetCpe || !vulnerabilityCpe || !assetVendor || !assetProduct) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const resp = await simulateCpeMatch({
+        assetCpe,
+        vulnerabilityCpe,
+        assetVendor,
+        assetProduct,
+        assetVersion: assetVersion || undefined,
+        versionRange:
+          versionStartIncluding || versionEndExcluding
+            ? {
+                versionStartIncluding: versionStartIncluding || undefined,
+                versionEndExcluding: versionEndExcluding || undefined,
+              }
+            : undefined,
+      });
+      setResult(resp);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Simulation failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!result) return;
+    const success = await copyText(JSON.stringify(result, null, 2));
+    setCopied(success);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="space-y-6">
+      <PageHeading
+        page="cpe-matcher"
+        title="CPE Matcher & Severity Classifier"
+        children={
+          <span className="text-sm text-zinc-400 light:text-zinc-600">
+            Simulate CPE 2.3 matching between an asset and a vulnerability.
+            The simulator parses both CPEs, expands aliases, checks version ranges,
+            and runs false-positive elimination rules before producing a severity classification.
+          </span>
+        }
+      />
+
+      <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+              Asset CPE 2.3
+            </label>
+            <input
+              type="text"
+              value={assetCpe}
+              onChange={(e) => setAssetCpe(e.target.value)}
+              placeholder="cpe:2.3:a:vendor:product:version:*:*:*:*:*:*:*:*"
+              className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+              Vulnerability CPE 2.3
+            </label>
+            <input
+              type="text"
+              value={vulnerabilityCpe}
+              onChange={(e) => setVulnerabilityCpe(e.target.value)}
+              placeholder="cpe:2.3:a:vendor:product:version:*:*:*:*:*:*:*:*"
+              className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+              Asset vendor
+            </label>
+            <input
+              type="text"
+              value={assetVendor}
+              onChange={(e) => setAssetVendor(e.target.value)}
+              className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+              Asset product
+            </label>
+            <input
+              type="text"
+              value={assetProduct}
+              onChange={(e) => setAssetProduct(e.target.value)}
+              className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+            Asset version (for range checking)
+          </label>
+          <input
+            type="text"
+            value={assetVersion}
+            onChange={(e) => setAssetVersion(e.target.value)}
+            placeholder="e.g. 10.0.19041"
+            className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex items-center gap-1 text-xs text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-900 transition-colors"
+          >
+            {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            Advanced: version range
+          </button>
+        </div>
+
+        {showAdvanced && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200">
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+                Version start (inclusive)
+              </label>
+              <input
+                type="text"
+                value={versionStartIncluding}
+                onChange={(e) => setVersionStartIncluding(e.target.value)}
+                placeholder="e.g. 10.2.0"
+                className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+                Version end (exclusive)
+              </label>
+              <input
+                type="text"
+                value={versionEndExcluding}
+                onChange={(e) => setVersionEndExcluding(e.target.value)}
+                placeholder="e.g. 10.2.9-h1"
+                className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-3 pt-2">
+          <button
+            type="button"
+            onClick={handleCopy}
+            disabled={!result}
+            className="p-1.5 text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-900 disabled:opacity-50 rounded transition-colors"
+            title="Copy simulation result"
+          >
+            {copied ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
+          </button>
+          <button
+            type="button"
+            onClick={handleSimulate}
+            disabled={loading || !assetCpe || !vulnerabilityCpe}
+            className="px-4 py-2 bg-blue-500/15 border border-blue-400/30 text-blue-300 light:text-blue-800 rounded-md font-medium hover:bg-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+          >
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+            Simulate CPE match
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-rose-500/30 bg-rose-500/10 p-3 flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 text-rose-400 light:text-rose-800" />
+          <span className="text-sm text-rose-300 light:text-rose-800">{error}</span>
+        </div>
+      )}
+
+      {result && (
+        <div className="space-y-6">
+          <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 overflow-hidden">
+            <div className="p-4 border-b border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  {result.match.matched ? (
+                    <ShieldCheck className="h-5 w-5 text-emerald-400 light:text-emerald-700" />
+                  ) : (
+                    <ShieldX className="h-5 w-5 text-rose-400 light:text-rose-700" />
+                  )}
+                  <span className="text-lg font-medium text-zinc-100 light:text-zinc-900">
+                    Match result: <span className={result.match.matched ? 'text-emerald-400 light:text-emerald-700' : 'text-rose-400 light:text-rose-700'}>{result.match.matched ? 'MATCHED' : 'NO MATCH'}</span>
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-500 light:text-zinc-600">Confidence:</span>
+                <span className="text-sm font-mono font-medium text-zinc-200 light:text-zinc-900">{result.match.confidence}%</span>
+              </div>
+            </div>
+            <div className="p-4 space-y-3">
+              <div>
+                <span className="text-xs font-medium text-zinc-500 light:text-zinc-600">Method</span>
+                <div className="text-sm font-mono text-zinc-300 light:text-zinc-800 mt-0.5">{result.match.method}</div>
+              </div>
+              <div>
+                <span className="text-xs font-medium text-zinc-500 light:text-zinc-600">Evidence</span>
+                <div className="text-sm text-zinc-300 light:text-zinc-800 mt-0.5">{result.match.evidence}</div>
+              </div>
+              {result.match.reason && <div><span className="text-xs font-medium text-zinc-500 light:text-zinc-600">Reason</span><div className="text-sm text-zinc-400 light:text-zinc-600 mt-0.5">{result.match.reason}</div></div>}
+              {result.match.viaAlias && (
+                <div>
+                  <span className="text-xs font-medium text-zinc-500 light:text-zinc-600">Matched via alias</span>
+                  <span className="text-xs text-teal-300 light:text-teal-800 ml-2">Yes</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <CpeParseCard title="Asset CPE" parsed={result.assetCpe} />
+            <CpeParseCard title="Vulnerability CPE" parsed={result.vulnerabilityCpe} />
+          </div>
+
+          {(result.assetVendorAlias || result.assetProductAlias) && (
+            <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
+              <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800 mb-3">Alias Expansion</h3>
+              <div className="space-y-2">
+                {result.assetVendorAlias && (
+                  <AliasExpansionDisplay alias={result.assetVendorAlias} />
+                )}
+                {result.assetProductAlias && (
+                  <AliasExpansionDisplay alias={result.assetProductAlias} />
+                )}
+              </div>
+            </div>
+          )}
+
+          {result.versionRangeCheck && (
+            <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
+              <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800 mb-2">Version Range Check</h3>
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                  result.versionRangeCheck.inRange
+                    ? 'bg-emerald-500/10 text-emerald-300 light:text-emerald-800 border border-emerald-500/30'
+                    : 'bg-rose-500/10 text-rose-300 light:text-rose-800 border border-rose-500/30'
+                }`}>
+                  {result.versionRangeCheck.inRange ? 'In range' : 'Out of range'}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-500 light:text-zinc-600 mt-1">{result.versionRangeCheck.reason}</p>
+            </div>
+          )}
+
+          <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
+            <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800 mb-3">False-Positive Elimination Checks</h3>
+            {result.falsePositiveChecks.length === 0 ? (
+              <p className="text-xs text-zinc-500 light:text-zinc-600">No false-positive checks configured for this match.</p>
+            ) : (
+              <div className="space-y-2">
+                {result.falsePositiveChecks.map((check, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-start gap-3 p-2 rounded-md border ${
+                      check.passed
+                        ? 'border-emerald-500/20 bg-emerald-500/5'
+                        : 'border-rose-500/20 bg-rose-500/5'
+                    }`}
+                  >
+                    {check.passed ? (
+                      <Check className="h-4 w-4 text-emerald-400 light:text-emerald-700 flex-shrink-0 mt-0.5" />
+                    ) : (
+                      <X className="h-4 w-4 text-rose-400 light:text-rose-800 flex-shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-zinc-300 light:text-zinc-800">{check.name}</span>
+                        <span className={`text-[10px] px-1.5 py-0.25 rounded ${
+                          check.severity === 'BLOCK'
+                            ? 'bg-rose-500/10 text-rose-300 light:text-rose-800'
+                            : 'bg-amber-500/10 text-amber-300 light:text-amber-800'
+                        }`}>
+                          {check.severity}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-500 light:text-zinc-600 mt-0.5">{check.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {result.severity && (
+            <SeverityCard severity={result.severity} />
+          )}
+
+          {loading && (
+            <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
+              <Loader2 className="mx-auto h-6 w-6 text-blue-400 animate-spin mb-2" />
+              <p className="text-sm text-zinc-400 light:text-zinc-600">Simulating CPE match...</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!result && !loading && !error && (
+        <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
+          <ScanLine className="mx-auto h-10 w-10 text-zinc-600 light:text-zinc-400 mb-3" />
+          <p className="text-sm text-zinc-400 light:text-zinc-600">
+            Enter CPE 2.3 strings and click "Simulate CPE match" to start.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+function CpeParseCard({ title, parsed }: { title: string; parsed: CpeParseResult }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800">{title}</h3>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-xs text-zinc-500 light:text-zinc-600 hover:text-zinc-300 light:hover:text-zinc-800"
+        >
+          {expanded ? 'Collapse' : 'Expand'}
+        </button>
+      </div>
+      <div className="font-mono text-xs text-zinc-400 light:text-zinc-600 break-all mb-2">
+        {parsed.cpe}
+      </div>
+      {parsed.errors.length > 0 && (
+        <div className="mb-2 space-y-1">
+          {parsed.errors.map((err, i) => (
+            <div key={i} className="flex items-center gap-1 text-xs text-rose-400 light:text-rose-700">
+              <AlertCircle size={12} />
+              {err}
+            </div>
+          ))}
+        </div>
+      )}
+      {parsed.parsed && (
+        <div>
+          <div className={`inline-flex items-center px-1.5 py-0.25 rounded text-xs font-medium ${
+            parsed.parsed.isValid
+              ? 'bg-emerald-500/10 text-emerald-300 light:text-emerald-800 border border-emerald-500/30'
+              : 'bg-rose-500/10 text-rose-300 light:text-rose-800 border border-rose-500/30'
+          }`}>
+            {parsed.parsed.isValid ? 'Valid CPE 2.3' : 'Invalid CPE'}
+          </div>
+        </div>
+      )}
+      {expanded && parsed.components.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {parsed.components.map((comp) => (
+            <div key={comp.field} className="grid grid-cols-4 gap-2 text-xs">
+              <span className="text-zinc-500 light:text-zinc-600">{comp.field}</span>
+              <span className="col-span-2 font-mono text-zinc-400 light:text-zinc-700 break-all">{comp.value || '—'}</span>
+              <span className="text-zinc-600 light:text-zinc-500 text-right">
+                {comp.isWildcard ? 'wildcard' : ''}
+                {comp.isAmbiguous ? 'ambiguous' : ''}
+                {!comp.isWildcard && !comp.isAmbiguous ? '' : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AliasExpansionDisplay({ alias }: { alias: NonNullable<CpeMatchSimulation['assetVendorAlias']> }) {
+  return (
+    <div className="flex items-start gap-3">
+      <Hash className="h-4 w-4 text-zinc-500 light:text-zinc-600 flex-shrink-0 mt-0.5" />
+      <div className="flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-medium text-zinc-300 light:text-zinc-800">
+            {alias.scope === 'VENDOR' ? 'Vendor' : 'Product'} alias:
+          </span>
+          <span className="text-xs font-mono text-zinc-400 light:text-zinc-600">{alias.canonical}</span>
+          {alias.builtInMatches && (
+            <span className="text-[10px] px-1.5 py-0.25 rounded bg-blue-500/10 text-blue-300 light:text-blue-800">
+              Built-in
+            </span>
+          )}
+          {alias.customMatches && (
+            <span className="text-[10px] px-1.5 py-0.25 rounded bg-purple-500/10 text-purple-300 light:text-purple-800">
+              Custom
+            </span>
+          )}
+        </div>
+        {alias.matchedAliases.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {alias.matchedAliases.map((a) => (
+              <code key={a} className="text-[10px] px-1 py-0.25 bg-zinc-800/60 dark:bg-zinc-800 light:bg-zinc-100 rounded text-zinc-400 light:text-zinc-600">
+                {a}
+              </code>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SeverityCard({ severity }: { severity: SeverityClassification }) {
+  const tone = SEVERITY_TONES[severity.tier] || SEVERITY_TONES.INFORMATIONAL;
+  return (
+    <div className={`rounded-lg border p-4 ${tone.border} ${tone.bg}`}>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800">Severity Classification</h3>
+        <span className={`px-2 py-0.5 rounded text-sm font-bold ${tone.text} ${tone.light}`}>
+          {severity.tier}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-4 text-xs">
+        <div>
+          <span className="text-zinc-500 light:text-zinc-600">Score</span>
+          <div className="font-mono text-zinc-200 light:text-zinc-900">{severity.score.toFixed(1)}</div>
+        </div>
+        <div>
+          <span className="text-zinc-500 light:text-zinc-600">Source</span>
+          <div className="text-zinc-200 light:text-zinc-900">{severity.source}</div>
+        </div>
+      </div>
+      {severity.vector && (
+        <div className="mt-2">
+          <span className="text-xs text-zinc-500 light:text-zinc-600">CVSS Vector</span>
+          <div className="font-mono text-xs text-zinc-400 light:text-zinc-600 mt-0.5 break-all">{severity.vector}</div>
+        </div>
+      )}
+      {severity.rationale.length > 0 && (
+        <div className="mt-3 space-y-1">
+          <span className="text-xs text-zinc-500 light:text-zinc-600">Rationale</span>
+          <ul className="space-y-1">
+            {severity.rationale.map((r, i) => (
+              <li key={i} className="text-xs text-zinc-400 light:text-zinc-600 flex items-start gap-1">
+                <span className="text-blue-400 light:text-blue-700">•</span>
+                <span>{r}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}

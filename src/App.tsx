@@ -12,6 +12,7 @@ import { FindingsView } from './components/FindingsView';
 import { ThreatDataView } from './components/ThreatDataView';
 import { ThreatIntelligenceSearch } from './components/ThreatIntelligenceSearch';
 import { ThreatAnalyticsView } from './components/ThreatAnalyticsView';
+import { CpeMatcherView } from './components/CpeMatcherView';
 import { AdvisoriesView } from './components/AdvisoriesView';
 import { PipelineExecutionsView } from './components/PipelineExecutionsView';
 import { AlertedCVEsView } from './components/AlertedCVEsView';
@@ -47,6 +48,7 @@ export const MainContent: React.FC = () => {
       {activeTab === 'findings' && <FindingsView />}
       {activeTab === 'threat-intelligence-search' && <ThreatIntelligenceSearch />}
       {activeTab === 'threat-analytics' && <ThreatAnalyticsView />}
+      {activeTab === 'cpe-matcher' && <CpeMatcherView />}
       {activeTab === 'threat-data' && <ThreatDataView />}
       {activeTab === 'advisories' && <AdvisoriesView />}
       {activeTab === 'correlation' && <CorrelationDashboard />}
