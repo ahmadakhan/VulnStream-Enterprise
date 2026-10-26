@@ -400,6 +400,10 @@ export interface AliasEntry {
   aliases: string[];
   notes?: string;
   createdAt: string;
+  /** AUTO rows are derived from the current inventory/correlation evidence and
+   * are rebuilt by the pipeline; MANUAL rows are operator-managed and are
+   * never deleted by the automatic lifecycle. */
+  source?: 'MANUAL' | 'AUTO';
 }
 
 export interface EmailRecipient {

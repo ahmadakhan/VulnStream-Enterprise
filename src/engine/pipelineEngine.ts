@@ -17,9 +17,11 @@ import {
   DEFAULT_PRODUCT_ALIASES,
   DEFAULT_VENDOR_ALIASES,
   aliasGroupKeys,
+  buildAliasMap,
   matchesWatchlistItem,
   parseCPE23,
 } from '../utils/cpeMatcher';
+import { deriveInventoryAliases } from '../utils/aliasLifecycle';
 import { isPublicAddress } from '../utils/ipSafety';
 import ipaddr from 'ipaddr.js';
 
@@ -159,6 +161,29 @@ export function runVulnerabilityPipeline(
   const duplicates = corpus.filter((cve) => normalizeCveId(cve.cveId)).length - latest.size;
   const normalizationDurationMs = Math.round(performance.now() - normalizationStarted);
   const activeAssets = watchlist.filter((asset) => asset.active);
+  // Auto aliases are derived from the operator's own inventory declarations
+  // (vendor/product plus CPEs). They are ephemeral here and persisted by the
+  // server pipeline, so both the browser simulation and server correlation
+  // resolve the same spellings. Manual aliases always take precedence and are
+  // never removed by this merge.
+  const autoAliasEntries = deriveInventoryAliases(activeAssets);
+  const mergeAliasMaps = (
+    base: Record<string, string[]>,
+    extra: Record<string, string[]>,
+  ): Record<string, string[]> => {
+    const merged: Record<string, string[]> = Object.assign(Object.create(null), base);
+    for (const [key, values] of Object.entries(extra))
+      merged[key] = [...new Set([...(merged[key] || []), ...values])];
+    return merged;
+  };
+  const effectiveVendorAliases = mergeAliasMaps(
+    vendorAliases,
+    buildAliasMap(autoAliasEntries, 'VENDOR'),
+  );
+  const effectiveProductAliases = mergeAliasMaps(
+    productAliases,
+    buildAliasMap(autoAliasEntries, 'PRODUCT'),
+  );
   // Index inventory once. Matching the entire CVE cache against every asset
   // on every run is the dominant avoidable cost for large installations.
   // The candidate selection is deliberately a superset: wildcard criteria,
@@ -180,7 +205,7 @@ export function runVulnerabilityPipeline(
       : [
           ...new Set([
             v.toLowerCase(),
-            ...aliasGroupKeys(v, DEFAULT_VENDOR_ALIASES, vendorAliases),
+            ...aliasGroupKeys(v, DEFAULT_VENDOR_ALIASES, effectiveVendorAliases),
           ]),
         ];
   const aliasProductKeys = (p: string): string[] =>
@@ -189,7 +214,7 @@ export function runVulnerabilityPipeline(
       : [
           ...new Set([
             p.toLowerCase(),
-            ...aliasGroupKeys(p, DEFAULT_PRODUCT_ALIASES, productAliases),
+            ...aliasGroupKeys(p, DEFAULT_PRODUCT_ALIASES, effectiveProductAliases),
           ]),
         ];
   for (const asset of activeAssets) {
@@ -318,8 +343,8 @@ export function runVulnerabilityPipeline(
           asset.targetHw,
           undefined,
           false,
-          vendorAliases,
-          productAliases,
+          effectiveVendorAliases,
+          effectiveProductAliases,
           asset.version,
         ),
       );

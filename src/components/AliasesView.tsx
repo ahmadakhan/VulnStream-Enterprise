@@ -130,11 +130,11 @@ export const AliasesView: React.FC = () => {
 
       <div>
         <h2 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 mb-2">
-          Custom {activeTab === 'VENDOR' ? 'vendor' : 'product'} aliases ({filteredCustom.length})
+          Managed {activeTab === 'VENDOR' ? 'vendor' : 'product'} aliases ({filteredCustom.length})
         </h2>
         {filteredCustom.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-800 dark:border-zinc-800 light:border-zinc-300 p-6 text-center text-xs text-zinc-500">
-            No custom aliases yet{searchTerm ? ' matching your search' : ''}.
+            No managed aliases yet{searchTerm ? ' matching your search' : ''}.
           </div>
         ) : (
           <div className="rounded-xl border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 divide-y divide-zinc-800 dark:divide-zinc-800 light:divide-zinc-200 overflow-hidden">
@@ -148,6 +148,14 @@ export const AliasesView: React.FC = () => {
                     <span className="text-xs font-mono font-semibold text-zinc-100 dark:text-zinc-100 light:text-zinc-900">
                       {entry.canonical}
                     </span>
+                    {entry.source === 'AUTO' && (
+                      <span
+                        className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                        title="Derived automatically from inventory and correlation evidence; rebuilt each pipeline run"
+                      >
+                        Auto
+                      </span>
+                    )}
                     <span className="text-zinc-600">&rarr;</span>
                     {entry.aliases.map((a) => (
                       <span
@@ -160,7 +168,7 @@ export const AliasesView: React.FC = () => {
                   </div>
                   {entry.notes && <p className="text-[11px] text-zinc-500 mt-1.5">{entry.notes}</p>}
                 </div>
-                {admin && (
+                {admin && entry.source !== 'AUTO' && (
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => openEdit(entry)}
@@ -182,6 +190,12 @@ export const AliasesView: React.FC = () => {
             ))}
           </div>
         )}
+        <p className="text-[11px] text-zinc-500 mt-2 flex items-start gap-1.5">
+          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          Auto aliases are rebuilt from active inventory and successful correlations on every pipeline run. They
+          disappear automatically when the supporting asset or CPE identity is removed; operator aliases are never
+          deleted automatically.
+        </p>
       </div>
 
       <div>

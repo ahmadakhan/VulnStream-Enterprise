@@ -183,7 +183,12 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
   } else if (action === 'alias.save') {
     const input = aliasSchema.parse(data),
       old = await checkExisting('aliases');
-    await put(db, 'aliases', newId, { ...input, id: newId, createdAt: old?.createdAt || now });
+    await put(db, 'aliases', newId, {
+      ...input,
+      id: newId,
+      createdAt: old?.createdAt || now,
+      source: 'MANUAL',
+    });
   } else if (action === 'alias.delete') {
     if (!id) throw new HttpError(400, 'Record ID required');
     if (!(await getForUpdate<any>(db, 'aliases', id))) throw new HttpError(404, 'Record not found');

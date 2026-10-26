@@ -2,7 +2,7 @@ import { writeEvent } from './events';
 import { mergeArticles, matchIntelligence } from '../src/utils/intelligenceMatcher';
 import type pg from 'pg';
 import { randomUUID, createHash } from 'node:crypto';
-import { get, getForUpdate, list, put, putMany, transaction, appendAudit, pipelineState, schemaLockKey } from './db';
+import { get, getForUpdate, list, put, putMany, remove, transaction, appendAudit, pipelineState, schemaLockKey } from './db';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import type {
   AppSettings,
@@ -15,6 +15,11 @@ import type {
   AliasEntry,
 } from '../src/types/index.ts';
 import { buildAliasMap, parseCPE23 } from '../src/utils/cpeMatcher';
+import {
+  deriveCorrelationAliases,
+  deriveInventoryAliases,
+  reconcileAutoAliases,
+} from '../src/utils/aliasLifecycle';
 import { mergeCveRecords, normalizeCveId, stableJson } from '../src/utils/deduplicator';
 import { reconcileFindings } from '../src/engine/reconcileFindings';
 import { applyVexSuppression, determineExploitRisk, rankAndRateLimitZeroDays, runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
@@ -297,11 +302,15 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       list<AliasEntry>(pool, 'aliases'),
     ]);
     // Operator-managed additions to the built-in alias thesaurus (see cpeMatcher.ts
-    // DEFAULT_VENDOR_ALIASES/DEFAULT_PRODUCT_ALIASES); loaded once per run and reused
-    // for both the preliminary and final correlation passes below so a skipped
-    // re-correlation (the `reusableMatches` fast path) never silently drops them.
-    const vendorAliases = buildAliasMap(aliasEntries, 'VENDOR');
-    const productAliases = buildAliasMap(aliasEntries, 'PRODUCT');
+    // DEFAULT_VENDOR_ALIASES/DEFAULT_PRODUCT_ALIASES) plus the automatic rows
+    // that were derived on previous runs. Inventory-derived aliases are merged
+    // immediately so a newly added/renamed asset benefits from the current run;
+    // the full add/remove reconciliation happens once correlation evidence for
+    // this run is known.
+    const inventoryAliases = deriveInventoryAliases(inventory, aliasEntries);
+    const startedAliasEntries: AliasEntry[] = [...aliasEntries, ...inventoryAliases];
+    const vendorAliases = buildAliasMap(startedAliasEntries, 'VENDOR');
+    const productAliases = buildAliasMap(startedAliasEntries, 'PRODUCT');
     const canonicalCache = mergeCveRecords(cachedCves);
     const knownCveModifiedAt = new Map([...canonicalCache].map(([id, cve]) => [id, cve.modifiedDate]));
     const knownWithdrawalAt = new Map(cachedWithdrawals.map((entry) => [entry.cveId, entry.modifiedDate]));
@@ -721,11 +730,18 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         stableJson(preliminarySourceIds) === stableJson(finalSourceIds) &&
         preliminaryCveSignature === matchingCveSignature(finalCves) &&
         preliminaryInventorySignature === inventorySignature(snapshot.watchlist);
+      // Inventory may have changed while this run was ingesting. Re-derive its
+      // automatic aliases for the final snapshot so both the PostgreSQL
+      // candidate index and the JavaScript matcher use the same expanded keys.
+      const finalInventoryAliases = deriveInventoryAliases(snapshot.watchlist, aliasEntries);
+      const finalAliasEntries: AliasEntry[] = [...aliasEntries, ...finalInventoryAliases];
+      const finalVendorAliases = buildAliasMap(finalAliasEntries, 'VENDOR');
+      const finalProductAliases = buildAliasMap(finalAliasEntries, 'PRODUCT');
       const finalPairs = reusableMatches
         ? undefined
         : await refreshCandidatePairs(db, finalCves, snapshot.watchlist, {
-            vendorAliases,
-            productAliases,
+            vendorAliases: finalVendorAliases,
+            productAliases: finalProductAliases,
           });
       const correlated = reusableMatches
         ? {
@@ -746,8 +762,8 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             settings,
             'Server worker',
             true,
-            vendorAliases,
-            productAliases,
+            finalVendorAliases,
+            finalProductAliases,
             finalPairs?.size ? finalPairs : undefined,
           );
       // A wholly rejected stale bundle may be rebuilt from current matches. Never
@@ -801,13 +817,28 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         'findings',
         persistedFindings.map((f) => ({ id: f.id, data: f })),
       );
+      // Rebuild the automatic alias layer from current inventory and from the
+      // correlations that survived this run. Rows that are no longer supported
+      // by either source are removed, while operator-managed rows are never
+      // touched. The effective maps include this run's changes so news evidence
+      // matching also sees the freshly learned names.
+      const desiredAutoAliases = [
+        ...deriveInventoryAliases(snapshot.watchlist, aliasEntries),
+        ...deriveCorrelationAliases(persistedFindings, snapshot.watchlist, byId),
+      ];
+      const autoAliases = reconcileAutoAliases(aliasEntries, desiredAutoAliases);
+      for (const entry of autoAliases.upserts) await put(db, 'aliases', entry.id, entry);
+      for (const id of autoAliases.removals) await remove(db, 'aliases', id);
+      const effectiveAliasEntries = autoAliases.aliases;
+      const effectiveVendorAliases = buildAliasMap(effectiveAliasEntries, 'VENDOR');
+      const effectiveProductAliases = buildAliasMap(effectiveAliasEntries, 'PRODUCT');
       const intelligenceMatches = matchIntelligence(
         articles,
         snapshot.watchlist,
         vexEnforced,
         [...byId.values()],
-        vendorAliases,
-        productAliases,
+        effectiveVendorAliases,
+        effectiveProductAliases,
         // Cached CVEs stay applicable regardless of age, but news vendor +
         // product evidence is limited to the run's published/modified window.
         execution!.scopeHours,

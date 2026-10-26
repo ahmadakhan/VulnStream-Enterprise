@@ -243,6 +243,62 @@ function hasUnescapedCpeWildcard(value: string): boolean {
   return value !== '*' && cpeComponentPattern(value).hasWildcard;
 }
 
+function escapeCpeToken(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/:/g, '\\:');
+}
+
+/** Inventory fields are operator-facing, so map them to the same component
+ * conventions used by NVD CPEs before substituting them for a wildcard. */
+function inventoryCpeToken(value: string): string {
+  return escapeCpeToken(
+    value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9_.-]/g, '_'),
+  );
+}
+
+function isGenericCpeComponent(value: string): boolean {
+  return value === '*' || hasUnescapedCpeWildcard(value);
+}
+
+/**
+ * A CPE whose vendor or product is a wildcard is not evidence of either
+ * identity: without help it intersects every advisory for the same part.
+ * Resolve the wildcard side from the inventory's own vendor/product fields so
+ * a generic inventory CPE matches the product it actually describes.
+ */
+function resolveGenericCpeIdentity(
+  assetCpeStr: string,
+  assetVendor: string,
+  assetProduct: string,
+): { cpe: string; inferred: boolean } {
+  const parsed = parseCPE23(assetCpeStr);
+  if (!parsed.isValid) return { cpe: assetCpeStr, inferred: false };
+
+  const genericVendor = isGenericCpeComponent(parsed.vendor);
+  const genericProduct = isGenericCpeComponent(parsed.product);
+  if (!genericVendor && !genericProduct) return { cpe: assetCpeStr, inferred: false };
+
+  let vendor = parsed.vendor;
+  let product = parsed.product;
+  let inferred = false;
+  if (genericVendor && assetVendor.trim()) {
+    vendor = inventoryCpeToken(assetVendor);
+    inferred = true;
+  }
+  if (genericProduct && assetProduct.trim()) {
+    product = inventoryCpeToken(assetProduct);
+    inferred = true;
+  }
+  if (!inferred) return { cpe: assetCpeStr, inferred: false };
+
+  const tokens = splitCpeTokens(parsed.raw.slice(8));
+  tokens[1] = vendor;
+  tokens[2] = product;
+  return { cpe: `cpe:2.3:${tokens.join(':')}`, inferred: true };
+}
+
 export interface CpeAliasOptions {
   /** Passing either map enables symmetric alias resolution for structured CPEs. */
   vendorAliases?: Record<string, string[]>;
@@ -611,7 +667,14 @@ export function matchesWatchlistItem(
   }
 
   // 3. Strict CPE 2.3 comparison with NVD version interval evaluation
-  for (const assetCpe of assetCpes) {
+  for (const rawAssetCpe of assetCpes) {
+    // Wildcard vendor/product CPEs are resolved from inventory identity below,
+    // and such inferred matches are review-only.
+    const { cpe: assetCpe, inferred: genericIdentity } = resolveGenericCpeIdentity(
+      rawAssetCpe,
+      assetVendor,
+      assetProduct,
+    );
     for (const vulnCpe of vulnCpeMatches) {
       const matchRes = matchCPE(assetCpe, vulnCpe, versionRange, {
         vendorAliases: customVendorAliases,
@@ -636,7 +699,7 @@ export function matchesWatchlistItem(
             confidence: 85,
             matchedCpe: vulnCpe,
             evidence: `Matched structured CPE through the symmetric alias thesaurus (${asset.vendor}/${asset.product} -> ${vuln.vendor}/${vuln.product}) (85% confidence)`,
-            applicabilityRequiresReview: rangeNeedsReview,
+            applicabilityRequiresReview: rangeNeedsReview || genericIdentity,
           });
           continue;
         }
@@ -673,17 +736,19 @@ export function matchesWatchlistItem(
               'other',
             ] as const
           ).some((field) => hasUnescapedCpeWildcard(asset[field]));
-        const requiresReview = rangeNeedsReview || contextNeedsReview;
+        const requiresReview = rangeNeedsReview || contextNeedsReview || genericIdentity;
         retain({
           matched: true,
           method: versionRange ? 'STRICT_CPE_INTERVAL' : 'STRICT_CPE',
           confidence: requiresReview ? 70 : versionRange ? 100 : 90,
           matchedCpe: vulnCpe,
-          evidence: versionRange
-            ? requiresReview
-              ? 'Matched strict CPE 2.3 product identifiers; version or architecture applicability requires review'
-              : `Matched strict CPE 2.3 component tokens + verified in version interval [< ${versionRange.versionEndExcluding || versionRange.versionEndIncluding}] (100% confidence)`
-            : `Matched strict CPE 2.3 component tokens (90% confidence)`,
+          evidence: genericIdentity
+            ? 'Matched CPE product identity inferred from the inventory record; confirm the generic CPE is intended (70% confidence)'
+            : versionRange
+              ? requiresReview
+                ? 'Matched strict CPE 2.3 product identifiers; version or architecture applicability requires review'
+                : `Matched strict CPE 2.3 component tokens + verified in version interval [< ${versionRange.versionEndExcluding || versionRange.versionEndIncluding}] (100% confidence)`
+              : `Matched strict CPE 2.3 component tokens (90% confidence)`,
           applicabilityRequiresReview: requiresReview,
         });
       }
@@ -692,13 +757,16 @@ export function matchesWatchlistItem(
 
   if (bestMatch) return bestMatch;
 
-  // Structured identifiers are authoritative; do not undo exclusions with text heuristics.
-  if ((assetCpes.length && vulnCpeMatches.length) || (assetPurls?.length && vulnPurls?.length)) {
+  // Package identity is exact: a PURL-vs-PURL mismatch remains authoritative.
+  // A CPE mismatch, by contrast, may only mean the two sides spell the same
+  // vendor/product differently, which the alias and fallback steps below can
+  // still resolve.
+  if (assetPurls?.length && vulnPurls?.length) {
     return {
       matched: false,
       method: 'NONE',
       confidence: 0,
-      evidence: 'Structured identifiers did not match',
+      evidence: 'Package identifiers did not match',
     };
   }
 
@@ -716,6 +784,64 @@ export function matchesWatchlistItem(
       ?.version ||
     '';
   const rangeHasBounds = Boolean(versionRange && Object.values(versionRange).some(Boolean));
+
+  // A CPE mismatch is only allowed to fall through when it concerns the
+  // vendor/product names. If the structured identity is the same and a CPE
+  // criterion explicitly excludes the inventory (version token, part,
+  // architecture, target OS or another fixed field), that exclusion remains
+  // authoritative. Otherwise a text fallback could re-admit a release the CPE
+  // evidence already proved inapplicable.
+  const sameStructuredIdentity = (asset: ParsedCPE, vuln: ParsedCPE) =>
+    (matchComponent(asset.vendor, vuln.vendor) ||
+      matchVendorWithAliases(asset.vendor, vuln.vendor, customVendorAliases)) &&
+    (matchComponent(asset.product, vuln.product) ||
+      matchProductWithAliases(asset.product, vuln.product, customProductAliases));
+  const cpeIdentityExcluded = assetCpes.some((assetCpe) => {
+    // Resolve a generic inventory CPE with the same inventory fields used by
+    // the strict comparison so its version/platform cannot be attributed to an
+    // unrelated advisory product.
+    const asset = parseCPE23(
+      resolveGenericCpeIdentity(assetCpe, assetVendor, assetProduct).cpe,
+    );
+    if (!asset.isValid) return false;
+    return vulnCpeMatches.some((vulnCpe) => {
+      const vuln = parseCPE23(vulnCpe);
+      if (!vuln.isValid || !sameStructuredIdentity(asset, vuln)) return false;
+      if (!matchComponent(asset.part, vuln.part)) return true;
+      if (
+        asset.targetHw !== '*' &&
+        vuln.targetHw !== '*' &&
+        !matchComponent(asset.targetHw, vuln.targetHw)
+      )
+        return true;
+      if (
+        asset.targetSw !== '*' &&
+        vuln.targetSw !== '*' &&
+        !matchComponent(asset.targetSw, vuln.targetSw)
+      )
+        return true;
+      for (const field of ['update', 'edition', 'language', 'swEdition', 'other'] as const) {
+        if (!matchComponent(asset[field], vuln[field])) return true;
+      }
+      const assetVersionToken = asset.version;
+      const vulnVersionToken = vuln.version;
+      return (
+        assetVersionToken !== '*' &&
+        assetVersionToken !== '-' &&
+        vulnVersionToken !== '*' &&
+        vulnVersionToken !== '-' &&
+        !matchComponent(assetVersionToken, vulnVersionToken)
+      );
+    });
+  });
+  if (assetCpes.length > 0 && cpeIdentityExcluded) {
+    return {
+      matched: false,
+      method: 'NONE',
+      confidence: 0,
+      evidence: 'Structured CPE criteria explicitly excluded the inventory version or platform',
+    };
+  }
 
   for (const vulnCpe of vulnCpeMatches) {
     const parsedVuln = parseCPE23(vulnCpe);
