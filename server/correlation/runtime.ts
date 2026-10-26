@@ -26,6 +26,8 @@ export class CorrelationRuntime {
    * the route just reads the cached number.
    */
   pendingDepth = -1;
+  /** When `pendingDepth` was last refreshed; 0 means never. */
+  pendingSampledAt = 0;
   /** Set when the consumer is disabled, so readiness does not claim it runs. */
   readonly workerEnabled: boolean;
   constructor(
@@ -73,6 +75,7 @@ export class CorrelationRuntime {
             .query('SELECT count(*)::int AS depth FROM correlation_pending')
             .then((result) => {
               this.pendingDepth = Number(result.rows[0]?.depth ?? 0);
+              this.pendingSampledAt = Date.now();
             })
             .catch(() => {});
         });

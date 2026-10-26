@@ -53,7 +53,16 @@ export class Heartbeat {
   private inFlight = false;
   state: HeartbeatState = { status: 'idle' };
   lastPingAt = 0;
+  /**
+   * Consecutive failed pings, reset on success. Exported as a GAUGE, not a
+   * counter: it resets on every success, so calling it `_total` and applying
+   * `increase()` to it made the failure alert fire on ordinary recovery
+   * (any nonzero -> 0 is read as a counter reset, and the spike it computes is
+   * an artefact).
+   */
   consecutiveFailures = 0;
+  /** Monotonic count of failed pings; this one IS a counter. */
+  failedPingsTotal = 0;
 
   constructor(private readonly options: HeartbeatOptions) {
     if (!options.url) this.state = { status: 'disabled' };
@@ -101,6 +110,7 @@ export class Heartbeat {
       this.state = { status: 'pinged', at: this.lastPingAt, latencyMs: this.lastPingAt - started };
     } catch (error) {
       this.consecutiveFailures++;
+      this.failedPingsTotal++;
       this.state = {
         status: 'failed',
         at: Date.now(),

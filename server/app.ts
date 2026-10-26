@@ -245,6 +245,7 @@ export function createApp(
         options.correlation.supervisor,
         options.correlation.heartbeat,
         options.correlation.pendingDepth,
+        options.correlation.pendingSampledAt,
       ),
     );
   });
