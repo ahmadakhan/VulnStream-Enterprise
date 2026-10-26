@@ -9,7 +9,7 @@ import { TextCorrelationEngine, type TimedQuery } from './engine.ts';
 import { linkPreCveClusters, clusterWindowDays, DEFAULT_CLUSTER_OPEN_WINDOW_DAYS } from './clusters.ts';
 import type { CorrelationTelemetry } from './telemetry.ts';
 import type { DeadLetterQueue } from './deadLetter.ts';
-export type IngestionResult = 'PROCESSED' | 'DUPLICATE' | 'DEAD_LETTER';
+export type IngestionResult = 'PROCESSED' | 'DUPLICATE' | 'DEAD_LETTER' | 'UNDURABLE';
 export const databaseCode = (error: unknown): string => {
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
   return /^[A-Z0-9]{5,20}$/.test(code) ? code : 'DATABASE_FAILURE';
@@ -84,10 +84,10 @@ export class AdvisoryIngestor {
     const parsed = AdvisoryInputSchema.safeParse(rawInput);
     if (!parsed.success) {
       this.telemetry.log('WARN', 'validation.failed', { trackingId, count: parsed.error.issues.length });
-      await this.persistFailure(rawInput, 'VALIDATION_FAILED', trackingId, dbPool);
+      const durable = await this.persistFailure(rawInput, 'VALIDATION_FAILED', trackingId, dbPool);
       this.telemetry.completed++;
       this.telemetry.latencyTotal += performance.now() - started;
-      return 'DEAD_LETTER';
+      return durable ? 'DEAD_LETTER' : 'UNDURABLE';
     }
     const input = parsed.data;
     const fingerprint = createHash('sha256')
@@ -220,8 +220,8 @@ export class AdvisoryIngestor {
       throw new Error('RETRIES_EXHAUSTED');
     } catch (error) {
       this.telemetry.log('ERROR', 'ingestion.failed', { trackingId, totalDatabaseTimeMs: databaseTime });
-      await this.persistFailure(rawInput, databaseCode(error), trackingId, dbPool);
-      return 'DEAD_LETTER';
+      const durable = await this.persistFailure(rawInput, databaseCode(error), trackingId, dbPool);
+      return durable ? 'DEAD_LETTER' : 'UNDURABLE';
     } finally {
       this.telemetry.completed++;
       this.telemetry.latencyTotal += performance.now() - started;
@@ -244,17 +244,20 @@ export class AdvisoryIngestor {
     errorCode: string,
     trackingId: string,
     dbPool: Pool,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const outcome = await this.deadLetterQueue.capture(raw, errorCode, trackingId, dbPool);
-      if (outcome === 'SPOOLED') return;
+      if (outcome === 'SPOOLED') return true;
     } catch (error) {
       this.telemetry.log('CRITICAL', 'dead_letter.spool_failed', { trackingId });
     }
-    if (await this.deadLetterQueue.captureToDatabase(raw, errorCode, trackingId, dbPool)) return;
-    // Both stores are unavailable. This is the only remaining loss window, so it
-    // is logged at CRITICAL with enough identifiers to reconstruct the record
-    // from the source feed, and the ingest outcome stays DEAD_LETTER.
+    if (await this.deadLetterQueue.captureToDatabase(raw, errorCode, trackingId, dbPool)) return true;
+    // Both stores are unavailable. This is the only remaining loss window, so
+    // the caller must NOT treat the record as durably handled. It is logged at
+    // CRITICAL with enough identifiers to reconstruct the record from the
+    // source feed, and the ingest outcome is UNDURABLE so a pending row is not
+    // acknowledged and deleted.
     this.telemetry.log('CRITICAL', 'dead_letter.undurable', { trackingId });
+    return false;
   }
 }

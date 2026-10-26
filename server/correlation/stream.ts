@@ -4,6 +4,8 @@ import type { Pool } from 'pg';
 import type { PipelineSupervisor, IngestPriority } from './supervisor.ts';
 import type { AdvisoryInput } from './validation.ts';
 const MAX_RECORD_BYTES = 262144;
+const QUEUE_DEADLINE_MS = 60_000;
+const PROCESSING_DEADLINE_MS = 15_000;
 type AdvisoryRecord = AdvisoryInput | { invalidFrame: string; raw?: string };
 /** Object-mode records or UTF-8 NDJSON. A record is bounded even across chunks. */
 export async function* advisoryRecords(input: Readable): AsyncGenerator<AdvisoryRecord> {
@@ -58,11 +60,14 @@ export class AdvisoryStreamProcessor {
   async processAdvisoryStream(inputStream: Readable, concurrencyLimit: number, dbPool: Pool): Promise<void> {
     if (!Number.isInteger(concurrencyLimit) || concurrencyLimit < 1 || concurrencyLimit > 32)
       throw new Error('INVALID_CONCURRENCY');
-    const running = new Set<Promise<void>>();
+    // Read ahead by a bounded factor. A LOW advisory waiting for a slot must
+    // not prevent a later HIGH advisory in the same stream from being parsed
+    // and handed to the priority scheduler.
+    const lookahead = Math.max(concurrencyLimit * 2, 8);
+    const outstanding = new Set<Promise<void>>();
     let failure: unknown;
     try {
       for await (const raw of advisoryRecords(inputStream)) {
-        // Skip invalid frames but log them
         if (typeof raw === 'object' && raw !== null && 'invalidFrame' in raw) {
           this.supervisor.ingestor.telemetry.log('WARN', 'stream.invalid_frame', {
             trackingId: 'stream',
@@ -70,45 +75,72 @@ export class AdvisoryStreamProcessor {
           });
           continue;
         }
-        while (running.size >= concurrencyLimit) await Promise.race(running);
-        // A durability failure on one record is recorded and reported after the
-        // stream drains (see the final `if (failure) throw failure` below), but
-        // must not stop this loop from reading and dispatching the records that
-        // follow it — that would silently drop every remaining item in the
-        // batch for one bad record. Only an explicit stop (abort/shutdown)
-        // short-circuits here, not an ingest-level failure.
         const trackingId = randomUUID();
         const controller = new AbortController();
-        // Determine priority from advisory content
         const priority = this.inferPriority(raw);
-        await this.supervisor.acquire(trackingId, controller, priority);
-        // A separate timer enforces the deadline even when a health probe is slow.
-        const timer = setTimeout(() => controller.abort(), 15_000);
-        const promise = this.supervisor.ingestor
-          .processIncomingAdvisory(raw, dbPool, trackingId, controller.signal)
-          .then(() => {})
+        const promise = this.processRecord(raw, dbPool, trackingId, controller, priority)
           .catch((error) => {
-            // A single record whose durability could not be established must not
-            // abort the whole stream: the remaining records in the batch are
-            // still processable, and killing the stream loses all of them. The
-            // record itself is already reported through the dead-letter chain.
+            // A single record whose durability could not be established must
+            // not abort the whole stream: the remaining records in the batch
+            // are still processable. The batch is not acknowledged (see
+            // runtime.ts), so the record itself is replayed from its durable
+            // pending row rather than lost.
             this.supervisor.ingestor.telemetry.log('CRITICAL', 'stream.durable_capture_failed', {
               trackingId,
             });
             failure ??= error;
           })
           .finally(() => {
-            clearTimeout(timer);
-            running.delete(promise);
-            this.supervisor.release(trackingId);
+            outstanding.delete(promise);
           });
-        running.add(promise);
+        outstanding.add(promise);
+        if (outstanding.size >= lookahead) await Promise.race(outstanding);
       }
     } finally {
-      await Promise.all(running);
+      await Promise.allSettled(outstanding);
     }
     if (failure) throw failure;
   }
+
+  /**
+   * One advisory lifecycle. The queue deadline is separate from the execution
+   * deadline: waiting behind high-priority work is not a processing failure,
+   * and the previous design counted both against the same 15-second timer.
+   */
+  private async processRecord(
+    raw: AdvisoryRecord,
+    dbPool: Pool,
+    trackingId: string,
+    controller: AbortController,
+    priority: IngestPriority,
+  ): Promise<void> {
+    let admitted = false;
+    const queueTimer = setTimeout(() => controller.abort(), QUEUE_DEADLINE_MS);
+    try {
+      await this.supervisor.acquire(trackingId, controller, priority);
+      admitted = true;
+    } finally {
+      clearTimeout(queueTimer);
+    }
+    const processingTimer = setTimeout(() => controller.abort(), PROCESSING_DEADLINE_MS);
+    try {
+      const result = await this.supervisor.ingestor.processIncomingAdvisory(
+        raw,
+        dbPool,
+        trackingId,
+        controller.signal,
+      );
+      // DEAD_LETTER is only returned after the dead-letter queue confirmed
+      // durability. UNDURABLE means neither the spool nor the database accepted
+      // the payload; the caller must keep the pending row instead of deleting
+      // the last copy.
+      if (result === 'UNDURABLE') throw new Error('UNDURABLE_CAPTURE');
+    } finally {
+      clearTimeout(processingTimer);
+      if (admitted) this.supervisor.release(trackingId);
+    }
+  }
+
   /** Infer priority from advisory content. HIGH = CVE present or critical keywords.
    * The record is untrusted stream input and may not match the advisory shape
    * at all, so every field is validated before it is dereferenced. */
