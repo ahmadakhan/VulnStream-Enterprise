@@ -10,6 +10,7 @@
     "clean": "node -e \"for (const p of ['dist','server-dist']) require('node:fs').rmSync(p,{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "test:alerts": "node scripts/alert-rule-check.mjs",
     "test:unit": "vitest run --no-coverage --reporter=verbose",
     "test:unit:watch": "vitest --no-coverage --reporter=verbose",
     "test:unit:typecheck": "tsc --noEmit --project tsconfig.json",

@@ -141,3 +141,42 @@ test('no alert rule joins across instances with an unlabelled on()', async () =>
   }
   assert.ok(checked > 0, 'expected at least one rule using and on() to be inspected');
 });
+test('alert-rule harness cannot silently query another Prometheus', async () => {
+  // Twice during development a harness reported "nothing fired" because it
+  // queried 127.0.0.1:9090, which on this host belongs to a different project's
+  // Prometheus. A harness that reads the wrong server turns every rule into a
+  // silent pass. Two mechanical guards must stay in place.
+  const harness = await readFile(
+    fileURLToPath(new URL('../scripts/alert-rule-check.mjs', import.meta.url)),
+    'utf8',
+  );
+  // 1. A dedicated, non-default API port, published on loopback only. The
+  //    container's INTERNAL 9090 is correct (that is where Prometheus listens);
+  //    what must never appear is a QUERY against the host's default port.
+  const code = harness.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\*.*$/gm, '');
+  assert.doesNotMatch(
+    code,
+    /(?:localhost|127\.0\.0\.1):9090/,
+    'harness must not query the default Prometheus port',
+  );
+  assert.match(harness, /const API_PORT = \d+/);
+  // 2. It refuses to run if the port is already published by something else.
+  assert.match(harness, /is already published by/, 'harness must refuse to reuse an occupied port');
+  // 3. It shortens BOTH `for:` and range windows. A rule inside
+  //    increase(x[10m]) cannot fire while the harness only waits seconds.
+  assert.match(harness, /for: \$\{FOR_SUBSTITUTE\}/);
+  assert.match(harness, /\[\$\{RANGE_SUBSTITUTE\}\]/);
+  // 4. It asserts, rather than merely printing. A harness that only logs can
+  //    never fail a build.
+  assert.match(harness, /process\.exitCode = 1/);
+});
+
+test('the alert-rule harness is wired into the test command', async () => {
+  const pkg = JSON.parse(await readFile(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'));
+  // Docker is not available in every CI lane, so this is a separate script, but
+  // it must exist as a named entry point that reviewers can run.
+  assert.ok(
+    pkg.scripts['test:alerts'] || pkg.scripts['alerts:check'],
+    'package.json must expose the alert-rule harness as an npm script',
+  );
+});
