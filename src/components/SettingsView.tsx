@@ -72,7 +72,9 @@ export function SettingsView() {
     form.securityPolicy.sessionTimeoutMins !== settings.securityPolicy.sessionTimeoutMins ||
     (form.logVerbosity ?? 'standard') !== (settings.logVerbosity ?? 'standard') ||
     form.schedulerEnabled !== settings.schedulerEnabled ||
-    form.autoDispatchEnabled !== settings.autoDispatchEnabled;
+     form.autoDispatchEnabled !== settings.autoDispatchEnabled ||
+     (form.autoDispatchConfidenceThreshold ?? 90) !==
+       (settings.autoDispatchConfidenceThreshold ?? 90);
   const sections = [
     ...(admin
       ? [
@@ -291,11 +293,37 @@ export function SettingsView() {
                       <span className="block font-medium text-zinc-200 light:text-zinc-800">
                         Automatic dispatch
                       </span>
-                      <span className="ui-description mt-0.5 block">
+                       <span className="ui-description mt-0.5 block">
                         Send confirmed findings to security teams automatically; everyone recipients wait in
                         Email Queue for security review.
                       </span>
                     </span>
+                  </label>
+                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={form.autoDispatchConfidenceThreshold ?? 90}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            autoDispatchConfidenceThreshold: parseInt(e.target.value) || 0,
+                          })
+                        }
+                        className="mt-1 w-16 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none light:border-zinc-300 light:bg-white light:text-zinc-900"
+                      />
+                      <span>
+                        <span className="block font-medium text-zinc-200 light:text-zinc-800">
+                          Auto-dispatch confidence threshold
+                        </span>
+                        <span className="ui-description mt-0.5 block">
+                          Minimum confidence (0-100) for automatic email dispatch. Set to 0 to send all
+                          findings regardless of confidence level.
+                        </span>
+                      </span>
+                    </div>
                   </label>
                 </div>
 

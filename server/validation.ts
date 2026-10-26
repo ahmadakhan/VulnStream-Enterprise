@@ -290,6 +290,7 @@ export const settingsSchema = z.object({
   schedulerEnabled: z.boolean(),
   advisoryPrefix: z.string().regex(/^[A-Za-z0-9_-]{1,30}$/),
   autoDispatchEnabled: z.boolean(),
+  autoDispatchConfidenceThreshold: z.number().int().min(0).max(100).default(90),
   // Digest coalescing is opt-in so existing deployments keep their current behavior.
   digestBatchingEnabled: z.boolean().default(false),
   digestWindowMinutes: z.number().int().min(1).max(1440),

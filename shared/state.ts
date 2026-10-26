@@ -32,6 +32,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   schedulerEnabled: false,
   advisoryPrefix: 'ADV-',
   autoDispatchEnabled: false,
+  autoDispatchConfidenceThreshold: 90,
   digestBatchingEnabled: false,
   digestWindowMinutes: 5,
   webhookSigningSecret: '',

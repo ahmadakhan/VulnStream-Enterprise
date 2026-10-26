@@ -709,6 +709,7 @@ export const INITIAL_SETTINGS: AppSettings = {
   schedulerEnabled: false,
   advisoryPrefix: 'ADV-2026-',
   autoDispatchEnabled: true,
+  autoDispatchConfidenceThreshold: 0,
   // Fixtures use standard detail: verbose telemetry is a deliberate forensic
   // choice an operator makes against a live installation.
   logVerbosity: 'standard',

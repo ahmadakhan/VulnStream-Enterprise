@@ -610,6 +610,12 @@ export interface AppSettings {
   schedulerEnabled: boolean;
   advisoryPrefix: string;
   autoDispatchEnabled: boolean;
+  /**
+   * Minimum confidence (0–100) required for a finding to auto-dispatch without
+   * manual review. Set to 0 to dispatch all findings regardless of confidence.
+   * The default (90) matches the previous hardcoded threshold.
+   */
+  autoDispatchConfidenceThreshold: number;
   digestBatchingEnabled: boolean;
   digestWindowMinutes: number;
   webhookSigningSecret: string;
