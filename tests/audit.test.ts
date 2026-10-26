@@ -14,7 +14,7 @@ import {
   parseCPE23,
 } from '../src/utils/cpeMatcher.ts';
 import { compareVersions } from '../src/utils/versionComparator.ts';
-import { mergeCveRecords } from '../src/utils/deduplicator';
+import { mergeCveRecords, isWithinTimelineScope } from '../src/utils/deduplicator';
 import { quickHash, generateHmacSignature } from '../src/utils/cryptoChain';
 import { runVulnerabilityPipeline, validateSsrfSafety } from '../src/engine/pipelineEngine';
 import {
@@ -411,4 +411,119 @@ test('equal-time conflicting CVE applicability keeps both candidate sets in revi
   assert.equal(merged.cpeMatchDetails?.length, 2);
   assert.equal(merged.versionRange, undefined);
   assert.equal(merged.applicabilityRequiresReview, true);
+});
+
+/**
+ * Timeline scope tests: prove the pipeline filters CVEs by the LATEST of
+ * publishedDate and modifiedDate, and that 1 / 2 / 3 / 4-week windows
+ * behave correctly.  Dates are relative to a fixed NOW so the assertions are
+ * deterministic regardless of when the test suite runs.
+ */
+test('isWithinTimelineScope uses the latest of published and modified dates', () => {
+  const NOW = new Date('2026-10-26T12:00:00Z');
+  const ONE_WEEK = 168;
+
+  // Published 2 days ago, modified 10 days ago → published is latest → in scope
+  assert.equal(isWithinTimelineScope('2026-10-24T12:00:00Z', '2026-10-16T12:00:00Z', ONE_WEEK, NOW), true);
+
+  // Published 10 days ago, modified 2 days ago → modified is latest → in scope
+  assert.equal(isWithinTimelineScope('2026-10-16T12:00:00Z', '2026-10-24T12:00:00Z', ONE_WEEK, NOW), true);
+
+  // Both 10 days ago → outside the 1-week window → out of scope
+  assert.equal(isWithinTimelineScope('2026-10-16T12:00:00Z', '2026-10-16T12:00:00Z', ONE_WEEK, NOW), false);
+
+  // Both 2 days ago → in scope
+  assert.equal(isWithinTimelineScope('2026-10-24T12:00:00Z', '2026-10-24T12:00:00Z', ONE_WEEK, NOW), true);
+
+  // Neither date is recent enough → out of scope for 4 weeks too
+  assert.equal(
+    isWithinTimelineScope('2026-09-20T00:00:00Z', '2026-09-20T00:00:00Z', 4 * ONE_WEEK, NOW),
+    false,
+  );
+});
+
+function makeCve(cveId: string, published: string, modified: string): NormalizedCVE {
+  return {
+    ...structuredClone(INITIAL_NORMALIZED_CVES[0]),
+    cveId,
+    publishedDate: published,
+    modifiedDate: modified,
+    cpeMatches: ['cpe:2.3:a:vendor:widget:*:*:*:*:*:*:*:*'],
+    versionRange: { versionStartIncluding: '1.0', versionEndExcluding: '3.0' },
+  };
+}
+
+const NOW_FOR_PIPELINE = new Date('2026-10-26T12:00:00Z');
+
+const WEEK_SCOPED_CVES = [
+  // 4 days ago — in scope at every window
+  makeCve('CVE-2026-1001', '2026-10-22T12:00:00Z', '2026-10-22T12:00:00Z'),
+  // 8 days published, 2 days modified — in scope via modified date at every window
+  makeCve('CVE-2026-1002', '2026-10-18T12:00:00Z', '2026-10-24T12:00:00Z'),
+  // 10 days ago (both) — in scope at 2/3/4 weeks, NOT 1 week
+  makeCve('CVE-2026-1003', '2026-10-16T12:00:00Z', '2026-10-16T12:00:00Z'),
+  // 18 days ago (both) — in scope at 3/4 weeks, NOT 1/2 weeks
+  makeCve('CVE-2026-1004', '2026-10-08T12:00:00Z', '2026-10-08T12:00:00Z'),
+  // 31 days ago (both) — out of scope at all standard windows
+  makeCve('CVE-2026-1005', '2026-09-25T12:00:00Z', '2026-09-25T12:00:00Z'),
+];
+
+const WEEK_WINDOWS = [
+  // NOW = Oct 26T12:00Z
+  // 1-week cutoff  = Oct 19T12:00Z  — 1001 (Oct 22), 1002 (Oct 24)        → 2
+  // 2-week cutoff  = Oct 12T12:00Z  — + 1003 (Oct 16)                      → 3
+  // 3-week cutoff  = Oct  5T12:00Z  — + 1004 (Oct  8)                      → 4
+  // 4-week cutoff  = Sep 28T12:00Z  — 1005 (Sep 25) still outside          → 4
+  { label: '1 week', hours: 168, expected: 2 },
+  { label: '2 weeks', hours: 336, expected: 3 },
+  { label: '3 weeks', hours: 504, expected: 4 },
+  { label: '4 weeks', hours: 672, expected: 4 },
+];
+
+test('pipeline scopeHours supports 1 / 2 / 3 / 4 week windows', () => {
+  const { asset, settings } = (() => {
+    const asset: WatchListItem = {
+      ...structuredClone(INITIAL_WATCHLIST[0]),
+      vendor: 'vendor',
+      product: 'widget',
+      version: '2.0', // within [1.0, 3.0)
+      cpes: ['cpe:2.3:a:vendor:widget:2.0:*:*:*:*:*:*:*'],
+      active: true,
+    };
+    const settings = { ...structuredClone(INITIAL_SETTINGS), scopeHours: 0, autoDispatchEnabled: false };
+    return { asset, settings };
+  })();
+
+  const now = NOW_FOR_PIPELINE;
+
+  for (const { label, hours, expected } of WEEK_WINDOWS) {
+    const inScope = WEEK_SCOPED_CVES.filter((cve) =>
+      isWithinTimelineScope(cve.publishedDate, cve.modifiedDate, hours, now),
+    );
+    assert.equal(
+      inScope.length,
+      expected,
+      `${label}: expected ${expected} CVEs after timeline filter, got ${inScope.length}`,
+    );
+
+    const result = runVulnerabilityPipeline(
+      INITIAL_FEEDS,
+      WEEK_SCOPED_CVES,
+      [asset],
+      [],
+      [],
+      { ...settings, scopeHours: hours },
+      'test',
+      false,
+      {},
+      {},
+      undefined,
+    );
+
+    assert.equal(
+      result.execution.stats.matchedWatchlist,
+      expected,
+      `${label}: expected ${expected} findings, got ${result.execution.stats.matchedWatchlist}`,
+    );
+  }
 });
