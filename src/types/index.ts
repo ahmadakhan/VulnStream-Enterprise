@@ -342,6 +342,57 @@ export interface ThreatSearchResponse {
   retryAfter?: number;
 }
 
+/** Granularity for the analytics timeline buckets. */
+export type TimelineBucket = 'day' | 'week' | 'month';
+
+/** Selectable time windows for the Threat Analytics & Trends timeline. */
+export type TimelineRange = '7d' | '30d' | '90d' | '365d' | 'all';
+
+export interface TimelinePoint {
+  label: string;
+  cveCount: number;
+  critical: number;
+  high: number;
+}
+
+export interface SeverityDistribution {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  unknown: number;
+}
+
+export interface ExploitStatusDistribution {
+  activeWeaponized: number;
+  reportedInWild: number;
+  pocAvailable: number;
+  none: number;
+}
+
+export interface VendorAnalytics {
+  vendor: string;
+  cveCount: number;
+  critical: number;
+  high: number;
+}
+
+export interface CveScoreBin {
+  range: string;
+  count: number;
+}
+
+export interface ThreatAnalytics {
+  totalCves: number;
+  kevCount: number;
+  timeline: TimelinePoint[];
+  severityDistribution: SeverityDistribution;
+  exploitStatusDistribution: ExploitStatusDistribution;
+  topVendors: VendorAnalytics[];
+  cvssScoreHistogram: CveScoreBin[];
+  generatedAt: string;
+}
+
 export interface Advisory {
   id: string;
   title: string;

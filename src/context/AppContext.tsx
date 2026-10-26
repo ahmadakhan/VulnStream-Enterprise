@@ -21,6 +21,7 @@ import type {
   CorrelationSimulation,
    NvdCpeSearchResponse,
    ThreatSearchResponse,
+   ThreatAnalytics,
 } from '../types';
 import { compileCustomizedTemplate } from '../utils/templateCompiler';
 function useApplication() {
@@ -347,6 +348,10 @@ function useApplication() {
      searchThreatIntelligence: async (vendor: string, product: string, limit = 50) => {
        const params = new URLSearchParams({ vendor, product, limit: String(limit) });
        return request<ThreatSearchResponse>(`/threat/intelligence/search?${params}`);
+     },
+     fetchThreatAnalytics: async (range: string, limit = 10) => {
+       const params = new URLSearchParams({ range, limit: String(limit) });
+       return request<ThreatAnalytics>(`/threat/analytics?${params}`);
      },
     toggleWatchlistItemActive: async (id: string) => {
       const updated = !!(await command('asset.toggle', undefined, id));

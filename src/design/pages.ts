@@ -18,6 +18,7 @@ import {
   Tags,
   Settings,
   Search,
+  BarChart3,
 } from 'lucide-react';
 
 /** One source of truth for page identity, headings, and workspace breadcrumbs. */
@@ -27,6 +28,7 @@ export const pages = {
   findings: { section: 'Operations', title: 'Vulnerabilities', icon: ShieldAlert },
   'threat-intelligence-search': { section: 'Operations', title: 'Threat intelligence search', icon: Search },
   'threat-data': { section: 'Operations', title: 'Threat intelligence', icon: Database },
+  'threat-analytics': { section: 'Operations', title: 'Threat analytics & trends', icon: BarChart3 },
   advisories: { section: 'Operations', title: 'Security advisories', icon: FileText },
   correlation: { section: 'Autonomous pipeline', title: 'Live correlation', icon: Zap },
   pipeline: { section: 'Autonomous pipeline', title: 'Pipeline executions', icon: Activity },

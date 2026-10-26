@@ -53,6 +53,7 @@ export const Sidebar: React.FC = () => {
         { id: 'watchlist', count: watchlist.length },
         { id: 'findings', count: activeFindingsCount },
          { id: 'threat-intelligence-search' },
+         { id: 'threat-analytics' },
          { id: 'threat-data' },
         { id: 'advisories' },
       ],

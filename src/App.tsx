@@ -11,6 +11,7 @@ import { WatchListView } from './components/WatchListView';
 import { FindingsView } from './components/FindingsView';
 import { ThreatDataView } from './components/ThreatDataView';
 import { ThreatIntelligenceSearch } from './components/ThreatIntelligenceSearch';
+import { ThreatAnalyticsView } from './components/ThreatAnalyticsView';
 import { AdvisoriesView } from './components/AdvisoriesView';
 import { PipelineExecutionsView } from './components/PipelineExecutionsView';
 import { AlertedCVEsView } from './components/AlertedCVEsView';
@@ -45,6 +46,7 @@ export const MainContent: React.FC = () => {
       {activeTab === 'watchlist' && <WatchListView />}
       {activeTab === 'findings' && <FindingsView />}
       {activeTab === 'threat-intelligence-search' && <ThreatIntelligenceSearch />}
+      {activeTab === 'threat-analytics' && <ThreatAnalyticsView />}
       {activeTab === 'threat-data' && <ThreatDataView />}
       {activeTab === 'advisories' && <AdvisoriesView />}
       {activeTab === 'correlation' && <CorrelationDashboard />}
