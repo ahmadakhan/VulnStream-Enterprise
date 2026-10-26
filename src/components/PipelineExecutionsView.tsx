@@ -18,6 +18,7 @@ import { useApp } from '../context/AppContext';
 import type { PipelineExecution, PipelinePhase } from '../types';
 import { Pagination } from './Pagination';
 import { useCollection } from '../hooks/useCollection';
+import { SCOPE_PRESETS, formatScopeLabel } from '../utils/scopePresets';
 
 const stages = [
   {
@@ -143,13 +144,14 @@ export const PipelineExecutionsView: React.FC = () => {
               disabled={isPipelineRunning}
               className="ml-2 rounded-lg border border-zinc-700 light:border-zinc-300 bg-zinc-950 light:bg-white px-2 py-2 text-zinc-100 light:text-zinc-900"
             >
-              {[...new Set([6, 12, 24, 48, 72, settings.scopeHours])]
-                .sort((a, b) => a - b)
-                .map((n) => (
-                  <option key={n} value={n}>
-                    {n} hours
-                  </option>
-                ))}
+              {SCOPE_PRESETS.map(({ hours, label }) => (
+                <option key={hours} value={hours}>
+                  {label}
+                </option>
+              ))}
+              {![...SCOPE_PRESETS.map((p) => p.hours)].includes(settings.scopeHours) && (
+                <option value={settings.scopeHours}>{formatScopeLabel(settings.scopeHours)}</option>
+              )}
             </select>
           </label>
           <label className="flex items-center gap-2 text-xs text-zinc-400 light:text-zinc-600">

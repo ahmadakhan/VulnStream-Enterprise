@@ -1,4 +1,5 @@
 import { pages, type PageId } from '../design/pages';
+import { SCOPE_PRESETS, formatScopeLabel } from '../utils/scopePresets';
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { RotateCw, Play, ChevronDown, CheckCircle2, Clock, Cpu, Sun, Moon, Menu } from 'lucide-react';
@@ -121,7 +122,7 @@ export const TopHeader: React.FC = () => {
                 ) : (
                   <>
                     <Play className="w-3 h-3 fill-current" />
-                    <span className="hidden sm:inline">Run Pipeline ({selectedScope}h)</span>
+                    <span className="hidden sm:inline">Run Pipeline ({formatScopeLabel(selectedScope)})</span>
                     <span className="sm:hidden">Run</span>
                   </>
                 )}
@@ -147,21 +148,21 @@ export const TopHeader: React.FC = () => {
                 <div className="px-3 py-1.5 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider font-mono">
                   Timeline Window
                 </div>
-                {[6, 12, 24, 48, 72, 168].map((hrs) => (
+                {SCOPE_PRESETS.map(({ hours, label }) => (
                   <button
-                    key={hrs}
+                    key={hours}
                     onClick={() => {
-                      setSelectedScope(hrs);
+                      setSelectedScope(hours);
                       setScopeDropdownOpen(false);
                     }}
                     className={`w-full text-left px-3 py-1.5 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 flex items-center justify-between ${
-                      selectedScope === hrs
+                      selectedScope === hours
                         ? 'text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold bg-zinc-800/40 dark:bg-zinc-800/40 light:bg-zinc-200/50'
                         : 'text-zinc-400 dark:text-zinc-400 light:text-zinc-600'
                     }`}
                   >
-                    <span>Past {hrs} Hours</span>
-                    {selectedScope === hrs && (
+                    <span>Past {label}</span>
+                    {selectedScope === hours && (
                       <CheckCircle2 className="w-3.5 h-3.5 text-zinc-300 dark:text-zinc-300 light:text-zinc-800" />
                     )}
                   </button>
