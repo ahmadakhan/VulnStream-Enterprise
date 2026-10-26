@@ -36,7 +36,7 @@ export const schemaLockKey = 'hashtext(COALESCE(current_schema(), current_databa
  * The newest migration this build depends on. Production startup refuses to
  * run against an older schema instead of failing later on a missing column.
  */
-export const REQUIRED_SCHEMA_VERSION = 23;
+export const REQUIRED_SCHEMA_VERSION = 24;
 
 /**
  * Migration files sorted by numeric prefix. Only plain `NNN_name.sql` entries
@@ -186,13 +186,14 @@ export async function getForUpdate<T>(db: Db, kind: string, id: string): Promise
     await db.query('SELECT data FROM records WHERE kind=$1 AND id=$2 FOR UPDATE', [kind, id])
   ).rows[0]?.data;
 }
-export async function list<T>(db: Db, kind: string): Promise<T[]> {
+export async function list<T>(db: Db, kind: string, limit?: number): Promise<T[]> {
+  const limitClause = limit && limit > 0 ? ` LIMIT ${limit}` : '';
   return (
     await db.query(
-      "SELECT data FROM records WHERE kind=$1 ORDER BY CASE WHEN kind='feeds' THEN created_at ELSE updated_at END DESC,id",
+      `SELECT data FROM records WHERE kind=$1 ${recordOrder}${limitClause}`,
       [kind],
     )
-  ).rows.map((r) => r.data);
+  ).rows.map((row) => row.data);
 }
 export async function remove(db: Db, kind: string, id: string) {
   return (await db.query('DELETE FROM records WHERE kind=$1 AND id=$2', [kind, id])).rowCount;

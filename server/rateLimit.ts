@@ -47,6 +47,13 @@ export const MUTATION_LIMIT_CAPACITY = 100;
 export const MUTATION_LIMIT_REFILL_PER_MINUTE = 2;
 export const MUTATION_LIMIT_REFILL_PER_MS = MUTATION_LIMIT_REFILL_PER_MINUTE / 60_000;
 
+/** Per-operator ingest quota: tight burst (20), refilling 10 tokens/minute.
+ * Prevents a single operator from saturating the correlation pipeline while
+ * keeping the endpoint usable for interactive batch submissions. */
+export const INGEST_LIMIT_CAPACITY = 20;
+export const INGEST_LIMIT_REFILL_PER_MINUTE = 10;
+export const INGEST_LIMIT_REFILL_PER_MS = INGEST_LIMIT_REFILL_PER_MINUTE / 60_000;
+
 export interface RateLimitDecision {
   allowed: boolean;
   retryAfterMs: number;

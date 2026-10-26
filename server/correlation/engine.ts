@@ -1,6 +1,6 @@
 import type { AdvisoryInput, ExtractedText } from './validation.ts';
 import type { CorrelationMatch } from '../../shared/correlation.ts';
-import { evaluateVersion } from './version.ts';
+import { evaluateVersion, evaluateVersionDetailed } from './version.ts';
 interface Asset {
   id: string;
   vendor: string;
@@ -89,6 +89,10 @@ export class TextCorrelationEngine {
     );
     if (aliases.rows.length > 100) throw new Error('ENTITY_FANOUT_LIMIT');
     const entities: Entity[] = [...input.entities];
+    const distinctEntityCount = new Set(
+      aliases.rows.map((row) => `${row.vendor.toLowerCase()}:${row.product.toLowerCase()}`),
+    ).size;
+    const pushedEntities = new Set<string>();
     for (const alias of aliases.rows) {
       // An explicit range is authoritative; a versionless alias must never
       // resurrect a product excluded by that range.
@@ -99,10 +103,15 @@ export class TextCorrelationEngine {
         )
       )
         continue;
+      const entityKey = `${alias.vendor.toLowerCase()}:${alias.product.toLowerCase()}`;
+      if (pushedEntities.has(entityKey)) continue;
+      pushedEntities.add(entityKey);
       let affectedRange: string | undefined;
       // Only infer a range for an unambiguous single-product article, immediately
-      // adjacent to its name. Mixed-product/version prose always needs review.
-      if (aliases.rows.length === 1) {
+      // adjacent to its name. Multiple alias strings (e.g., "k8s" and
+      // "kubernetes") that map to the same canonical entity still qualify — the
+      // dedup above collapses them before the count check.
+      if (distinctEntityCount === 1) {
         const phrase = normalized(alias.alias);
         const evidence = extracted.ranges.filter(
           (range) => range.productPhrase === phrase || range.productPhrase.endsWith(' ' + phrase),
@@ -143,11 +152,11 @@ export class TextCorrelationEngine {
           );
           continue;
         }
-        const verdict = evaluateVersion(asset.version, entity.affectedRange);
-        if (verdict === 'AFFECTED')
-          add(asset, 'HIGH', 'Canonical entity and explicit affected version range satisfied');
-        else if (verdict === 'REVIEW')
-          add(asset, 'LOW', 'Version/backport ordering is uncertain; vendor evidence required');
+        const verdict = evaluateVersionDetailed(asset.version, entity.affectedRange);
+        if (verdict.verdict === 'AFFECTED')
+          add(asset, 'HIGH', `Canonical entity and explicit affected version range satisfied (${verdict.provenance}:${verdict.comparator})`);
+        else if (verdict.verdict === 'REVIEW')
+          add(asset, 'LOW', `Version/backport ordering uncertain (${verdict.provenance}:${verdict.comparator}); vendor evidence required`);
       }
     }
     if (extracted.zeroDay && matches.size === 0)

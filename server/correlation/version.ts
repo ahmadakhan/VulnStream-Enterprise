@@ -1,23 +1,24 @@
 import semver from 'semver';
+
+const PRERELEASE_TAG = /-(alpha|beta|rc|pre|preview)([.-][0-9]+)?$/i;
+
+const isNamedPrerelease = (clean: string): boolean => PRERELEASE_TAG.test(clean);
+
 /** Coerce only plain numeric releases. Never discard distribution/backport suffixes.
  * Only unambiguous, named prerelease tags (alpha, beta, rc, pre, preview, optionally
  * with a numeric ordinal) are accepted. A bare digit-only suffix (e.g., "2.4.41-2")
  * falls through to REVIEW, consistent with NVD-side comparator behavior. */
 export function portableVersion(value: string): string | null {
   if (value.length > 100) return null;
-  const clean = value.trim().replace(/^v/, '');
+  const clean = value.trim().replace(/^v/i, '');
   const valid = semver.valid(clean);
   if (valid) {
-    // Vendor build metadata can encode backports; an upstream range cannot resolve it.
     if (clean.includes('+')) return null;
-    // Reject bare numeric-only prerelease suffixes (e.g., "2.4.41-2", "1.2.3-45")
-    // Only accept named prerelease tags: alpha, beta, rc, pre, preview with optional numeric ordinal.
-    if (clean.includes('-') && !/-((alpha|beta|rc|pre|preview)([.-][0-9]+)?)$/.test(clean))
-      return null;
+    if (clean.includes('-') && !isNamedPrerelease(clean)) return null;
     return valid;
   }
-  if (!/^[0-9]{1,9}(\.[0-9]{1,9}){0,2}$/.test(clean)) return null;
-  return semver.coerce(clean)?.version ?? null;
+  if (!/^[0-9]{1,9}(\.[0-9]{1,9}){0,3}$/.test(clean)) return null;
+  return clean;
 }
 
 /** Detect a distribution/backport suffix on an enterprise package version.
@@ -27,14 +28,17 @@ export function portableVersion(value: string): string | null {
  * upstream bound silently produces wrong verdicts. */
 export function distributionSuffix(value: string): string | null {
   const clean = value.trim().replace(/^v/i, '');
-  // Named prerelease tags are upstream identifiers, not distribution rebuilds.
-  if (/-(alpha|beta|rc|pre|preview)([.-][0-9]+)?$/.test(clean)) return null;
-  // Debian/Ubuntu/RHEL style: 1.2.3-ubuntu1~20.04.1, 2.4.41-el8, 1:1.2.3-1
+  if (isNamedPrerelease(clean)) return null;
   const debian = /^[0-9.]+(?::-[0-9.]+)?-([A-Za-z][A-Za-z0-9.+~]*)$/.exec(clean);
   if (debian) return debian[1];
-  // Java-style update ordinal: 1.8.0_392
   if (/^[0-9.]+_[0-9]+$/.test(clean)) return clean.split('_')[1];
   return null;
+}
+
+const VERSION_TOKEN = 'v?([0-9]{1,9}(?:\\.[0-9]{1,9}){0,3})';
+
+function stripLeadingV(raw: string): string {
+  return raw.replace(/^v?/i, '');
 }
 
 /**
@@ -45,60 +49,158 @@ export function distributionSuffix(value: string): string | null {
  *   "fixed in 4.2.1"                  -> vulnerable < 4.2.1
  *   "vulnerable between 2.1.0 and 2.3.4" -> >=2.1.0 <=2.3.4
  *   "versions 5.0 through 5.7"        -> >=5.0 <=5.7
+ *   "up to and including 4.2.1"       -> <=4.2.1
  * Anything that cannot be translated unambiguously returns REVIEW, never a
  * silent identity fallback.
  */
 export function naturalLanguageRange(prose: string): string | null {
   const text = prose.toLowerCase().replace(/\bversions?\b/g, ' ').replace(/\s+/g, ' ').trim();
-  const V = 'v?([0-9]{1,9}(?:\\.[0-9]{1,9}){0,2})';
+
   let m: RegExpExecArray | null;
-  // "before/prior to/below/earlier than X" — vulnerable strictly below X,
-  // unless negated by "patched/fixed/resolved", which means the same bound.
-  m = new RegExp(`(?:before|prior to|below|earlier than) ${V}`).exec(text);
-  if (m) return `<${m[1]}`;
-  m = new RegExp(`(?:patched|fixed|resolved|remediated) in ${V}`).exec(text);
-  if (m) return `<${m[1]}`;
-  // "between X and Y" / "from X through Y" — inclusive band.
-  m = new RegExp(`(?:between|from) ${V} (?:and|to|through|thru) ${V}`).exec(text);
+
+  m = new RegExp(`(?:between|from) ${VERSION_TOKEN} (?:and|to|through|thru) ${VERSION_TOKEN}`).exec(text);
   if (m) {
-    const low = semver.coerce(m[1]);
-    const high = semver.coerce(m[2]);
-    if (low && high) return `>=${low.version} <=${high.version}`;
+    const low = stripLeadingV(m[1]);
+    const high = stripLeadingV(m[2]);
+    return `>=${low} <=${high}`;
   }
-  // "X and earlier" / "X or older"
-  m = new RegExp(`^${V} (?:and earlier|or older|or earlier|or below)$`).exec(text);
-  if (m) return `<=${m[1]}`;
-  // "X and later" / "X or newer" — vulnerability introduced in X.
-  m = new RegExp(`^${V} (?:and later|or later|or newer|or above)$`).exec(text);
-  if (m) return `>=${m[1]}`;
+
+  m = new RegExp(`${VERSION_TOKEN} (?:through|to|thru) ${VERSION_TOKEN}`).exec(text);
+  if (m) {
+    const low = stripLeadingV(m[1]);
+    const high = stripLeadingV(m[2]);
+    return `>=${low} <=${high}`;
+  }
+
+  m = new RegExp(`(?:before|prior to|below|earlier than|at most) ${VERSION_TOKEN}`).exec(text);
+  if (m) return `<${stripLeadingV(m[1])}`;
+
+  m = new RegExp(`(?:patched|fixed|resolved|remediated|addressed) in ${VERSION_TOKEN}`).exec(text);
+  if (m) return `<${stripLeadingV(m[1])}`;
+
+  m = new RegExp(`(?:up to and including|through|up to) ${VERSION_TOKEN}`).exec(text);
+  if (m) return `<=${stripLeadingV(m[1])}`;
+
+  m = new RegExp(`^${VERSION_TOKEN} (?:and earlier|or older|or earlier|or below)$`).exec(text);
+  if (m) return `<=${stripLeadingV(m[1])}`;
+
+  m = new RegExp(`^${VERSION_TOKEN} (?:and later|or later|or newer|or above)$`).exec(text);
+  if (m) return `>=${stripLeadingV(m[1])}`;
+
   return null;
 }
 
-export function evaluateVersion(version: string | null, range: string): 'AFFECTED' | 'UNAFFECTED' | 'REVIEW' {
-  if (!version || range.length > 200) return 'REVIEW';
-  // A backported distribution package must never be resolved against an
-  // upstream bound: distro rebuilds patch without changing the upstream base
-  // version, so both AFFECTED and UNAFFECTED verdicts would be fiction.
-  if (distributionSuffix(version)) return 'REVIEW';
-  // Accept either a comparator range or a natural-language advisory phrase.
+function numericParts(version: string): number[] | null {
+  const match = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?$/.exec(version.trim());
+  if (!match) return null;
+  return [1, 2, 3, 4].map((i) => (match[i] === undefined ? 0 : Number(match[i])));
+}
+
+function compareNumeric(version: string, bound: string): number {
+  const a = numericParts(version);
+  const b = numericParts(bound);
+  if (!a || !b) return 0;
+  for (let i = 0; i < 4; i++) {
+    if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
+  }
+  return 0;
+}
+
+export interface VersionVerdict {
+  verdict: 'AFFECTED' | 'UNAFFECTED' | 'REVIEW';
+  provenance: 'semver' | 'numeric' | 'distro-backport' | 'unparseable' | 'empty';
+  comparator: string;
+}
+
+/**
+ * Evaluate whether a deployed version is affected by a range.
+ *
+ * Returns the verdict string directly for backward compatibility. Use
+ * `evaluateVersionDetailed` when provenance metadata is required.
+ *
+ * includePrerelease: true is an explicit policy decision: a prerelease of the
+ * next release (e.g., 1.0.0-rc.1 satisfies <1.0.0) is treated as vulnerable
+ * because it is older than the stable release. This is recorded as policy, not
+ * an incidental semver flag.
+ */
+export function evaluateVersion(
+  version: string | null,
+  range: string,
+): 'AFFECTED' | 'UNAFFECTED' | 'REVIEW' {
+  return evaluateVersionDetailed(version, range).verdict;
+}
+
+export function evaluateVersionDetailed(
+  version: string | null,
+  range: string,
+): VersionVerdict {
+  if (!version) return { verdict: 'REVIEW', provenance: 'empty', comparator: range };
+  if (range.length > 200) return { verdict: 'REVIEW', provenance: 'unparseable', comparator: range };
+
+  if (distributionSuffix(version)) {
+    return {
+      verdict: 'REVIEW',
+      provenance: 'distro-backport',
+      comparator: `distribution-suffix:${version}`,
+    };
+  }
+
   const effective = naturalLanguageRange(range) ?? range;
   const parsed = portableVersion(version);
-  // Keep range grammar narrow. No implicit broad x-ranges, caret or tilde coercion.
+  if (!parsed) return { verdict: 'REVIEW', provenance: 'unparseable', comparator: range };
+
   const terms = effective.trim().split(/\s+/);
   if (
-    !parsed ||
     terms.length > 8 ||
-    terms.some((term) => !/^(>=|<=|>|<|=)?v?[0-9]{1,9}(\.[0-9]{1,9}){0,2}(-[a-zA-Z0-9.-]{1,40})?$/.test(term))
+    terms.some(
+      (term) =>
+        !/^(>=|<=|>|<|=)?v?[0-9]{1,9}(\.[0-9]{1,9}){0,3}(-[a-zA-Z0-9.-]{1,40})?$/i.test(term),
+    )
   )
-    return 'REVIEW';
+    return { verdict: 'REVIEW', provenance: 'unparseable', comparator: range };
+
   const normalized: string[] = [];
   for (const term of terms) {
     const match = /^(>=|<=|>|<|=)?(.*)$/.exec(term)!;
     const bound = portableVersion(match[2]);
-    if (!bound) return 'REVIEW';
+    if (!bound) return { verdict: 'REVIEW', provenance: 'unparseable', comparator: range };
     normalized.push(`${match[1] || '='}${bound}`);
   }
-  const valid = semver.validRange(normalized.join(' '));
-  if (!valid) return 'REVIEW';
-  return semver.satisfies(parsed, valid, { includePrerelease: true }) ? 'AFFECTED' : 'UNAFFECTED';
+
+  const semverRange = semver.validRange(normalized.join(' '));
+  if (semverRange && semver.valid(parsed)) {
+    return {
+      verdict: semver.satisfies(parsed, semverRange, { includePrerelease: true })
+        ? 'AFFECTED'
+        : 'UNAFFECTED',
+      provenance: 'semver',
+      comparator: semverRange,
+    };
+  }
+
+  if (numericParts(parsed) && normalized.every((t) => numericParts(t.replace(/^(>=|<=|>|<|=)?/, '')))) {
+    let affected = true;
+    for (const term of normalized) {
+      const match = /^(>=|<=|>|<|=)?(.*)$/.exec(term)!;
+      const op = match[1] || '=';
+      const cmp = compareNumeric(parsed, match[2]);
+      if (
+        (op === '>' && !(cmp > 0)) ||
+        (op === '>=' && !(cmp >= 0)) ||
+        (op === '<' && !(cmp < 0)) ||
+        (op === '<=' && !(cmp <= 0)) ||
+        (op === '=' && cmp !== 0)
+      ) {
+        affected = false;
+        break;
+      }
+    }
+    return {
+      verdict: affected ? 'AFFECTED' : 'UNAFFECTED',
+      provenance: 'numeric',
+      comparator: normalized.join(' '),
+    };
+  }
+
+  return { verdict: 'REVIEW', provenance: 'unparseable', comparator: range };
 }

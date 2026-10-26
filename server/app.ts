@@ -45,7 +45,7 @@ import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
 import { emailIsConfigured } from './emailProviders';
 import { parseSyndication, RSS_MAX_BYTES } from './rss';
 import { readEvents, writeEvent } from './events';
-import { createDatabaseRateLimiter, type MutationLimiter } from './rateLimit';
+import { createDatabaseRateLimiter, type MutationLimiter, INGEST_LIMIT_CAPACITY, INGEST_LIMIT_REFILL_PER_MS } from './rateLimit';
 import { searchNvdCpes, loadNvdApiKey, isNvdRateLimitError, nvdRetryAfterSeconds } from './cpeSearch';
 import type { AppState } from '../shared/state.ts';
 import type {
@@ -153,6 +153,11 @@ export interface AppOptions {
    * exercise the middleware with a small deterministic quota.
    */
   mutationLimiter?: MutationLimiter;
+  /**
+   * Overrides the per-operator ingest rate limiter. Omit to use the default
+   * database-backed limiter with the built-in capacity/refill.
+   */
+  ingestLimiter?: MutationLimiter;
 }
 export function createApp(
   pool: pg.Pool,
@@ -227,6 +232,7 @@ export function createApp(
   // route cannot inherit the exemption through naming.
   const NON_MUTATING_POSTS = new Set(['/api/correlation/simulate']);
   const mutationLimiter = options.mutationLimiter ?? createDatabaseRateLimiter(pool);
+  const ingestLimiter = options.ingestLimiter ?? createDatabaseRateLimiter(pool, INGEST_LIMIT_CAPACITY, INGEST_LIMIT_REFILL_PER_MS);
   app.use('/api', requireAuth(pool, config), async (req, res, next) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
     // Inside a mount, req.path is the path RELATIVE to the mount point
@@ -367,6 +373,12 @@ export function createApp(
       '/api/correlation/ingest',
       requireRole('ADMIN', 'OPERATOR'),
       asyncRoute(async (req, res) => {
+        const identifier = req.operator?.id || req.ip || '';
+        const ingestResult = await ingestLimiter(`rl-ingest:${identifier}`);
+        if (!ingestResult.allowed) {
+          res.setHeader('Retry-After', String(Math.max(1, Math.ceil(ingestResult.retryAfterMs / 1000))));
+          throw new HttpError(429, 'Too many ingest submissions');
+        }
         const { ndjson } = z
           .object({ ndjson: z.string().min(1).max(524288) })
           .strict()
@@ -628,8 +640,8 @@ export function createApp(
         })
         .parse(req.body);
       const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
-      const cves = await list<NormalizedCVE>(pool, 'cveData');
-      const aliases = await list<AliasEntry>(pool, 'aliases');
+      const cves = await list<NormalizedCVE>(pool, 'cveData', 500);
+      const aliases = await list<AliasEntry>(pool, 'aliases', 500);
       const watchItem: WatchListItem = {
         id: 'sim-test-01',
         vendor: body.vendor,

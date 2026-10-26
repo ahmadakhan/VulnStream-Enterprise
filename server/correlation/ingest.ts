@@ -145,17 +145,36 @@ export class AdvisoryIngestor {
             this.telemetry.log('INFO', 'ingestion.duplicate', { trackingId });
             return 'DUPLICATE';
           }
-          const inserted = await query<{ id: string }>(
-            `INSERT INTO unstructured_advisories(id,title,content,url,fingerprint)
-            VALUES($1,$2,$3,$4,$5) ON CONFLICT (fingerprint) DO UPDATE SET processed_at=now() WHERE unstructured_advisories.fingerprint = EXCLUDED.fingerprint AND unstructured_advisories.id = EXCLUDED.id RETURNING id`,
-            [randomUUID(), input.title, extracted.cleanContent, input.url, fingerprint],
-          );
-          if (!inserted.rowCount) {
+          const advisoryId = await (async (): Promise<string | null> => {
+            try {
+              const inserted = await query<{ id: string }>(
+                `INSERT INTO unstructured_advisories(id,title,content,url,fingerprint)
+                VALUES($1,$2,$3,$4,$5) ON CONFLICT (fingerprint) DO NOTHING RETURNING id`,
+                [randomUUID(), input.title, extracted.cleanContent, input.url, fingerprint],
+              );
+              return inserted.rowCount ? inserted.rows[0].id : null;
+            } catch (urlConflict) {
+              if (databaseCode(urlConflict) !== '23505') throw urlConflict;
+              // URL already exists with a different fingerprint: merge the updated
+              // content into the existing row instead of dead-lettering the
+              // advisory. This lets an updated advisory with the same URL replace
+              // stale content without losing correlation history.
+              const merged = await query<{ id: string }>(
+                `UPDATE unstructured_advisories SET
+                   title=EXCLUDED.title, content=EXCLUDED.content,
+                   fingerprint=EXCLUDED.fingerprint, processed_at=NULL
+                 WHERE url=EXCLUDED.url RETURNING id`,
+                [input.title, extracted.cleanContent, fingerprint],
+              );
+              this.telemetry.log('INFO', 'ingestion.url_merged', { trackingId });
+              return merged.rowCount ? merged.rows[0].id : null;
+            }
+          })();
+          if (!advisoryId) {
             await query('COMMIT');
             this.telemetry.log('INFO', 'ingestion.duplicate', { trackingId });
             return 'DUPLICATE';
           }
-          const advisoryId = inserted.rows[0].id;
           const matches = await this.engine.correlate(input, extracted, query);
           // Pre-CVE cluster linkage runs inside the same transaction: the
           // advisory, its matches, and its cluster membership commit atomically.
