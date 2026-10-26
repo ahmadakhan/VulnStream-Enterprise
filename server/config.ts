@@ -53,6 +53,12 @@ const schema = z.object({
   // (a routine debugging move) exposed an endpoint that can open the shared
   // circuit breaker and halt ingestion for every replica.
   FAULT_SIMULATION_ENABLED: z.enum(['true', 'false']).default('false'),
+  // Dead-man's switch. See server/correlation/heartbeat.ts: this is the only
+  // mechanism that detects a TOTAL outage, because every other alert is
+  // evaluated by something that also dies in a total outage.
+  HEARTBEAT_URL: z.string().max(2048).default(''),
+  HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().min(15).max(3600).default(60),
+  HANG_DETECTION_ENABLED: z.enum(['true', 'false']).default('false'),
 });
 export type Config = z.infer<typeof schema>;
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -64,5 +70,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (Buffer.from(config.ENCRYPTION_KEY, 'base64').length !== 32) throw new Error('Invalid encryption key');
   if (config.NODE_ENV === 'production' && config.FAULT_SIMULATION_ENABLED === 'true')
     throw new Error('FAULT_SIMULATION_ENABLED is not permitted in production');
+  if (config.HEARTBEAT_URL) {
+    // The ping grants the ability to silence the alarm, so it must be https and
+    // must not embed credentials in the URL.
+    let url: URL;
+    try {
+      url = new URL(config.HEARTBEAT_URL);
+    } catch {
+      throw new Error('HEARTBEAT_URL must be a valid absolute URL');
+    }
+    if (config.NODE_ENV === 'production' && url.protocol !== 'https:')
+      throw new Error('HEARTBEAT_URL must use https in production');
+    if (url.username || url.password)
+      throw new Error('HEARTBEAT_URL must not embed credentials; use a receiver with a token path');
+  }
   return config;
 }

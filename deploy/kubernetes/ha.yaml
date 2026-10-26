@@ -93,6 +93,16 @@ spec:
             - {name: PORT, value: '8080'}
             - {name: WORKER_ENABLED, value: 'true'}
             - {name: CORRELATION_DLQ_DIRECTORY, value: /var/lib/vulnstream/deadletters}
+            # Dead-man's switch. Optional: delete both env entries to disable it.
+            # The receiver must be OUTSIDE this cluster, or a total outage takes
+            # it down too and no alert is raised.
+            - name: HEARTBEAT_URL
+              valueFrom:
+                secretKeyRef: {name: vulnstream-runtime, key: HEARTBEAT_URL, optional: true}
+            - {name: HEARTBEAT_INTERVAL_SECONDS, value: '60'}
+            # A 10s event-loop block is reported as 503 by /live. Only enable
+            # this where the probe timeout below is comfortably larger.
+            - {name: HANG_DETECTION_ENABLED, value: 'true'}
           ports:
             - {name: http, containerPort: 8080}
           startupProbe:
@@ -100,15 +110,20 @@ spec:
             periodSeconds: 5
             failureThreshold: 24
           readinessProbe:
+            # /ready fails when the pipeline cannot admit (database recovery or an
+            # open breaker), so a wedged consumer is taken out of the load
+            # balancer instead of silently dropping advisories.
             httpGet: {path: /ready, port: http}
             periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 2
           livenessProbe:
+            # /live answers 503 only when the event loop itself has stalled. The
+            # threshold is 10s, so 4 x 10s gives a 40s window before a restart.
             httpGet: {path: /live, port: http}
             periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
+            timeoutSeconds: 8
+            failureThreshold: 4
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

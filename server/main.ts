@@ -75,10 +75,20 @@ await transaction(pool, async (db) => {
 await writeEvent(pool, {category:'SYSTEM', code:'system.started', message:'Application initialized', context:{workerEnabled:config.WORKER_ENABLED === 'true'}});
 const request = createRequester(config),
   sendMail = createMailSender(config, pool, request);
-const correlation = new CorrelationRuntime(pool, config.ENCRYPTION_KEY, process.env.CORRELATION_DLQ_DIRECTORY || '/tmp/vulnstream-correlation-dlq');
+const correlation = new CorrelationRuntime(
+  pool,
+  config.ENCRYPTION_KEY,
+  process.env.CORRELATION_DLQ_DIRECTORY || '/tmp/vulnstream-correlation-dlq',
+  { url: config.HEARTBEAT_URL, intervalSeconds: config.HEARTBEAT_INTERVAL_SECONDS },
+);
 if (config.WORKER_ENABLED === 'true') correlation.start();
 else correlation.supervisor.start();
-const server = createApp(pool, config, request, { correlation }).listen(config.PORT, '0.0.0.0', () =>
+const server = createApp(pool, config, request, {
+  correlation,
+  // The liveness probe only performs the stall check where the probe timeout is
+  // comfortably above the block threshold; see the option's documentation.
+  hangDetection: config.HANG_DETECTION_ENABLED === 'true',
+}).listen(config.PORT, '0.0.0.0', () =>
   console.log(JSON.stringify({ event: 'listening', port: config.PORT })),
 );
 server.requestTimeout = 30000;

@@ -111,6 +111,19 @@ Stdout telemetry permits UUID tracking IDs and numeric metrics; raw payloads, UR
 - `/metrics` is independent of database authentication and requires `Authorization: Bearer` with the dedicated `METRICS_TOKEN`. Empty configuration disables the endpoint. Metrics contain numeric process/pool counters and fixed state labels, without advisory text, inventory identity or credentials. The local token is stored privately in the ignored `.runtime/metrics.token`, and local dead letters use the ignored persistent `.runtime/correlation-deadletters` directory. Neither enters Docker build context.
 - `server/runtimePrivileges.ts` centralizes restricted runtime grants, including the shared rate-limit bucket permission that was previously missing. Runtime code can read owner assets and aliases but cannot rewrite them.
 
+## Availability and alerting
+
+"Always on, and alert when it is not" requires four independent things, because any one of them alone has a blind spot:
+
+1. **Restart.** Compose uses a restart policy; Kubernetes uses the liveness probe. Neither can restart an instance whose event loop has wedged but whose socket still accepts connections. `HANG_DETECTION_ENABLED=true` makes `/live` answer 503 when the loop has been blocked for more than 10s, so the orchestrator replaces the instance. Liveness is configured with a 40s window (4 x 10s) to leave room for a legitimate GC pause.
+2. **Correct readiness.** `/ready` previously ran `SELECT 1` and returned 200 during every pipeline outage. It now fails (503) when the supervisor is in `RECOVERING_DB_SEVERANCE` — an open breaker or a lost database — so a load balancer stops routing work at an instance that is admitting nothing. `DEGRADED_BACKPRESSURE` is reported as a warning but still returns 200, because shedding is degraded service, not a stopped one.
+3. **Alerts that are actually delivered.** `prometheus.yml` had no `alerting:` block. Prometheus has no default receiver, so every rule in `vulnstream-alerts.yml` was evaluated and **discarded** — the rules existed, nothing ever reached a human. `deploy/monitoring/alertmanager.yml` supplies the route and receivers, and `repeat_interval` re-notifies for as long as the condition persists.
+4. **A dead-man's switch.** All of the above is invisible in a *total* outage: with VulnStream, PostgreSQL and the collector all gone, no rule evaluates and no alert fires. `server/correlation/heartbeat.ts` POSTs to an external receiver every `HEARTBEAT_INTERVAL_SECONDS`, and the receiver alarms when the pings **stop**. Pings are suppressed while the pipeline is unhealthy, because pinging "alive" through an outage would make the switch lie. `scripts/watchdog.mjs` is the equivalent out-of-band check for deployments with no Prometheus, intended to run from cron on a different host.
+
+**Limit, stated plainly:** no application code can guarantee 100% uptime. This work makes every failure mode observable and recoverable, and makes the *absence of the platform itself* observable for the first time. Meeting an availability target still needs redundant nodes, an HA PostgreSQL endpoint, an external receiver, and the deployment work in `deploy/kubernetes/README.md`.
+
+`HEARTBEAT_URL` is a credential: anyone who holds it can silence the alarm by pinging it. It must be HTTPS in production, must not embed userinfo, and must never be logged.
+
 ## Load and recovery evidence
 
 Run `npm run correlation:preflight` for a read-only protected-schema compatibility report. Run `npm run db:migrate` with migration-owner credentials for serialized migrations and inventory projection bootstrap. Run `npm run correlation:benchmark` for a disposable, streaming benchmark; optional `CORRELATION_BENCH_ITEMS`, `CORRELATION_BENCH_CONCURRENCY`, and `CORRELATION_BENCH_REPORT` control its bounded workload and report file.

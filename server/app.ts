@@ -160,6 +160,13 @@ export interface AppOptions {
    * database-backed limiter with the built-in capacity/refill.
    */
   ingestLimiter?: MutationLimiter;
+  /**
+   * When set, `/live` performs a watchdog check and answers 503 if the event
+   * loop has stalled. Off by default so a slow-but-alive instance is not killed
+   * by a liveness probe during a GC pause; enable it only where the liveness
+   * probe timeout is comfortably above the block threshold.
+   */
+  hangDetection?: boolean;
 }
 export function createApp(
   pool: pg.Pool,
@@ -207,18 +214,75 @@ export function createApp(
       return next(new HttpError(415, 'JSON body required'));
     next();
   });
-  app.get('/live', (_req, res) => res.json({ status: 'live' }));
+  // --- Process liveness -----------------------------------------------------
+  //
+  // A Fastify/Express keep-alive server that answered a socket connect is not
+  // evidence the process can still serve work. Two failure modes produce a dead
+  // instance with a listening socket: (a) the event loop is wedged and the timer
+  // that would answer never fires; (b) the process is alive but its queued work
+  // is not progressing. (a) is detectable here by comparing wall-clock drift: a
+  // 5s timer whose callback observes less than 5s elapsed means the loop was
+  // blocked, and a block longer than the threshold is reported on /live with a
+  // 503 so the orchestrator replaces the instance.
+  let lastHeartbeat = Date.now();
+  const HANG_THRESHOLD_MS = 10_000;
+  const hangTimer = setInterval(() => {
+    lastHeartbeat = Date.now();
+  }, 5_000);
+  hangTimer.unref();
+  app.get('/live', (_req, res) => {
+    const stalledFor = Date.now() - lastHeartbeat;
+    if (options.hangDetection && stalledFor > HANG_THRESHOLD_MS)
+      return res.status(503).json({ status: 'stalled', stalledForMs: stalledFor });
+    res.json({ status: 'live' });
+  });
   app.get('/metrics', (req, res) => {
     if (!options.correlation || !config.METRICS_TOKEN) return res.sendStatus(404);
     if (!secureEqual(req.headers.authorization || '', `Bearer ${config.METRICS_TOKEN}`))
       return res.sendStatus(401);
-    res.type('text/plain; version=0.0.4').send(correlationMetrics(options.correlation.supervisor));
+    res.type('text/plain; version=0.0.4').send(
+      correlationMetrics(
+        options.correlation.supervisor,
+        options.correlation.heartbeat,
+        options.correlation.pendingDepth,
+      ),
+    );
   });
   app.get(
     '/ready',
     asyncRoute(async (_req, res) => {
+      // Readiness is "can this instance do its job", not "can it reach a TCP
+      // socket". `SELECT 1` succeeded through every outage the pipeline has: a
+      // wedged advisory consumer, an open circuit breaker and a stalled worker
+      // pool all returned 200, so a load balancer kept routing work at an
+      // instance that was admitting nothing. Each check below corresponds to a
+      // distinct "always on" requirement.
+      const started = Date.now();
       await pool.query('SELECT 1');
-      res.json({ status: 'ready' });
+      const databaseLatencyMs = Date.now() - started;
+      const supervisor = options.correlation?.supervisor;
+      const reasons: string[] = [];
+      if (supervisor) {
+        // An open breaker means the pipeline is deliberately rejecting every
+        // advisory for minutes. Routing new work here is pointless.
+        if (supervisor.health === 'RECOVERING_DB_SEVERANCE') reasons.push('database-recovery');
+        // Soft shedding still makes progress, so it is reported but not failed.
+        if (supervisor.health === 'DEGRADED_BACKPRESSURE') reasons.push('backpressure');
+      }
+      if (reasons.some((reason) => reason !== 'backpressure'))
+        return res.status(503).json({
+          status: 'not-ready',
+          reasons,
+          health: supervisor?.health,
+          databaseLatencyMs,
+        });
+      res.json({
+        status: 'ready',
+        health: supervisor?.health ?? 'unknown',
+        activeWorkers: supervisor?.active.size ?? 0,
+        databaseLatencyMs,
+        warnings: reasons,
+      });
     }),
   );
   app.post('/api/login', loginHandler(pool, config));
