@@ -6,11 +6,11 @@
 -- runtime. Ships as its own migration so existing installations that passed
 -- 023 are still validated against the complete contract.
 
--- Unique indexes are required for ON CONFLICT handling in ingest.ts.
--- IF NOT EXISTS skips when 023 already created them.
-CREATE UNIQUE INDEX IF NOT EXISTS correlation_advisory_fingerprint ON unstructured_advisories(fingerprint);
-CREATE UNIQUE INDEX IF NOT EXISTS correlation_advisory_url ON unstructured_advisories(url);
-CREATE UNIQUE INDEX IF NOT EXISTS correlation_alias_pkey ON vendor_product_aliases(alias);
+-- Unique indexes are required for ON CONFLICT handling in ingest.ts. They are
+-- built by applyIndexMigrations() with CREATE INDEX CONCURRENTLY, outside the
+-- migration transaction (server/migrations/indexes/001_correlation_indexes.sql).
+-- The verification below still asserts that every ON CONFLICT target exists and
+-- is valid, so a skipped or failed concurrent build is caught here.
 
 -- Re-assert column contract with type precision for the full set of tables.
 DO $$
@@ -79,13 +79,17 @@ END $$;
 DO $$
 DECLARE invalid_idx text;
 BEGIN
-  SELECT index.relname INTO invalid_idx
-  FROM pg_index index
-  JOIN pg_class cls ON cls.oid = index.indexrelid
+  -- `index` is reserved in PL/pgSQL (the FOR loop variable), so the alias is
+  -- `idx`. The previous alias ended the SELECT with `index.relname`, which the
+  -- parser read as the loop variable crossed with a field -> 42703 on every
+  -- fresh migration. Only the database-gated suites caught it.
+  SELECT cls.relname INTO invalid_idx
+  FROM pg_index idx
+  JOIN pg_class cls ON cls.oid = idx.indexrelid
   JOIN pg_namespace ns ON ns.oid = cls.relnamespace
   WHERE ns.nspname = current_schema()
-    AND index.indisunique IS TRUE
-    AND index.indisvalid IS FALSE
+    AND idx.indisunique IS TRUE
+    AND idx.indisvalid IS FALSE
   LIMIT 1;
   IF invalid_idx IS NOT NULL THEN
     RAISE EXCEPTION 'Unique index % is not valid (incomplete CREATE INDEX CONCURRENTLY?)', invalid_idx;

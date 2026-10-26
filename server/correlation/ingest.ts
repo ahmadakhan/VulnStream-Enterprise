@@ -146,6 +146,7 @@ export class AdvisoryIngestor {
             return 'DUPLICATE';
           }
           const advisoryId = await (async (): Promise<string | null> => {
+            await query('SAVEPOINT advisory_insert');
             try {
               const inserted = await query<{ id: string }>(
                 `INSERT INTO unstructured_advisories(id,title,content,url,fingerprint)
@@ -155,14 +156,26 @@ export class AdvisoryIngestor {
               return inserted.rowCount ? inserted.rows[0].id : null;
             } catch (urlConflict) {
               if (databaseCode(urlConflict) !== '23505') throw urlConflict;
+              // Undo the failed statement so the transaction is usable again.
+              await query('ROLLBACK TO SAVEPOINT advisory_insert');
               // URL already exists with a different fingerprint: merge the updated
               // content into the existing row instead of dead-lettering the
               // advisory. This lets an updated advisory with the same URL replace
               // stale content without losing correlation history.
+              //
+              // The SAVEPOINT above is load-bearing: without it the INSERT's
+              // 23505 leaves the transaction aborted and every following
+              // statement fails with 25P02, so the merge never executed and
+              // every retitled advisory at an existing URL was dead-lettered as
+              // an opaque database failure. The UPDATE runs in the same
+              // transaction and commits atomically with the matches and cluster
+              // linkage. Snapshot isolation gives it the pre-statement view of
+              // the conflicting row, so that row is visible here.
               const merged = await query<{ id: string }>(
                 `UPDATE unstructured_advisories SET
                    title=$1, content=$2, fingerprint=$3, processed_at=NULL
-                 WHERE url=$4 RETURNING id`,
+                 WHERE url=$4 AND fingerprint IS DISTINCT FROM $3
+                 RETURNING id`,
                 [input.title, extracted.cleanContent, fingerprint, input.url],
               );
               this.telemetry.log('INFO', 'ingestion.url_merged', { trackingId });
@@ -187,6 +200,8 @@ export class AdvisoryIngestor {
           // interface used by the cluster module (both are the same client).
           const clusterDb = {
             query: (sql: string, values?: unknown[]) => query<Record<string, unknown>>(sql, values),
+            client,
+            inTransaction: true,
           };
           await linkPreCveClusters(clusterDb, advisoryId, entities, matches.length, extracted.cveIds, windowDays);
           for (const match of matches) {

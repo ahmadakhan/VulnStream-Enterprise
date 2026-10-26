@@ -100,9 +100,10 @@ DROP INDEX IF EXISTS operational_events_tracking_id_idx;
 
 -- Retention and the event viewer both filter on occurred_at; without an index
 -- the retention sweep degrades to a full scan of the largest table as it grows.
-CREATE INDEX IF NOT EXISTS operational_events_occurred_at
-  ON operational_events (occurred_at DESC);
-CREATE INDEX IF NOT EXISTS operational_events_tracking
-  ON operational_events (tracking_id) WHERE tracking_id IS NOT NULL;
+-- Both indexes are built CONCURRENTLY by applyIndexMigrations() (see
+-- migrations/indexes/002_operational_events_indexes.sql): a plain CREATE INDEX
+-- here took SHARE on this table for the whole build, blocking every pipeline
+-- writer, and tied the build to the migration transaction so a killed build
+-- rolled back the schema upgrade too.
 
 INSERT INTO schema_migrations(version) VALUES(22) ON CONFLICT DO NOTHING;

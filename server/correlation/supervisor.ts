@@ -38,6 +38,9 @@ export class PipelineSupervisor {
   /** Original shares, retained so repeated rebalancing cannot drift ratios. */
   private readonly baseConfig: SupervisorConfig;
   private memoryPressure = false;
+  /** When shedding began. A single high sample under a 1s poll is a spike, not
+   * sustained pressure; the interval guard in check() requires it to persist. */
+  private sheddingSince = 0;
   private timer?: ReturnType<typeof setInterval>;
   private checking = false;
   private stopped = false;
@@ -60,6 +63,15 @@ export class PipelineSupervisor {
   private crashTimestamps: number[] = [];
   private pausedUntil = 0;
   private pauseReason: string | null = null;
+  /**
+   * Simulation-triggered failures. These are operator-initiated and must not
+   * contribute to the real breaker: three simulated database faults inside the
+   * crash window would open a genuine five-minute pause after the simulation
+   * had already 'ended', turning the endpoint into a five-minute outage.
+   */
+  private simulatedCrashes: number[] = [];
+  /** The persisted breaker this instance adopted from the database. */
+  private adoptedPause = 0;
 
   constructor(
     readonly pool: Pool,
@@ -136,11 +148,46 @@ export class PipelineSupervisor {
     while (this.active.size || this.checking) await delay(20);
   }
 
+  /**
+   * Simulate a control-plane fault for five seconds. Deliberately in-process:
+   * this never severs a real socket or exhausts real memory.
+   *
+   * The window is published to the shared policy row so a sibling replica
+   * reflects the transition and a restart mid-simulation cannot leave a
+   * half-applied fault behind. Simulated failures are counted separately from
+   * real ones (see `simulatedCrashes`).
+   */
   simulate(fault: 'memory' | 'database'): void {
     this.simulated = fault;
     this.simulatedUntil = Date.now() + 5000;
     this.ingestor.telemetry.log('WARN', 'supervisor.fault_simulated');
+    void this.pool
+      .query(
+        timedQuery(
+          `UPDATE correlation_policy SET simulated_fault=$1,simulated_until=$2 WHERE id=1`,
+          [fault, new Date(this.simulatedUntil)],
+          2000,
+        ),
+      )
+      .catch(() => {});
     void this.check();
+  }
+
+  /** Clear an expired simulation locally and on the shared row. */
+  private expireSimulation(): void {
+    if (!this.simulated) return;
+    this.simulated = null;
+    this.simulatedCrashes = [];
+    this.sheddingSince = 0;
+    void this.pool
+      .query(
+        timedQuery(
+          'UPDATE correlation_policy SET simulated_fault=NULL,simulated_until=NULL WHERE id=1 AND simulated_fault IS NOT NULL',
+          [],
+          2000,
+        ),
+      )
+      .catch(() => {});
   }
 
   private recordCrash(): void {
@@ -155,15 +202,44 @@ export class PipelineSupervisor {
         pauseDurationMs: PAUSE_DURATION_MS,
       });
       this.rejectWaiters(new Error(`Supervisor paused: ${this.pauseReason}`));
+      this.persistCircuit();
     }
+  }
+
+  /**
+   * Publish the open breaker so a restart, or a sibling replica, honours it.
+   * Fire-and-forget on purpose: admission is already blocked in memory, and the
+   * breaker must hold even when this write fails.
+   */
+  private persistCircuit(): void {
+    void this.pool
+      .query(
+        timedQuery(
+          `UPDATE correlation_policy SET circuit_open_until=$1,circuit_reason=$2,circuit_instance=$3 WHERE id=1`,
+          [new Date(this.pausedUntil), this.pauseReason, this.instanceId],
+          2000,
+        ),
+      )
+      .catch(() => this.ingestor.telemetry.log('WARN', 'supervisor.circuit_persist_failed'));
+  }
+
+  /** Clear the open breaker in the shared policy row. */
+  private clearPersistedCircuit(): void {
+    void this.pool
+      .query(timedQuery('UPDATE correlation_policy SET circuit_open_until=NULL,circuit_reason=NULL WHERE id=1', [], 2000))
+      .catch(() => {});
   }
 
   private resetCircuit(): void {
     if (!this.crashTimestamps.length && !this.pausedUntil) return;
+    const wasShared = this.adoptedPause > 0;
     this.crashTimestamps = [];
+    this.simulatedCrashes = [];
     this.pausedUntil = 0;
     this.pauseReason = null;
+    this.adoptedPause = 0;
     this.ingestor.telemetry.log('INFO', 'supervisor.circuit_breaker_reset');
+    if (wasShared) this.clearPersistedCircuit();
     this.pump();
   }
 
@@ -176,7 +252,7 @@ export class PipelineSupervisor {
     this.checking = true;
     const log = this.ingestor.telemetry;
     try {
-      if (Date.now() >= this.simulatedUntil) this.simulated = null;
+      if (Date.now() >= this.simulatedUntil) this.expireSimulation();
       // A breaker must not outlive the outage that opened it. Without this
       // reset, a recovered database still rejected every advisory for the
       // remainder of the five-minute pause.
@@ -184,14 +260,27 @@ export class PipelineSupervisor {
 
       const memory = this.simulated === 'memory' ? 90 : this.memoryPercent();
       if (memory >= 85 && !this.memoryPressure) {
-        this.memoryPressure = true;
-        this.concurrencyLimit = Math.max(1, Math.floor(this.desiredConcurrency / 2));
-        log.log('WARN', 'supervisor.memory_shedding', { count: this.concurrencyLimit });
-        if (typeof globalThis.gc === 'function') globalThis.gc();
+        // Hysteresis on the rise: a single sample is a transient allocation
+        // spike, not sustained pressure. Require it to persist for one more
+        // probe interval before halving the whole pipeline's concurrency.
+        if (!this.sheddingSince) {
+          this.sheddingSince = Date.now();
+        } else if (Date.now() - this.sheddingSince >= 1000) {
+          this.memoryPressure = true;
+          this.concurrencyLimit = Math.max(1, Math.floor(this.desiredConcurrency / 2));
+          log.log('WARN', 'supervisor.memory_shedding', {
+            count: this.concurrencyLimit,
+            highPool: this.getPoolLimit('HIGH'),
+          });
+          if (typeof globalThis.gc === 'function') globalThis.gc();
+        }
       } else if (memory < 60 && this.memoryPressure) {
         this.memoryPressure = false;
+        this.sheddingSince = 0;
         this.concurrencyLimit = this.desiredConcurrency;
         log.log('INFO', 'supervisor.memory_recovered');
+      } else if (memory < 85) {
+        this.sheddingSince = 0;
       }
 
       for (const [trackingId, task] of this.active)
@@ -203,31 +292,67 @@ export class PipelineSupervisor {
       try {
         if (this.simulated === 'database') throw new Error('SIMULATED_DATABASE_OUTAGE');
         await this.pool.query(timedQuery('SELECT 1', [], 2000));
-        const policy = await this.pool.query<{ concurrency_limit: number }>(
-          timedQuery('SELECT concurrency_limit FROM correlation_policy WHERE id=1', [], 2000),
+        const policy = await this.pool.query<{
+          concurrency_limit: number;
+          circuit_open_until: Date | null;
+          circuit_reason: string | null;
+        }>(
+          timedQuery(
+            `SELECT concurrency_limit,circuit_open_until,circuit_reason FROM correlation_policy WHERE id=1`,
+            [],
+            2000,
+          ),
         );
-        if (policy.rows[0] && policy.rows[0].concurrency_limit !== this.desiredConcurrency)
-          this.setConcurrency(policy.rows[0].concurrency_limit);
-        // The database is reachable. Clear crash evidence and release any
-        // remaining pause so recovery is immediate, not five minutes later.
-        this.resetCircuit();
-        const next = this.memoryPressure ? 'DEGRADED_BACKPRESSURE' : 'HEALTHY';
-        if (this.health !== next)
-          log.log(
-            next === 'HEALTHY' ? 'INFO' : 'WARN',
-            next === 'HEALTHY' ? 'supervisor.recovered' : 'supervisor.backpressure_active',
-          );
-        this.health = next;
-        await this.ingestor.deadLetterQueue.flush(this.pool).catch(() => {
-          log.log('CRITICAL', 'dead_letter.flush_failed');
-        });
+        const row = policy.rows[0];
+        if (row && row.concurrency_limit !== this.desiredConcurrency)
+          this.setConcurrency(row.concurrency_limit);
+        // Adopt a breaker opened by another replica, or by this process before a
+        // restart. A crash-loop must not delete the evidence that patience is
+        // required: without this, restarting the process cleared the five-minute
+        // pause and poured admission straight back into the outage.
+        const persisted = row?.circuit_open_until ? row.circuit_open_until.getTime() : 0;
+        const sharedPauseActive = persisted > Date.now();
+        if (sharedPauseActive) {
+          this.pausedUntil = persisted;
+          this.adoptedPause = persisted;
+          this.pauseReason = row?.circuit_reason ?? 'Circuit breaker open (shared state)';
+          if (this.health !== 'RECOVERING_DB_SEVERANCE') {
+            log.log('CRITICAL', 'supervisor.circuit_breaker_adopted', {
+              pauseDurationMs: persisted - Date.now(),
+            });
+            this.health = 'RECOVERING_DB_SEVERANCE';
+          }
+          this.rejectWaiters(new Error(`Supervisor paused: ${this.pauseReason}`));
+        } else if (persisted) {
+          // Expired shared pause: clear it so a later crash can open a new one.
+          this.adoptedPause = 0;
+          this.clearPersistedCircuit();
+          this.resetCircuit();
+        }
+        if (!sharedPauseActive) {
+          // The database is reachable. Clear crash evidence and release any
+          // remaining pause so recovery is immediate, not five minutes later.
+          this.resetCircuit();
+          const next = this.memoryPressure ? 'DEGRADED_BACKPRESSURE' : 'HEALTHY';
+          if (this.health !== next)
+            log.log(
+              next === 'HEALTHY' ? 'INFO' : 'WARN',
+              next === 'HEALTHY' ? 'supervisor.recovered' : 'supervisor.backpressure_active',
+            );
+          this.health = next;
+          await this.ingestor.deadLetterQueue.flush(this.pool).catch(() => {
+            log.log('CRITICAL', 'dead_letter.flush_failed');
+          });
+        }
       } catch (error) {
         if (this.health !== 'RECOVERING_DB_SEVERANCE')
           log.log('CRITICAL', 'supervisor.database_unavailable');
         this.health = 'RECOVERING_DB_SEVERANCE';
         // pg destroys failed clients; a new connect resolves the configured
         // failover/proxy endpoint. Never pool.end() the shared application pool.
-        this.recordCrash();
+        // A simulated outage never contributes to the real breaker.
+        if (this.simulated === 'database') this.simulatedCrashes.push(Date.now());
+        else this.recordCrash();
       }
     } finally {
       this.checking = false;
@@ -313,7 +438,16 @@ export class PipelineSupervisor {
       // HIGH is protected from soft shedding, but still bounded by its own
       // pool and by the configured desired ceiling. It must not open an
       // unbounded number of workers while memory is exhausted.
-      if (this.active.size >= Math.max(this.concurrencyLimit, this.desiredConcurrency)) return false;
+      //
+      // Shedding halves the GLOBAL ceiling, and a proportional share then rounds
+      // HIGH down to a single slot — starving exactly the critical advisories
+      // that shed-for-memory exists to keep alive. HIGH therefore gets its own
+      // floor. The global ceiling and the HIGH pool still bound it.
+      const highFloor = Math.min(
+        this.desiredConcurrency,
+        Math.max(2, Math.ceil(this.desiredConcurrency / 4)),
+      );
+      if (this.active.size >= Math.max(this.concurrencyLimit, highFloor)) return false;
     }
     if (this.activeCount[priority] >= this.getPoolLimit(priority)) return false;
     return true;
@@ -362,8 +496,12 @@ export class PipelineSupervisor {
 
   private getPoolLimit(priority: IngestPriority): number {
     switch (priority) {
-      case 'HIGH':
-        return Math.max(1, this.config.highPool);
+      case 'HIGH': {
+        // Shedding halves the ceiling but must not shrink HIGH below its floor,
+        // otherwise the soft-shedding bypass documented on canAdmit means nothing.
+        const floor = Math.min(this.desiredConcurrency, Math.max(2, Math.ceil(this.desiredConcurrency / 4)));
+        return Math.max(1, this.config.highPool, floor);
+      }
       case 'MEDIUM':
         return Math.max(1, this.config.mediumPool);
       case 'LOW':

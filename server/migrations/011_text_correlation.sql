@@ -32,13 +32,11 @@ BEGIN
     RAISE EXCEPTION 'Correlation schema contract missing columns: %. Supply a mapping migration approved by the database owner; protected tables have not been altered.', missing;
   END IF;
 END $$;
-CREATE INDEX IF NOT EXISTS correlation_assets_cpe ON assets(cpe_23) WHERE cpe_23 IS NOT NULL;
-CREATE INDEX IF NOT EXISTS correlation_assets_purl ON assets(purl) WHERE purl IS NOT NULL;
-CREATE INDEX IF NOT EXISTS correlation_assets_names ON assets(lower(vendor),lower(product));
-CREATE UNIQUE INDEX IF NOT EXISTS correlation_advisory_fingerprint ON unstructured_advisories(fingerprint);
-CREATE UNIQUE INDEX IF NOT EXISTS correlation_advisory_url ON unstructured_advisories(url);
-CREATE INDEX IF NOT EXISTS correlation_advisory_search ON unstructured_advisories USING gin(tsv_content);
-CREATE INDEX IF NOT EXISTS correlation_alias_lookup ON vendor_product_aliases(lower(alias));
+-- Indexes are NOT built here: a plain CREATE INDEX takes SHARE for the whole
+-- build and blocks live writers, which dead-letters every in-flight advisory
+-- under the 3500ms ingest statement timeout. See server/migrations/indexes/ and
+-- applyIndexMigrations() in server/db.ts (CREATE INDEX CONCURRENTLY, outside a
+-- transaction).
 INSERT INTO vendor_product_aliases(alias,vendor,product)
 SELECT seed.alias,seed.vendor,seed.product FROM (VALUES
   ('k8s','kubernetes','kubernetes'),('kubernetes','kubernetes','kubernetes'),

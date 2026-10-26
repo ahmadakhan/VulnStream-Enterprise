@@ -47,6 +47,12 @@ const schema = z.object({
   FEED_MAX_DURATION_SECONDS: z.coerce.number().int().min(1).max(7200).default(1800),
   WORKER_ENABLED: z.enum(['true', 'false']).default('true'),
   MAILJET_SANDBOX_MODE: z.enum(['true', 'false']).default('false'),
+  // Control-plane fault simulation. Disabled unless an operator opts in, and
+  // refused outright in production. It previously keyed off NODE_ENV alone,
+  // which meant a staging/production image started with NODE_ENV=development
+  // (a routine debugging move) exposed an endpoint that can open the shared
+  // circuit breaker and halt ingestion for every replica.
+  FAULT_SIMULATION_ENABLED: z.enum(['true', 'false']).default('false'),
 });
 export type Config = z.infer<typeof schema>;
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -56,5 +62,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (config.NODE_ENV === 'production' && origin.protocol !== 'https:')
     throw new Error('Production requires an HTTPS APP_ORIGIN');
   if (Buffer.from(config.ENCRYPTION_KEY, 'base64').length !== 32) throw new Error('Invalid encryption key');
+  if (config.NODE_ENV === 'production' && config.FAULT_SIMULATION_ENABLED === 'true')
+    throw new Error('FAULT_SIMULATION_ENABLED is not permitted in production');
   return config;
 }

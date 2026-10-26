@@ -36,7 +36,7 @@ export const schemaLockKey = 'hashtext(COALESCE(current_schema(), current_databa
  * The newest migration this build depends on. Production startup refuses to
  * run against an older schema instead of failing later on a missing column.
  */
-export const REQUIRED_SCHEMA_VERSION = 24;
+export const REQUIRED_SCHEMA_VERSION = 26;
 
 /**
  * Migration files sorted by numeric prefix. Only plain `NNN_name.sql` entries
@@ -50,6 +50,175 @@ async function migrationFiles(): Promise<{ version: number; name: string }[]> {
     .filter((name) => /^\d{3}_.*\.sql$/.test(name))
     .map((name) => ({ version: Number(name.slice(0, 3)), name }))
     .sort((a, b) => a.version - b.version);
+}
+
+/**
+ * Non-transactional index builds.
+ *
+ * PostgreSQL refuses CREATE INDEX CONCURRENTLY inside a transaction block, and a
+ * plain CREATE INDEX takes SHARE on the table for the entire build. On a large
+ * live installation that blocks every INSERT/UPDATE for the duration, and ingest
+ * workers run under a 3500ms statement timeout, so each one rolls back, burns
+ * its retry ladder and is dead-lettered. A maintenance window is therefore not
+ * an acceptable workaround: it converts an ordinary deploy into a loss window.
+ *
+ * So index DDL lives in ./migrations/indexes/*.sql and is applied here, one
+ * statement at a time, on an autocommit connection. A concurrent build that
+ * fails leaves an INVALID index behind (the catalogue row outlives the abort);
+ * the retry path drops it before rebuilding. `preflight.ts` rejects any unique
+ * index whose `indisvalid` is false, so an interrupted build cannot masquerade
+ * as a satisfied ON CONFLICT target.
+ */
+async function indexMigrationFiles(): Promise<{ name: string; sql: string }[]> {
+  const directory = fileURLToPath(new URL('./migrations/indexes/', import.meta.url));
+  const entries = (await readdir(directory)).filter((name) => /^\d{3}_.*\.sql$/.test(name)).sort();
+  return Promise.all(
+    entries.map(async (name) => ({
+      name,
+      sql: await readFile(new URL(`./migrations/indexes/${name}`, import.meta.url), 'utf8'),
+    })),
+  );
+}
+
+/** Strip comments and split on semicolons outside string literals. */
+export function indexStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let current = '';
+  let quoted = false;
+  for (let index = 0; index < sql.length; index++) {
+    const char = sql[index];
+    if (!quoted && char === '-' && sql[index + 1] === '-') {
+      while (index < sql.length && sql[index] !== '\n') index++;
+      current += '\n';
+      continue;
+    }
+    if (char === "'") quoted = !quoted;
+    if (!quoted && char === ';') {
+      if (current.trim()) statements.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim()) statements.push(current.trim());
+  return statements;
+}
+
+const indexName = (statement: string): string | null =>
+  /CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\s+IF\s+NOT\s+EXISTS\s+"?([a-z0-9_]+)"?/i.exec(statement)?.[1] ??
+  null;
+
+/**
+ * Build the correlation indexes concurrently. Runs on its own connection, in
+ * autocommit mode, after the transactional migrations have committed: the
+ * relations must exist first, and the tables must not be locked by this run.
+ */
+export async function applyIndexMigrations(pool: pg.Pool): Promise<void> {
+  const client = await pool.connect();
+  let failed = false;
+  try {
+    // A concurrent build waits for every transaction that already holds a
+    // conflicting lock. Ingest transactions are short (3500ms statement / 5000ms
+    // idle), so a generous lock timeout retries rather than aborting; the
+    // statement timeout is the real ceiling for a multi-million-row build.
+    await client.query("SET statement_timeout = '900000ms'");
+    await client.query("SET lock_timeout = '30000ms'");
+    await client.query('SELECT set_config($1, current_schema(), false)', ['search_path']);
+    // Serialize concurrent deploys of the same schema. Separate from the
+    // migration lock because this runs outside that transaction.
+    await client.query('SELECT pg_advisory_lock(800005, hashtext(COALESCE(current_schema(), current_database())))');
+    try {
+      for (const file of await indexMigrationFiles()) {
+        for (const statement of indexStatements(file.sql)) {
+          await buildIndex(client, statement, file.name);
+        }
+      }
+    } finally {
+      await client.query('SELECT pg_advisory_unlock(800005, hashtext(COALESCE(current_schema(), current_database())))').catch(() => {});
+    }
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    client.release(failed);
+  }
+}
+
+/**
+ * One CREATE INDEX CONCURRENTLY with the failure handling that statement class
+ * actually needs. Returns false when the index is permanently unavailable in
+ * this deployment (pg_trgm absent) rather than throwing, so an optimisation
+ * cannot block a deploy.
+ */
+async function buildIndex(client: pg.PoolClient, statement: string, file: string): Promise<void> {
+  const name = indexName(statement);
+  // A cancelled or killed CONCURRENTLY build leaves a valid-looking catalogue
+  // entry with `indisvalid = false`. `IF NOT EXISTS` below would then skip the
+  // rebuild and the planner would ignore the index forever — the build silently
+  // never happens. Sweep it first, outside the migration transaction (DROP INDEX
+  // CONCURRENTLY has the same no-transaction restriction as the build).
+  if (name) {
+    const invalid = await client
+      .query<{ invalid: boolean }>(
+        `SELECT NOT i.indisvalid AS invalid
+           FROM pg_index i
+           JOIN pg_class c ON c.oid = i.indexrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE c.relname = $1 AND n.nspname = ANY(current_schemas(true))`,
+        [name],
+      )
+      .catch(() => ({ rows: [] as { invalid: boolean }[] }));
+    if (invalid.rows[0]?.invalid) {
+      await client.query(`DROP INDEX CONCURRENTLY IF EXISTS "${name}"`);
+      console.warn(JSON.stringify({ level: 'warn', event: 'index.invalid_rebuilt', index: name, file }));
+    }
+  }
+  // pg_trgm is optional, and migration 019 revoked the fuzzy helpers from
+  // PUBLIC. Building a trigram index is therefore an optimisation that a
+  // deployment may legitimately be unable to perform — a failed build must
+  // never block the release. Probe resolution exactly as PostgreSQL will:
+  // `gin_trgm_ops` must be an opclass name in the session's search_path
+  // namespace set and its access method. A global catalog lookup answers the
+  // wrong question: in a multi-tenant database the extension is typically
+  // installed once, in one schema, and remains invisible to every other
+  // tenant's session.
+  if (statement.includes('gin_trgm_ops')) {
+    const available = await client
+      .query<{ available: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM pg_opclass o
+           JOIN pg_namespace n ON n.oid = o.opcnamespace
+           JOIN pg_am a ON a.oid = o.opcmethod
+           WHERE o.opcname = 'gin_trgm_ops' AND a.amname = 'gin'
+             AND n.nspname = ANY(current_schemas(true))
+         ) AS available`,
+      )
+      .catch(() => ({ rows: [{ available: false }] }));
+    if (!available.rows[0]?.available) {
+      console.warn(JSON.stringify({ level: 'warn', event: 'index.skipped', index: name, file, reason: 'gin_trgm_ops-unavailable' }));
+      return;
+    }
+  }
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    try {
+      await client.query(statement);
+      return;
+    } catch (error) {
+      const code = String((error as { code?: string }).code ?? '');
+      // A cancelled or failed concurrent build leaves an INVALID index behind.
+      // DROP INDEX CONCURRENTLY also runs outside a transaction, and the retry
+      // must not trip over the stale catalogue entry.
+      if (name) await client.query(`DROP INDEX CONCURRENTLY IF EXISTS "${name}"`).catch(() => {});
+      // Lock timeout and deadlock are transient: a live writer held the table.
+      if ((code === '55P03' || code === '40P01') && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)));
+        continue;
+      }
+      throw Object.assign(new Error(`Index build failed (${file}, ${name ?? 'unnamed'}): ${code}`), {
+        cause: error,
+      });
+    }
+  }
 }
 
 export async function migrate(pool: pg.Pool) {
@@ -103,6 +272,9 @@ export async function migrate(pool: pg.Pool) {
     // instead of recycling it back into the pool for the next caller.
     client.release(failed);
   }
+  // Only after the schema transaction commits: the relations exist, and the
+  // CREATE INDEX CONCURRENTLY statements must not run inside a transaction.
+  await applyIndexMigrations(pool);
 }
 export interface TransactionOptions {
   /**

@@ -24,14 +24,42 @@ const contracts: Record<string, Record<string, readonly string[]>> = {
   },
 };
 
+// `assets` is absent: it is owner-managed, and migration 011 never adds a
+// unique index to it. Requiring one here rejected a perfectly valid
+// installation before its first migration ran. Only the relations whose
+// indexes the ON CONFLICT clauses actually depend on are listed.
 const uniqueIndexes: Record<string, readonly string[]> = {
   unstructured_advisories: ['fingerprint', 'url'],
   vendor_product_aliases: ['alias'],
 };
 
-const generatedColumns: Record<string, readonly string[]> = {
-  unstructured_advisories: ['tsv_content'],
-};
+// Generated columns the preflight may demand are read from the registry that
+// migration 025 populates from pg_attribute. Hard-coding `tsv_content` here was
+// a false positive: a protected, owner-managed table may legitimately use a
+// trigger-maintained tsvector, and `vendor_product_aliases.normalized_alias`
+// exists only when pg_trgm was usable. Demanding either of those is not part of
+// this module's contract — their absence is not a defect, it is an operator's
+// build choice, and the full-text/alias code paths already degrade gracefully.
+const generatedColumnsTable = 'correlation_generated_columns';
+
+/**
+ * Relations this module creates itself (migrations 011–024). Their constraint
+ * and generated-column contracts are asserted here because the DDL already
+ * exists on an upgraded installation. Owner-managed/protected tables
+ * (`assets`, `unstructured_advisories`, `vendor_product_aliases`) are only
+ * checked for presence and type: an operator's pre-existing table legitimately
+ * uses a trigger-maintained tsvector or differently named checks, and this
+ * module must never demand that it be rebuilt.
+ */
+const ownedRelations = new Set([
+  'correlation_matches',
+  'low_confidence_review_buffer',
+  'correlation_dead_letters',
+  'correlation_pending',
+  'correlation_managed_assets',
+  'correlation_policy',
+  'pre_cve_clusters',
+]);
 
 export interface SchemaPreflight {
   compatible: boolean;
@@ -108,66 +136,101 @@ export async function correlationPreflight(db: Db): Promise<SchemaPreflight> {
     // pg_index.indisvalid catches incomplete indexes from a crashed CREATE INDEX
     // CONCURRENTLY. An invalid index is never used for constraint enforcement.
     const invalidIndexRows = await db.query<{ indexname: string }>(
-      `SELECT index.relname AS indexname
-       FROM pg_index index
-       JOIN pg_class cls ON cls.oid = index.indexrelid
+      // `index` is a reserved word in PostgreSQL; using it as a bare alias makes
+      // `index.relname` parse as a column named "index". Alias it `idx`.
+      `SELECT cls.relname AS indexname
+       FROM pg_index idx
+       JOIN pg_class cls ON cls.oid = idx.indexrelid
        JOIN pg_namespace ns ON ns.oid = cls.relnamespace
        WHERE ns.nspname = current_schema()
-         AND index.indisunique IS TRUE
-         AND index.indisvalid IS FALSE`,
+         AND idx.indisunique IS TRUE
+         AND idx.indisvalid IS FALSE`,
     );
     for (const row of invalidIndexRows.rows)
       issues.push(`Unique index ${row.indexname}: not valid (incomplete CREATE INDEX CONCURRENTLY?)`);
 
     // --- Generated column verification ---
-    // tsv_content must be GENERATED ALWAYS AS (...) STORED. A plain column or
-    // a generated column in a different mode breaks the full-text search contract.
-    const genColumnRows = await db.query<{
-      table_name: string;
-      column_name: string;
-      attgenerated: string;
-    }>(
-      `SELECT c.relname AS table_name, a.attname AS column_name, a.attgenerated
-       FROM pg_attribute a
-       JOIN pg_class c ON c.oid = a.attrelid
-       JOIN pg_namespace n ON n.oid = c.relnamespace
-       WHERE n.nspname = current_schema()
-         AND a.attname = ANY($1)
-         AND a.attnum > 0 AND a.attisdropped IS FALSE`,
-      [Array.from(new Set(Object.values(generatedColumns).flat()))],
+    // Only columns the owning migration registered as generated are checked, so
+    // a trigger-maintained tsvector on a protected table or a pg_trgm-dependent
+    // alias column is not a defect. The registry itself is created by migration
+    // 025; before that migration runs there is nothing to verify.
+    const registry = await db.query<{ name: string | null }>(
+      `SELECT to_regclass($1)::text AS name`,
+      [generatedColumnsTable],
     );
-    const genColumns = new Set(genColumnRows.rows.map((r) => `${r.table_name}.${r.column_name}`));
-    for (const [table, cols] of Object.entries(generatedColumns))
-      for (const col of cols)
-        if (!genColumns.has(`${table}.${col}`))
-          issues.push(`${table}.${col}: expected generated column, found plain column`);
+    if (registry.rows[0]?.name) {
+      const genColumnRows = await db.query<{
+        table_name: string;
+        column_name: string;
+        attgenerated: string;
+      }>(
+        `SELECT g.table_name, g.column_name, COALESCE(a.attgenerated,'') AS attgenerated
+         FROM ${generatedColumnsTable} g
+         JOIN pg_class c ON c.relname = g.table_name AND c.relnamespace = to_regnamespace(current_schema())
+         LEFT JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = g.column_name AND a.attnum > 0
+         WHERE c.oid IS NOT NULL`,
+      );
+      for (const row of genColumnRows.rows)
+        if (row.attgenerated !== 's')
+          issues.push(`${row.table_name}.${row.column_name}: registered as generated, found plain column`);
+    }
 
     // --- CHECK constraint verification ---
+    // Constraint definitions are read from the relation's own schema. Matching
+    // only on `relname` is ambiguous once the search_path reaches a second
+    // schema that also holds a table of that name.
+    // `existingTables` only lists tables that expose an `id` column. The
+    // confidence CHECKs live on `correlation_matches` (no `id`) and on the
+    // review buffer, so the constraint lookup must name its relations directly
+    // instead of reusing that projection's list.
+    // Non-required CHECK constraints (e.g. the pinned singleton policy row) may
+    // legitimately be absent on a pre-existing installation; only the
+    // confidence allow-lists are part of the contract.
     const checkRows = await db.query<{
       table_name: string;
       check_clause: string;
     }>(
       `SELECT c.relname AS table_name,
-              regexp_replace(pg_get_constraintdef(con.oid), '^CHECK\\(|\\)$', '', 'g') AS check_clause
+              pg_get_constraintdef(con.oid) AS check_clause
        FROM pg_constraint con
        JOIN pg_class c ON c.oid = con.conrelid
        JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = current_schema()
          AND con.contype = 'c'
-         AND c.relname = ANY($1)`,
-      [existingTables],
+         AND c.relname = ANY(ARRAY['correlation_matches','low_confidence_review_buffer'])`,
     );
-    const checkSet = new Set(
-      checkRows.rows.map((r) => `${r.table_name}:${r.check_clause.replace(/\s+/g, ' ')}`),
-    );
-    const requiredChecks: Record<string, string[]> = {
-      correlation_matches: ["confidence IN ('HIGH', 'MEDIUM')"],
-      low_confidence_review_buffer: ["confidence='LOW'"],
+    // PostgreSQL stores the expression in its own form (`= ANY (ARRAY[...])`,
+    // quoted identifiers, `::text` casts), so an exact-string comparison against
+    // the source literal rejected a correct constraint. Reduce it to its
+    // significant tokens (identifiers and quoted literals) and compare
+    // semantically: the security property is "only these confidence values are
+    // allowed", not the DDL spelling.
+    const checkTokens = (clause: string) =>
+      (clause.match(/[A-Za-z_][A-Za-z0-9_]*|'[^']*'/g) ?? []).map((t) =>
+        t.replace(/^'|'$/g, '').toLowerCase(),
+      );
+    const checksByTable = new Map<string, Set<string>[]>();
+    for (const row of checkRows.rows) {
+      const list = checksByTable.get(row.table_name) ?? [];
+      list.push(new Set(checkTokens(row.check_clause)));
+      checksByTable.set(row.table_name, list);
+    }
+    const requiredChecks: Record<string, (tokens: Set<string>) => boolean> = {
+      correlation_matches: (t) =>
+        t.has('confidence') && t.has('any') && t.has('high') && t.has('medium') && !t.has('low'),
+      low_confidence_review_buffer: (t) => t.has('confidence') && t.has('low'),
     };
-    for (const [table, clauses] of Object.entries(requiredChecks))
-      for (const clause of clauses)
-        if (!checkSet.has(`${table}:${clause}`))
-          issues.push(`${table}: missing CHECK constraint for ${clause}`);
+    // Preflight also runs BEFORE the first migration (`migrate()` calls it at
+    // server/db.ts:74), so an owned table that does not exist yet is created by
+    // migration 011 with the correct constraints — that is not a violation.
+    // Only an owned table that exists without them is.
+    for (const [table, matches] of Object.entries(requiredChecks))
+      if (
+        ownedRelations.has(table) &&
+        existingTables.includes(table) &&
+        !(checksByTable.get(table) ?? []).some(matches)
+      )
+        issues.push(`${table}: missing required confidence CHECK constraint`);
   }
 
   return { compatible: issues.length === 0, tablesToCreate, issues };

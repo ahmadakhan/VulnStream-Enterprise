@@ -704,11 +704,48 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       // evidence and operator rulings travel with the canonical identifier.
       // Only CVEs that are new to the corpus (not merely re-versioned) can
       // establish the publication event; a re-publication never re-binds.
+      //
+      // A bind that loses its bounded lock race throws BIND_LOCK_CONTENDED. That
+      // is not "no cluster to bind": swallowing it would record the CVE as
+      // already-published, so no later run would retry and the operator's
+      // FALSE_POSITIVE/NOT_AFFECTED ruling would never reach the canonical
+      // finding. Deferred identities are merged into the pending pin, which the
+      // next citation run retries before re-deriving new publications.
+      const deferredBinds: { cveId: string; vendor: string; product: string }[] = [];
+      const previous = await get<{ pending: typeof deferredBinds }>(
+        db,
+        'systemState',
+        'correlation-deferred-binds',
+      ).catch(() => undefined);
+      for (const identity of previous?.pending ?? []) {
+        try {
+          await bindClusterToCve(db, identity.cveId, identity.vendor, identity.product);
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'BIND_LOCK_CONTENDED') throw error;
+          deferredBinds.push(identity);
+        }
+      }
       for (const cve of changedCves) {
         if (oldCveMap.has(cve.cveId)) continue;
-        for (const identity of cveClusterIdentities(cve))
-          await bindClusterToCve(db, cve.cveId, identity.vendor, identity.product);
+        for (const identity of cveClusterIdentities(cve)) {
+          try {
+            await bindClusterToCve(db, cve.cveId, identity.vendor, identity.product);
+          } catch (error) {
+            if ((error as { code?: string }).code !== 'BIND_LOCK_CONTENDED') throw error;
+            deferredBinds.push({ cveId: cve.cveId, ...identity });
+          }
+        }
       }
+      if (deferredBinds.length)
+        await put(db, 'systemState', 'correlation-deferred-binds', {
+          pending: deferredBinds.slice(0, 500),
+          updatedAt: new Date().toISOString(),
+        });
+      else if (previous)
+        await put(db, 'systemState', 'correlation-deferred-binds', {
+          pending: [],
+          updatedAt: new Date().toISOString(),
+        });
       await putMany(db, 'cveData', changedCves.map((cve) => ({ id: cve.cveId, data: cve })));
       const keys = await db.query("SELECT id FROM records WHERE kind='cveData'");
       for (const { id } of keys.rows) {

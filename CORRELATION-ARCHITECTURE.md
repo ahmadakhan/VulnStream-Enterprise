@@ -21,7 +21,7 @@ The configured local database initially exposed none of `assets`, `unstructured_
 
 | Layer | Files | Behavior |
 | --- | --- | --- |
-| 1: PostgreSQL | `server/migrations/011_text_correlation.sql` | Guarded tables, partial identity indexes, lowercase composite lookup, generated TSV/GIN search, seeded aliases, separate match/review/dead-letter/pending dimensions |
+| 1: PostgreSQL | `server/migrations/011_text_correlation.sql` | Guarded tables, partial identity indexes, lowercase composite lookup, generated TSV/GIN search, seeded aliases, separate match/review/dead-letter/pending dimensions. Index builds live in `server/migrations/indexes/` and are applied `CONCURRENTLY` outside the migration transaction by `applyIndexMigrations()` |
 | 2: Boundaries | `server/correlation/validation.ts`, `deadLetter.ts` | Strict Zod safe parsing; 200/255/50,000 title/URL/body limits; HTTP(S) URLs without credentials; encrypted malformed-input capture |
 | 3: Correlation | `extraction.ts`, `engine.ts` | Exact structured CPE/PURL intersection, indexed alias n-grams, canonical vendor/product matching, bounded version extraction, strict CVE extraction, density-based early intelligence detection |
 | 4: Version and confidence | `version.ts`, `engine.ts` | Explicit comparison bounds, preserved prereleases, uncertain backports reviewed, explicit-range exclusions cannot be overridden by aliases |
@@ -34,7 +34,7 @@ Root TypeScript compilation now enables `strict`. Existing modules also passed t
 
 ## Protected database contract
 
-Migration 011 contains no `ALTER TABLE`, `DROP`, column replacement, or owner-data updates. It seeds missing aliases without overwriting existing mappings. It adds indexes to the three protected tables. Those indexes require a normal PostgreSQL index-build lock; schedule migration in a maintenance window for a large existing installation. The existing migration runner uses a single transaction, so `CREATE INDEX CONCURRENTLY` cannot be placed inside it.
+Migration 011 contains no `ALTER TABLE`, `DROP`, column replacement, or owner-data updates. It seeds missing aliases without overwriting existing mappings. It adds indexes to the three protected tables. Those indexes are built with `CREATE INDEX CONCURRENTLY` by `applyIndexMigrations()` on an autocommit connection, after the schema transaction commits: a plain `CREATE INDEX` takes `SHARE` for the whole build, and ingest workers run under a 3500 ms statement timeout, so an inline build converts a deploy into a dead-letter backlog rather than a latency spike. The runner retries a contended build (`55P03`/`40P01`), drops the invalid index a cancelled `CONCURRENTLY` build leaves behind, and skips the trigram index when `gin_trgm_ops` is not resolvable on the session path. An interrupted build was previously invisible; `correlationPreflight()` and migration 024 reject any unique index whose `indisvalid` is false.
 
 The native contract is:
 
@@ -62,7 +62,7 @@ RSS articles are handed to `correlation_pending` in the same transaction as thei
 
 The main process starts the native consumer when `WORKER_ENABLED=true`; monitoring remains available when the consumer is disabled. Claims use `FOR UPDATE SKIP LOCKED` and a 60-second lease. A crash leaves the job available for retry. Unique article constraints protect against duplicate effects after lease expiration or an uncertain COMMIT acknowledgment. A failed durable dead-letter capture leaves the pending job unacknowledged.
 
-The supervisor halves configured concurrency once at 85% memory pressure and pauses admission until memory falls below 60%. Pressure is the higher of V8 heap usage against the heap limit and RSS against a detected container memory limit. Optional exposed GC is invoked when available. This is admission control, not a way to recover from a fatal V8 allocation failure.
+The supervisor halves configured concurrency once memory pressure is confirmed on two consecutive probes at 85%, and pauses admission until memory falls below 60%. A single sample is a transient allocation spike, not sustained pressure, so it only arms the guard. HIGH priority keeps a floor of `max(2, ceil(desired/4))` workers while shedding: halving the global ceiling otherwise rounds its share down to one slot and starves exactly the critical advisories shedding exists to protect. The global ceiling and the HIGH pool still bound it. Pressure is the higher of V8 heap usage against the heap limit and RSS against a detected container memory limit. Optional exposed GC is invoked when available. This is admission control, not a way to recover from a fatal V8 allocation failure.
 
 Database outages pause admission. Failed transaction clients are destroyed, and heartbeats retry connectivity. `DATABASE_URL` must point at the deployment's writable HA endpoint/proxy to recover across primary failover. The application does not promote replicas, invent secondary endpoints, or attempt writes to a read-only standby. Health probes and request authentication share that database, so the dashboard can itself become inaccessible during total database loss; external stdout collection is necessary for outage observability.
 
@@ -75,7 +75,7 @@ Neither 100% uptime nor a zero false-positive rate can be guaranteed by applicat
 1. Build using `npm run lint && npm run build`.
 2. Review the protected-table contract and index-build window.
 3. Run the existing migration entry point with the migration role. Schema version 14 is required. The runtime grant list now includes the new tables.
-4. Provide the existing base64 32-byte `ENCRYPTION_KEY`, a writable HA `DATABASE_URL`, and persistent `CORRELATION_DLQ_DIRECTORY` storage. Compose mounts the named `correlation-deadletters` volume, whose directory is initialized for the unprivileged Node user.
+4. Provide the existing base64 32-byte `ENCRYPTION_KEY`, a writable HA `DATABASE_URL`, and persistent `CORRELATION_DLQ_DIRECTORY` storage. Index builds run concurrently after the schema transaction, so they no longer need a write-quiet maintenance window — but they do need enough statement budget to finish, and they hold a lock on `vendor_product_aliases` only briefly. Compose mounts the named `correlation-deadletters` volume, whose directory is initialized for the unprivileged Node user.
 5. Start at a conservative concurrency and measure workload-specific latency and pool wait times.
 
 The default development spool is `/tmp/vulnstream-correlation-dlq`; use a persistent path outside disposable development. At most 256 spool files are admitted, with each original payload limited to 256 KiB (approximately 90 MiB maximum ciphertext storage). A full or unwritable spool fails closed and retains durable pending work. Dead letters are automatically flushed into `correlation_dead_letters`; correcting/replaying rejected data remains an operator action. Preserve encryption keys for retained ciphertext.
@@ -85,7 +85,7 @@ The UI exposes:
 - `GET /api/correlation`: instance-local metrics, last 300 log entries, latest 100 durable matches.
 - `POST /api/correlation/concurrency`: OPERATOR/ADMIN, integer `limit` from 1 through 32.
 - `POST /api/correlation/ingest`: OPERATOR/ADMIN, JSON `{ "ndjson": "..." }`, max 512 KiB string and 128 frames; returns durable acceptance.
-- `POST /api/correlation/fault`: ADMIN, `{ "fault": "memory" }` or `database`; disabled in production. Simulates control-plane signals for five seconds without exhausting real memory or severing real sockets.
+- `POST /api/correlation/fault`: ADMIN, `{ "fault": "memory" }` or `database`; requires `FAULT_SIMULATION_ENABLED=true` and is refused outright when `NODE_ENV=production`. Simulates control-plane signals for five seconds without exhausting real memory or severing real sockets. The circuit breaker and the simulation window are persisted on `correlation_policy`, so a restart honours an open breaker instead of clearing it and a sibling replica reports the same state; simulated outages are counted separately and can never open the real breaker.
 - `GET /api/correlation/search?q=...`: bounded native TSV fallback search.
 
 The existing `/api/correlation/simulate` asset/CVE simulator is preserved. Mutation routes inherit origin, JSON, session, CSRF, and shared rate-limit checks.

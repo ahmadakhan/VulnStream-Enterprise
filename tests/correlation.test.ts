@@ -356,20 +356,54 @@ test(
           .rowCount,
         1,
       );
-      // URL conflict with a different fingerprint: the updated advisory should
-      // merge into the existing row instead of dead-lettering on a 23505 error.
-      await ingestor.processIncomingAdvisory(
-        advisory({ url: 'https://example.org/security/1', title: 'UPDATED TITLE' }),
-        pool,
+      // URL conflict with a different fingerprint: the updated advisory must
+      // MERGE into the existing row (title AND the stored fingerprint) instead
+      // of dead-lettering on a 23505.
+      //
+      // This previously targeted https://example.org/security/1 and asserted
+      // the title changed. The advisory() default text contains "versions" and
+      // "vulnerable" together, which the translator now correctly refuses to
+      // reduce to one interval, so no match was written for that URL and the
+      // row it inspected had never existed — the title assertion then passed on
+      // the first insert, testing nothing. Use a URL whose text yields a
+      // deterministic match and assert on BOTH columns.
+      const mergeUrl = 'https://example.org/security/exact';
+      const mergedFingerprint = (
+        await pool.query(
+          `SELECT fingerprint FROM unstructured_advisories WHERE url=$1`,
+          [mergeUrl],
+        )
+      ).rows[0].fingerprint;
+      assert.equal(
+        await ingestor.processIncomingAdvisory(
+          advisory({ url: mergeUrl, title: 'UPDATED TITLE', purls: ['pkg:generic/kubernetes@1.28.0'] }),
+          pool,
+        ),
+        'PROCESSED',
+        'a retitled advisory at an existing URL is merged, not dead-lettered',
+      );
+      const merged = (
+        await pool.query('SELECT title,fingerprint FROM unstructured_advisories WHERE url=$1', [mergeUrl])
+      ).rows[0];
+      assert.equal(merged.title, 'UPDATED TITLE', 'advisory content should be merged on URL conflict');
+      assert.notEqual(
+        merged.fingerprint,
+        mergedFingerprint,
+        'the URL-conflict merge must refresh the fingerprint, not keep the stale one',
+      );
+      // The refreshed fingerprint must be the idempotency key for the new title:
+      // re-submitting the same retitled payload is a DUPLICATE, not a new row.
+      assert.equal(
+        await ingestor.processIncomingAdvisory(
+          advisory({ url: mergeUrl, title: 'UPDATED TITLE', purls: ['pkg:generic/kubernetes@1.28.0'] }),
+          pool,
+        ),
+        'DUPLICATE',
       );
       assert.equal(
-        (
-          await pool.query(
-            "SELECT title FROM unstructured_advisories WHERE url='https://example.org/security/1'",
-          )
-        ).rows[0].title,
-        'UPDATED TITLE',
-        'advisory content should be merged on URL conflict',
+        (await pool.query('SELECT count(*)::int AS n FROM unstructured_advisories WHERE url=$1', [mergeUrl]))
+          .rows[0].n,
+        1,
       );
       await ingestor.processIncomingAdvisory({ poison: 'customer-secret' }, pool);
       await queue.flush(pool);
@@ -379,13 +413,69 @@ test(
       await pool.query('UPDATE correlation_policy SET concurrency_limit=8 WHERE id=1');
       supervisor.setConcurrency(8);
       supervisor.memoryPercent = () => 90;
+      // Hysteresis on the rise: one sample is a transient allocation spike, not
+      // sustained pressure. The first probe only arms the guard; the second,
+      // after one probe interval, sheds.
+      await supervisor.check();
+      assert.equal(supervisor.health, 'HEALTHY', 'a single high sample must not shed');
+      await new Promise((resolve) => setTimeout(resolve, 1050));
       await supervisor.check();
       assert.equal(supervisor.health, 'DEGRADED_BACKPRESSURE');
       assert.equal(supervisor.concurrencyLimit, 4);
+      // HIGH keeps a floor under shedding. Assert ADMISSION, not a recomputed
+      // constant: the previous version checked `Math.max(2, ceil(8/4))` against
+      // itself, which passes no matter what canAdmit does.
+      const admitted: string[] = [];
+      const controllers = [0, 1, 2].map(() => new AbortController());
+      for (const [index, controller] of controllers.entries()) {
+        const outcome = await Promise.race([
+          supervisor.acquire(`high-${index}`, controller, 'HIGH').then(() => 'admitted'),
+          new Promise<string>((resolve) => setTimeout(() => resolve('queued'), 150)),
+        ]);
+        admitted.push(outcome);
+      }
+      assert.equal(
+        admitted.filter((outcome) => outcome === 'admitted').length,
+        2,
+        `HIGH must keep two slots while shedding, got ${admitted.join(',')}`,
+      );
+      for (const controller of controllers) controller.abort();
+      for (let index = 0; index < 3; index++) supervisor.release(`high-${index}`);
       supervisor.memoryPercent = () => 50;
       await supervisor.check();
       assert.equal(supervisor.health, 'HEALTHY');
       assert.equal(supervisor.concurrencyLimit, 8);
+      // The circuit breaker must survive a process restart. A crash-loop previously
+      // cleared a five-minute pause on every restart and poured admission straight
+      // back into the outage that opened it. Write the shared row, then build a
+      // FRESH supervisor (new process) and prove it honours the pause.
+      await pool.query(
+        "UPDATE correlation_policy SET circuit_open_until=now()+interval '5 minutes', circuit_reason='restart-probe' WHERE id=1",
+      );
+      const restarted = new PipelineSupervisor(pool, ingestor);
+      await restarted.check();
+      assert.equal(restarted.health, 'RECOVERING_DB_SEVERANCE');
+      await assert.rejects(
+        restarted.acquire('after-restart', new AbortController(), 'HIGH'),
+        /Supervisor paused/,
+        'a restarted process must honour a persisted breaker, not clear it',
+      );
+      // It must not clear the row either: a sibling replica may still be honouring it.
+      assert.equal(
+        (await pool.query(`SELECT circuit_open_until IS NOT NULL AS open FROM correlation_policy WHERE id=1`))
+          .rows[0].open,
+        true,
+      );
+      // An expired shared pause is lifted, so a breaker cannot outlive its outage.
+      await pool.query("UPDATE correlation_policy SET circuit_open_until=now()-interval '1 second' WHERE id=1");
+      await restarted.check();
+      await restarted.check();
+      assert.equal(restarted.health, 'HEALTHY');
+      assert.equal(
+        (await pool.query(`SELECT circuit_open_until IS NULL AS cleared FROM correlation_policy WHERE id=1`))
+          .rows[0].cleared,
+        true,
+      );
       supervisor.setConcurrency(2);
       const processor = new AdvisoryStreamProcessor(supervisor);
       let max = 0;

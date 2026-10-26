@@ -1,6 +1,7 @@
 import type { TimedQuery } from './engine.ts';
 import type { Db } from '../db.ts';
 import { createHash } from 'node:crypto';
+import type { PoolClient } from 'pg';
 
 /**
  * Pre-CVE cluster linkage.
@@ -62,6 +63,20 @@ export function textFingerprint(normalizedText: string): string {
 
 export type ClusterQuery = {
   query: (sql: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[]; rowCount: number | null }>;
+  /**
+   * The underlying pool client, when one exists. `bindClusterToCve` uses it to
+   * bound its row-lock wait with a per-statement `lock_timeout` and a savepoint;
+   * without it the wait inherits the caller's statement budget and a timeout
+   * silently drops the disposition inheritance.
+   */
+  client?: PoolClient;
+  /**
+   * True when the caller already opened a transaction on `client`. Savepoints
+   * (the only way to survive a lock timeout without aborting the caller's
+   * transaction) are illegal outside one, so the guard must be explicit rather
+   * than inferred from the client's presence.
+   */
+  inTransaction?: boolean;
 };
 
 /**
@@ -154,34 +169,78 @@ export async function bindClusterToCve(
   vendor: string,
   product: string,
 ): Promise<string | null> {
-  const rows = (
-    await db.query(
-      // Prefer an open cluster. A cluster closed by window expiry is still
-      // bindable within a grace period: NVD frequently publishes weeks after
-      // the disclosure, and the operator dispositions recorded in the window
-      // must still reach the canonical identifier.
-      //
-      // No SKIP LOCKED here. Skipping a locked row during a concurrent bind
-      // would make this function return null and silently drop the disposition
-      // inheritance — the one guarantee the cluster exists to provide. Waiting
-      // is bounded by the ingest statement_timeout, and the UPDATE below is
-      // idempotent if another transaction bound the cluster first.
-      `SELECT id FROM pre_cve_clusters
-      WHERE vendor=$1 AND product=$2 AND resolved_cve_id IS NULL
-        AND (closed_at IS NULL OR closed_at > now() - interval '180 days')
-      ORDER BY closed_at NULLS FIRST, last_seen DESC
-      LIMIT 1 FOR UPDATE`,
-      [vendor.toLowerCase(), product.toLowerCase()],
-    )
-  ).rows as { id: string }[];
-  const clusterId = rows[0]?.id;
-  if (!clusterId) return null;
-  const updated = await db.query(
-    `UPDATE pre_cve_clusters SET resolved_cve_id=$2, resolved_at=now()
-     WHERE id=$1 AND resolved_cve_id IS NULL`,
-    [clusterId, cveId],
-  );
-  return updated.rowCount ? clusterId : null;
+  // The `FOR UPDATE` below must not be skipped: skipping a locked cluster would
+  // silently drop the disposition inheritance the cluster exists to provide.
+  // It also must not be allowed to fail silently, which is what happened when
+  // the statement inherited the caller's 3500ms `statement_timeout`: the wait
+  // expired, the error propagated into the pipeline's generic handler, and the
+  // inheritance was lost with no retry and no record.
+  //
+  // Instead, bound the wait to a fraction of the caller's budget with a
+  // short-lived savepoint (so a timeout does not poison the enclosing
+  // transaction), and retry while budget remains. Only when the budget is
+  // genuinely exhausted does this return null — and it reports that so the
+  // caller can surface it rather than treating it as "no cluster to bind".
+  const started = Date.now();
+  const lockBudgetMs = Math.min(2500, Math.max(200, Number(process.env.CORRELATION_BIND_LOCK_BUDGET_MS ?? 2000)));
+  // Savepoints are only legal inside a transaction. The pipeline calls this
+  // inside one; a read-only or autocommit caller gets the plain wait, and the
+  // typed error below still reports contention instead of returning null.
+  const inTransaction = Boolean(db.client && db.inTransaction);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3 && Date.now() - started < lockBudgetMs; attempt++) {
+    if (inTransaction) {
+      await db.query('SAVEPOINT bind_cluster');
+      await db.client!.query(`SET LOCAL lock_timeout = '${Math.max(50, Math.floor(lockBudgetMs / 3))}ms'`);
+    }
+    let releaseFailed = false;
+    let rows: { id: string }[];
+    try {
+      rows = (
+        await db.query(
+          // Prefer an open cluster. A cluster closed by window expiry is still
+          // bindable within a grace period: NVD frequently publishes weeks after
+          // the disclosure, and the operator dispositions recorded in the window
+          // must still reach the canonical identifier.
+          `SELECT id FROM pre_cve_clusters
+          WHERE vendor=$1 AND product=$2 AND resolved_cve_id IS NULL
+            AND (closed_at IS NULL OR closed_at > now() - interval '180 days')
+          ORDER BY closed_at NULLS FIRST, last_seen DESC
+          LIMIT 1 FOR UPDATE`,
+          [vendor.toLowerCase(), product.toLowerCase()],
+        )
+      ).rows as { id: string }[];
+    } catch (error) {
+      const code = String((error as { code?: string }).code ?? '');
+      // 55P03 lock_not_available, 40P01 deadlock_detected, 57014 query_canceled
+      // (statement timeout). All are transient contention, not an absent cluster.
+      if (!['55P03', '40P01', '57014'].includes(code)) throw error;
+      lastError = error;
+      rows = [];
+      releaseFailed = true;
+    }
+    if (inTransaction) {
+      if (releaseFailed) await db.query('ROLLBACK TO SAVEPOINT bind_cluster').catch(() => {});
+      else await db.query('RELEASE SAVEPOINT bind_cluster').catch(() => {});
+    }
+    if (rows.length) {
+      const clusterId = rows[0].id;
+      const updated = await db.query(
+        `UPDATE pre_cve_clusters SET resolved_cve_id=$2, resolved_at=now()
+         WHERE id=$1 AND resolved_cve_id IS NULL`,
+        [clusterId, cveId],
+      );
+      return updated.rowCount ? clusterId : null;
+    }
+    if (!releaseFailed) return null; // genuinely no cluster to bind
+    await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
+  }
+  if (lastError)
+    throw Object.assign(
+      new Error(`BIND_LOCK_CONTENDED: disposition inheritance for ${cveId} was deferred after ${lockBudgetMs}ms`),
+      { cause: lastError, code: 'BIND_LOCK_CONTENDED' },
+    );
+  return null;
 }
 
 /**

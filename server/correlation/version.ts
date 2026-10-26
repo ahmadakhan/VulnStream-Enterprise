@@ -56,6 +56,32 @@ function stripLeadingV(raw: string): string {
 export function naturalLanguageRange(prose: string): string | null {
   const text = prose.toLowerCase().replace(/\bversions?\b/g, ' ').replace(/\s+/g, ' ').trim();
 
+  // A single phrase must not silently pick one of several claims. "Fixed in
+  // 9.0.86; versions before 8.1 are vulnerable" contains a fix bound and an
+  // affected bound; translating only the first (or the last) inverts the
+  // verdict and produces a silent UNAFFECTED. Multiple bound-bearing clauses
+  // are ambiguous and must go to review, never to the comparator.
+  // `through/to/and` inside an inclusive band are separators, not extra
+  // clauses, so a band phrase is counted as one claim rather than three.
+  const bands = text.match(/\b(?:between|from)\b[^.;]*?\b(?:and|to|through|thru)\b/g) ?? [];
+  const withoutBands = text.replace(/\b(?:between|from)\b[^.;]*?\b(?:and|to|through|thru)\b/g, ' ');
+  const clauseCount =
+    (
+      withoutBands.match(
+        /\b(?:before|prior to|below|earlier than|at most|up to|through|and earlier|or older|and later|or newer)\b/g,
+      ) ?? []
+    ).length + bands.length;
+  const verbCount = (text.match(/\b(?:patched|fixed|resolved|remediated|addressed) in\b/g) ?? []).length;
+  if (clauseCount + verbCount > 1 && !/\bbetween\b/.test(text)) return null;
+
+  // Contradictory applicability language (both a fix and a live vulnerability
+  // claim) is never safe to reduce to one interval.
+  if (
+    /\b(?:patched|fixed|resolved|remediated|addressed) in\b/.test(text) &&
+    /\b(?:vulnerable|affected|susceptible|exposed)\b/.test(text)
+  )
+    return null;
+
   let m: RegExpExecArray | null;
 
   m = new RegExp(`(?:between|from) ${VERSION_TOKEN} (?:and|to|through|thru) ${VERSION_TOKEN}`).exec(text);
@@ -66,6 +92,9 @@ export function naturalLanguageRange(prose: string): string | null {
   }
 
   m = new RegExp(`${VERSION_TOKEN} (?:through|to|thru) ${VERSION_TOKEN}`).exec(text);
+  // A worded range that the regexes above still cannot express (e.g. "from X
+  // to Y" where the noun phrase sits between the keyword and the bound) is a
+  // REVIEW, never a silent identity fallback.
   if (m) {
     const low = stripLeadingV(m[1]);
     const high = stripLeadingV(m[2]);

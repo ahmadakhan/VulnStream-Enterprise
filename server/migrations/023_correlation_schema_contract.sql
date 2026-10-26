@@ -72,14 +72,11 @@ BEGIN
   END IF;
 END $$;
 
--- Indexes, created only once the contract above is confirmed to hold.
-CREATE INDEX IF NOT EXISTS correlation_assets_cpe ON assets(cpe_23) WHERE cpe_23 IS NOT NULL;
-CREATE INDEX IF NOT EXISTS correlation_assets_purl ON assets(purl) WHERE purl IS NOT NULL;
-CREATE INDEX IF NOT EXISTS correlation_assets_names ON assets(lower(vendor), lower(product));
-CREATE UNIQUE INDEX IF NOT EXISTS correlation_advisory_fingerprint ON unstructured_advisories(fingerprint);
-CREATE UNIQUE INDEX IF NOT EXISTS correlation_advisory_url ON unstructured_advisories(url);
-CREATE INDEX IF NOT EXISTS correlation_advisory_search ON unstructured_advisories USING gin(tsv_content);
-CREATE INDEX IF NOT EXISTS correlation_alias_lookup ON vendor_product_aliases(lower(alias));
+-- Indexes, created only once the contract above is confirmed to hold. They are
+-- built OUTSIDE this transaction by applyIndexMigrations() using CREATE INDEX
+-- CONCURRENTLY; see server/migrations/indexes/001_correlation_indexes.sql.
+-- Building them inline here took SHARE for the whole build and blocked live
+-- writers for its duration, dead-lettering every in-flight advisory.
 
 -- Re-assert the newest contract version so the production gate and the
 -- migration runner agree on the schema level this build requires.

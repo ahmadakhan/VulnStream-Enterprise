@@ -41,6 +41,27 @@ ALTER TABLE vendor_product_aliases
   ADD COLUMN IF NOT EXISTS normalized_alias TEXT
   GENERATED ALWAYS AS (regexp_replace(lower(alias), '[^a-z0-9]', '', 'g')) STORED;
 
+-- Register the derived column for the preflight contract check. This is an
+-- optional extension of a module-owned table, not part of the protected native
+-- contract: an installation whose history predates this migration legitimately
+-- lacks it, so the preflight must only demand columns that really exist. The
+-- insert is conditional on the column being generated, and the registry table
+-- is created on demand so this file stays runnable on an older baseline.
+DO $$
+BEGIN
+  IF to_regclass('correlation_generated_columns') IS NOT NULL THEN
+    INSERT INTO correlation_generated_columns(table_name,column_name)
+    SELECT 'vendor_product_aliases','normalized_alias'
+    WHERE EXISTS (
+      SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+      JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname=current_schema() AND c.relname='vendor_product_aliases'
+        AND a.attname='normalized_alias' AND a.attgenerated='s'
+    )
+    ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
 -- NOTE: migration 011 declares `assets` an owner-managed relation that the
 -- correlation pipeline must never alter. An earlier revision of this file
 -- added generated normalized_vendor/normalized_product columns to `assets`
@@ -50,15 +71,15 @@ ALTER TABLE vendor_product_aliases
 -- were never called by the ingestion path. Only vendor_product_aliases, which
 -- this module owns, gains a derived column.
 
--- Trigram indexes are an optimization only. Build them conditionally so the
--- migration succeeds whether or not pg_trgm is usable.
+-- Trigram indexes are an optimization only. They are built by
+-- applyIndexMigrations() (CONCURRENTLY, outside this transaction) and skipped
+-- there when pg_trgm is not installed in a schema on the session path. Building
+-- them inline blocked writers for the whole build, which dead-letters every
+-- in-flight advisory under the 3500ms ingest statement timeout.
 DO $$
 BEGIN
-  IF pg_temp_has_trgm() THEN
-    CREATE INDEX IF NOT EXISTS correlation_alias_trigram
-      ON vendor_product_aliases USING GIN (normalized_alias gin_trgm_ops);
-  ELSE
-    RAISE NOTICE 'pg_trgm not installed in this schema; trigram indexes skipped';
+  IF NOT pg_temp_has_trgm() THEN
+    RAISE NOTICE 'pg_trgm not installed in this schema; trigram index build deferred';
   END IF;
 END $$;
 
