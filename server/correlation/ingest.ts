@@ -161,10 +161,9 @@ export class AdvisoryIngestor {
               // stale content without losing correlation history.
               const merged = await query<{ id: string }>(
                 `UPDATE unstructured_advisories SET
-                   title=EXCLUDED.title, content=EXCLUDED.content,
-                   fingerprint=EXCLUDED.fingerprint, processed_at=NULL
-                 WHERE url=EXCLUDED.url RETURNING id`,
-                [input.title, extracted.cleanContent, fingerprint],
+                   title=$1, content=$2, fingerprint=$3, processed_at=NULL
+                 WHERE url=$4 RETURNING id`,
+                [input.title, extracted.cleanContent, fingerprint, input.url],
               );
               this.telemetry.log('INFO', 'ingestion.url_merged', { trackingId });
               return merged.rowCount ? merged.rows[0].id : null;
