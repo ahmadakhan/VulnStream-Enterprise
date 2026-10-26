@@ -1,5 +1,6 @@
 import type { Finding, IntelligenceArticle, IntelligenceMatch, WatchListItem, NormalizedCVE, ThreatFeed } from '../types';
 import { quickHash } from './cryptoChain';
+import { isWithinTimelineScope } from './deduplicator';
 
 const text = (value: string) =>
   value
@@ -102,6 +103,10 @@ export function mergeArticles(records: IntelligenceArticle[]): IntelligenceArtic
  *   table so a single Thesaurus entry covers both CVE matching and news evidence.
  * @param customProductAliases - Operator-managed product aliases from the Alias Thesaurus
  *   (buildAliasMap(aliasEntries, 'PRODUCT')), used to catch product name variants in article prose.
+ * @param scopeHours - Pipeline timeline window in hours. Vendor + product news matches use the
+ *   latest of each article's publishedDate and modifiedDate, so an article is evidence only
+ *   while it is inside the same window that scopes CVE matching. Zero disables the filter.
+ * @param now - Reference time for the timeline window (injectable for deterministic tests).
  */
 export function matchIntelligence(
   articles: IntelligenceArticle[],
@@ -110,6 +115,8 @@ export function matchIntelligence(
   corpus: NormalizedCVE[] = [],
   customVendorAliases: Record<string, string[]> = {},
   customProductAliases: Record<string, string[]> = {},
+  scopeHours = 0,
+  now: Date = new Date(),
 ): IntelligenceMatch[] {
   const matches = new Map<string, IntelligenceMatch>();
   const current = new Map(findings.map((finding) => [`${finding.cveId}:${finding.matchedAssetId}`, finding]));
@@ -119,6 +126,10 @@ export function matchIntelligence(
       .map((cve) => cve.cveId),
   );
   for (const article of mergeArticles(articles)) {
+    // News evidence is subject to the same published/modified window as the
+    // CVE it corroborates. Using the latest activity keeps an updated story
+    // eligible even when it was first published before the window opened.
+    if (!isWithinTimelineScope(article.publishedDate, article.modifiedDate, scopeHours, now)) continue;
     const document = text(`${article.title} ${article.summary}`);
     for (const asset of inventory.filter((item) => item.active)) {
       // Merge built-in display-name variants with any operator-managed aliases

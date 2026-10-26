@@ -808,6 +808,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         [...byId.values()],
         vendorAliases,
         productAliases,
+        // Cached CVEs stay applicable regardless of age, but news vendor +
+        // product evidence is limited to the run's published/modified window.
+        execution!.scopeHours,
       );
       await putMany(db, 'intelligenceMatches', intelligenceMatches.map(data => ({id:data.id,data})));
       await db.query("DELETE FROM records WHERE kind='intelligenceMatches' AND NOT (id=ANY($1::text[]))", [intelligenceMatches.map(item => item.id)]);

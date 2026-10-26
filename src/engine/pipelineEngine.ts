@@ -283,6 +283,9 @@ export function runVulnerabilityPipeline(
   const matchingStarted = performance.now();
   for (const raw of latest.values()) {
     const canonical = normalizeCveId(raw.cveId);
+    // Filter before candidate selection so every match method (strict CPE/PURL,
+    // alias, and vendor/product fallback) sees only CVEs whose latest published
+    // or modified date is inside the run's timeline scope.
     if (
       !canonical ||
       !isWithinTimelineScope(raw.publishedDate, raw.modifiedDate, settings.scopeHours, started)
