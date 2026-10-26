@@ -159,16 +159,21 @@ test('alert-rule harness cannot silently query another Prometheus', async () => 
     /(?:localhost|127\.0\.0\.1):9090/,
     'harness must not query the default Prometheus port',
   );
-  assert.match(harness, /const API_PORT = \d+/);
+  assert.match(harness, /const BASE_API_PORT = \d+/);
   // 2. It refuses to run if the port is already published by something else.
   assert.match(harness, /is already published by/, 'harness must refuse to reuse an occupied port');
-  // 3. It shortens BOTH `for:` and range windows. A rule inside
-  //    increase(x[10m]) cannot fire while the harness only waits seconds.
-  assert.match(harness, /for: \$\{FOR_SUBSTITUTE\}/);
-  assert.match(harness, /\[\$\{RANGE_SUBSTITUTE\}\]/);
+  // 3. It scales BOTH `for:` and range windows, preserving their relationship.
+  //    A rule inside increase(x[10m]) cannot fire while the harness only waits
+  //    seconds, and flattening every `for:` to one value destroys escalation
+  //    pairs that differ only by elapsed time.
+  assert.match(harness, /for: \$\{Math\.max/, 'for: must be scaled, not flattened');
+  assert.match(harness, /\[\$\{Math\.max\(40/, 'range windows must be scaled');
   // 4. It asserts, rather than merely printing. A harness that only logs can
   //    never fail a build.
   assert.match(harness, /process\.exitCode = 1/);
+  // 5. It confirms it is talking to ITS OWN Prometheus by asserting the rule
+  //    set is present, so a wrong port cannot look like "nothing fired".
+  assert.match(harness, /never exposed the expected rule set/);
 });
 
 test('the alert-rule harness is wired into the test command', async () => {

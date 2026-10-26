@@ -32,6 +32,22 @@ groups:
       # series is absent, which is a different and much worse failure that the
       # `up` rules already report.
 
+      - alert: VulnStreamDatabaseRecovery
+        # Restored: this name existed before the rule rewrite and is referenced by
+        # the runbook and by alert history. It is the 1-minute "admission paused"
+        # signal; PipelineNotAdmitting below is the same condition held longer
+        # and escalates, while CircuitBreakerOpen names the specific cause. Three
+        # rules over one condition is deliberate: they answer different questions
+        # (is it happening / is it sustained / is it the breaker).
+        expr: |
+          vulnstream_correlation_worker_enabled == 1
+          and on(instance) vulnstream_correlation_health{state="RECOVERING_DB_SEVERANCE"} == 1
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: Advisory admission paused during database recovery
+          runbook: Check database reachability from the instance.
+
       - alert: VulnStreamPipelineNotAdmitting
         # Admission stops only for RECOVERING_DB_SEVERANCE (lost database, open
         # circuit breaker). DEGRADED_BACKPRESSURE halves concurrency but keeps

@@ -124,7 +124,14 @@ const scenarios = [
   {
     name: 'database severance',
     metrics: { health: 'DB', hbAge: 120, hbState: 'suppressed', pending: 5 },
-    expectFiring: ['VulnStreamDatabaseRecovery', 'VulnStreamPipelineNotAdmitting'],
+    // CircuitBreakerOpen is expected: RECOVERING_DB_SEVERANCE is precisely the
+    // state in which the breaker is open, and after the scaled 5m hold all
+    // three escalation levels describe the same true condition.
+    expectFiring: [
+      'VulnStreamDatabaseRecovery',
+      'VulnStreamPipelineNotAdmitting',
+      'VulnStreamCircuitBreakerOpen',
+    ],
   },
   {
     name: 'backpressure, otherwise idle',
@@ -164,16 +171,30 @@ const scenarios = [
   },
   {
     name: 'sustained ping failures',
+    // `pinged` is 0 while failing, so the never-started rule also fires. That is
+    // a real overlap in the rule set, recorded here rather than hidden.
     metrics: { hbFails: 4, hbState: 'failed', health: 'DB' },
-    expectFiring: ['VulnStreamHeartbeatFailing', 'VulnStreamDatabaseRecovery', 'VulnStreamPipelineNotAdmitting'],
+    expectFiring: [
+      'VulnStreamHeartbeatFailing',
+      'VulnStreamHeartbeatNeverStarted',
+      'VulnStreamDatabaseRecovery',
+      'VulnStreamPipelineNotAdmitting',
+      'VulnStreamCircuitBreakerOpen',
+    ],
   },
-  { name: 'dead letters arriving', metrics: { deadLetters: 5 }, expectFiring: ['VulnStreamDeadLetters'] },
+  { name: 'dead letters arriving', metrics: { deadLetters: 5 }, deadLetterPerScrape: 1, expectFiring: ['VulnStreamDeadLetters'] },
   {
     name: 'dead-letter burst',
     metrics: { deadLetters: 60 },
+    deadLetterPerScrape: 5,
     expectFiring: ['VulnStreamDeadLetterBurst', 'VulnStreamDeadLetters'],
   },
-  { name: 'log queue congestion', metrics: { droppedLogs: 3 }, expectFiring: ['VulnStreamLogLoss'] },
+  {
+    name: 'log queue congestion',
+    metrics: { droppedLogs: 3 },
+    droppedLogPerScrape: 1,
+    expectFiring: ['VulnStreamLogLoss'],
+  },
 ];
 
 /**
@@ -217,6 +238,11 @@ async function runScenario(scenario, index) {
   const id = `vs-ac-${process.pid}-${index}`;
   sh(`mkdir -p ${dir}`);
   writeFileSync(path.join(dir, 'alerts.yml'), readFileSync(path.join(root, 'alerts.yml'), 'utf8'));
+  // Counters must MOVE for increase()/rate() to be non-zero. A constant
+  // exposition makes every counter-based rule structurally unable to fire, and
+  // the scenario then reads as a rule defect. `items` stays flat (that is the
+  // stall condition); the dead-letter and dropped-log counters are ramped by the
+  // exporter itself, `step` per scrape.
   writeFileSync(path.join(dir, 'metrics.txt'), exposition({ ...base, ...scenario.metrics }));
   writeFileSync(
     path.join(dir, 'prometheus.yml'),
@@ -237,8 +263,18 @@ async function runScenario(scenario, index) {
   sh(
     `docker run -d --name ${id}-exp --network ${net} --network-alias exporter ` +
       `-v ${dir}:/data:ro node:22-alpine node -e "` +
-      `require('http').createServer((q,r)=>{r.writeHead(200,{'content-type':'text/plain'});` +
-      `r.end(require('fs').readFileSync('/data/metrics.txt','utf8'))}).listen(${SCRAPE_PORT})"`,
+      // Read the scenario state per request and ramp the two counters that
+      // rules integrate over (`dead_letters`, `dropped_logs`). `items` is a
+      // completion counter and must NOT ramp: a rising value means progress,
+      // which is exactly what the stall rules exist to detect the absence of.
+      `const fs=require('fs');let t=0;` +
+      `require('http').createServer((q,r)=>{t++;` +
+      // Each counter ramps at its own rate. A single shared rate made the
+      // dead-letter scenarios also trip LogLoss, because dropped_logs moved too.
+      `const s=fs.readFileSync('/data/metrics.txt','utf8')` +
+      `.replace(/^vulnstream_correlation_dead_letters_total (-?\\d+(?:\\.\\d+)?)$/m,(m,v)=>m.replace(v,String(Number(v)+t*${scenario.deadLetterPerScrape ?? 0})))` +
+      `.replace(/^vulnstream_correlation_dropped_logs_total (-?\\d+(?:\\.\\d+)?)$/m,(m,v)=>m.replace(v,String(Number(v)+t*${scenario.droppedLogPerScrape ?? 0})));` +
+      `r.writeHead(200,{'content-type':'text/plain'});r.end(s)}).listen(${SCRAPE_PORT})"`,
   );
   owned.push(() => sh(`docker rm -f ${id}-exp >/dev/null 2>&1`));
   sh(

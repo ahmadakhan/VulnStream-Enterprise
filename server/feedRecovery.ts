@@ -1,9 +1,12 @@
 import type { ThreatFeed } from '../src/types/index.ts';
 
-/** Persistent cooldowns survive restarts; only enabled, failed sources trigger recovery. */
+/** Persistent cooldowns survive restarts; only enabled, failed sources trigger recovery.
+ * A DOWN feed with no circuit deadline (e.g. marked DOWN via a manual test or a
+ * partial write) is immediately due so the automatic loop will probe it again
+ * instead of leaving it stranded when the scheduler is disabled. */
 export function recoveryDue(feed: ThreatFeed, now = Date.now()): boolean {
-  return feed.enabled && feed.healthStatus === 'DOWN' && !!feed.circuitOpenUntil &&
-    Date.parse(feed.circuitOpenUntil) <= now;
+  return feed.enabled && feed.healthStatus === 'DOWN' &&
+    (!feed.circuitOpenUntil || Date.parse(feed.circuitOpenUntil) <= now);
 }
 
 export function recoveryAt(feed: ThreatFeed, failures: number, now = Date.now()): string {

@@ -40,6 +40,7 @@ import { checkPassword, passwordHash, decrypt, secureEqual } from './secrets';
 import { createRequester, resolvePublic } from './network';
 import type { Requester, ResponseData } from './network';
 import { queueRun, stopRun, renderAdvisory } from './pipeline';
+import { recoveryAt } from './feedRecovery';
 import { enqueue, queueAdvisory } from './delivery';
 import { advisoryEmail } from './advisoryEmail';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
@@ -1011,49 +1012,60 @@ export function createApp(
           }
         }
         const latency = Math.round(performance.now() - start);
+        const ok = response.status >= 200 && response.status < 300;
         await transaction(pool, async (db) => {
           const current = await getForUpdate<ThreatFeed>(db, 'feeds', feed.id);
-          if (current)
+          if (current) {
+            const consecutiveFailures = (current.consecutiveFailures || 0) + (ok ? 0 : 1);
             await put(db, 'feeds', feed.id, {
               ...current,
-              healthStatus: response.status >= 200 && response.status < 300 ? 'HEALTHY' : 'DOWN',
+              healthStatus: ok ? 'HEALTHY' : 'DOWN',
+              lastSync: ok ? new Date().toISOString() : current.lastSync,
               latencyMs: latency,
-              errorLog: response.status >= 200 && response.status < 300 ? null : `HTTP ${response.status}`,
+              errorLog: ok ? null : `HTTP ${response.status}`,
+              ssrfValidated: ok ? true : current.ssrfValidated,
+              consecutiveFailures: ok ? 0 : consecutiveFailures,
+              circuitOpenUntil: ok ? null : recoveryAt(current, consecutiveFailures),
             });
+          }
           await appendAudit(
             db,
             'Feed connectivity tested',
             `${feed.id}; HTTP ${response.status}`,
             req.operator!.username,
             'FEED',
-            'INFO',
+            ok ? 'INFO' : 'ERROR',
             req.ip || '',
           );
         });
         res.json({
-          success: response.status >= 200 && response.status < 300,
+          success: ok,
           latency,
-          error: response.status >= 200 && response.status < 300 ? undefined : `HTTP ${response.status}`,
+          error: ok ? undefined : `HTTP ${response.status}`,
         });
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Connection failed';
         const latency = Math.round(performance.now() - start);
         await transaction(pool, async (db) => {
           const current = await getForUpdate<ThreatFeed>(db, 'feeds', feed.id);
-          if (current)
+          if (current) {
+            const consecutiveFailures = (current.consecutiveFailures || 0) + 1;
             await put(db, 'feeds', feed.id, {
               ...current,
               healthStatus: 'DOWN',
               latencyMs: latency,
               errorLog: message,
+              consecutiveFailures,
+              circuitOpenUntil: recoveryAt(current, consecutiveFailures),
             });
+          }
           await appendAudit(
             db,
             'Feed connectivity tested',
             `${feed.id}; ERROR: ${message}`,
             req.operator!.username,
             'FEED',
-            'INFO',
+            'ERROR',
             req.ip || '',
           );
         });

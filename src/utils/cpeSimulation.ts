@@ -501,10 +501,17 @@ export function runCpeSimulation(
   }
   confidence = Math.max(-9, Math.min(100, confidence));
 
-  // False-positive checks
-  const fpChecks = (assetParsed.isValid && vulnParsed.isValid)
-    ? runFalsePositiveChecks(assetParsed, vulnParsed, versionInRange, versionRange)
-    : [];
+  const fpChecks: FalsePositiveCheck[] = [];
+  if (!assetParsed.isValid || !vulnParsed.isValid) {
+    fpChecks.push({
+      name: 'CPE Validity',
+      passed: false,
+      severity: 'BLOCK',
+      detail: 'One or both CPE strings are not valid CPE 2.3',
+    });
+  } else {
+    fpChecks.push(...runFalsePositiveChecks(assetParsed, vulnParsed, versionInRange, versionRange));
+  }
 
   const hasBlock = fpChecks.some((c) => !c.passed && c.severity === 'BLOCK');
   if (hasBlock && matchResult.matched) {

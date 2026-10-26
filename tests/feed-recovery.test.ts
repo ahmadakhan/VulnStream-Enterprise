@@ -16,6 +16,11 @@ test('failed sources recover at their persisted deadline and back off to one hou
   assert.equal(recoveryDue({ ...feed, healthStatus: 'HEALTHY', circuitOpenUntil: deadline }, now + 120000), false);
   assert.equal(Date.parse(recoveryAt(feed, 100, now)), now + 3600000);
 });
+test('a DOWN feed with no circuit deadline is immediately due for recovery', () => {
+  const now = Date.now();
+  assert.equal(recoveryDue({ ...feed, circuitOpenUntil: null }, now), true);
+  assert.equal(recoveryDue({ ...feed, circuitOpenUntil: undefined }, now), true);
+});
 
 test('recovery probes run with routine scheduling disabled, while periodic runs remain disabled', () => {
   const now = Date.parse('2026-10-22T00:00:00Z');

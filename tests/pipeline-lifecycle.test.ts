@@ -206,6 +206,26 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       assert.equal(recovered.consecutiveFailures, 0);
       assert.equal(recovered.circuitOpenUntil, null);
     });
+    await t.test('DOWN feed with no circuit deadline auto-recovers with scheduler disabled', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: false });
+      await save('feeds', 'no-circuit', {
+        id: 'no-circuit', name: 'No circuit feed', type: 'JSON_SEARCH_API',
+        url: 'https://example.com/feed', enabled: true, authType: 'NONE',
+        rateLimitPerMin: 60, healthStatus: 'DOWN', recoveryDelayMinutes: 1,
+      });
+      let calls = 0;
+      const success = async () => {
+        calls++;
+        return { status: 200, body: '[]', headers: {} };
+      };
+      assert.equal(await processPipeline(pool, config, success), true);
+      const recovered = await get<any>(pool, 'feeds', 'no-circuit');
+      assert.equal(calls, 1);
+      assert.equal(recovered.healthStatus, 'HEALTHY');
+      assert.equal(recovered.consecutiveFailures, 0);
+      assert.equal(recovered.circuitOpenUntil, null);
+    });
     await t.test('concurrent queue requests create one execution and one worker owns ingestion', async () => {
       await reset();
       const queued = await Promise.all(Array.from({ length: 8 }, () => queueRun(pool, 24, 'test')));
