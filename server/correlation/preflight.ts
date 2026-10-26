@@ -82,12 +82,12 @@ export async function correlationPreflight(db: Db): Promise<SchemaPreflight> {
     const uniqueByTable = new Map<string, Set<string>>();
     for (const row of indexRows.rows) {
       const def = row.indexdef;
-      const uniqueMatch = def.match(/CREATE UNIQUE INDEX \w+ ON \w+\.(\w+) \(([^)]+)\)/);
+      const uniqueMatch = def.match(/CREATE UNIQUE INDEX \w+ ON \w+\.(\w+) (?:USING \w+ )?\(([^)]+)\)/);
       if (uniqueMatch) {
         const tbl = uniqueMatch[1];
         const colList = uniqueMatch[2]
           .split(',')
-          .map((c) => c.trim())
+          .map((c) => c.trim().replace(/^.*\((.+)\)$/, '$1'))
           .join(',')
           .toLowerCase();
         uniqueByTable.set(tbl, (uniqueByTable.get(tbl) ?? new Set()).add(colList));
