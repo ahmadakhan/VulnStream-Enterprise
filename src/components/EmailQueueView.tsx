@@ -42,9 +42,11 @@ export function EmailQueueView() {
   const [deleting, setDeleting] = useState<EmailQueueItem | null>(null);
   const [reviewing, setReviewing] = useState<EmailQueueItem | null>(null);
   const [rejecting, setRejecting] = useState<EmailQueueItem | null>(null);
-  const [reviewBusy, setReviewBusy] = useState(false);
+   const [reviewBusy, setReviewBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const canManage = session?.role === 'ADMIN' || session?.role === 'OPERATOR';
+   const canManage = session?.role === 'ADMIN' || session?.role === 'OPERATOR';
+   const REFRESH_INTERVAL_MS = 10_000;
+   const [lastRefreshedAt, setLastRefreshedAt] = useState<number>(Date.now());
 
   const refresh = async () => {
     setLoading(true);
@@ -52,6 +54,7 @@ export function EmailQueueView() {
     if (result) {
       setItems(result);
       setLoadError(false);
+      setLastRefreshedAt(Date.now());
     } else {
       setLoadError(true);
     }
@@ -60,6 +63,17 @@ export function EmailQueueView() {
 
   useEffect(() => {
     void refresh();
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'hidden') void refresh();
+    }, REFRESH_INTERVAL_MS);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -123,6 +137,14 @@ export function EmailQueueView() {
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
           {loading ? 'Refreshing…' : 'Refresh queue'}
         </button>
+        <span
+          className="self-start text-xs text-zinc-500 light:text-zinc-600 sm:self-auto"
+          aria-label="Auto-refreshing every 10 seconds"
+          title="Auto-refreshing every 10 seconds"
+        >
+          <Clock3 className="inline h-3.5 w-3.5" aria-hidden="true" />
+          Auto-refresh in {Math.max(0, Math.ceil((REFRESH_INTERVAL_MS - (Date.now() - lastRefreshedAt)) / 1000))}s
+        </span>
       </header>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Email queue totals">
