@@ -50,6 +50,23 @@ export function describeError(error: unknown, depth = 0): Record<string, unknown
 }
 
 /**
+ * Short, human-readable failure label persisted as the event *message*.
+ *
+ * The message column is full-text indexed and rendered in the UI, so it must
+ * stay a stable, low-cardinality summary. The full error text lands in the
+ * event *context* instead: embedding it in the message gave every 500 its own
+ * message (one per user-supplied id or query), which defeated the tsvector
+ * index and made the operations log unscannable.
+ */
+export function describeFailureSummary(error: unknown): string {
+  return error instanceof z.ZodError
+    ? 'Validation failed'
+    : error instanceof Error && error.name
+      ? error.name
+      : 'Request failed';
+}
+
+/**
  * Context persisted for an unhandled request failure. Kept separate from the
  * Express handler so the shape is unit-testable and every 500 carries the same
  * fields: error detail, reference, route, authenticated actor and caller IP.

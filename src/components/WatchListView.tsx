@@ -68,6 +68,12 @@ export const WatchListView: React.FC = () => {
   const [purlInput, setPurlInput] = useState('');
   const [cpeExpressionInput, setCpeExpressionInput] = useState('');
 
+  // Track auto-generated CPEs the user removes from the live preview, and
+  // custom CPE 2.3 expressions the user adds manually.
+  const [removedAutoCpes, setRemovedAutoCpes] = useState<Set<string>>(new Set());
+  const [customAddedCpes, setCustomAddedCpes] = useState<string[]>([]);
+  const [customCpeInput, setCustomCpeInput] = useState('');
+
   // NVD Verified CPE search
   const [nvdResults, setNvdResults] = useState<NvdCpeSearchResult[]>([]);
   const [nvdLoading, setNvdLoading] = useState(false);
@@ -172,7 +178,9 @@ export const WatchListView: React.FC = () => {
           cpe,
           part: parseCPE23(cpe).part as 'a' | 'o' | 'h',
         }));
-      return [...current, ...additions, ...customAddition, ...nvdAdditions];
+       return [...current, ...additions, ...customAddition, ...nvdAdditions].filter(
+        (item) => !removedAutoCpes.has(item.cpe),
+      );
     }
     const list: Array<{ product: string; cpe: string; part: 'a' | 'o' | 'h' }> = [];
     const v = vendorInput.trim() || 'vendor';
@@ -206,8 +214,15 @@ export const WatchListView: React.FC = () => {
         part: parseCPE23(cpe).part as 'a' | 'o' | 'h',
       }));
 
-    return [...list, ...nvdAdditions];
-  }, [
+     return [...list.filter((item) => !removedAutoCpes.has(item.cpe)), ...nvdAdditions, ...customAddedCpes.map((cpe) => {
+       const parsed = parseCPE23(cpe);
+       return {
+         product: 'Custom',
+         cpe,
+         part: parsed.isValid ? (parsed.part as 'a' | 'o' | 'h') : cpePart,
+       };
+     })];
+   }, [
     vendorInput,
     selectedProductIds,
     customProductInput,
@@ -219,6 +234,8 @@ export const WatchListView: React.FC = () => {
     editingItem,
     cpeExpressionInput,
     selectedNvdCpes,
+    removedAutoCpes,
+    customAddedCpes,
   ]);
 
   const filteredAssets = watchlist.filter((item) => {
@@ -240,22 +257,25 @@ export const WatchListView: React.FC = () => {
     setVendorInput('');
     setCustomProductInput('');
     setAdditionalProductInput('');
-    setAdditionalCpes([]);
-    setSelectedProductIds([]);
-    setCpePart('a');
-    setVersionInput('*');
-    setTargetHwInput('*');
-    setAssetTagInput('');
-    setOwnerGroupInput('SecOps-Core');
-    setNotesInput('');
-    setPurlInput('');
-    setCpeExpressionInput('');
-    setNvdResults([]);
-    setNvdLoading(false);
-    setNvdError(null);
-    setSelectedNvdCpes([]);
-    setEditingItem(null);
-    setShowAddModal(true);
+     setAdditionalCpes([]);
+     setSelectedProductIds([]);
+     setCpePart('a');
+     setVersionInput('*');
+     setTargetHwInput('*');
+     setAssetTagInput('');
+     setOwnerGroupInput('SecOps-Core');
+     setNotesInput('');
+     setPurlInput('');
+     setCpeExpressionInput('');
+     setNvdResults([]);
+     setNvdLoading(false);
+     setNvdError(null);
+     setSelectedNvdCpes([]);
+     setRemovedAutoCpes(new Set());
+     setCustomAddedCpes([]);
+     setCustomCpeInput('');
+     setEditingItem(null);
+     setShowAddModal(true);
   };
 
   const handleOpenEdit = (item: WatchListItem) => {
@@ -277,9 +297,12 @@ export const WatchListView: React.FC = () => {
     setNvdResults([]);
     setNvdLoading(false);
     setNvdError(null);
-    setSelectedNvdCpes([]);
-    setEditingItem(item);
-    setShowAddModal(true);
+     setSelectedNvdCpes([]);
+     setRemovedAutoCpes(new Set());
+     setCustomAddedCpes([]);
+     setCustomCpeInput('');
+     setEditingItem(item);
+     setShowAddModal(true);
   };
 
   const toggleSelectProduct = (prod: CatalogProduct) => {
@@ -385,7 +408,8 @@ export const WatchListView: React.FC = () => {
           versionInput,
           targetHwInput,
         );
-        if (editingItem.cpes.includes(addedCpe) || addedCpe === cpe) return [];
+        if (editingItem.cpes.includes(addedCpe) || addedCpe === cpe || removedAutoCpes.has(addedCpe))
+          return [];
         return [
           {
             vendor: vendorInput.trim(),
@@ -408,7 +432,7 @@ export const WatchListView: React.FC = () => {
           versionInput,
           targetHwInput,
         );
-        if (!editingItem.cpes.includes(addedCpe) && addedCpe !== cpe) {
+        if (!editingItem.cpes.includes(addedCpe) && addedCpe !== cpe && !removedAutoCpes.has(addedCpe)) {
           productsToAdd.push({
             vendor: vendorInput.trim(),
             product: additionalProductInput.trim(),
@@ -438,7 +462,12 @@ export const WatchListView: React.FC = () => {
         vendor: parsedCpe.vendor,
         product: parsedCpe.product,
         version: parsedCpe.version,
-        cpes: dedupeCpes([cpe, ...additionalCpes, ...selectedNvdCpes]),
+        cpes: dedupeCpes([
+          cpe,
+          ...additionalCpes.filter((c) => !removedAutoCpes.has(c)),
+          ...selectedNvdCpes.filter((c) => !removedAutoCpes.has(c)),
+          ...customAddedCpes,
+        ]),
         purls: purlList.length > 0 ? purlList : undefined,
         targetHw: parsedCpe.targetHw !== '*' ? parsedCpe.targetHw : undefined,
         assetTag: assetTagInput.trim() || editingItem.assetTag,
@@ -469,32 +498,47 @@ export const WatchListView: React.FC = () => {
     // Creating new products (supports multi-products!)
     const productsToCreate: Array<{ name: string; normalizedId: string; part: 'a' | 'o' | 'h' }> = [];
 
-    // Add selected catalog products
+     // Add selected catalog products
     for (const prodId of selectedProductIds) {
       const catProd = catalogProducts.find((p) => p.normalizedId === prodId);
       if (catProd) {
-        productsToCreate.push({ name: catProd.name, normalizedId: catProd.normalizedId, part: catProd.part });
+        const generatedCpe = buildStrictCpe23(catProd.part, vendorInput.trim(), catProd.normalizedId, versionInput, targetHwInput);
+        if (!removedAutoCpes.has(generatedCpe)) {
+          productsToCreate.push({ name: catProd.name, normalizedId: catProd.normalizedId, part: catProd.part });
+        }
       } else {
-        productsToCreate.push({ name: prodId, normalizedId: prodId, part: cpePart });
+        const generatedCpe = buildStrictCpe23(cpePart, vendorInput.trim(), prodId, versionInput, targetHwInput);
+        if (!removedAutoCpes.has(generatedCpe)) {
+          productsToCreate.push({ name: prodId, normalizedId: prodId, part: cpePart });
+        }
       }
     }
 
     // Add custom product if entered
     if (customProductInput.trim()) {
-      productsToCreate.push({
-        name: customProductInput.trim(),
-        normalizedId: customProductInput.trim().toLowerCase().replace(/\s+/g, '_'),
-        part: cpePart,
-      });
+      const generatedCpe = buildStrictCpe23(cpePart, vendorInput.trim(), customProductInput.trim().toLowerCase().replace(/\s+/g, '_'), versionInput, targetHwInput);
+      if (!removedAutoCpes.has(generatedCpe)) {
+        productsToCreate.push({
+          name: customProductInput.trim(),
+          normalizedId: customProductInput.trim().toLowerCase().replace(/\s+/g, '_'),
+          part: cpePart,
+        });
+      }
     }
 
     // If none selected, fallback to single entry
     if (productsToCreate.length === 0) {
-      productsToCreate.push({
-        name: 'Standard Asset',
-        normalizedId: 'software',
-        part: cpePart,
-      });
+      const fallbackCpe = buildStrictCpe23(cpePart, vendorInput.trim(), 'software', versionInput, targetHwInput);
+      if (!removedAutoCpes.has(fallbackCpe)) {
+        productsToCreate.push({
+          name: 'Standard Asset',
+          normalizedId: 'software',
+          part: cpePart,
+        });
+      } else {
+        setSaveFeedback({ type: 'error', message: 'All auto-generated CPEs were removed. Add at least one product or CPE before saving.' });
+        return;
+      }
     }
 
     // Register all products into inventory
@@ -509,7 +553,9 @@ export const WatchListView: React.FC = () => {
       return {
         vendor: vendorInput.trim(),
         product: p.name,
-        cpes: isPrimary ? dedupeCpes([cpe, ...selectedNvdCpes]) : [cpe],
+        cpes: isPrimary
+          ? dedupeCpes([cpe, ...selectedNvdCpes, ...customAddedCpes])
+          : [cpe],
         purls: purlList.length > 0 ? purlList : undefined,
         targetHw: targetHwInput !== '*' ? targetHwInput : undefined,
         assetTag: `${baseTag}${tagSuffix}`,
@@ -1332,23 +1378,70 @@ export const WatchListView: React.FC = () => {
                 </div>
 
                 <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                  {generatedCpes.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 font-mono text-xs flex items-center justify-between text-zinc-200 dark:text-zinc-200 light:text-zinc-800 shadow-sm"
-                    >
-                      <div className="truncate mr-2">
-                        <span className="text-[10px] text-zinc-500 mr-1.5">[{item.product}]</span>
-                        <span className="text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold">
-                          {item.cpe}
-                        </span>
-                      </div>
-                      <span className="text-[9px] font-mono uppercase bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-400 px-1.5 py-0.2 rounded shrink-0">
-                        {item.part}
-                      </span>
-                    </div>
-                  ))}
+                   {generatedCpes.map((item, idx) => (
+                     <div
+                       key={item.cpe}
+                       className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 font-mono text-xs flex items-center justify-between text-zinc-200 dark:text-zinc-200 light:text-zinc-800 shadow-sm"
+                     >
+                       <div className="truncate mr-2">
+                         <span className="text-[10px] text-zinc-500 mr-1.5">[{item.product}]</span>
+                         <span className="text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold">
+                           {item.cpe}
+                         </span>
+                       </div>
+                       <div className="flex items-center gap-1 shrink-0">
+                         <button
+                           type="button"
+                           onClick={() => {
+                             if (item.product === 'Custom') {
+                               setCustomAddedCpes((c) => c.filter((c2) => c2 !== item.cpe));
+                             } else {
+                               setRemovedAutoCpes((s) => {
+                                 const next = new Set(s);
+                                 next.add(item.cpe);
+                                 return next;
+                               });
+                             }
+                           }}
+                           aria-label={`Remove CPE ${item.cpe}`}
+                           className="rounded-lg p-0.75 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400 transition"
+                           title={item.product === 'Custom' ? 'Remove custom CPE' : 'Remove auto-generated CPE'}
+                         >
+                           <X className="h-3.5 w-3.5" />
+                         </button>
+                         <span className="text-[9px] font-mono uppercase bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-400 px-1.5 py-0.2 rounded shrink-0">
+                           {item.part}
+                         </span>
+                       </div>
+                     </div>
+                   ))}
                 </div>
+              </div>
+
+              {/* Custom CPE 2.3 Expression Input */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="e.g. cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*"
+                  value={customCpeInput}
+                  onChange={(e) => setCustomCpeInput(e.target.value)}
+                  className="flex-1 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono text-xs focus:border-zinc-600 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const trimmed = customCpeInput.trim();
+                    if (trimmed && parseCPE23(trimmed).isValid && !customAddedCpes.includes(trimmed)) {
+                      setCustomAddedCpes((c) => [...c, trimmed]);
+                      setCustomCpeInput('');
+                    }
+                  }}
+                  disabled={!customCpeInput.trim() || !parseCPE23(customCpeInput.trim()).isValid}
+                  className="shrink-0 px-3 py-1.5 rounded-xl bg-sky-900/40 dark:bg-sky-900/40 light:bg-sky-100 border border-sky-800 dark:border-sky-800 light:border-sky-300 text-sky-300 dark:text-sky-300 light:text-sky-700 font-mono text-xs hover:bg-sky-900/60 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" />
+                  Add
+                </button>
               </div>
 
               {/* Supply Chain PURL (Optional) */}

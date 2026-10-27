@@ -383,7 +383,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
       ...f,
       status: input.status,
       timeline: [
-        ...f.timeline,
+        ...(f.timeline ?? []),
         { timestamp: now, action: input.status, system: actor, details: input.note || '' },
       ],
     });

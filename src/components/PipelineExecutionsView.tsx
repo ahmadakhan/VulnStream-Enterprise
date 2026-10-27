@@ -90,7 +90,9 @@ export const PipelineExecutionsView: React.FC = () => {
     pageSize,
   });
   const running = isPipelineRunning ? latestExecution : null;
-  const execution = executions.find((e) => e.id === selectedId) || running || executions[0];
+  // Every branch is nullable: an execution selected from the snapshot may age out
+  // of the fetched page, and the page itself is empty until the first run.
+  const execution = executions.find((e) => e.id === selectedId) ?? running ?? executions[0] ?? null;
   const canOperate = session?.role === 'ADMIN' || session?.role === 'OPERATOR';
   useEffect(() => {
     if (!isPipelineRunning) return;
@@ -277,10 +279,10 @@ export const PipelineExecutionsView: React.FC = () => {
       {execution && (
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-label="Execution metrics">
           {[
-            ['Records read', execution.stats.rawIngested],
-            ['Normalized CVEs', execution.stats.normalized],
-            ['Product matches', execution.stats.matchedWatchlist],
-            ['Notifications queued', execution.stats.notificationsQueued || 0],
+            ['Records read', execution.stats?.rawIngested ?? 0],
+            ['Normalized CVEs', execution.stats?.normalized ?? 0],
+            ['Product matches', execution.stats?.matchedWatchlist ?? 0],
+            ['Notifications queued', execution.stats?.notificationsQueued || 0],
           ].map(([label, value]) => (
             <div key={label} className={`${panel} p-4`}>
               <p className="text-xs text-zinc-400 light:text-zinc-600">{label}</p>
@@ -300,7 +302,7 @@ export const PipelineExecutionsView: React.FC = () => {
         ) : (
           <>
             <div className="space-y-2">
-              {executions.slice((page - 1) * pageSize, page * pageSize).map((run) => (
+              {executions.map((run) => (
                 <button
                   key={run.id}
                   aria-pressed={execution?.id === run.id}
@@ -313,7 +315,7 @@ export const PipelineExecutionsView: React.FC = () => {
                   <div>
                     <p className="text-xs font-mono text-zinc-200 light:text-zinc-800 break-all">{run.id}</p>
                     <p className="mt-1 text-xs text-zinc-400 light:text-zinc-600">
-                      {new Date(run.startTime).toLocaleString()} · {run.stats.matchedWatchlist} matches
+                      {new Date(run.startTime).toLocaleString()} · {run.stats?.matchedWatchlist ?? 0} matches
                     </p>
                   </div>
                   <span className={`flex items-center gap-2 text-xs font-medium ${tone(run.status)}`}>

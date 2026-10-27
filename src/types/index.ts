@@ -113,7 +113,7 @@ export interface OperationalEvent {
 }
 
 export interface CVSSData {
-  version: '3.1' | '4.0' | '2.0' | 'UNKNOWN';
+  version: '3.0' | '3.1' | '4.0' | '2.0' | 'UNKNOWN';
   score: number;
   vector: string;
   severity: Severity;

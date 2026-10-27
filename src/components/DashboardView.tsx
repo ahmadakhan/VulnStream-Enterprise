@@ -193,7 +193,7 @@ export const DashboardView: React.FC = () => {
 
           <div className="space-y-2.5">
             {activeVulnerabilities.slice(0, 4).map((finding) => {
-              const isKev = finding.cve.cisaKev.isKev;
+              const isKev = finding.cve.cisaKev?.isKev ?? false;
 
               return (
                 <div

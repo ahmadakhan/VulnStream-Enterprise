@@ -75,7 +75,8 @@ const formatPercentile = (value: number) => {
   return `${ordinal(shown)} pct`;
 };
 
-const hasEpssData = (epss: NormalizedCVE['epss']) => epss.score > 0 || epss.percentile > 0;
+const hasEpssData = (epss: NormalizedCVE['epss'] | undefined) =>
+  !!epss && (epss.score > 0 || epss.percentile > 0);
 
 const severityTone = (severity: NormalizedCVE['cvss']['severity']) => {
   switch (severity) {
@@ -448,15 +449,25 @@ const CveCacheView: React.FC = () => {
                   const modTime = new Date(cve.modifiedDate).getTime();
                   const pubInScope = now - pubTime <= scopeMillis;
                   const modInScope = now - modTime <= scopeMillis;
-                  const scored = cve.cvss.version !== 'UNKNOWN';
-                  const epssScored = hasEpssData(cve.epss);
+                  // Legacy cache rows can predate fields that are now required
+                  // by the schema; default them rather than crashing the table.
+                  const cvss = cve.cvss ?? {
+                    version: 'UNKNOWN' as const,
+                    score: 0,
+                    vector: '',
+                    severity: 'UNKNOWN' as const,
+                  };
+                  const epss = cve.epss ?? { score: 0, percentile: 0 };
+                  const isKev = cve.cisaKev?.isKev ?? false;
+                  const scored = cvss.version !== 'UNKNOWN';
+                  const epssScored = hasEpssData(epss);
 
                   return (
                     <tr key={cve.cveId} className="transition hover:bg-zinc-800/30 light:hover:bg-zinc-50">
                       <td className="min-w-[220px] px-4 py-3">
                         <div className="flex items-center gap-2">
                           <CveLink cveId={cve.cveId} className="whitespace-nowrap" />
-                          {cve.cisaKev.isKev && (
+                          {isKev && (
                             <span
                               className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] font-medium text-amber-300 light:text-amber-800"
                               title="Listed in the CISA Known Exploited Vulnerabilities catalog"
@@ -474,24 +485,24 @@ const CveCacheView: React.FC = () => {
                       <td className="px-4 py-3 font-mono">
                         <div className="flex items-center gap-1.5">
                           <span className="text-sm font-semibold text-zinc-200 light:text-zinc-900">
-                            {scored ? cve.cvss.score.toFixed(1) : 'Unscored'}
+                            {scored ? cvss.score.toFixed(1) : 'Unscored'}
                           </span>
                           {scored && (
                             <span
                               className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-medium ${severityTone(
-                                cve.cvss.severity,
+                                cvss.severity,
                               )}`}
                             >
-                              {cve.cvss.severity}
+                              {cvss.severity}
                             </span>
                           )}
                         </div>
-                        {scored && cve.cvss.vector && (
+                        {scored && cvss.vector && (
                           <div
                             className="mt-0.5 max-w-[150px] truncate text-[10px] text-zinc-500"
-                            title={cve.cvss.vector}
+                            title={cvss.vector}
                           >
-                            {cve.cvss.vector}
+                            {cvss.vector}
                           </div>
                         )}
                       </td>
@@ -501,15 +512,15 @@ const CveCacheView: React.FC = () => {
                           <>
                             <div
                               className={`font-medium ${
-                                cve.epss.score >= 0.4
+                                epss.score >= 0.4
                                   ? 'text-amber-300 light:text-amber-800'
                                   : 'text-zinc-300 light:text-zinc-800'
                               }`}
                             >
-                              {formatEpss(cve.epss.score)}
+                              {formatEpss(epss.score)}
                             </div>
                             <div className="text-[10px] text-zinc-500" title="EPSS percentile">
-                              {formatPercentile(cve.epss.percentile)}
+                              {formatPercentile(epss.percentile)}
                             </div>
                           </>
                         ) : (
@@ -681,8 +692,8 @@ const CveCacheView: React.FC = () => {
                   <dt className="text-zinc-500">EPSS</dt>
                   <dd className="mt-0.5 font-mono text-zinc-200 light:text-zinc-800">
                     {hasEpssData(inspectCve.epss)
-                      ? `${formatEpss(inspectCve.epss.score)} · ${formatPercentile(
-                          inspectCve.epss.percentile,
+                      ? `${formatEpss(inspectCve.epss?.score ?? 0)} · ${formatPercentile(
+                          inspectCve.epss?.percentile ?? 0,
                         )}`
                       : 'Not scored'}
                   </dd>
@@ -690,13 +701,13 @@ const CveCacheView: React.FC = () => {
                 <div>
                   <dt className="text-zinc-500">CISA KEV</dt>
                   <dd className="mt-0.5 font-mono text-zinc-200 light:text-zinc-800">
-                    {inspectCve.cisaKev.isKev ? 'Known exploited' : '—'}
+                    {inspectCve.cisaKev?.isKev ? 'Known exploited' : '—'}
                   </dd>
                 </div>
                 <div className="col-span-2 sm:col-span-4">
                   <dt className="text-zinc-500">Ingested from</dt>
                   <dd className="mt-1 flex flex-wrap gap-1">
-                    {inspectCve.sourceFeeds.length ? (
+                    {inspectCve.sourceFeeds?.length ? (
                       inspectCve.sourceFeeds.map((source, index) => (
                         <span key={`${source}-${index}`} className={sourceBadgeClass}>
                           {source}

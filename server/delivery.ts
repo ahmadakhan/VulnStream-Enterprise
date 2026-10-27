@@ -240,14 +240,14 @@ export function recipientAllows(recipient: EmailRecipient, finding: Finding): bo
     recipient.subscriptionTier === 'ALL_SEVERITIES' ||
     (recipient.subscriptionTier === 'CRITICAL_HIGH_ONLY' &&
       ['CRITICAL', 'HIGH'].includes(finding.cve.cvss.severity)) ||
-    (recipient.subscriptionTier === 'CISA_KEV_ONLY' && finding.cve.cisaKev.isKev)
+    (recipient.subscriptionTier === 'CISA_KEV_ONLY' && finding.cve.cisaKev?.isKev)
   );
 }
 export function webhookAllows(hook: WebhookEndpoint, finding: Finding): boolean {
   return (
     hook.events.includes('ALL') ||
     (hook.events.includes('CRITICAL') && finding.cve.cvss.severity === 'CRITICAL') ||
-    (hook.events.includes('CISA_KEV') && finding.cve.cisaKev.isKev)
+    (hook.events.includes('CISA_KEV') && finding.cve.cisaKev?.isKev)
   );
 }
 export function createMailSender(

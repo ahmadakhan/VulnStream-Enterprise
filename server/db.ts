@@ -514,7 +514,7 @@ async function attachCounts(db: Db, snapshot: AppState) {
         (SELECT count(*) FROM records WHERE kind='findings'
           AND COALESCE(data->>'status','') NOT IN ('RESOLVED','FALSE_POSITIVE','PATCH_APPLIED')
           AND COALESCE(data->>'notificationStatus','') <> 'NOT_APPLICABLE'
-          AND (data->'cve'->'cisaKev'->>'isKev')::boolean IS TRUE)::int AS "kevFindings",
+          AND COALESCE(data->'cve'->'cisaKev'->>'isKev', 'false') = 'true')::int AS "kevFindings",
         (SELECT count(*) FROM records WHERE kind='emailLogs'
           AND data->>'status' = ANY($1::text[]))::int AS "deliveredEmails"`,
       [['ACCEPTED', 'DELIVERED']],

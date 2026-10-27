@@ -90,6 +90,22 @@ test('computeThreatAnalytics aggregates CVE data correctly', { skip: !database }
     assert.equal(result.exploitStatusDistribution.pocAvailable, 1);
     assert.equal(result.exploitStatusDistribution.none, 1);
     assert.ok(result.topVendors.length > 0, 'should have vendor data');
+    // The vendor is CPE component 4 (vendor), not component 5 (product).
+    // `count(*) FILTER (...)` also has to see the severity of the grouped rows;
+    // when the filter referenced a column the inner query never exposed, the
+    // query failed or every per-vendor severity count came back empty.
+    assert.deepEqual(
+      result.topVendors.map((vendor) => vendor.vendor).sort(),
+      ['apache', 'microsoft', 'openssl'],
+    );
+    assert.deepEqual(
+      result.topVendors.find((vendor) => vendor.vendor === 'microsoft'),
+      { vendor: 'microsoft', cveCount: 1, critical: 1, high: 0 },
+    );
+    assert.deepEqual(
+      result.topVendors.find((vendor) => vendor.vendor === 'apache'),
+      { vendor: 'apache', cveCount: 1, critical: 0, high: 1 },
+    );
     assert.ok(result.timeline.length >= 1, 'should have timeline data');
     assert.ok(result.cvssScoreHistogram.length === 5, 'should have 5 CVSS score bins');
     assert.ok(result.generatedAt, 'should have a generation timestamp');
@@ -99,6 +115,71 @@ test('computeThreatAnalytics aggregates CVE data correctly', { skip: !database }
     await base.end();
   }
 });
+
+test(
+  'threat analytics collapses repeated CPEs and ignores wildcard vendors',
+  { skip: !database },
+  async () => {
+    const base = createPool(database!);
+    const schema = 'test_' + randomUUID().replaceAll('-', '');
+    await base.query(`CREATE SCHEMA "${schema}"`);
+    const url = new URL(database!);
+    url.searchParams.set('options', `-c search_path=${schema}`);
+    const pool = createPool(url.href);
+    try {
+      await migrate(pool);
+      await transaction(pool, async (db) => {
+        await put(
+          db,
+          'cveData',
+          'CVE-2024-VENDOR-REPEATED',
+          cveForAnalytics({
+            cveId: 'CVE-2024-VENDOR-REPEATED',
+            publishedDate: '2026-10-10T10:00:00Z',
+            cvss: { version: '3.1', score: 9.8, vector: 'CVSS:3.1/AV:N', severity: 'CRITICAL' },
+            // One product with two affected builds (and an escaped colon in a CPE
+            // component) must still count as a single CVE for that vendor.
+            cpeMatches: [
+              'cpe:2.3:a:acme:widget:1.0:*:*:*:*:*:*:*',
+              'cpe:2.3:a:acme:widget:1.1:*:*:*:*:*:*:*',
+              'cpe:2.3:a:acme\\:labs:gadget:2.0:*:*:*:*:*:*:*',
+            ],
+          }),
+        );
+        await put(
+          db,
+          'cveData',
+          'CVE-2024-VENDOR-UNKNOWN',
+          cveForAnalytics({
+            cveId: 'CVE-2024-VENDOR-UNKNOWN',
+            publishedDate: '2026-10-10T10:00:00Z',
+            cvss: { version: '3.1', score: 5.0, vector: 'CVSS:3.1/AV:N', severity: 'MEDIUM' },
+            // `any` is the CPE 2.3 spelling for "vendor not specified".
+            cpeMatches: ['cpe:2.3:a:any:thing:1.0:*:*:*:*:*:*:*'],
+          }),
+        );
+      });
+
+      const result = await computeThreatAnalytics(pool, 'all', 10);
+      const acme = result.topVendors.find((vendor) => vendor.vendor === 'acme');
+      assert.deepEqual(acme, { vendor: 'acme', cveCount: 1, critical: 1, high: 0 });
+      assert.equal(
+        result.topVendors.some((vendor) => vendor.vendor === 'any'),
+        false,
+        'a wildcard vendor is not a real vendor',
+      );
+      assert.equal(
+        result.topVendors.some((vendor) => vendor.vendor === 'acme:labs'),
+        false,
+        'an escaped colon must not truncate the vendor name',
+      );
+    } finally {
+      await pool.end();
+      await base.query(`DROP SCHEMA "${schema}" CASCADE`);
+      await base.end();
+    }
+  },
+);
 
 test('computeThreatAnalytics handles empty database', { skip: !database }, async () => {
   const base = createPool(database!);

@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { normalizeCveId } from '../src/utils/deduplicator';
 import { paceConcurrent } from './concurrency';
+import { cvssSeverity, normalizeCvssVersion } from './cvss.ts';
 export interface IngestResult {
   sourceId?: string;
   syncState?: IngestionState;
@@ -51,13 +52,13 @@ const iso = (s: string) => new Date(s).toISOString();
 function normalizeOpenCve(detail: any, feedId: string): NormalizedCVE {
   const metrics = detail.metrics || {};
   const metric = metrics.cvssV4_0?.data?.score != null
-    ? { ...metrics.cvssV4_0.data, version: '4.0' }
+    ? { ...metrics.cvssV4_0.data, version: normalizeCvssVersion('4.0') }
     : metrics.cvssV3_1?.data?.score != null
-      ? { ...metrics.cvssV3_1.data, version: '3.1' }
+      ? { ...metrics.cvssV3_1.data, version: normalizeCvssVersion('3.1') }
       : metrics.cvssV3_0?.data?.score != null
-        ? { ...metrics.cvssV3_0.data, version: '3.1' }
+        ? { ...metrics.cvssV3_0.data, version: normalizeCvssVersion('3.0') }
         : metrics.cvssV2_0?.data?.score != null
-          ? { ...metrics.cvssV2_0.data, version: '2.0' }
+          ? { ...metrics.cvssV2_0.data, version: normalizeCvssVersion('2.0') }
           : undefined;
   const details: NonNullable<NormalizedCVE['cpeMatchDetails']> = [];
   let applicabilityRequiresReview = false;
@@ -88,7 +89,7 @@ function normalizeOpenCve(detail: any, feedId: string): NormalizedCVE {
     modifiedDate: iso(detail.updated_at),
     cvss: {
       version: metric?.version || 'UNKNOWN', score, vector: String(metric?.vector || ''),
-      severity: !metric ? 'UNKNOWN' : score >= 9 ? 'CRITICAL' : score >= 7 ? 'HIGH' : score >= 4 ? 'MEDIUM' : 'LOW',
+      severity: !metric ? 'UNKNOWN' : cvssSeverity(score),
     },
     cwe: Array.isArray(detail.weaknesses) ? detail.weaknesses.filter((v: unknown) => typeof v === 'string').slice(0, 100) : [],
     cpeMatches: details.map(({ criteria }) => criteria),
@@ -140,24 +141,12 @@ export function normalizeNvd(item: any, feedId: string): NormalizedCVE | null {
     publishedDate: iso(cve.published),
     modifiedDate: iso(cve.lastModified),
     cvss: {
-      version: !metric
-        ? 'UNKNOWN'
-        : metric.version === '4.0'
-          ? '4.0'
-          : metric.version === '2.0'
-            ? '2.0'
-            : '3.1',
+      // metric is selected from cvssMetricV40/V31/V30/V2, each of which carries
+      // its own version, so a metric without a matching label is still v3.1.
+      version: !metric ? 'UNKNOWN' : normalizeCvssVersion(metric.version),
       score,
       vector: metric?.vectorString || '',
-      severity: !metric
-        ? 'UNKNOWN'
-        : score >= 9
-          ? 'CRITICAL'
-          : score >= 7
-            ? 'HIGH'
-            : score >= 4
-              ? 'MEDIUM'
-              : 'LOW',
+      severity: !metric ? 'UNKNOWN' : cvssSeverity(score),
     },
     cwe: (cve.weaknesses || [])
       .flatMap((w: any) => (w.description || []).filter((d: any) => d.lang === 'en').map((d: any) => d.value))

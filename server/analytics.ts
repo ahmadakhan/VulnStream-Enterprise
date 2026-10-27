@@ -98,19 +98,39 @@ export async function computeThreatAnalytics(
      GROUP BY status`,
   );
 
-  const vendorResult = await pool.query<{ vendor: string; count: number }>(
-    `SELECT vendor, count(*)::int AS count FROM (
-       SELECT split_part(
-         split_part(cpe, ':', 5),
-         ':',
-         1
-       ) AS vendor
-       FROM records r, jsonb_array_elements_text(r.data->'cpeMatches') AS cpe
+  const vendorResult = await pool.query<{
+    vendor: string;
+    count: number;
+    critical: number;
+    high: number;
+  }>(
+    `SELECT vendor,
+       count(*)::int AS count,
+       count(*) FILTER (WHERE severity = 'CRITICAL')::int AS critical,
+       count(*) FILTER (WHERE severity = 'HIGH')::int AS high
+     FROM (
+       -- CPE 2.3 layout: cpe:2.3:<part>:<vendor>:<product>:...
+       -- Use the vendor field (4th component), not the product (5th), and
+       -- collapse repeated CPEs so one CVE cannot inflate a vendor's count.
+       SELECT DISTINCT r.id AS cve_id,
+         -- CPE 2.3 escapes ':' inside a component as '\:' and a literal
+         -- backslash as '\\'. Remove the escape characters so a vendor such as
+         -- 'a\:b' is not truncated at the escaped colon.
+         replace(replace(split_part(cpe, ':', 4), '\\', ''), '\:', ':') AS vendor,
+         r.data->'cvss'->>'severity' AS severity
+       FROM records r
+       CROSS JOIN LATERAL jsonb_array_elements_text(
+         CASE WHEN jsonb_typeof(r.data->'cpeMatches') = 'array'
+           THEN r.data->'cpeMatches' ELSE '[]'::jsonb END
+       ) AS cpe
        WHERE r.kind = 'cveData' AND ${dateClause || 'true'}
          AND cpe LIKE 'cpe:2.3:%'
      ) AS vendors
+     -- 'any' is the CPE 2.3 wildcard spelling for an unspecified vendor in a
+     -- component (unlike '*', which is an escaped literal in that position).
+     WHERE vendor NOT IN ('', '*', '-', 'any')
      GROUP BY vendor
-     ORDER BY count DESC
+     ORDER BY count DESC, vendor ASC
      LIMIT ${Math.max(1, Math.min(50, vendorLimit))}`,
   );
 
@@ -178,12 +198,14 @@ function buildExploit(rows: { status: string; count: number }[]): ExploitStatusD
   return dist;
 }
 
-function buildVendors(rows: { vendor: string; count: number }[]): VendorAnalytics[] {
+function buildVendors(
+  rows: { vendor: string; count: number; critical: number; high: number }[],
+): VendorAnalytics[] {
   return rows.map((r) => ({
     vendor: r.vendor,
     cveCount: Number(r.count),
-    critical: 0,
-    high: 0,
+    critical: Number(r.critical),
+    high: Number(r.high),
   }));
 }
 

@@ -81,9 +81,9 @@ function recordConditions(kind: CollectionKind, query: CollectionQuery) {
           `(lower(data->>'cveId') LIKE ${param(like)} ESCAPE '!'
             OR lower(COALESCE(data->>'title','')) LIKE ${param(like)} ESCAPE '!'
             OR lower(COALESCE(data->>'description','')) LIKE ${param(like)} ESCAPE '!'
-            OR lower(COALESCE(data->'sourceFeeds'::text,'')) LIKE ${param(like)} ESCAPE '!'
-            OR lower(COALESCE(data->'cpeMatches'::text,'')) LIKE ${param(like)} ESCAPE '!'
-            OR lower(COALESCE(data->'purls'::text,'')) LIKE ${param(like)} ESCAPE '!')`,
+            OR lower(COALESCE((data->'sourceFeeds')::text,'')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE((data->'cpeMatches')::text,'')) LIKE ${param(like)} ESCAPE '!'
+            OR lower(COALESCE((data->'purls')::text,'')) LIKE ${param(like)} ESCAPE '!')`,
         );
       if (filters.kev === true || filters.kev === 'true' || filters.kev === 'KEV_ONLY')
         clauses.push(`data->'cisaKev'->>'isKev' = 'true'`);
@@ -134,7 +134,7 @@ function recordConditions(kind: CollectionKind, query: CollectionQuery) {
         clauses.push(
           `(lower(data->>'cveId') LIKE ${param(like)} ESCAPE '!'
             OR lower(COALESCE(data->>'advisoryId','')) LIKE ${param(like)} ESCAPE '!'
-            OR lower(COALESCE(data->'recipientEmails'::text,'')) LIKE ${param(like)} ESCAPE '!')`,
+            OR lower(COALESCE((data->'recipientEmails')::text,'')) LIKE ${param(like)} ESCAPE '!')`,
         );
       if (!isAll(filters.status))
         clauses.push(`data->>'status' = ${param(String(filters.status))}`);
@@ -176,7 +176,7 @@ function recordConditions(kind: CollectionKind, query: CollectionQuery) {
         clauses.push(
           `(lower(COALESCE(data->>'title','')) LIKE ${param(like)} ESCAPE '!'
             OR lower(COALESCE(data->>'summary','')) LIKE ${param(like)} ESCAPE '!'
-            OR lower(COALESCE(data->'cveIds'::text,'')) LIKE ${param(like)} ESCAPE '!')`,
+            OR lower(COALESCE((data->'cveIds')::text,'')) LIKE ${param(like)} ESCAPE '!')`,
         );
       break;
     }

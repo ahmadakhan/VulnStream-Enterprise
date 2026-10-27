@@ -6,6 +6,7 @@ import { normalizeCveId } from '../src/utils/deduplicator';
 import { parseCPE23 } from '../src/utils/cpeMatcher.ts';
 import { paceConcurrent } from './concurrency';
 import { z } from 'zod';
+import { cvssSeverity, normalizeCvssVersion } from './cvss.ts';
 /** In-flight per-CVE detail fetches; overlaps network latency without
  * exceeding the feed's configured request rate (see paceConcurrent). */
 const DETAIL_FETCH_CONCURRENCY = 8;
@@ -43,8 +44,11 @@ export function normalizeMitre(record: any, feedId: string): NormalizedCVE | nul
     cveId: id, title: String(cna.title || description).slice(0, 500),
     description: `${description}${productNames ? `\nCNA affected products: ${productNames}` : ''}`.slice(0, 30000),
     publishedDate: timestamp(meta.datePublished), modifiedDate: timestamp(meta.dateUpdated || meta.datePublished),
-    cvss: { version: !metric ? 'UNKNOWN' : metric.version === '4.0' ? '4.0' : metric.version === '2.0' ? '2.0' : '3.1',
-      score, vector: metric?.vectorString || '', severity: !metric ? 'UNKNOWN' : score >= 9 ? 'CRITICAL' : score >= 7 ? 'HIGH' : score >= 4 ? 'MEDIUM' : 'LOW' },
+    // A selected metric without its own version label is v3.1: `metric` prefers
+    // cvssV4_0, then cvssV3_1/cvssV3_0, then cvssV2_0, each of which carries a
+    // version in a valid CNA record.
+    cvss: { version: !metric ? 'UNKNOWN' : normalizeCvssVersion(metric.version),
+      score, vector: metric?.vectorString || '', severity: !metric ? 'UNKNOWN' : cvssSeverity(score) },
     cwe: [...new Set(containers.flatMap(c => (c.problemTypes || []).flatMap((p: any) => (p.descriptions || []).map((d: any) => d.cweId).filter((id: unknown) => typeof id === 'string'))))].slice(0, 100),
     cpeMatches: cpes, applicabilityRequiresReview: true, sourceFeeds: [feedId],
     epss: { score: 0, percentile: 0 }, cisaKev: { isKev: false }, exploitStatus: 'None',

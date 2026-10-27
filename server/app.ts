@@ -47,7 +47,13 @@ import { advisoryEmail } from './advisoryEmail';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG, isCollectionKind } from '../shared/state.ts';
 import { emailIsConfigured } from './emailProviders';
 import { parseSyndication, RSS_MAX_BYTES } from './rss';
-import { describeError, describeRequestFailure, readEvents, writeEvent } from './events';
+import {
+  describeError,
+  describeFailureSummary,
+  describeRequestFailure,
+  readEvents,
+  writeEvent,
+} from './events';
 import { createDatabaseRateLimiter, type MutationLimiter, INGEST_LIMIT_CAPACITY, INGEST_LIMIT_REFILL_PER_MS } from './rateLimit';
 import { searchNvdCpes, loadNvdApiKey, isNvdRateLimitError, nvdRetryAfterSeconds } from './cpeSearch';
 import { searchThreatIntelligence, ThreatSearchRateLimitError } from './threatSearch';
@@ -102,6 +108,18 @@ const STATE_COLLECTION_LIMITS = {
   intelligenceArticles: 50,
   intelligenceMatches: 100,
 } as const;
+const invalidId = () => new HttpError(400, 'Invalid identifier');
+/**
+ * Parses a client-supplied outbox id. `outbox.id` is a uuid column, so an
+ * unparseable value is a client error: passing it straight to a `$1::uuid`
+ * parameter raised 22P02 and turned a bad link into a 500 plus an incident log
+ * entry on every page that acts on a delivery.
+ */
+const outboxId = (value: unknown): string => {
+  const parsed = z.uuid().safeParse(value);
+  if (!parsed.success) throw invalidId();
+  return parsed.data;
+};
 async function refreshAdvisoryDeliveryStatus(db: pg.Pool | import('pg').PoolClient, advisoryId: string) {
   const advisory = await getForUpdate<Advisory>(db, 'advisories', advisoryId);
   if (!advisory) return;
@@ -296,14 +314,20 @@ export function createApp(
   // Global rate limiting for authenticated mutation endpoints. The bucket is
   // stored in PostgreSQL so every replica shares one quota per operator.
   //
-  // Only state-changing requests are charged. `/api/correlation/simulate` is a
-  // POST that performs a pure in-memory match against already-loaded data and
-  // writes nothing, so billing it against the mutation quota let an ordinary
-  // read-only operator exhaust their write budget by exploring the matcher —
-  // and made the documented VIEWER read-only role unable to use it at all.
+  // Only state-changing requests are charged. Some POSTs are pure read
+  // operations: `/api/correlation/simulate` matches in memory against loaded
+  // data, `/api/threat/cpe-simulate` evaluates CPE matching, and
+  // `/api/retention/preview` reports what a cleanup would remove. Billing those
+  // against the mutation quota let an ordinary read-only operator exhaust their
+  // write budget by exploring the UI — and made the documented VIEWER read-only
+  // role unable to use them at all.
   // The allowlist is by exact route, never by prefix, so a future mutating
   // route cannot inherit the exemption through naming.
-  const NON_MUTATING_POSTS = new Set(['/api/correlation/simulate']);
+  const NON_MUTATING_POSTS = new Set([
+    '/api/correlation/simulate',
+    '/api/threat/cpe-simulate',
+    '/api/retention/preview',
+  ]);
   const mutationLimiter = options.mutationLimiter ?? createDatabaseRateLimiter(pool);
   const ingestLimiter = options.ingestLimiter ?? createDatabaseRateLimiter(pool, INGEST_LIMIT_CAPACITY, INGEST_LIMIT_REFILL_PER_MS);
   app.use('/api', requireAuth(pool, config), async (req, res, next) => {
@@ -718,11 +742,14 @@ export function createApp(
       const data = z
         .object({ role: z.enum(['ADMIN', 'OPERATOR', 'VIEWER']), disabled: z.boolean() })
         .parse(req.body);
+      const userId = z.uuid().safeParse(req.params.id);
+      // `id` is a uuid column; an unparseable id is a client error, not a 500.
+      if (!userId.success) throw invalidId();
       if (req.params.id === req.operator!.id && (data.disabled || data.role !== 'ADMIN'))
         throw new HttpError(400, 'Cannot remove your own administrator access');
       await transaction(pool, async (db) => {
         const changed = await db.query('UPDATE users SET role=$2,disabled=$3 WHERE id=$1 RETURNING id', [
-          req.params.id,
+          userId.data,
           data.role,
           data.disabled,
         ]);
@@ -1212,13 +1239,13 @@ export function createApp(
     '/api/email/:id/approve',
     requireRole('ADMIN', 'OPERATOR'),
     asyncRoute(async (req, res) => {
+      const id = outboxId(req.params.id);
       await transaction(pool, async (db) => {
         const row = await db.query(
           "UPDATE outbox SET status='QUEUED',review_approved=true,next_attempt=now(),error=NULL,updated_at=now() WHERE id=$1 AND channel='email' AND status='REVIEW' RETURNING advisory_id",
-          [req.params.id],
+          [id],
         );
         if (!row.rowCount) throw new HttpError(409, 'Only notifications awaiting review can be approved');
-        const id = String(req.params.id);
         const log = await getForUpdate<any>(db, 'emailLogs', id);
         if (log)
           await put(db, 'emailLogs', id, {
@@ -1245,13 +1272,13 @@ export function createApp(
     '/api/email/:id/reject',
     requireRole('ADMIN', 'OPERATOR'),
     asyncRoute(async (req, res) => {
+      const id = outboxId(req.params.id);
       await transaction(pool, async (db) => {
         const row = await db.query(
           "UPDATE outbox SET status='REJECTED',error='Rejected during security review',updated_at=now() WHERE id=$1 AND channel='email' AND status='REVIEW' RETURNING advisory_id",
-          [req.params.id],
+          [id],
         );
         if (!row.rowCount) throw new HttpError(409, 'Only notifications awaiting review can be rejected');
-        const id = String(req.params.id);
         const log = await getForUpdate<any>(db, 'emailLogs', id);
         if (log)
           await put(db, 'emailLogs', id, {
@@ -1278,6 +1305,7 @@ export function createApp(
     '/api/email/:id/retry',
     requireRole('ADMIN', 'OPERATOR'),
     asyncRoute(async (req, res) => {
+      const id = outboxId(req.params.id);
       await transaction(pool, async (db) => {
         // Failed jobs restart with a fresh retry budget; a job already waiting
         // on a scheduled retry can be sent now without losing its attempt
@@ -1300,16 +1328,17 @@ export function createApp(
                   updated_at=now()
              FROM target
             WHERE o.id=target.id
-           RETURNING target.status AS "previousStatus", o.attempts`,
-          [req.params.id],
+           RETURNING target.status AS "previousStatus", o.attempts, o.advisory_id`,
+          [id],
         );
         if (!row.rowCount)
           throw new HttpError(409, 'Only failed or scheduled deliveries may be retried');
         const previousStatus = String(row.rows[0].previousStatus);
         const attempts = Number(row.rows[0].attempts);
-        const log = await getForUpdate<any>(db, 'emailLogs', String(req.params.id));
+        const advisoryId = String(row.rows[0].advisory_id);
+        const log = await getForUpdate<any>(db, 'emailLogs', id);
         if (log)
-          await put(db, 'emailLogs', String(req.params.id), {
+          await put(db, 'emailLogs', id, {
             ...log,
             status: 'QUEUED',
             attemptCount: previousStatus === 'FAILED' ? 0 : attempts,
@@ -1319,12 +1348,17 @@ export function createApp(
         await appendAudit(
           db,
           'Delivery retry queued',
-          `Delivery ${req.params.id}`,
+          `Delivery ${id}`,
           req.operator!.username,
           'EMAIL',
           'INFO',
           req.ip || '',
         );
+        // The job is pending again, so the advisory it belongs to and its
+        // findings must reflect that. Without this the advisory stayed FAILED
+        // (the retry is the operator's remedy for a failed delivery) and the
+        // findings kept DELIVERY_FAILED even though a send was now queued.
+        await refreshAdvisoryDeliveryStatus(db, advisoryId);
       });
       res.json({ success: true });
     }),
@@ -1333,7 +1367,7 @@ export function createApp(
     '/api/email/:id',
     requireRole('ADMIN', 'OPERATOR'),
     asyncRoute(async (req, res) => {
-      const id = String(req.params.id);
+      const id = outboxId(req.params.id);
       await transaction(pool, async (db) => {
         const deleted = await db.query(
           "DELETE FROM outbox WHERE id=$1 AND channel='email' AND status IN ('QUEUED','FAILED') RETURNING id",
@@ -1485,12 +1519,15 @@ export function createApp(
     const detail = describeError(error);
     // Keep the client response generic (internals stay server-side) but make the
     // retained event complete enough to diagnose the failure without the
-    // process log: message, DB error code/detail/hint, route, caller and query.
+    // process log: DB error code/detail/hint, route, caller and query. The
+    // message stays a stable summary while the full error text goes in the
+    // context, so the indexed message column does not gain one new value per
+    // failed request.
     void writeEvent(pool, {
       category: 'ISSUE',
       level: 'ERROR',
       code: 'http.request_failed',
-      message: 'An API request failed',
+      message: `Request failed: ${describeFailureSummary(error)}`,
       context: describeRequestFailure(error, request, reference),
     }).catch((writeError) => {
       // The audit write itself can fail (for example during a database outage);

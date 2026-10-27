@@ -123,9 +123,20 @@ export function createRequester(config: Config): Requester {
           }, reject).finally(clearDeadline);
         },
       );
+      // Callers bound their timeout by a remaining-time budget (see the feed
+      // duration limit), which can be at or below zero once the budget is spent.
+      // A negative delay makes Node clamp the timer to 1ms and warn; reject
+      // immediately instead, so the caller sees a normal timeout rather than an
+      // attempt that was never going to be allowed to finish.
+      const timeoutMs = options.timeoutMs ?? 20000;
+      if (timeoutMs <= 0) {
+        reject(new Error('Outbound request timed out'));
+        request.destroy();
+        return;
+      }
       deadline = setTimeout(
         () => request.destroy(new Error('Outbound request timed out')),
-        options.timeoutMs ?? 20000,
+        timeoutMs,
       );
       request.on('timeout', () => request.destroy(new Error('Outbound request timed out')));
       request.on('error', (error) => {

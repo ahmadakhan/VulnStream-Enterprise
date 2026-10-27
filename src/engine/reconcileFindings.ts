@@ -43,7 +43,7 @@ export function reconcileFindings(
       notificationStatus,
       timeline: changed
         ? [
-            ...old.timeline,
+            ...(old.timeline ?? []),
             {
               timestamp: now,
               action: 'Applicability re-evaluated',
@@ -65,7 +65,7 @@ export function reconcileFindings(
               matchingEvidence:
                 'No current match: inventory is inactive, removed, or outside the cached vulnerability criteria.',
               timeline: [
-                ...old.timeline,
+                ...(old.timeline ?? []),
                 {
                   timestamp: now,
                   action: 'Applicability re-evaluated',

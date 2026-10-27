@@ -352,8 +352,14 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             const checkedSleep = async (ms: number) => {
               const until = Date.now() + ms;
               while (Date.now() < until) {
+                // `sourceCheckpoint` awaits a database read and a clock check, so
+                // the remaining time can cross zero between the loop test and the
+                // timer. A negative delay is clamped by Node only after warning,
+                // which flooded the worker log with TimeoutNegativeWarning.
+                const delay = until - Date.now();
                 await sourceCheckpoint();
-                await new Promise((resolve) => setTimeout(resolve, Math.min(500, until - Date.now())));
+                if (delay <= 0) return;
+                await new Promise((resolve) => setTimeout(resolve, Math.min(500, delay)));
               }
             };
             const savedCursor = await get<FeedCursor>(pool, 'feedCursors', feed.id);
@@ -930,7 +936,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           // findings merely because one other item in a bundle passes its filter.
           const groups = new Map<string, Finding[]>();
           for (const finding of pending) {
-            const key = `${finding.cve.cvss.severity}:${finding.cve.cisaKev.isKev}`;
+            const key = `${finding.cve.cvss.severity}:${finding.cve.cisaKev?.isKev ?? false}`;
             const group = groups.get(key) || [];
             group.push(finding);
             groups.set(key, group);
