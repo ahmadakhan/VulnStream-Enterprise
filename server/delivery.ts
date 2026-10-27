@@ -30,6 +30,7 @@ import type {
   WebhookDeliveryLog,
   AlertedCVE,
   EmailConfiguration,
+  AppSettings,
 } from '../src/types/index.ts';
 export interface Job {
   id: string;
@@ -63,14 +64,68 @@ export interface Job {
 export type MailSender = (
   job: Job,
 ) => Promise<string | { id: string; provider: EmailDeliveryLog['provider'] }>;
+export interface EmailRetryPolicy {
+  /** When false, a transient failure becomes terminal after the first attempt. */
+  enabled: boolean;
+  /** Total attempts, including the first send. */
+  maxAttempts: number;
+  initialDelayMinutes: number;
+  maxDelayMinutes: number;
+}
+const boundedInt = (value: unknown, fallback: number, min: number, max: number) => {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(parsed)));
+};
 /**
- * Total attempts, including the first send. Backoff is capped at one hour so a
- * provider outage is retried durably without hammering the relay, and a
- * permanently failing caller transitions to FAILED instead of retrying forever.
+ * Resolves the operator-configured retry policy. Persisted settings from older
+ * deployments may not contain these fields yet, so missing values fall back to
+ * the documented defaults instead of disabling retries silently.
  */
-export const DELIVERY_MAX_ATTEMPTS = 6;
-const deliveryBackoffMs = (attempt: number) =>
-  Math.min(60 * 60_000, 60_000 * 2 ** Math.max(0, attempt - 1));
+export function emailRetryPolicy(settings?: Partial<AppSettings> | null): EmailRetryPolicy {
+  const initialDelayMinutes = boundedInt(
+    settings?.emailRetryInitialDelayMinutes,
+    DEFAULT_SETTINGS.emailRetryInitialDelayMinutes,
+    1,
+    1440,
+  );
+  return {
+    enabled: settings?.emailRetryEnabled ?? DEFAULT_SETTINGS.emailRetryEnabled,
+    maxAttempts: boundedInt(
+      settings?.emailRetryMaxAttempts,
+      DEFAULT_SETTINGS.emailRetryMaxAttempts,
+      1,
+      20,
+    ),
+    initialDelayMinutes,
+    maxDelayMinutes: Math.max(
+      initialDelayMinutes,
+      boundedInt(
+        settings?.emailRetryMaxDelayMinutes,
+        DEFAULT_SETTINGS.emailRetryMaxDelayMinutes,
+        1,
+        10080,
+      ),
+    ),
+  };
+}
+export const DEFAULT_EMAIL_RETRY_POLICY = emailRetryPolicy(DEFAULT_SETTINGS);
+/**
+ * Exponential backoff capped by the configured maximum, so a provider outage is
+ * retried durably without hammering the relay and without retrying forever.
+ */
+export const emailRetryDelayMs = (attempt: number, policy: EmailRetryPolicy) =>
+  Math.min(
+    policy.maxDelayMinutes * 60_000,
+    policy.initialDelayMinutes * 60_000 * 2 ** Math.max(0, attempt - 1),
+  );
+/** Human-readable schedule stored on the delivery log for operator visibility. */
+export const emailRetrySchedule = (policy: EmailRetryPolicy) =>
+  policy.enabled
+    ? Array.from({ length: policy.maxAttempts }, (_, index) =>
+        `${Math.round(emailRetryDelayMs(index + 1, policy) / 60_000)}m`,
+      )
+    : [];
 const revision = (cve: NormalizedCVE) => createHash('sha256').update(stableJson(cve)).digest('hex');
 const findingRevision = (finding: Finding) =>
   createHash('sha256')
@@ -332,6 +387,7 @@ export async function enqueue(
   const insertedId = inserted.rows[0].id as string;
   if (channel === 'email') {
     const configuration = (await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
+    const settings = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
     await put(db, 'emailLogs', insertedId, {
       id: insertedId,
       recipientEmail: payload.recipientEmail || '',
@@ -340,9 +396,7 @@ export async function enqueue(
       provider: EMAIL_PROVIDER_LABELS[configuration.provider],
       status: initialStatus === 'REVIEW' ? 'REVIEW_REQUIRED' : 'QUEUED',
       attemptCount: 0,
-      retrySchedule: Array.from({ length: DELIVERY_MAX_ATTEMPTS }, (_, index) =>
-        `${Math.round(deliveryBackoffMs(index + 1) / 60_000)}m`,
-      ),
+      retrySchedule: emailRetrySchedule(emailRetryPolicy(settings)),
       nextRetryTime: initialStatus === 'REVIEW' ? null : new Date().toISOString(),
       sentAt: '',
     } satisfies EmailDeliveryLog);
@@ -592,6 +646,12 @@ export async function deliverNext(
     return claimed.rows[0] as Job | undefined;
   });
   if (!job) return false;
+  // Email retries follow the operator policy; webhooks retain the historical
+  // six-attempt policy because their budget is not exposed as an email setting.
+  const settings = job.channel === 'email'
+    ? (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS
+    : DEFAULT_SETTINGS;
+  const retryPolicy = emailRetryPolicy(settings);
   let providerId = '',
     statusCode = 0,
     signature = '',
@@ -608,7 +668,14 @@ export async function deliverNext(
   let declaredCveIds: string[] = [];
   let declaredFindingIds: string[] = [];
   try {
-    if (job.attempts > DELIVERY_MAX_ATTEMPTS) {
+    if (!retryPolicy.enabled && job.attempts > 1 && job.channel === 'email' && !job.review_approved) {
+      permanent = true;
+      throw new Error('Automatic email retry is disabled by the current settings');
+    }
+    // A review-held job consumes its first attempt before an operator approves
+    // it. Approval is an explicit send, so it must not be blocked by a retry
+    // budget of one; subsequent attempts follow the configured policy.
+    if (job.attempts > retryPolicy.maxAttempts && !job.review_approved) {
       permanent = true;
       throw new Error('Delivery retry budget exhausted after worker recovery');
     }
@@ -797,8 +864,14 @@ export async function deliverNext(
     const current = await db.query('SELECT status,lock_token FROM outbox WHERE id=$1 FOR UPDATE', [job.id]);
     if (current.rows[0]?.lock_token !== job.lock_token) return;
     const failed =
-        !!error && !routeToReview && (permanent || job.attempts >= DELIVERY_MAX_ATTEMPTS),
-      next = new Date(Math.max(retryNotBefore, Date.now() + deliveryBackoffMs(job.attempts)));
+        !!error &&
+        !routeToReview &&
+        (permanent ||
+          !retryPolicy.enabled ||
+          job.attempts >= retryPolicy.maxAttempts),
+      next = new Date(
+        Math.max(retryNotBefore, Date.now() + emailRetryDelayMs(job.attempts, retryPolicy)),
+      );
     await db.query(
       'UPDATE outbox SET status=$2,next_attempt=$3,error=$4,provider_id=$5,locked_at=NULL,lock_token=NULL,updated_at=now() WHERE id=$1',
       [

@@ -23,6 +23,15 @@ import './settings.css';
 
 const field = 'ui-field';
 
+/** Older persisted settings may predate the retry policy fields. */
+const withEmailRetryDefaults = (value: AppSettings): AppSettings => ({
+  ...value,
+  emailRetryEnabled: value.emailRetryEnabled ?? true,
+  emailRetryMaxAttempts: value.emailRetryMaxAttempts ?? 6,
+  emailRetryInitialDelayMinutes: value.emailRetryInitialDelayMinutes ?? 1,
+  emailRetryMaxDelayMinutes: value.emailRetryMaxDelayMinutes ?? 60,
+});
+
 function SectionHeading({
   icon: Icon,
   title,
@@ -52,7 +61,7 @@ function SectionHeading({
 export function SettingsView() {
   const { settings, updateSettings, changePassword, session, listUsers, createUser, updateUser, pending } =
     useApp();
-  const [form, setForm] = useState(settings);
+  const [form, setForm] = useState<AppSettings>(() => withEmailRetryDefaults(settings));
   const [message, setMessage] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -76,7 +85,12 @@ export function SettingsView() {
      (form.autoDispatchConfidenceThreshold ?? 90) !==
        (settings.autoDispatchConfidenceThreshold ?? 90) ||
      (form.digestBatchingEnabled ?? false) !== (settings.digestBatchingEnabled ?? false) ||
-     (form.digestWindowMinutes ?? 5) !== (settings.digestWindowMinutes ?? 5);
+     (form.digestWindowMinutes ?? 5) !== (settings.digestWindowMinutes ?? 5) ||
+     (form.emailRetryEnabled ?? true) !== (settings.emailRetryEnabled ?? true) ||
+     (form.emailRetryMaxAttempts ?? 6) !== (settings.emailRetryMaxAttempts ?? 6) ||
+     (form.emailRetryInitialDelayMinutes ?? 1) !==
+       (settings.emailRetryInitialDelayMinutes ?? 1) ||
+     (form.emailRetryMaxDelayMinutes ?? 60) !== (settings.emailRetryMaxDelayMinutes ?? 60);
   const sections = [
     ...(admin
       ? [
@@ -370,6 +384,126 @@ export function SettingsView() {
                       </span>
                     </div>
                   </label>
+                  <div className="sm:col-span-2 mt-1 border-t border-zinc-800/70 pt-4 light:border-zinc-200">
+                    <h3 className="text-xs font-semibold text-zinc-200 light:text-zinc-800">
+                      Email retry policy
+                    </h3>
+                    <p className="ui-description mt-1">
+                      Transient provider or network failures are retried automatically. Permanent provider
+                      rejections (for example, an invalid recipient or credentials) still require operator
+                      correction.
+                    </p>
+                  </div>
+                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
+                    <input
+                      type="checkbox"
+                      checked={form.emailRetryEnabled ?? true}
+                      onChange={(e) => setForm({ ...form, emailRetryEnabled: e.target.checked })}
+                    />
+                    <span>
+                      <span className="block font-medium text-zinc-200 light:text-zinc-800">
+                        Enable automatic email retry
+                      </span>
+                      <span className="ui-description mt-0.5 block">
+                        Keep failed deliveries queued with exponential backoff instead of marking them
+                        failed after the first transport error.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        min="1"
+                        max="20"
+                        disabled={!form.emailRetryEnabled}
+                        value={form.emailRetryMaxAttempts ?? 6}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            emailRetryMaxAttempts: Math.min(
+                              20,
+                              Math.max(1, parseInt(e.target.value) || 1),
+                            ),
+                          })
+                        }
+                        className="mt-1 w-16 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-50 light:border-zinc-300 light:bg-white light:text-zinc-900"
+                      />
+                      <span>
+                        <span className="block font-medium text-zinc-200 light:text-zinc-800">
+                          Maximum attempts
+                        </span>
+                        <span className="ui-description mt-0.5 block">
+                          Total sends per email, including the first attempt. A value of 1 disables
+                          automatic retries while keeping the initial delivery.
+                        </span>
+                      </span>
+                    </div>
+                  </label>
+                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        min="1"
+                        max="1440"
+                        disabled={!form.emailRetryEnabled}
+                        value={form.emailRetryInitialDelayMinutes ?? 1}
+                        onChange={(e) => {
+                          const initial = Math.min(
+                            1440,
+                            Math.max(1, parseInt(e.target.value) || 1),
+                          );
+                          setForm({
+                            ...form,
+                            emailRetryInitialDelayMinutes: initial,
+                            // Keep the ceiling valid without a server round-trip.
+                            emailRetryMaxDelayMinutes: Math.max(
+                              initial,
+                              form.emailRetryMaxDelayMinutes ?? 60,
+                            ),
+                          });
+                        }}
+                        className="mt-1 w-16 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-50 light:border-zinc-300 light:bg-white light:text-zinc-900"
+                      />
+                      <span>
+                        <span className="block font-medium text-zinc-200 light:text-zinc-800">
+                          Initial backoff (minutes)
+                        </span>
+                        <span className="ui-description mt-0.5 block">
+                          Delay before the second attempt. The delay doubles after each failed try.
+                        </span>
+                      </span>
+                    </div>
+                  </label>
+                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        min={form.emailRetryInitialDelayMinutes ?? 1}
+                        max="10080"
+                        disabled={!form.emailRetryEnabled}
+                        value={form.emailRetryMaxDelayMinutes ?? 60}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            emailRetryMaxDelayMinutes: Math.max(
+                              form.emailRetryInitialDelayMinutes ?? 1,
+                              Math.min(10080, Math.max(1, parseInt(e.target.value) || 1)),
+                            ),
+                          })
+                        }
+                        className="mt-1 w-16 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-50 light:border-zinc-300 light:bg-white light:text-zinc-900"
+                      />
+                      <span>
+                        <span className="block font-medium text-zinc-200 light:text-zinc-800">
+                          Maximum backoff (minutes)
+                        </span>
+                        <span className="ui-description mt-0.5 block">
+                          Upper bound for the exponential delay between delivery attempts.
+                        </span>
+                      </span>
+                    </div>
+                  </label>
                 </div>
 
                 <p className="rounded-xl border border-zinc-800 bg-zinc-950/30 px-4 py-3 text-xs leading-relaxed text-zinc-400 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-600">
@@ -395,7 +529,7 @@ export function SettingsView() {
                         className="ui-secondary"
                         disabled={pending > 0}
                         onClick={() => {
-                          setForm(settings);
+                          setForm(withEmailRetryDefaults(settings));
                           setMessage('');
                         }}
                       >

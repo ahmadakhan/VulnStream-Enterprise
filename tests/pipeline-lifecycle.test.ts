@@ -981,6 +981,87 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         assert.equal(await flushDueDigest(pool), 0);
       },
     );
+    await t.test('email retry policy persists and bounds delivery attempts', async () => {
+      await reset();
+      // Persist through the same validated command path the Settings page uses.
+      await transaction(pool, (db) =>
+        applyCommand(db, config, {
+          action: 'settings.save',
+          data: {
+            autoDispatchEnabled: true,
+            emailRetryEnabled: true,
+            emailRetryMaxAttempts: 2,
+            emailRetryInitialDelayMinutes: 3,
+            emailRetryMaxDelayMinutes: 7,
+          },
+          actor: 'test',
+        }),
+      );
+      const persisted = await get<any>(pool, 'settings', 'main');
+      assert.equal(persisted.emailRetryEnabled, true);
+      assert.equal(persisted.emailRetryMaxAttempts, 2);
+      assert.equal(persisted.emailRetryInitialDelayMinutes, 3);
+      assert.equal(persisted.emailRetryMaxDelayMinutes, 7);
+
+      const setupDelivery = async () => {
+        await save('watchlist', 'asset', asset());
+        await save('cveData', vulnerability().cveId, vulnerability());
+        await save('recipients', 'retry-recipient', {
+          id: 'retry-recipient',
+          name: 'Retry test',
+          email: 'retry@example.invalid',
+          enabled: true,
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        await run();
+      };
+      await setupDelivery();
+      const schedule = (await list<any>(pool, 'emailLogs'))[0].retrySchedule;
+      assert.deepEqual(schedule, ['3m', '6m']);
+
+      assert.equal(
+        await deliverNext(pool, config, request, async () => {
+          throw new Error('temporary transport outage');
+        }),
+        true,
+      );
+      let job = (await pool.query("SELECT status,attempts,next_attempt FROM outbox WHERE attempts=1"))
+        .rows[0];
+      assert.equal(job.status, 'QUEUED');
+      const delayMs = new Date(job.next_attempt).getTime() - Date.now();
+      assert.ok(delayMs > 120_000 && delayMs <= 200_000, `unexpected retry delay ${delayMs}ms`);
+
+      await pool.query("UPDATE outbox SET next_attempt=now() WHERE status='QUEUED'");
+      assert.equal(
+        await deliverNext(pool, config, request, async () => {
+          throw new Error('temporary transport outage');
+        }),
+        true,
+      );
+      job = (await pool.query('SELECT status,attempts FROM outbox')).rows[0];
+      assert.equal(job.status, 'FAILED');
+      assert.equal(job.attempts, 2);
+      const failedLog = (await list<any>(pool, 'emailLogs'))[0];
+      assert.equal(failedLog.status, 'FAILED');
+      assert.equal(failedLog.attemptCount, 2);
+
+      // Disabling retry makes the first transient failure terminal.
+      await reset();
+      await transaction(pool, (db) =>
+        applyCommand(db, config, {
+          action: 'settings.save',
+          data: { autoDispatchEnabled: true, emailRetryEnabled: false },
+          actor: 'test',
+        }),
+      );
+      await setupDelivery();
+      await deliverNext(pool, config, request, async () => {
+        throw new Error('temporary transport outage');
+      });
+      job = (await pool.query('SELECT status,attempts FROM outbox')).rows[0];
+      assert.equal(job.status, 'FAILED');
+      assert.equal(job.attempts, 1);
+    });
     await t.test('queued delivery rechecks changed recipient subscriptions', async () => {
       await reset();
       await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });

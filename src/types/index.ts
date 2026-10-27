@@ -764,6 +764,17 @@ export interface AppSettings {
   autoDispatchConfidenceThreshold: number;
   digestBatchingEnabled: boolean;
   digestWindowMinutes: number;
+  /**
+   * Durable retry policy for transient email transport failures. Retry is
+   * enabled by default so a provider outage does not silently drop an alert.
+   */
+  emailRetryEnabled: boolean;
+  /** Total delivery attempts, including the first send. */
+  emailRetryMaxAttempts: number;
+  /** Delay before the second attempt; doubles on each subsequent retry. */
+  emailRetryInitialDelayMinutes: number;
+  /** Upper bound for the exponential backoff delay. */
+  emailRetryMaxDelayMinutes: number;
   webhookSigningSecret: string;
   authorityPrecedence: ('VENDOR_PSIRT' | 'CISA_KEV' | 'FIRST_EPSS' | 'NVD_BATCH')[];
   ssrfProtection: {

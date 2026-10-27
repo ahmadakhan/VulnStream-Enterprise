@@ -762,6 +762,10 @@ export const INITIAL_SETTINGS: AppSettings = {
   logVerbosity: 'standard',
   digestBatchingEnabled: true,
   digestWindowMinutes: 3,
+  emailRetryEnabled: true,
+  emailRetryMaxAttempts: 6,
+  emailRetryInitialDelayMinutes: 1,
+  emailRetryMaxDelayMinutes: 60,
   webhookSigningSecret: 'whsec_enterprise_hmac_prod_99x8...',
   authorityPrecedence: ['VENDOR_PSIRT', 'CISA_KEV', 'FIRST_EPSS', 'NVD_BATCH'],
   ssrfProtection: {

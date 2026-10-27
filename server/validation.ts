@@ -294,6 +294,12 @@ export const settingsSchema = z.object({
   // Digest coalescing is opt-in so existing deployments keep their current behavior.
   digestBatchingEnabled: z.boolean().default(false),
   digestWindowMinutes: z.number().int().min(1).max(1440),
+  // Retries are on by default; one attempt disables automatic retry while
+  // keeping the initial delivery. Delays are bounded to avoid a runaway queue.
+  emailRetryEnabled: z.boolean().default(true),
+  emailRetryMaxAttempts: z.number().int().min(1).max(20).default(6),
+  emailRetryInitialDelayMinutes: z.number().int().min(1).max(1440).default(1),
+  emailRetryMaxDelayMinutes: z.number().int().min(1).max(10080).default(60),
   webhookSigningSecret: z.literal(''),
   authorityPrecedence: z.array(z.enum(['VENDOR_PSIRT', 'CISA_KEV', 'FIRST_EPSS', 'NVD_BATCH'])).max(4),
   ssrfProtection: z.object({
@@ -340,6 +346,13 @@ export const settingsSchema = z.object({
       autoCleanup: true,
       retentionMode: 'rolling',
     }),
+}).superRefine((value, ctx) => {
+  if (value.emailRetryMaxDelayMinutes < value.emailRetryInitialDelayMinutes)
+    ctx.addIssue({
+      code: 'custom',
+      path: ['emailRetryMaxDelayMinutes'],
+      message: 'Maximum backoff must be at least the initial backoff',
+    });
 });
 export class HttpError extends Error {
   status: number;
