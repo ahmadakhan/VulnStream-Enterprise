@@ -21,6 +21,7 @@ import {
   Hash,
   ChevronDown,
   ChevronRight,
+  RotateCcw,
 } from 'lucide-react';
 import { copyText } from '../utils/clipboard';
 
@@ -127,7 +128,25 @@ export const CpeMatcherView: React.FC = () => {
     setShowAdvanced(true);
   };
 
+  const handleClear = () => {
+    setAssetCpe('');
+    setVulnerabilityCpe('');
+    setAssetVendor('');
+    setAssetProduct('');
+    setAssetVersion('');
+    setVersionStartIncluding('');
+    setVersionEndExcluding('');
+    setShowAdvanced(false);
+    setResult(null);
+    setError(null);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      handleClear();
+      return;
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       void handleSimulate();
@@ -315,12 +334,20 @@ export const CpeMatcherView: React.FC = () => {
           >
             {copied ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
           </button>
-          <button
-            type="button"
-            onClick={handleSimulate}
-            disabled={loading || !assetCpe || !vulnerabilityCpe}
-            className="px-4 py-2 bg-blue-500/15 border border-blue-400/30 text-blue-300 light:text-blue-800 rounded-md font-medium hover:bg-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-          >
+           <button
+             type="button"
+             onClick={handleClear}
+             className="px-4 py-2 border border-zinc-700 bg-zinc-800/30 text-zinc-300 rounded-md font-medium hover:bg-zinc-700 hover:border-zinc-600 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100 transition-colors flex items-center gap-2 text-xs"
+           >
+             <RotateCcw size={14} />
+             Clear
+           </button>
+           <button
+             type="button"
+             onClick={() => void handleSimulate()}
+             disabled={loading || !assetCpe || !vulnerabilityCpe}
+             className="px-4 py-2 bg-blue-500/15 border border-blue-400/30 text-blue-300 light:text-blue-800 rounded-md font-medium hover:bg-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+           >
              {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
             Simulate CPE match
             <kbd className="hidden sm:inline-block text-[10px] text-zinc-500 light:text-zinc-600">· Cmd+Enter</kbd>
