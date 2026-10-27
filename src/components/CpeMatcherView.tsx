@@ -1,5 +1,5 @@
 import { PageHeading } from './PageHeading';
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   CpeMatchSimulation,
@@ -24,6 +24,19 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { copyText } from '../utils/clipboard';
+
+const CPE_REGEX = /^cpe:2\.3:[aoh]:[^:]+:[^:]+:(?:[^:*:-]+|\*|-):(?:\*|-|:[^:]*)/;
+
+function validateCpeInput(cpe: string): { valid: boolean; message?: string } {
+  if (!cpe) return { valid: false, message: 'CPE string is required' };
+  if (!cpe.startsWith('cpe:2.3:')) return { valid: false, message: 'Must start with cpe:2.3:' };
+  const parts = cpe.split(':');
+  if (parts.length < 13) return { valid: false, message: `Expected ≥13 colon-separated parts, got ${parts.length}` };
+  if (parts.length > 13) return { valid: false, message: `Expected at most 13 parts, got ${parts.length}` };
+  const part = parts[2];
+  if (!['a', 'o', 'h', '*'].includes(part)) return { valid: false, message: `Invalid part "${part}" — expected a, o, h, or *` };
+  return { valid: true };
+}
 
 const SEVERITY_TONES: Record<string, { border: string; bg: string; text: string; light: string }> = {
   CRITICAL: {
@@ -117,6 +130,9 @@ export const CpeMatcherView: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const assetCpeValid = useMemo(() => validateCpeInput(assetCpe), [assetCpe]);
+  const vulnCpeValid = useMemo(() => validateCpeInput(vulnerabilityCpe), [vulnerabilityCpe]);
 
   const handlePreset = (preset: CpePreset) => {
     setAssetCpe(preset.assetCpe);
@@ -227,8 +243,13 @@ export const CpeMatcherView: React.FC = () => {
               onChange={(e) => setAssetCpe(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="cpe:2.3:a:vendor:product:version:*:*:*:*:*:*:*:*"
-              className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
+              className={`w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:border-zinc-600 placeholder-zinc-500 ${
+                !assetCpeValid.valid ? 'border-rose-500/50 focus:ring-rose-500/50' : 'border-zinc-600'
+              }`}
             />
+            {!assetCpeValid.valid && assetCpe && (
+              <p className="mt-1 text-[10px] text-rose-400 light:text-rose-700">{assetCpeValid.message}</p>
+            )}
           </div>
           <div>
             <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
@@ -240,8 +261,13 @@ export const CpeMatcherView: React.FC = () => {
               onChange={(e) => setVulnerabilityCpe(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="cpe:2.3:a:vendor:product:version:*:*:*:*:*:*:*:*"
-              className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
+              className={`w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:border-zinc-600 placeholder-zinc-500 ${
+                !vulnCpeValid.valid ? 'border-rose-500/50 focus:ring-rose-500/50' : 'border-zinc-600'
+              }`}
             />
+            {!vulnCpeValid.valid && vulnerabilityCpe && (
+              <p className="mt-1 text-[10px] text-rose-400 light:text-rose-700">{vulnCpeValid.message}</p>
+            )}
           </div>
         </div>
 
