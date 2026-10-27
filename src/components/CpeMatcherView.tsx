@@ -57,6 +57,50 @@ const SEVERITY_TONES: Record<string, { border: string; bg: string; text: string;
   },
 };
 
+interface CpePreset {
+  label: string;
+  assetCpe: string;
+  vulnerabilityCpe: string;
+  assetVendor: string;
+  assetProduct: string;
+  assetVersion: string;
+  versionEndExcluding: string;
+  description: string;
+}
+
+const CPE_PRESETS: CpePreset[] = [
+  {
+    label: 'Log4Shell (Log4j 2)',
+    description: 'Classic RCE via JNDI in Apache Log4j 2 < 2.15.0',
+    assetCpe: 'cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*',
+    vulnerabilityCpe: 'cpe:2.3:a:apache:log4j:2:*:*:*:*:*:*:*',
+    assetVendor: 'apache',
+    assetProduct: 'log4j',
+    assetVersion: '2.14.1',
+    versionEndExcluding: '2.15.0',
+  },
+  {
+    label: 'OpenSSL Heartbleed',
+    description: 'Buffer over-read in OpenSSL 1.0.1 < 1.0.1g',
+    assetCpe: 'cpe:2.3:a:openssl:openssl:1.0.1f:*:*:*:*:*:*:*',
+    vulnerabilityCpe: 'cpe:2.3:a:openssl:openssl:*:*:*:*:*:*:*:*',
+    assetVendor: 'openssl',
+    assetProduct: 'openssl',
+    assetVersion: '1.0.1f',
+    versionEndExcluding: '1.0.1g',
+  },
+  {
+    label: 'Windows DHCP RCE',
+    description: 'Wormable RCE in Windows Server DHCP < 10.0.17763.2686',
+    assetCpe: 'cpe:2.3:o:microsoft:windows_server_2019:10.0.17763:*:*:*:*:*:*:*',
+    vulnerabilityCpe: 'cpe:2.3:o:microsoft:windows_server_2019:*:*:*:*:*:*:*:*',
+    assetVendor: 'microsoft',
+    assetProduct: 'windows_server_2019',
+    assetVersion: '10.0.17763',
+    versionEndExcluding: '10.0.17763.2686',
+  },
+];
+
 export const CpeMatcherView: React.FC = () => {
   const { simulateCpeMatch } = useApp();
   const [assetCpe, setAssetCpe] = useState('cpe:2.3:a:microsoft:windows_10:10.0.19041:*:*:*:*:*:*:*');
@@ -72,6 +116,23 @@ export const CpeMatcherView: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const handlePreset = (preset: CpePreset) => {
+    setAssetCpe(preset.assetCpe);
+    setVulnerabilityCpe(preset.vulnerabilityCpe);
+    setAssetVendor(preset.assetVendor);
+    setAssetProduct(preset.assetProduct);
+    setAssetVersion(preset.assetVersion);
+    setVersionEndExcluding(preset.versionEndExcluding);
+    setShowAdvanced(true);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      void handleSimulate();
+    }
+  };
 
   const handleSimulate = async () => {
     if (!assetCpe || !vulnerabilityCpe || !assetVendor || !assetProduct) return;
@@ -122,6 +183,20 @@ export const CpeMatcherView: React.FC = () => {
       />
 
       <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4">
+        <div className="flex flex-wrap gap-1.5 pb-2 -mx-4 border-b border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200">
+          <span className="px-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Presets</span>
+          {CPE_PRESETS.map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              onClick={() => handlePreset(preset)}
+              className="text-[11px] px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-700 hover:border-zinc-600 light:border-zinc-300 light:bg-zinc-100 light:text-zinc-800 light:hover:bg-zinc-200 transition-colors"
+              title={preset.description}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
@@ -131,6 +206,7 @@ export const CpeMatcherView: React.FC = () => {
               type="text"
               value={assetCpe}
               onChange={(e) => setAssetCpe(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder="cpe:2.3:a:vendor:product:version:*:*:*:*:*:*:*:*"
               className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
             />
@@ -143,6 +219,7 @@ export const CpeMatcherView: React.FC = () => {
               type="text"
               value={vulnerabilityCpe}
               onChange={(e) => setVulnerabilityCpe(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder="cpe:2.3:a:vendor:product:version:*:*:*:*:*:*:*:*"
               className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
             />
@@ -178,13 +255,14 @@ export const CpeMatcherView: React.FC = () => {
           <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
             Asset version (for range checking)
           </label>
-          <input
-            type="text"
-            value={assetVersion}
-            onChange={(e) => setAssetVersion(e.target.value)}
-            placeholder="e.g. 10.0.19041"
-            className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
-          />
+             <input
+               type="text"
+               value={assetVersion}
+               onChange={(e) => setAssetVersion(e.target.value)}
+               onKeyDown={handleKeyDown}
+               placeholder="e.g. 10.0.19041"
+               className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
+             />
         </div>
 
         <div className="flex items-center gap-2">
@@ -243,8 +321,9 @@ export const CpeMatcherView: React.FC = () => {
             disabled={loading || !assetCpe || !vulnerabilityCpe}
             className="px-4 py-2 bg-blue-500/15 border border-blue-400/30 text-blue-300 light:text-blue-800 rounded-md font-medium hover:bg-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
           >
-            {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+             {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
             Simulate CPE match
+            <kbd className="hidden sm:inline-block text-[10px] text-zinc-500 light:text-zinc-600">· Cmd+Enter</kbd>
           </button>
         </div>
       </div>
