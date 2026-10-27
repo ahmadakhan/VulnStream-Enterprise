@@ -113,7 +113,8 @@ const exploitTone = (status: NormalizedCVE['exploitStatus']) => {
   }
 };
 
-const hasEpss = (epss: NormalizedCVE['epss']) => epss.score > 0 || epss.percentile > 0;
+const hasEpss = (epss: NormalizedCVE['epss'] | undefined) =>
+  !!epss && (epss.score > 0 || epss.percentile > 0);
 const formatEpss = (value: number) => `${(value * 100).toFixed(1)}%`;
 const formatPercentile = (value: number) => {
   const percentile = value * 100;
@@ -484,7 +485,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     const query = resultQuery.trim().toLowerCase();
     const filtered = results.filter((hit) => {
       if (severityFilter !== 'ALL' && hit.cve.cvss.severity !== severityFilter) return false;
-      if (kevOnly && !hit.cve.cisaKev.isKev) return false;
+      if (kevOnly && !hit.cve.cisaKev?.isKev) return false;
       if (!query) return true;
       return [
         hit.cve.cveId,
@@ -526,7 +527,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     for (const hit of results) {
       if (hit.cve.cvss.severity === 'CRITICAL') critical++;
       if (hit.cve.cvss.severity === 'HIGH') high++;
-      if (hit.cve.cisaKev.isKev) kev++;
+      if (hit.cve.cisaKev?.isKev) kev++;
       if (hit.source === 'NVD_API') exact++;
     }
     return {
@@ -641,10 +642,10 @@ export const ThreatIntelligenceSearch: React.FC = () => {
         hit.cve.cvss.score,
         hit.cve.cvss.version,
         hit.cve.cvss.vector,
-        hit.cve.cisaKev.isKev ? 'Yes' : 'No',
-        hit.cve.cisaKev.dateAdded ?? '',
-        hasEpss(hit.cve.epss) ? hit.cve.epss.score : '',
-        hasEpss(hit.cve.epss) ? hit.cve.epss.percentile : '',
+        hit.cve.cisaKev?.isKev ? 'Yes' : 'No',
+        hit.cve.cisaKev?.dateAdded ?? '',
+        hasEpss(hit.cve.epss) ? (hit.cve.epss?.score ?? 0) : '',
+        hasEpss(hit.cve.epss) ? (hit.cve.epss?.percentile ?? 0) : '',
         hit.cve.publishedDate,
         hit.cve.modifiedDate,
         hit.source,
@@ -1391,7 +1392,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                           <td className="max-w-sm px-4 py-3">
                             <div className="flex flex-wrap items-center gap-2">
                               <CveLink cveId={cve.cveId} className="whitespace-nowrap" />
-                              {cve.cisaKev.isKev && <KevBadge />}
+                              {cve.cisaKev?.isKev && <KevBadge />}
                             </div>
                             <p
                               className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-zinc-400 light:text-zinc-600"
@@ -1422,15 +1423,15 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                               <p className={`text-[11px] font-medium ${exploitTone(cve.exploitStatus)}`}>
                                 {cve.exploitStatus === 'None' ? 'No known exploit' : cve.exploitStatus}
                               </p>
-                              {cve.cisaKev.isKev && cve.cisaKev.dateAdded && (
+                              {cve.cisaKev?.isKev && cve.cisaKev.dateAdded && (
                                 <p className="text-[10px] text-amber-300 light:text-amber-700">
                                   KEV added {formatDate(cve.cisaKev.dateAdded)}
                                 </p>
                               )}
                               {hasEpss(cve.epss) && (
                                 <p className="font-mono text-[10px] text-zinc-500">
-                                  EPSS {formatEpss(cve.epss.score)} ·{' '}
-                                  {formatPercentile(cve.epss.percentile)}
+                                  EPSS {formatEpss(cve.epss?.score ?? 0)} ·{' '}
+                                  {formatPercentile(cve.epss?.percentile ?? 0)}
                                 </p>
                               )}
                             </div>
@@ -1516,7 +1517,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                 <div className="mt-1.5 flex flex-wrap items-center gap-2">
                   <CveLink cveId={inspect.cve.cveId} className="text-base" />
                   <SeverityBadge severity={inspect.cve.cvss.severity} />
-                  {inspect.cve.cisaKev.isKev && <KevBadge />}
+                  {inspect.cve.cisaKev?.isKev && <KevBadge />}
                   <SourceBadge source={inspect.source} />
                 </div>
                 <h2
@@ -1572,8 +1573,8 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   <dt className="text-zinc-500">EPSS</dt>
                   <dd className="mt-0.5 font-mono text-zinc-200 light:text-zinc-800">
                     {hasEpss(inspect.cve.epss)
-                      ? `${formatEpss(inspect.cve.epss.score)} · ${formatPercentile(
-                          inspect.cve.epss.percentile,
+                      ? `${formatEpss(inspect.cve.epss?.score ?? 0)} · ${formatPercentile(
+                          inspect.cve.epss?.percentile ?? 0,
                         )}`
                       : 'Not scored'}
                   </dd>
@@ -1601,7 +1602,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                 <div className="col-span-2">
                   <dt className="text-zinc-500">CISA KEV</dt>
                   <dd className="mt-0.5 text-zinc-200 light:text-zinc-800">
-                    {inspect.cve.cisaKev.isKev ? (
+                    {inspect.cve.cisaKev?.isKev ? (
                       <>
                         Known exploited
                         {inspect.cve.cisaKev.dateAdded

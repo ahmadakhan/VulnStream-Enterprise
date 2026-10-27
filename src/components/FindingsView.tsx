@@ -170,7 +170,7 @@ export const FindingsView: React.FC = () => {
                   ) : (
                     findings.map((finding) => {
                       const isSelected = selectedFinding?.id === finding.id;
-                      const isKev = finding.cve.cisaKev.isKev;
+                      const isKev = finding.cve.cisaKev?.isKev ?? false;
 
                       return (
                         <tr
@@ -233,8 +233,8 @@ export const FindingsView: React.FC = () => {
                               </span>
                               <span className="text-[10px] text-zinc-500">{finding.cve.cvss.severity}</span>
                             </div>
-                            <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-500">
-                              EPSS: {(finding.cve.epss.score * 100).toFixed(1)}%
+                              <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-500">
+                              EPSS: {finding.cve.epss?.score != null ? `${(finding.cve.epss.score * 100).toFixed(1)}%` : '—'}
                             </div>
                           </td>
 
@@ -313,7 +313,7 @@ export const FindingsView: React.FC = () => {
               <div>
                 <div className="flex items-center space-x-2">
                   <CveLink cveId={selectedFinding.cveId} className="text-base" />
-                  {selectedFinding.cve.cisaKev.isKev && (
+                  {selectedFinding.cve.cisaKev?.isKev && (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/40 text-amber-300 border border-amber-800/80 flex items-center gap-1 font-semibold">
                       <Flame className="w-3 h-3 text-amber-500" />
                       CISA KEV
