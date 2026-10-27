@@ -421,9 +421,18 @@ export const OperationalLogsView: React.FC = () => {
           if (!disposed) setLoading(false);
         });
     }, 250);
+    const interval = setInterval(() => {
+      if (document.visibilityState !== 'hidden' && !cursor) setRefresh((value) => value + 1);
+    }, 10_000);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible' && !cursor) setRefresh((value) => value + 1);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       disposed = true;
       clearTimeout(timer);
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [tab, category, level, query, runId, cursor, refresh]);
   return (
