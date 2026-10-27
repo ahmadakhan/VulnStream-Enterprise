@@ -163,6 +163,24 @@ export async function decideDeadLetter(
   );
   await appendAudit(db, 'Correlation dead letter decided', `Dead letter ${id}: ${input.action}`, actor);
 }
+export async function cleanupStaleMatches(db: Db): Promise<number> {
+  const evidenceDeleted = await db.query(
+    `DELETE FROM correlation_match_evidence e
+     WHERE NOT EXISTS (
+       SELECT 1 FROM correlation_asset_inventory i
+       WHERE i.id=e.asset_id AND i.revision=e.asset_revision
+     )`,
+  );
+  const matchesDeleted = await db.query(
+    `DELETE FROM correlation_matches m
+     WHERE m.asset_id IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM correlation_asset_inventory i
+       WHERE i.id=m.asset_id
+     )`,
+  );
+  return (evidenceDeleted.rowCount ?? 0) + (matchesDeleted.rowCount ?? 0);
+}
 /** Bounded retention; protected inventory, articles and aliases are never deleted. */
 export async function retainCorrelationData(db: Db): Promise<number> {
   const policy = await getCorrelationPolicy(db);

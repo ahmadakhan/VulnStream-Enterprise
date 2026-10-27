@@ -1,6 +1,6 @@
 import { transaction } from '../db.ts';
 import { queueNativeNotifications } from './notifications.ts';
-import { retainCorrelationData } from './operations.ts';
+import { retainCorrelationData, cleanupStaleMatches } from './operations.ts';
 import { Readable } from 'node:stream';
 import type { Pool } from 'pg';
 import { CorrelationTelemetry } from './telemetry.ts';
@@ -8,7 +8,17 @@ import { DeadLetterQueue } from './deadLetter.ts';
 import { AdvisoryIngestor } from './ingest.ts';
 import { PipelineSupervisor } from './supervisor.ts';
 import { AdvisoryStreamProcessor } from './stream.ts';
-import { claimPending, renewPending, acknowledgePending } from './pending.ts';
+import { claimPending, renewPending, acknowledgePending, acknowledgePendingExcept } from './pending.ts';
+
+/** Structural equality for pending payloads (plain JSON values only). */
+const samePayload = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+};
 import { Heartbeat } from './heartbeat.ts';
 export class CorrelationRuntime {
   readonly supervisor: PipelineSupervisor;
@@ -83,6 +93,7 @@ export class CorrelationRuntime {
     this.timer.unref();
   }
   private async drain(): Promise<void> {
+    await this.cleanupStaleMatches();
     await this.queueNotifications();
     if (Date.now() - this.lastMaintenance >= 60_000) {
       await transaction(this.pool, (db) => retainCorrelationData(db)).catch(() => {
@@ -110,12 +121,40 @@ export class CorrelationRuntime {
           this.pool,
         );
         await acknowledgePending(this.pool, batch);
+      } catch (error) {
+        // At least one record could not be made durable. Its pending row is the
+        // last copy, so it is retained — but only it. Acknowledging the whole
+        // batch would delete the record; acknowledging none replays the entire
+        // batch and re-runs every advisory that already committed. The stream
+        // reports which payloads failed, and those are matched back to the jobs
+        // by payload identity (pending payloads are JSON-round-tripped, so the
+        // comparison is structural and stable).
+        const failed = (error as { failedRecords?: unknown[] }).failedRecords ?? [];
+        const retainedIds = failed.length
+          ? batch.jobs
+              .filter((job) => failed.some((record) => samePayload(record, job.payload)))
+              .map((job) => job.id)
+          : // The stream failed before it could attribute records (e.g. the
+            // source itself threw): nothing may be acknowledged.
+            batch.jobs.map((job) => job.id);
+        if (retainedIds.length < batch.jobs.length) {
+          await acknowledgePendingExcept(this.pool, batch, retainedIds).catch(() => 0);
+        }
+        this.supervisor.ingestor.telemetry.log('CRITICAL', 'pending.batch_partially_acknowledged', {
+          count: batch.jobs.length - retainedIds.length,
+        });
+        throw error;
       } finally {
         clearInterval(heartbeat);
         await renewing;
       }
       await this.queueNotifications();
     }
+  }
+  private async cleanupStaleMatches(): Promise<void> {
+    await transaction(this.pool, (db) => cleanupStaleMatches(db)).catch(() => {
+      this.supervisor.ingestor.telemetry.log('ERROR', 'stale_matches.cleanup_failed');
+    });
   }
   private async queueNotifications(): Promise<void> {
     await transaction(this.pool, (db) => queueNativeNotifications(db)).catch(() => {

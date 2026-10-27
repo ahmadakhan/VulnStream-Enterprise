@@ -22,11 +22,11 @@ export async function queueNativeNotifications(db: Db): Promise<number> {
     CROSS JOIN correlation_policy p LEFT JOIN correlation_notifications n ON n.advisory_id=m.advisory_id
     WHERE p.id=1 AND p.notifications_enabled AND m.created_at>=p.notifications_since
     AND (n.advisory_id IS NULL OR m.created_at>n.queued_at)
-    AND NOT EXISTS (
+    AND EXISTS (
       SELECT 1 FROM correlation_matches candidate
-      LEFT JOIN correlation_match_evidence e ON e.advisory_id=candidate.advisory_id AND e.asset_id=candidate.asset_id
-      LEFT JOIN correlation_asset_inventory i ON i.id=candidate.asset_id
-      WHERE candidate.advisory_id=m.advisory_id AND (e.asset_revision IS NULL OR i.revision IS NULL OR e.asset_revision<>i.revision)
+      JOIN correlation_match_evidence e ON e.advisory_id=candidate.advisory_id AND e.asset_id=candidate.asset_id
+      JOIN correlation_asset_inventory i ON i.id=candidate.asset_id
+      WHERE candidate.advisory_id=m.advisory_id AND e.asset_revision=i.revision
     )
     AND (SELECT count(*) FROM (SELECT 1 FROM correlation_matches fanout WHERE fanout.advisory_id=m.advisory_id LIMIT 1001) bounded)<=1000
     AND ($1::boolean OR NOT EXISTS(SELECT 1 FROM correlation_matches other WHERE other.advisory_id=m.advisory_id AND other.confidence<>'HIGH'))

@@ -26,25 +26,25 @@ export async function readNativeEvidence(db: Db, advisoryId: string) {
   );
   const matches = await db.query<EvidenceMatch>(
     `SELECT m.asset_id AS "assetId",m.vendor,m.product,m.confidence,m.reason,
-    e.asset_revision AS "assetRevision",i.revision AS "currentRevision" FROM correlation_matches m
-    LEFT JOIN correlation_match_evidence e ON e.advisory_id=m.advisory_id AND e.asset_id=m.asset_id
-    LEFT JOIN correlation_asset_inventory i ON i.id=m.asset_id WHERE m.advisory_id=$1 ORDER BY m.asset_id LIMIT 1001`,
+     e.asset_revision AS "assetRevision",i.revision AS "currentRevision" FROM correlation_matches m
+     LEFT JOIN correlation_match_evidence e ON e.advisory_id=m.advisory_id AND e.asset_id=m.asset_id
+     LEFT JOIN correlation_asset_inventory i ON i.id=m.asset_id WHERE m.advisory_id=$1 ORDER BY m.asset_id LIMIT 1001`,
     [advisoryId],
   );
+  const freshMatches = matches.rows.filter((match) => match.assetRevision && match.assetRevision === match.currentRevision);
   if (
     !article.rows[0] ||
-    !matches.rowCount ||
-    matches.rows.length > 1000 ||
-    matches.rows.some((match) => !match.assetRevision || match.assetRevision !== match.currentRevision)
+    !freshMatches.length ||
+    matches.rows.length > 1000
   )
     return null;
-  const confidence: 'HIGH' | 'MEDIUM' = matches.rows.every((match) => match.confidence === 'HIGH')
+  const confidence: 'HIGH' | 'MEDIUM' = freshMatches.every((match) => match.confidence === 'HIGH')
     ? 'HIGH'
     : 'MEDIUM';
   const evidenceHash = createHash('sha256')
-    .update(JSON.stringify([article.rows[0], matches.rows]))
+    .update(JSON.stringify([article.rows[0], freshMatches]))
     .digest('hex');
-  return { article: article.rows[0], matches: matches.rows, confidence, evidenceHash };
+  return { article: article.rows[0], matches: freshMatches, confidence, evidenceHash };
 }
 export async function validateNativeDelivery(db: Db, job: Job): Promise<NativeDelivery> {
   const input = nativeDeliverySchema.parse(job.payload.nativeCorrelation);
