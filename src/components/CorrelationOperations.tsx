@@ -1,6 +1,7 @@
 import {
   ClipboardCheck,
   Database,
+  Flame,
   Inbox,
   Search,
   ShieldCheck,
@@ -103,6 +104,38 @@ export function CorrelationOperations() {
       setBusy(false);
     }
   };
+  const armGate = useCallback(async () => {
+    if (!state) return;
+    const next = !state.faultSimulationArmed;
+    setState((current) => (current ? { ...current, faultSimulationArmed: next } : current));
+    setBusy(true);
+    setNotice('');
+    setNoticeError(false);
+    try {
+      const response = await fetch('/api/correlation/fault/arming', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+        body: JSON.stringify({ armed: next }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string };
+        throw new Error(error.error || `Arming failed (HTTP ${response.status})`);
+      }
+      const data = (await response.json()) as { faultSimulationArmed: boolean };
+      setState((current) =>
+        current ? { ...current, faultSimulationArmed: data.faultSimulationArmed } : current,
+      );
+      setNotice(`Fault simulation gate ${data.faultSimulationArmed ? 'armed' : 'disarmed'}`);
+    } catch (reason) {
+      setNoticeError(true);
+      setNotice(reason instanceof Error ? reason.message : 'Fault simulation arming failed');
+      setState((current) => (current ? { ...current, faultSimulationArmed: !next } : current));
+    } finally {
+      setBusy(false);
+    }
+  }, [state, csrfToken]);
   const searchAssets = async (after?: string) => {
     setBusy(true);
     try {
@@ -242,6 +275,42 @@ export function CorrelationOperations() {
               onClick={() => void mutate('retention/run', {})}
             >
               Run retention batch
+            </button>
+          </div>
+        </form>
+      )}
+      {admin && (
+        <form
+          className="ui-panel cr-control-card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void armGate();
+          }}
+        >
+          <div className="cr-section-title">
+            <span className="ui-section-icon">
+              <Flame size={17} />
+            </span>
+            <div>
+              <h3>Fault simulation gate</h3>
+              <p>
+                The fleet-wide gate required by /api/correlation/fault. The per-replica
+                FAULT_SIMULATION_ENABLED flag must also be set. Admin-only; every change is audited.
+              </p>
+            </div>
+          </div>
+          <div className="cr-policy-controls">
+            <label className="ui-check-row">
+              <input
+                type="checkbox"
+                disabled={busy || !state}
+                checked={!!state?.faultSimulationArmed}
+                onChange={() => void armGate()}
+              />
+              Fleet-wide simulation gate armed
+            </label>
+            <button type="submit" className={button} disabled={busy || !state}>
+              {state?.faultSimulationArmed ? 'Disarm' : 'Arm'} gate
             </button>
           </div>
         </form>

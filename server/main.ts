@@ -1,4 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 const _envPath = join(process.cwd(), '.env');
 if (existsSync(_envPath) && !process.env.DATABASE_URL) {
@@ -84,14 +86,54 @@ const correlation = new CorrelationRuntime(
 );
 if (config.WORKER_ENABLED === 'true') correlation.start();
 else correlation.supervisor.start();
-const server = createApp(pool, config, request, {
+const app = createApp(pool, config, request, {
   correlation,
   // The liveness probe only performs the stall check where the probe timeout is
   // comfortably above the block threshold; see the option's documentation.
   hangDetection: config.HANG_DETECTION_ENABLED === 'true',
-}).listen(config.PORT, '0.0.0.0', () =>
-  console.log(JSON.stringify({ event: 'listening', port: config.PORT })),
-);
+});
+/**
+ * Start listening on `port`, retrying up to `maxAttempts` times when the port
+ * is already in use. On EADDRINUSE the process holding the port is killed
+ * (it is invariably a stale dev-server instance from an ungraceful shutdown or
+ * a `tsx watch` restart race), then the listen is retried after a short delay.
+ * This makes `npm run dev:server` robust without requiring a separate pre-start
+ * step on every `tsx watch` restart.
+ */
+async function listenWithRetry(port: number, host: string, maxAttempts = 5): Promise<Server> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const server = createServer(app);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => reject(error);
+        server.on('error', onError);
+        server.listen(port, host, () => {
+          server.removeListener('error', onError);
+          console.log(JSON.stringify({ event: 'listening', port }));
+          resolve();
+        });
+      });
+      return server;
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code !== 'EADDRINUSE') throw error;
+      if (attempt === maxAttempts) throw error;
+      let pids = '';
+      try {
+        pids = execSync(`lsof -ti:${port}`, { stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+      } catch {}
+      if (pids) {
+        console.log(JSON.stringify({ event: 'port_conflict.resolve', port, attempt, pids }));
+        for (const pid of pids.split('\n').filter(Boolean)) {
+          try { process.kill(Number(pid), 'SIGKILL'); } catch {}
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+  throw new Error('listenWithRetry: unreachable');
+}
+const server = await listenWithRetry(config.PORT, '0.0.0.0');
 server.requestTimeout = 30000;
 server.headersTimeout = 15000;
 let stopping = false,

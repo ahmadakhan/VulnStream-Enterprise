@@ -4,7 +4,11 @@ import { appendAudit } from '../db.ts';
 import { decrypt } from '../secrets.ts';
 import { HttpError } from '../validation.ts';
 import { AdvisoryInputSchema } from './validation.ts';
-import { recordClusterDisposition, MIN_CLUSTER_OPEN_WINDOW_DAYS, MAX_CLUSTER_OPEN_WINDOW_DAYS } from './clusters.ts';
+import {
+  recordClusterDisposition,
+  MIN_CLUSTER_OPEN_WINDOW_DAYS,
+  MAX_CLUSTER_OPEN_WINDOW_DAYS,
+} from './clusters.ts';
 import type { CorrelationPolicy, CorrelationWorkflows } from '../../shared/correlation.ts';
 const noteSchema = z.string().trim().min(5).max(1000);
 export const correlationPolicySchema = z
@@ -40,7 +44,12 @@ export async function updateCorrelationPolicy(
     `UPDATE correlation_policy SET notifications_since=CASE WHEN NOT notifications_enabled AND $1
     THEN now() ELSE notifications_since END,notifications_enabled=$1,retention_enabled=$2,retention_hours=$3,
     pre_cve_cluster_window_days=COALESCE($4,pre_cve_cluster_window_days),updated_at=now() WHERE id=1`,
-    [input.notificationsEnabled, input.retentionEnabled, input.retentionHours, input.preCveClusterWindowDays ?? null],
+    [
+      input.notificationsEnabled,
+      input.retentionEnabled,
+      input.retentionHours,
+      input.preCveClusterWindowDays ?? null,
+    ],
   );
   await appendAudit(db, 'Correlation policy updated', 'Notification and retention policy changed', actor);
   return getCorrelationPolicy(db);
@@ -60,11 +69,7 @@ export async function getFaultSimulationArmed(db: Db): Promise<boolean> {
 /** Arm or disarm the fleet-wide fault-simulation gate (`fault_simulation_armed`).
  * This is the per-database counterpart to the per-replica FAULT_SIMULATION_ENABLED
  * env var: arming the gate on one replica does not arm it fleet-wide on its own. */
-export async function setFaultSimulationArmed(
-  db: Db,
-  armed: boolean,
-  actor: string,
-): Promise<boolean> {
+export async function setFaultSimulationArmed(db: Db, armed: boolean, actor: string): Promise<boolean> {
   await db.query(`UPDATE correlation_policy SET fault_simulation_armed=$1 WHERE id=1`, [armed]);
   await appendAudit(
     db,
@@ -94,7 +99,13 @@ export async function correlationWorkflows(db: Db): Promise<CorrelationWorkflows
     (SELECT count(*)::int FROM correlation_pending) AS pending,
     (SELECT count(*)::int FROM low_confidence_review_buffer b WHERE NOT EXISTS(SELECT 1 FROM correlation_review_decisions d WHERE d.review_id=b.id)) AS reviews,
     (SELECT count(*)::int FROM correlation_dead_letters l WHERE NOT EXISTS(SELECT 1 FROM correlation_dead_letter_actions a WHERE a.letter_id=l.id)) AS "deadLetters"`);
-  return { policy, faultSimulationArmed, reviews: reviews.rows, deadLetters: deadLetters.rows, counts: counts.rows[0] };
+  return {
+    policy,
+    faultSimulationArmed,
+    reviews: reviews.rows,
+    deadLetters: deadLetters.rows,
+    counts: counts.rows[0],
+  };
 }
 export async function decideCorrelationReview(
   db: Db,

@@ -56,25 +56,30 @@ import {
   readEvents,
   writeEvent,
 } from './events';
-import { createDatabaseRateLimiter, type MutationLimiter, INGEST_LIMIT_CAPACITY, INGEST_LIMIT_REFILL_PER_MS } from './rateLimit';
+import {
+  createDatabaseRateLimiter,
+  type MutationLimiter,
+  INGEST_LIMIT_CAPACITY,
+  INGEST_LIMIT_REFILL_PER_MS,
+} from './rateLimit';
 import { searchNvdCpes, loadNvdApiKey, isNvdRateLimitError, nvdRetryAfterSeconds } from './cpeSearch';
 import { searchThreatIntelligence, ThreatSearchRateLimitError } from './threatSearch';
 import { computeThreatAnalytics } from './analytics';
 import type { AppState } from '../shared/state.ts';
 import type {
   AppSettings,
-   ThreatFeed,
-   WebhookEndpoint,
-   Advisory,
-   TemplateCustomization,
-   EmailConfiguration,
-   NormalizedCVE,
-   AliasEntry,
-   WatchListItem,
-   NvdCpeSearchResponse,
-   ThreatSearchResponse,
-   ThreatAnalytics,
-   CpeMatchSimulation,
+  ThreatFeed,
+  WebhookEndpoint,
+  Advisory,
+  TemplateCustomization,
+  EmailConfiguration,
+  NormalizedCVE,
+  AliasEntry,
+  WatchListItem,
+  NvdCpeSearchResponse,
+  ThreatSearchResponse,
+  ThreatAnalytics,
+  CpeMatchSimulation,
 } from '../src/types/index.ts';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler.ts';
 function publicState(data: AppState): AppState {
@@ -266,14 +271,16 @@ export function createApp(
     if (!options.correlation || !config.METRICS_TOKEN) return res.sendStatus(404);
     if (!secureEqual(req.headers.authorization || '', `Bearer ${config.METRICS_TOKEN}`))
       return res.sendStatus(401);
-    res.type('text/plain; version=0.0.4').send(
-      correlationMetrics(
-        options.correlation.supervisor,
-        options.correlation.heartbeat,
-        options.correlation.pendingDepth,
-        options.correlation.pendingSampledAt,
-      ),
-    );
+    res
+      .type('text/plain; version=0.0.4')
+      .send(
+        correlationMetrics(
+          options.correlation.supervisor,
+          options.correlation.heartbeat,
+          options.correlation.pendingDepth,
+          options.correlation.pendingSampledAt,
+        ),
+      );
   });
   app.get(
     '/ready',
@@ -331,7 +338,9 @@ export function createApp(
     '/api/retention/preview',
   ]);
   const mutationLimiter = options.mutationLimiter ?? createDatabaseRateLimiter(pool);
-  const ingestLimiter = options.ingestLimiter ?? createDatabaseRateLimiter(pool, INGEST_LIMIT_CAPACITY, INGEST_LIMIT_REFILL_PER_MS);
+  const ingestLimiter =
+    options.ingestLimiter ??
+    createDatabaseRateLimiter(pool, INGEST_LIMIT_CAPACITY, INGEST_LIMIT_REFILL_PER_MS);
   app.use('/api', requireAuth(pool, config), async (req, res, next) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
     // Inside a mount, req.path is the path RELATIVE to the mount point
@@ -481,7 +490,12 @@ export function createApp(
           .parse(req.body);
         runtime.supervisor.simulate(fault);
         await transaction(pool, (db) =>
-          appendAudit(db, 'Correlation fault simulated', `Simulated ${fault} fault via dashboard`, req.operator!.username),
+          appendAudit(
+            db,
+            'Correlation fault simulated',
+            `Simulated ${fault} fault via dashboard`,
+            req.operator!.username,
+          ),
         ).catch(() => {});
         res.json({ accepted: true });
       }),
@@ -1351,8 +1365,7 @@ export function createApp(
            RETURNING target.status AS "previousStatus", o.attempts, o.advisory_id`,
           [id],
         );
-        if (!row.rowCount)
-          throw new HttpError(409, 'Only failed or scheduled deliveries may be retried');
+        if (!row.rowCount) throw new HttpError(409, 'Only failed or scheduled deliveries may be retried');
         const previousStatus = String(row.rows[0].previousStatus);
         const attempts = Number(row.rows[0].attempts);
         const advisoryId = String(row.rows[0].advisory_id);
@@ -1507,9 +1520,7 @@ export function createApp(
   // answered `POST /api/typo` with 200 + HTML, which a client reads as success
   // and an operator reads as a working endpoint.
   app.use((req, _res, next) =>
-    ['GET', 'HEAD', 'OPTIONS'].includes(req.method)
-      ? next()
-      : next(new HttpError(404, 'Route not found')),
+    ['GET', 'HEAD', 'OPTIONS'].includes(req.method) ? next() : next(new HttpError(404, 'Route not found')),
   );
   app.use(
     express.static(path.resolve('dist'), {
