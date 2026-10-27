@@ -16,7 +16,7 @@ if (existsSync(_envPath) && !process.env.DATABASE_URL) {
 
 import { backfillCorrelationInventory } from './correlation/inventory.ts';
 import { CorrelationRuntime } from './correlation/runtime.ts';
-import { writeEvent } from './events';
+import { describeError, writeEvent } from './events';
 import { loadConfig } from './config';
 import { createPool, migrate, transaction, get, put, REQUIRED_SCHEMA_VERSION } from './db';
 import { applyCommand } from './commands';
@@ -99,9 +99,12 @@ let stopping = false,
   outbox: Promise<unknown> | null = null,
   digest: Promise<unknown> | null = null;
 const report = (event: string) => (error: unknown) => {
-  void writeEvent(pool, {category:'ISSUE', level:'ERROR', code:'worker.failed', message:'Background worker failed', context:{component:event,errorType:error instanceof Error ? error.name : 'Error'}}).catch(() => {});
+  const detail = describeError(error);
+  void writeEvent(pool, {category:'ISSUE', level:'ERROR', code:'worker.failed', message:'Background worker failed', context:{component:event, ...detail}}).catch((writeError: unknown) => {
+    console.error(JSON.stringify({ level: 'error', event: 'event.write_failed', component: event, message: writeError instanceof Error ? writeError.message : String(writeError) }));
+  });
   console.error(
-    JSON.stringify({ level: 'error', event, type: error instanceof Error ? error.name : 'Error' }),
+    JSON.stringify({ level: 'error', event, ...detail }),
   );
 };
 const tick = () => {

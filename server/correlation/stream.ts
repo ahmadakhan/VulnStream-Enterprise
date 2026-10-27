@@ -5,7 +5,15 @@ import type { PipelineSupervisor, IngestPriority } from './supervisor.ts';
 import type { AdvisoryInput } from './validation.ts';
 const MAX_RECORD_BYTES = 262144;
 const QUEUE_DEADLINE_MS = 60_000;
-const PROCESSING_DEADLINE_MS = 15_000;
+/**
+ * Absolute processing deadline for one advisory, in-queue wait excluded.
+ * The ingest retry ladder is bounded inside this window (see ingest.ts
+ * ATTEMPT_BUDGET_MS): four attempts at 3.5 s statement + 2 s lock timeout each
+ * would exceed this deadline, and the processing timer would then abort the
+ * *last* attempt instead of letting its own rollback and dead-letter capture
+ * complete. The two budgets must fit inside one another, not race.
+ */
+const PROCESSING_DEADLINE_MS = 30_000;
 type AdvisoryRecord = AdvisoryInput | { invalidFrame: string; raw?: string };
 /** Object-mode records or UTF-8 NDJSON. A record is bounded even across chunks. */
 export async function* advisoryRecords(input: Readable): AsyncGenerator<AdvisoryRecord> {
@@ -66,13 +74,17 @@ export class AdvisoryStreamProcessor {
     const lookahead = Math.max(concurrencyLimit * 2, 8);
     const outstanding = new Set<Promise<void>>();
     let failure: unknown;
+    // Failed records are remembered by identity, not by position: a batch is
+    // acknowledged by its pending ids and every *other* record in the batch is
+    // durable, so only the failed ones may be kept. Position-based inference
+    // broke for object-mode sources whose promises settle out of order.
+    const failedRecords: AdvisoryRecord[] = [];
     try {
       for await (const raw of advisoryRecords(inputStream)) {
         if (typeof raw === 'object' && raw !== null && 'invalidFrame' in raw) {
-          this.supervisor.ingestor.telemetry.log('WARN', 'stream.invalid_frame', {
-            trackingId: 'stream',
-            count: 1,
-          });
+          // A structurally broken NDJSON frame has no addressable identity to
+          // acknowledge; it is counted once per frame, not once per stream.
+          this.supervisor.ingestor.telemetry.log('WARN', 'stream.invalid_frame', { count: 1 });
           continue;
         }
         const trackingId = randomUUID();
@@ -88,6 +100,7 @@ export class AdvisoryStreamProcessor {
             this.supervisor.ingestor.telemetry.log('CRITICAL', 'stream.durable_capture_failed', {
               trackingId,
             });
+            failedRecords.push(raw);
             failure ??= error;
           })
           .finally(() => {
@@ -99,7 +112,7 @@ export class AdvisoryStreamProcessor {
     } finally {
       await Promise.allSettled(outstanding);
     }
-    if (failure) throw failure;
+    if (failure) throw Object.assign(failure as Error, { failedRecords });
   }
 
   /**

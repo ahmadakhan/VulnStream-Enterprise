@@ -26,3 +26,22 @@ export async function acknowledgePending(db: Db, batch: PendingBatch): Promise<n
     WHERE id=ANY($1::text[]) AND lease_token=$2 AND lease_until>now()`, [batch.jobs.map(job => job.id), batch.token]));
   return result.rowCount || 0;
 }
+/**
+ * Acknowledge only the jobs that were handled. A batch whose stream threw has
+ * at least one record that is *not* durable; acknowledging the batch would
+ * delete it, while acknowledging nothing replays the whole batch and re-runs
+ * every match for the records that already committed. The caller supplies the
+ * ids that were not durable, and every remaining leased job is deleted.
+ */
+export async function acknowledgePendingExcept(
+  db: Db,
+  batch: PendingBatch,
+  retainedJobIds: readonly string[],
+): Promise<number> {
+  const retained = new Set(retainedJobIds);
+  const done = batch.jobs.map((job) => job.id).filter((id) => !retained.has(id));
+  if (!done.length) return 0;
+  const result = await db.query(timedQuery(`DELETE FROM correlation_pending
+    WHERE id=ANY($1::text[]) AND lease_token=$2 AND lease_until>now()`, [done, batch.token]));
+  return result.rowCount || 0;
+}

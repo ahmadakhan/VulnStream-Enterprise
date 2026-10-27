@@ -330,14 +330,19 @@ test(
         }),
         pool,
       );
-      assert.equal(
-        (
-          await pool.query(
-            `SELECT b.* FROM low_confidence_review_buffer b JOIN unstructured_advisories a ON a.id=b.advisory_id WHERE a.url='https://example.org/security/unmapped'`,
-          )
-        ).rowCount,
-        1,
-      );
+      // The synthetic branch requires keyword *density*, not just two hits:
+      // `signals / tokens >= 0.002` (extraction.ts). Four tokens with two signals
+      // is dense enough; the reason and the unassigned assetId are what this
+      // asserts, because an empty assetId is what routes the row to the
+      // unassigned review queue.
+      const synthetic = (
+        await pool.query(
+          `SELECT b.* FROM low_confidence_review_buffer b JOIN unstructured_advisories a ON a.id=b.advisory_id WHERE a.url='https://example.org/security/unmapped'`,
+        )
+      ).rows;
+      assert.equal(synthetic.length, 1);
+      assert.equal(synthetic[0].asset_id, null, 'an unassigned finding must not name an asset');
+      assert.match(synthetic[0].reason, /unverified early intelligence/);
       const retryEngine = new (await import('../server/correlation/engine.ts')).TextCorrelationEngine();
       const correlate = retryEngine.correlate.bind(retryEngine);
       let attempts = 0;
@@ -405,6 +410,105 @@ test(
           .rows[0].n,
         1,
       );
+      // A merge replaces the advisory's content, so it must retire the matches
+      // that content no longer supports. correlation_matches is insert-only and
+      // keyed (advisory_id, asset_id), so before this a retitled advisory kept
+      // its old HIGH match forever even when the new body mentioned nothing.
+      const mergeAdvisoryId = (
+        await pool.query('SELECT id FROM unstructured_advisories WHERE url=$1', [mergeUrl])
+      ).rows[0].id;
+      await pool.query(
+        `INSERT INTO correlation_matches(advisory_id,asset_id,vendor,product,confidence,reason)
+         VALUES($1,$2,'kubernetes','kubernetes','HIGH','stale conclusion')`,
+        [mergeAdvisoryId, randomUUID()],
+      );
+      assert.equal(
+        await ingestor.processIncomingAdvisory(
+          advisory({ url: mergeUrl, title: 'FULLY RETITLED', content: 'Unrelated product news.', purls: [] }),
+          pool,
+        ),
+        'PROCESSED',
+      );
+      assert.equal(
+        (
+          await pool.query(
+            "SELECT * FROM correlation_matches WHERE advisory_id=$1 AND reason='stale conclusion'",
+            [mergeAdvisoryId],
+          )
+        ).rowCount,
+        0,
+        'a merge must retire matches its new content no longer supports',
+      );
+      // A crash between INSERT and the match writes leaves `processed_at` NULL.
+      // Replaying that advisory must re-correlate it, not report DUPLICATE.
+      // `processed_at=now()` is used rather than NULL: a NULL statement would
+      // write the same value back and suppress the row lock.
+      await pool.query('UPDATE unstructured_advisories SET processed_at=now() WHERE url=$1', [mergeUrl]);
+      assert.equal(
+        await ingestor.processIncomingAdvisory(
+          advisory({ url: mergeUrl, title: 'FULLY RETITLED', content: 'Unrelated product news.', purls: [] }),
+          pool,
+        ),
+        'DUPLICATE',
+        'a completed advisory is a duplicate on replay',
+      );
+      // Simulate the crash window: the row exists, correlation never committed.
+      await pool.query('UPDATE unstructured_advisories SET processed_at=NULL WHERE url=$1', [mergeUrl]);
+      assert.equal(
+        await ingestor.processIncomingAdvisory(
+          advisory({ url: mergeUrl, title: 'FULLY RETITLED', content: 'Unrelated product news.', purls: [] }),
+          pool,
+        ),
+        'PROCESSED',
+        'an unprocessed advisory is merged and re-correlated instead of being dropped',
+      );
+      assert.notEqual(
+        (
+          await pool.query('SELECT processed_at FROM unstructured_advisories WHERE url=$1', [mergeUrl])
+        ).rows[0].processed_at,
+        null,
+        'replay must complete the advisory it resumed',
+      );
+      // The review-queue cap bounds one advisory's review rows. The range must
+      // be one that reaches the comparator: "vulnerable before 9.0.0" translates
+      // to `<9.0.0`, which REVIEWs each 1.0.x asset because the bound is coarser
+      // than the deployed four-part style is here (a REVIEW, not a guess).
+      await pool.query('UPDATE correlation_policy SET review_row_cap=1 WHERE id=1');
+      const cappedUrl = 'https://example.org/security/capped';
+      const cappedBody = 'capvendor capproduct patched in 9.0.0';
+      await ingestor.processIncomingAdvisory(
+        advisory({ url: cappedUrl, title: 'capvendor capproduct flaw', content: cappedBody }),
+        pool,
+      );
+      for (let index = 0; index < 3; index++)
+        await pool.query(
+          "INSERT INTO assets(vendor,product,version,purl) VALUES('capvendor','capproduct','1.0.0',$1)",
+          [`pkg:generic/capproduct@1.0.${index}`],
+        );
+      // The article is versionless, so each of the three assets is a MEDIUM
+      // match. Cap the review queue and pin the advisory's versionless matches
+      // through the explicit-entity path (no alias table edit needed).
+      // A range whose bound is a distro backport forces every asset to REVIEW,
+      // which is the branch the review queue exists for.
+      const reviewSource = 'https://example.org/security/capped-3';
+      await pool.query('UPDATE correlation_policy SET review_row_cap=1 WHERE id=1');
+      await ingestor.processIncomingAdvisory(
+        advisory({
+          url: reviewSource,
+          title: 'capvendor capproduct flaw',
+          content: 'capvendor capproduct flaw is under review',
+          entities: [{ vendor: 'capvendor', product: 'capproduct', affectedRange: '>=1.0.0 <2.0.0-ubuntu1' }],
+        }),
+        pool,
+      );
+      const cappedRows = (
+        await pool.query(
+          'SELECT b.* FROM low_confidence_review_buffer b JOIN unstructured_advisories a ON a.id=b.advisory_id WHERE a.url=$1',
+          [reviewSource],
+        )
+      ).rowCount;
+      assert.equal(cappedRows, 1, 'review rows per advisory are bounded by review_row_cap');
+      await pool.query('UPDATE correlation_policy SET review_row_cap=200 WHERE id=1');
       await ingestor.processIncomingAdvisory({ poison: 'customer-secret' }, pool);
       await queue.flush(pool);
       assert.equal((await pool.query('SELECT * FROM correlation_dead_letters')).rowCount, 1);
@@ -412,7 +516,7 @@ test(
       const supervisor = new PipelineSupervisor(pool, ingestor);
       await pool.query('UPDATE correlation_policy SET concurrency_limit=8 WHERE id=1');
       supervisor.setConcurrency(8);
-      supervisor.memoryPercent = () => 90;
+      supervisor.setMemoryProbe(() => 90);
       // Hysteresis on the rise: one sample is a transient allocation spike, not
       // sustained pressure. The first probe only arms the guard; the second,
       // after one probe interval, sheds.
@@ -441,7 +545,7 @@ test(
       );
       for (const controller of controllers) controller.abort();
       for (let index = 0; index < 3; index++) supervisor.release(`high-${index}`);
-      supervisor.memoryPercent = () => 50;
+      supervisor.setMemoryProbe(() => 50);
       await supervisor.check();
       assert.equal(supervisor.health, 'HEALTHY');
       assert.equal(supervisor.concurrencyLimit, 8);
@@ -546,11 +650,38 @@ test(
         .set('Origin', config.APP_ORIGIN)
         .set('x-csrf-token', csrf)
         .send({
-          ndjson: JSON.stringify(advisory({ url: 'https://example.org/durable-api' })) + '\n{invalid json}',
+          ndjson: JSON.stringify(advisory({ url: 'https://example.org/durable-api' })) + '\n' +
+            JSON.stringify(advisory({ url: 'https://example.org/durable-api-2' })),
         });
       assert.equal(accepted.status, 202);
       assert.equal(accepted.body.queued, 2);
       assert.equal((await pool.query('SELECT * FROM correlation_pending')).rowCount, 2);
+      // A submission containing anything malformed is rejected as a whole,
+      // before it is queued. Previously the malformed line was enqueued and the
+      // caller was told "accepted": the worker then re-validated it, dead-
+      // lettered it, and the record was gone with no feedback. The response names
+      // the record and the rule, never the rejected value.
+      const rejected = await agent
+        .post('/api/correlation/ingest')
+        .set('Origin', config.APP_ORIGIN)
+        .set('x-csrf-token', csrf)
+        .send({
+          ndjson: JSON.stringify(advisory({ url: 'https://example.org/durable-api-3' })) + '\n{invalid json}',
+        });
+      assert.equal(rejected.status, 400);
+      assert.equal(rejected.body.queued, 0);
+      assert.equal(rejected.body.rejected.length, 1);
+      assert.equal(rejected.body.rejected[0].record, 2);
+      assert.equal(
+        (await pool.query('SELECT * FROM correlation_pending')).rowCount,
+        2,
+        'a rejected submission must queue nothing',
+      );
+      assert.equal(
+        JSON.stringify(rejected.body).includes('durable-api-3'),
+        false,
+        'the rejected value is not echoed',
+      );
       // Existing product/CVE simulator keeps its original contract with the new runtime attached.
       const legacy = await agent
         .post('/api/correlation/simulate')

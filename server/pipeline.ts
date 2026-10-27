@@ -1,4 +1,4 @@
-import { writeEvent } from './events';
+import { describeError, writeEvent } from './events';
 import { mergeArticles, matchIntelligence } from '../src/utils/intelligenceMatcher';
 import type pg from 'pg';
 import { randomUUID, createHash } from 'node:crypto';
@@ -1014,7 +1014,10 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     return true;
   } catch (e) {
     if (connectionLost) throw e;
-    if (execution)
+    if (execution) {
+      // Cancellation is an intentional operator action; only a real failure
+      // carries an error payload into the event and the audit trail.
+      const failure: Record<string, unknown> = e instanceof PipelineStopped ? {} : describeError(e);
       await lockedTransaction(async (db) => {
         await put(db, 'executions', execution!.id, {
           ...execution,
@@ -1028,17 +1031,19 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           endTime: new Date().toISOString(),
           logs: [...execution!.logs, e instanceof Error ? e.message : 'Worker failed'],
         });
-        await writeEvent(db, {category:e instanceof PipelineStopped ? 'PIPELINE' : 'ISSUE', level:e instanceof PipelineStopped ? 'INFO' : 'ERROR', code:e instanceof PipelineStopped ? 'pipeline.cancelled' : 'pipeline.failed', message:e instanceof PipelineStopped ? 'Pipeline stopped by operator' : 'Pipeline failed; inspect execution details', runId:execution!.id});
+        await writeEvent(db, {category:e instanceof PipelineStopped ? 'PIPELINE' : 'ISSUE', level:e instanceof PipelineStopped ? 'INFO' : 'ERROR', code:e instanceof PipelineStopped ? 'pipeline.cancelled' : 'pipeline.failed', message:e instanceof PipelineStopped ? 'Pipeline stopped by operator' : 'Pipeline failed; inspect execution details', runId:execution!.id, context: failure});
         await appendAudit(
           db,
           e instanceof PipelineStopped ? 'Pipeline stopped' : 'Pipeline failed',
-          `Execution ${execution!.id}`,
+          `Execution ${execution!.id}${
+            typeof failure.error === 'string' ? `; ${failure.error.slice(0, 500)}` : ''
+          }`,
           'worker',
           'PIPELINE',
           e instanceof PipelineStopped ? undefined : 'ERROR',
         );
       });
-    else throw e;
+    } else throw e;
     return true;
   } finally {
     if (heartbeat) clearInterval(heartbeat);

@@ -50,7 +50,11 @@ parentPort.on('message', ({ text }) => {
     const normalized = ' ' + tokens.join(' ') + ' ';
     const ranges = [];
     const consumed = [];
-    const VERSION = 'v?[0-9]{1,9}(?:\\.[0-9]{1,9}){1,3}(?:-(?:rc|alpha|beta|pre|preview|RC|ALPHA|BETA|PRE|PREVIEW)(?:[.-][0-9]{1,6})?)?';
+    // Shared with server/correlation/version.ts: the bound grammar accepts 1-4
+    // numeric components. A two-component minimum was not capturable as a bound
+    // of "patched before 4", so the entity fell through to the versionless
+    // branch and scored MEDIUM instead of being reviewed as a coarse bound.
+    const VERSION = 'v?[0-9]{1,9}(?:\\.[0-9]{1,9}){0,3}(?:-(?:rc|alpha|beta|pre|preview|RC|ALPHA|BETA|PRE|PREVIEW)(?:[.-][0-9]{1,6})?)?';
     // Product phrase tokens must start with a letter to avoid greedily consuming
     // version-like segments (e.g. "k8s 2.0 through 3.0" must not capture "2.0").
     // Non-greedy {0,3}? lets the operator phrase claim its words first.
@@ -101,7 +105,7 @@ parentPort.on('message', ({ text }) => {
     parentPort.postMessage({ text: normalized, cleanContent: plain.trim(), ranges, cveIds: [...cves],
       zeroDay: cves.size === 0 && signals >= 2 && density >= 0.002,
       securitySignal: signals > 0, negated: /\b(not affected|not vulnerable|unaffected|false positive)\b/.test(plain), zeroDayDensity: density });
-  } catch { parentPort.postMessage({ failed: true }); }
+  } catch (error) { parentPort.postMessage({ failed: true, reason: String((error && error.message) || error) }); }
 });
 parentPort.postMessage({ ready: true });
 `;
@@ -121,15 +125,29 @@ export async function extractText(
     });
     let done = false;
     let timer: ReturnType<typeof setTimeout>;
+    /** Which budget expired, so telemetry reports the real cause instead of a
+     * generic "isolated". A worker that exceeds its 24 MB heap limit dies with
+     * a Worker error, not with the 200 ms budget — the two require different
+     * operator responses (payload shape vs. regex complexity). */
+    let stage: 'start' | 'extract' = 'start';
     const finish = (error?: Error, value?: ExtractedText) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       signal?.removeEventListener('abort', abort);
       void worker.terminate();
-      telemetry.log(error ? 'CRITICAL' : 'INFO', error ? 'extraction.isolated' : 'extraction.completed', {
+      const cause = error?.message ?? '';
+      const event = !error
+        ? 'extraction.completed'
+        : cause === 'EXTRACTION_TIMEOUT' || cause === 'EXTRACTION_BUDGET'
+          ? 'extraction.budget_exceeded'
+          : cause === 'WORKER_ABORTED' || cause === 'EXTRACTION_WORKER_EXIT'
+            ? 'extraction.terminated'
+            : 'extraction.isolated';
+      telemetry.log(error ? 'CRITICAL' : 'INFO', event, {
         trackingId,
         extractionLatencyMs: performance.now() - start,
+        ...(error && stage === 'start' ? { count: 1 } : {}),
       });
       if (error) reject(error);
       else resolve(value!);
@@ -140,6 +158,7 @@ export async function extractText(
     worker.on('message', (value: ExtractedText & { ready?: boolean; failed?: boolean }) => {
       if (value.ready) {
         clearTimeout(timer);
+        stage = 'extract';
         timer = setTimeout(() => finish(new Error('EXTRACTION_TIMEOUT')), 200);
         worker.postMessage({ text });
       } else if (value.failed) finish(new Error('EXTRACTION_BUDGET'));

@@ -14,6 +14,13 @@ export const databaseCode = (error: unknown): string => {
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
   return /^[A-Z0-9]{5,20}$/.test(code) ? code : 'DATABASE_FAILURE';
 };
+/**
+ * Wall-clock budget for the whole four-attempt ladder. Four attempts at
+ * 3.5 s of database work plus their backoff must fit this, and it must fit
+ * inside the stream's processing deadline (stream.ts).
+ */
+export const ATTEMPT_BUDGET_MS = 20_000;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const transientDatabaseError = (error: unknown) =>
   /^(40001|40P01|08[A-Z0-9]{3}|57P0[123]|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|ENETUNREACH)$/.test(
     databaseCode(error),
@@ -42,7 +49,6 @@ export class AdvisoryIngestor {
   private async refreshVerbosity(pool: Pool): Promise<void> {
     const now = Date.now();
     if (now - this.verbosityCheckedAt < 1000) return;
-    this.verbosityCheckedAt = now;
     try {
       const row = (
         await pool.query<{ value: string | null }>(
@@ -50,8 +56,12 @@ export class AdvisoryIngestor {
         )
       ).rows[0];
       this.verbosityLevel = row?.value === 'verbose' ? 'verbose' : 'standard';
+      // Only a successful read resets the interval. A transient failure must be
+      // retried on the next advisory, not latched for a second.
+      this.verbosityCheckedAt = now;
     } catch {
-      this.verbosityLevel = 'standard';
+      // Keep the last known level: it is a display preference, never a gate.
+      this.verbosityLevel = this.telemetry.verbosity;
     }
     this.telemetry.verbosity = this.verbosityLevel;
   }
@@ -65,16 +75,46 @@ export class AdvisoryIngestor {
         )
       ).rows[0];
       return clusterWindowDays(row?.days);
-    } catch {
+    } catch (error) {
+      if (databaseCode(error) !== '42703' && databaseCode(error) !== '42P01') throw error;
       return DEFAULT_CLUSTER_OPEN_WINDOW_DAYS;
     }
+  }
+  /**
+   * Maximum review rows one advisory may write. A REVIEW verdict applies to
+   * every asset of the product, so the unbounded shape is O(estate size) rows
+   * and round trips inside a single 3.5 s transaction. The cap is a *review
+   * queue* budget, not a correctness limit: the reason string and the cluster
+   * membership still record the finding, and the overflow is reported.
+   */
+  static readonly DEFAULT_REVIEW_ROW_CAP = 200;
+  private async reviewRowCap(query: TimedQuery): Promise<number> {
+    try {
+      const row = (
+        await query<{ cap: number | null }>('SELECT review_row_cap AS cap FROM correlation_policy WHERE id=1')
+      ).rows[0];
+      const cap = Number(row?.cap);
+      if (Number.isInteger(cap) && cap >= 1 && cap <= 10_000) return cap;
+    } catch (error) {
+      // Only a *missing* setting (a database that predates the column)
+      // justifies the built-in default. SQLSTATE 42703 is undefined_column;
+      // 42P01 is undefined_table. Any other failure is a real fault and must
+      // surface, not be masked as "the operator did not configure a cap".
+      if (databaseCode(error) !== '42703' && databaseCode(error) !== '42P01') throw error;
+    }
+    return AdvisoryIngestor.DEFAULT_REVIEW_ROW_CAP;
   }
   async processIncomingAdvisory(
     rawInput: unknown,
     dbPool: Pool,
-     trackingId: string = randomUUID(),
+    trackingId: string = randomUUID(),
     signal?: AbortSignal,
   ): Promise<IngestionResult> {
+    // `trackingId` is interpolated into a uuid[] parameter and used as a
+    // telemetry correlation key. It is caller-supplied, so anything that is not
+    // a UUID is replaced rather than allowed to fail the telemetry insert and
+    // abort the advisory it describes.
+    trackingId = UUID_PATTERN.test(trackingId) ? trackingId : randomUUID();
     const started = performance.now();
     let databaseTime = 0;
     // Resolve the logging level before the first entry so the whole advisory is
@@ -100,6 +140,11 @@ export class AdvisoryIngestor {
         trackingId,
         signal,
       );
+      // Four attempts at the per-attempt budget above is ~14 s of database
+      // time; the delays between them must fit inside ATTEMPT_BUDGET_MS or the
+      // ladder ends exactly when the stream's processing deadline aborts it,
+      // and the last attempt is killed instead of dead-lettering cleanly.
+      const attemptStarted = performance.now();
       for (let attempt = 0; attempt <= 3; attempt++) {
         let client: PoolClient | undefined;
         let released = false;
@@ -134,59 +179,105 @@ export class AdvisoryIngestor {
             }
           };
           await query('BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED');
+          // Per-attempt budgets. `lock_timeout` is below `statement_timeout` so a
+          // blocked lock fails as contention (retryable) rather than burning the
+          // whole statement budget, and all four attempts fit inside the
+          // stream's processing deadline (stream.ts PROCESSING_DEADLINE_MS).
           await query("SET LOCAL statement_timeout='3500ms'");
-          await query("SET LOCAL lock_timeout='2000ms'");
-          await query('SET LOCAL idle_in_transaction_session_timeout=\'5000ms\'');
-          const duplicate = await query('SELECT id FROM unstructured_advisories WHERE fingerprint=$1', [
-            fingerprint,
-          ]);
-          if (duplicate.rowCount) {
+          await query("SET LOCAL lock_timeout='1500ms'");
+          await query("SET LOCAL idle_in_transaction_session_timeout='5000ms'");
+          // Preliminary duplicate check: a fingerprint that is visible and
+          // already processed is a duplicate and nothing else happens. The
+          // authoritative check is the URL-conflict path below, which also
+          // distinguishes an unprocessed (crashed) row that must be resumed.
+          const duplicate = await query<{ processed: boolean }>(
+            'SELECT processed_at IS NOT NULL AS processed FROM unstructured_advisories WHERE fingerprint=$1',
+            [fingerprint],
+          );
+          if (duplicate.rows[0]?.processed) {
             await query('COMMIT');
             this.telemetry.log('INFO', 'ingestion.duplicate', { trackingId });
             return 'DUPLICATE';
           }
+          let mergedAdvisory = false;
+          let unfinishedAdvisoryId: string | null = null;
+          // Resolve (or create) the advisory row and report which case applied.
+          // The URL is the natural key: the row is inserted, or an existing row
+          // at this URL is updated in place when its content changed. A
+          // fingerprint matching a *different* URL is a duplicate and is
+          // detected inside a savepoint, because a raised unique violation
+          // aborts the enclosing transaction.
           const advisoryId = await (async (): Promise<string | null> => {
-            await query('SAVEPOINT advisory_insert');
+            const inserted = await query<{ id: string }>(
+              `INSERT INTO unstructured_advisories(id,title,content,url,fingerprint)
+               VALUES($1,$2,$3,$4,$5) ON CONFLICT (url) DO NOTHING RETURNING id`,
+              [randomUUID(), input.title, extracted.cleanContent, input.url, fingerprint],
+            );
+            if (inserted.rowCount) return inserted.rows[0].id;
+            await query('SAVEPOINT advisory_fingerprint');
+            let duplicateFingerprint = false;
             try {
-              const inserted = await query<{ id: string }>(
-                `INSERT INTO unstructured_advisories(id,title,content,url,fingerprint)
-                VALUES($1,$2,$3,$4,$5) ON CONFLICT (fingerprint) DO NOTHING RETURNING id`,
-                [randomUUID(), input.title, extracted.cleanContent, input.url, fingerprint],
-              );
-              return inserted.rowCount ? inserted.rows[0].id : null;
-            } catch (urlConflict) {
-              if (databaseCode(urlConflict) !== '23505') throw urlConflict;
-              // Undo the failed statement so the transaction is usable again.
-              await query('ROLLBACK TO SAVEPOINT advisory_insert');
-              // URL already exists with a different fingerprint: merge the updated
-              // content into the existing row instead of dead-lettering the
-              // advisory. This lets an updated advisory with the same URL replace
-              // stale content without losing correlation history.
-              //
-              // The SAVEPOINT above is load-bearing: without it the INSERT's
-              // 23505 leaves the transaction aborted and every following
-              // statement fails with 25P02, so the merge never executed and
-              // every retitled advisory at an existing URL was dead-lettered as
-              // an opaque database failure. The UPDATE runs in the same
-              // transaction and commits atomically with the matches and cluster
-              // linkage. Snapshot isolation gives it the pre-statement view of
-              // the conflicting row, so that row is visible here.
-              const merged = await query<{ id: string }>(
-                `UPDATE unstructured_advisories SET
-                   title=$1, content=$2, fingerprint=$3, processed_at=NULL
-                 WHERE url=$4 AND fingerprint IS DISTINCT FROM $3
-                 RETURNING id`,
-                [input.title, extracted.cleanContent, fingerprint, input.url],
-              );
-              this.telemetry.log('INFO', 'ingestion.url_merged', { trackingId });
-              return merged.rowCount ? merged.rows[0].id : null;
+              // Only a conflict on the fingerprint can raise here; the URL is
+              // already known to exist. The statement is rolled back to the
+              // savepoint so the transaction is usable afterwards.
+              duplicateFingerprint =
+                ((await query('SELECT 1 FROM unstructured_advisories WHERE fingerprint=$1 FOR UPDATE', [fingerprint]))
+                  .rowCount ?? 0) > 0;
+            } catch (conflict) {
+              if (databaseCode(conflict) !== '23505') throw conflict;
+              await query('ROLLBACK TO SAVEPOINT advisory_fingerprint');
+              duplicateFingerprint = true;
             }
+            const current = await query<{ id: string; processed: boolean }>(
+              `SELECT id, processed_at IS NOT NULL AS processed FROM unstructured_advisories WHERE url=$1`,
+              [input.url],
+            );
+            const row = current.rows[0];
+            if (!row) return null;
+            if (duplicateFingerprint) {
+              // Same content already stored (possibly under this URL): nothing
+              // to merge. An unprocessed row is resumed so a crash between
+              // INSERT and the match writes cannot strand an advisory.
+              if (!row.processed) {
+                unfinishedAdvisoryId = row.id;
+                return row.id;
+              }
+              return null;
+            }
+            const merged = await query<{ id: string }>(
+              `UPDATE unstructured_advisories SET
+                 title=$1, content=$2, fingerprint=$3, processed_at=NULL
+               WHERE url=$4 RETURNING id`,
+              [input.title, extracted.cleanContent, fingerprint, input.url],
+            );
+            if (!merged.rowCount) return null;
+            mergedAdvisory = true;
+            this.telemetry.log('INFO', 'ingestion.url_merged', { trackingId });
+            return merged.rows[0].id;
           })();
           if (!advisoryId) {
             await query('COMMIT');
             this.telemetry.log('INFO', 'ingestion.duplicate', { trackingId });
             return 'DUPLICATE';
           }
+          // A crash between inserting the advisory and committing its matches
+          // leaves `processed_at` NULL on a row whose content is already stored
+          // (see the fingerprint branch above). The advisory is then
+          // re-correlated here rather than being declared complete.
+          const pending = await query<{ processed_at: Date | null }>(
+            'SELECT processed_at FROM unstructured_advisories WHERE id=$1',
+            [advisoryId],
+          );
+          if (pending.rows[0]?.processed_at && advisoryId !== unfinishedAdvisoryId) {
+            await query('COMMIT');
+            this.telemetry.log('INFO', 'ingestion.duplicate', { trackingId });
+            return 'DUPLICATE';
+          }
+          // Correlation runs on the advisory's own transaction and snapshot, so
+          // the matches that are written and the assets they were derived from
+          // are consistent even if inventory changes concurrently. It runs
+          // once per attempt: a retried transaction must re-read the inventory,
+          // because the attempt that failed may have observed a stale page.
           const matches = await this.engine.correlate(input, extracted, query);
           // Pre-CVE cluster linkage runs inside the same transaction: the
           // advisory, its matches, and its cluster membership commit atomically.
@@ -204,20 +295,35 @@ export class AdvisoryIngestor {
             inTransaction: true,
           };
           await linkPreCveClusters(clusterDb, advisoryId, entities, matches.length, extracted.cveIds, windowDays);
+          // Bound the review queue. A REVIEW verdict is applied to every asset of
+          // the named product, so a 40,000-seat product produces 40,000 review
+          // rows for one article — an operator-facing flood that also costs one
+          // round trip per row inside the advisory transaction. The remainder is
+          // reported instead of being silently dropped.
+          const reviewMatches = matches.filter((match) => match.confidence === 'LOW');
+          const reviewCap = await this.reviewRowCap(query);
+          const reviewBudget = Math.min(reviewMatches.length, reviewCap);
+          const deferredReviews = reviewMatches.length - reviewBudget;
+          let written = 0;
           for (const match of matches) {
-            if (match.confidence === 'LOW')
+            if (match.confidence === 'LOW') {
+              const withinBudget = written < reviewBudget;
+              written++;
+              if (!withinBudget) continue;
               await query(
                 `INSERT INTO low_confidence_review_buffer(advisory_id,asset_id,reason)
                 VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,
                 [advisoryId, match.assetId || null, match.reason],
               );
-            else
+            } else
               await query(
                 `INSERT INTO correlation_matches(advisory_id,asset_id,vendor,product,confidence,reason)
                 VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
                 [advisoryId, match.assetId, match.vendor, match.product, match.confidence, match.reason],
               );
           }
+          if (deferredReviews > 0)
+            this.telemetry.log('WARN', 'ingestion.review_capped', { trackingId, count: deferredReviews });
           for (const match of matches)
             if (match.assetId && match.assetRevision)
               await query(
@@ -225,6 +331,39 @@ export class AdvisoryIngestor {
                 [advisoryId, match.assetId, match.assetRevision],
               );
           await query('UPDATE unstructured_advisories SET processed_at=now() WHERE id=$1', [advisoryId]);
+          // A merge replaced the advisory's *content*, so it must replace the
+          // conclusions derived from the content too. Before this, a title or
+          // body edit that removed the CVE reference left the previous HIGH
+          // match in place forever: correlation_matches is insert-only and its
+          // primary key is (advisory_id, asset_id), so nothing could retire a
+          // match the new text no longer supports. Operator decisions are
+          // evidence, not derived state, and are preserved.
+          if (mergedAdvisory) {
+            const keep = matches.filter((match) => match.assetId).map((match) => match.assetId);
+            const retained = await query<{ asset_id: string | null }>(
+              'DELETE FROM correlation_matches m WHERE m.advisory_id=$1 AND NOT (m.asset_id = ANY($2::uuid[])) RETURNING m.asset_id',
+              [advisoryId, keep],
+            );
+            // Evidence describes the *asset revision* that was matched at the
+            // time; it is retired only with the matches it belonged to.
+            if (retained.rowCount)
+              await query(
+                'DELETE FROM correlation_match_evidence WHERE advisory_id=$1 AND asset_id=ANY($2::uuid[])',
+                [advisoryId, retained.rows.map((row) => row.asset_id)],
+              );
+            const retainedReviews = await query<{ asset_id: string | null }>(
+              `DELETE FROM low_confidence_review_buffer b
+               WHERE b.advisory_id=$1 AND NOT (b.asset_id = ANY($2::uuid[]))
+                 AND NOT EXISTS (SELECT 1 FROM correlation_review_decisions d WHERE d.review_id=b.id)
+               RETURNING b.asset_id`,
+              [advisoryId, matches.filter((match) => match.confidence === 'LOW' && match.assetId).map((match) => match.assetId)],
+            );
+            if (retained.rowCount || retainedReviews.rowCount)
+              this.telemetry.log('INFO', 'ingestion.merged_matches_retired', {
+                trackingId,
+                count: (retained.rowCount ?? 0) + (retainedReviews.rowCount ?? 0),
+              });
+          }
           // Persist telemetry to operational_events BEFORE commit for crash durability
           await this.telemetry.persistBeforeCommit(client, trackingId);
           await query('COMMIT');
@@ -237,9 +376,12 @@ export class AdvisoryIngestor {
           return 'PROCESSED';
         } catch (error) {
           failed = true;
+          // A merge that reached the database changes the fingerprint first; a
+          // retry of the same payload must therefore be a duplicate, not a
+          // second merge that silently re-correlates and re-inserts matches.
           if (client && !released) await client.query(timedQuery('ROLLBACK', [], 1000)).catch(() => {});
           if (signal?.aborted || !transientDatabaseError(error) || attempt === 3) throw error;
-      this.telemetry.log('WARN', 'database.transaction_retry', { trackingId, attempt: attempt + 1 });
+          this.telemetry.log('WARN', 'database.transaction_retry', { trackingId, attempt: attempt + 1 });
         } finally {
           signal?.removeEventListener('abort', abort);
           client?.removeListener('error', onClientError);
@@ -248,12 +390,23 @@ export class AdvisoryIngestor {
             client.release(failed);
           }
         }
-        await delay(100 * 2 ** attempt + Math.random() * 50, undefined, { signal });
+        // Full jitter rather than base + small noise: every worker that failed
+        // on the same failover event otherwise retries within ~50 ms of its
+        // peers. The cap keeps the ladder inside the attempt budget.
+        const backoff = Math.random() * Math.min(100 * 2 ** attempt, 2_000);
+        if (performance.now() - attemptStarted + backoff > ATTEMPT_BUDGET_MS)
+          throw new Error('RETRY_BUDGET_EXHAUSTED');
+        await delay(backoff, undefined, { signal });
       }
       throw new Error('RETRIES_EXHAUSTED');
     } catch (error) {
       this.telemetry.log('ERROR', 'ingestion.failed', { trackingId, totalDatabaseTimeMs: databaseTime });
       const durable = await this.persistFailure(rawInput, databaseCode(error), trackingId, dbPool);
+      // The transaction rolled back, so its buffered telemetry can never be
+      // persisted with it. Discard *after* the failure has been made durable:
+      // discarding first removed the very line describing the failure before
+      // the spool path could report it.
+      this.telemetry.discard(trackingId);
       return durable ? 'DEAD_LETTER' : 'UNDURABLE';
     } finally {
       this.telemetry.completed++;

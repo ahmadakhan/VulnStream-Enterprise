@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { parseSyndication } from '../server/rss';
 import { matchIntelligence, mergeArticles } from '../src/utils/intelligenceMatcher';
-import { redactEventContext, writeEvent, readEvents } from '../server/events';
+import {
+  describeError,
+  describeRequestFailure,
+  redactEventContext,
+  writeEvent,
+  readEvents,
+} from '../server/events';
 import { createPool, migrate, put, state } from '../server/db.ts';
 import { queueRun, processPipeline } from '../server/pipeline';
 import { loadConfig } from '../server/config.ts';
@@ -126,6 +132,74 @@ test('event context redacts credentials recursively and bounds arbitrary values'
     { nested: { apiKey: '[redacted]', password: '[redacted]', ok: 1 }, body: '[redacted]' },
   );
   assert.equal((redactEventContext({ value: 'x'.repeat(3000) }) as any).value.length, 2000);
+});
+test('describeError records message, database code, driver detail and stack', () => {
+  const dbError = Object.assign(new Error('cannot start subtransactions during a parallel operation'), {
+    name: 'error',
+    code: '0A000',
+    detail: 'subtransaction started in a parallel worker',
+    hint: 'avoid exception blocks in parallel-safe functions',
+    constraint: 'records_pkey',
+    table: 'records',
+    column: 'data',
+    schema: 'public',
+    severity: 'ERROR',
+  });
+
+  const described = describeError(dbError);
+
+  assert.equal(described.error, 'cannot start subtransactions during a parallel operation');
+  assert.equal(described.errorType, 'error');
+  assert.equal(described.errorCode, '0A000');
+  assert.equal(described.errorDetail, 'subtransaction started in a parallel worker');
+  assert.equal(described.errorHint, 'avoid exception blocks in parallel-safe functions');
+  assert.equal(described.errorConstraint, 'records_pkey');
+  assert.equal(described.errorTable, 'records');
+  assert.equal(described.errorColumn, 'data');
+  assert.equal(described.errorSeverity, 'ERROR');
+  assert.match(String(described.stack), /cannot start subtransactions/);
+});
+test('describeError handles plain values, wrapped causes and oversized text', () => {
+  assert.deepEqual(describeError('boom'), { error: 'boom' });
+  assert.deepEqual(describeError(null), {});
+
+  const wrapped = new Error('fetch failed', {
+    cause: { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED 127.0.0.1:5432' },
+  });
+  const described = describeError(wrapped);
+  assert.equal(described.error, 'fetch failed');
+  assert.deepEqual(described.cause, {
+    error: 'connect ECONNREFUSED 127.0.0.1:5432',
+    errorCode: 'ECONNREFUSED',
+  });
+  assert.equal(String(describeError(new Error('x'.repeat(5000))).error).length, 4000);
+});
+test('request failure context carries route, caller, query and error detail', () => {
+  const error = Object.assign(new Error('relation "records" does not exist'), { code: '42P01' });
+  const context = describeRequestFailure(
+    error,
+    {
+      method: 'GET',
+      path: '/api/threat/analytics',
+      route: { path: '/api/threat/analytics' },
+      query: { range: '30d' },
+      ip: '127.0.0.1',
+      operator: { username: 'admin', role: 'ADMIN' },
+    },
+    'ref-1',
+  );
+
+  assert.equal(context.error, 'relation "records" does not exist');
+  assert.equal(context.errorCode, '42P01');
+  assert.equal(context.reference, 'ref-1');
+  assert.equal(context.httpStatus, 500);
+  assert.equal(context.method, 'GET');
+  assert.equal(context.path, '/api/threat/analytics');
+  assert.equal(context.route, '/api/threat/analytics');
+  assert.deepEqual(context.query, { range: '30d' });
+  assert.equal(context.actor, 'admin');
+  assert.equal(context.role, 'ADMIN');
+  assert.equal(context.ip, '127.0.0.1');
 });
 test(
   'PostgreSQL news ingestion stays idempotent; events paginate and validate filters',

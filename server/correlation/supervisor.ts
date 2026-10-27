@@ -5,7 +5,7 @@ import { totalmem } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Pool } from 'pg';
 import type { PipelineHealth, CorrelationSnapshot } from '../../shared/correlation.ts';
-import type { AdvisoryIngestor } from './ingest.ts';
+import { databaseCode, type AdvisoryIngestor } from './ingest.ts';
 export type IngestPriority = 'HIGH' | 'MEDIUM' | 'LOW';
 export interface SupervisorConfig {
   highPool: number;
@@ -18,6 +18,31 @@ const CRASH_WINDOW_MS = 60_000;
 const CRASH_THRESHOLD = 3;
 const PAUSE_DURATION_MS = 5 * 60_000; // 5 minutes
 const WORKER_DEADLINE_MS = 15_000;
+/**
+ * Hard ceiling for HIGH-priority admission. Soft shedding (85%) slows the
+ * pipeline; at 95% the process itself is at risk, and admitting more work —
+ * including a worker thread with a 24 MB heap — makes the OOM certain.
+ */
+const HARD_MEMORY_CEILING_PERCENT = 95;
+
+/**
+ * Does this error mean the database is unreachable?
+ *
+ * SQLSTATE class 08 is connection exception, 57P0x is shutdown-related, and
+ * 53300 is too-many-connections — all "the database is not available to us".
+ * Statement and lock timeouts (57014/55P03), unique violations, undefined
+ * columns and local I/O errors are the database *answering*, often with a
+ * complaint, and must not be reported as a severed connection.
+ */
+function isConnectivityFailure(code: string, error: unknown): boolean {
+  if (/^(08[A-Z0-9]{3}|57P0[123]|53300)$/.test(code)) return true;
+  return (
+    error instanceof Error &&
+    /connection terminated|connection timeout|timeout exceeded when trying to connect|client has encountered a connection error|server closed the connection/i.test(
+      error.message,
+    )
+  );
+}
 
 interface Waiter {
   trackingId: string;
@@ -114,6 +139,17 @@ export class PipelineSupervisor {
     this.pump();
   }
 
+  private lastMemoryPercent = 0;
+  /**
+   * Inject a memory reading for admission decisions and the shedding poll.
+   * Tests and health probes need a deterministic value; production reads it
+   * from memoryPercent() at each heartbeat.
+   */
+  private memoryProbe: (() => number) | null = null;
+  setMemoryProbe(probe: (() => number) | null): void {
+    this.memoryProbe = probe;
+  }
+
   memoryPercent(): number {
     const memory = process.memoryUsage();
     // constrainedMemory() is zero on hosts without a cgroup limit. Falling
@@ -123,7 +159,15 @@ export class PipelineSupervisor {
     const limit = process.constrainedMemory?.() || totalmem();
     const heap = memory.heapUsed / getHeapStatistics().heap_size_limit;
     const rss = limit > 0 ? memory.rss / limit : 0;
-    return Math.min(100, Math.max(heap, rss) * 100);
+    this.lastMemoryPercent = Math.min(100, Math.max(heap, rss) * 100);
+    return this.lastMemoryPercent;
+  }
+
+  /** The reading used for shedding and admission: the probe when installed. */
+  private sampleMemory(): number {
+    const value = this.memoryProbe ? this.memoryProbe() : this.memoryPercent();
+    if (Number.isFinite(value)) this.lastMemoryPercent = Math.min(100, Math.max(0, value));
+    return this.lastMemoryPercent;
   }
 
   start(): void {
@@ -145,7 +189,31 @@ export class PipelineSupervisor {
     this.timer = undefined;
     this.rejectWaiters(new Error('SUPERVISOR_STOPPED'));
     for (const task of this.active.values()) task.controller.abort();
-    while (this.active.size || this.checking) await delay(20);
+    // Bounded drain: a worker whose controller ignores the abort must not make
+    // shutdown hang forever (main.ts then force-exits after 30 s with in-flight
+    // work unexplained). Stop waiting after the worker deadline and report it.
+    const deadline = Date.now() + WORKER_DEADLINE_MS + 1_000;
+    while ((this.active.size || this.checking) && Date.now() < deadline) await delay(20);
+    if (this.active.size)
+      this.ingestor.telemetry.log('CRITICAL', 'supervisor.shutdown_drain_timeout', {
+        count: this.active.size,
+      });
+    // A simulated fault is this instance's own state; leaving it armed on the
+    // shared row would outlive the process that created it.
+    if (this.simulated) await this.sweepArmedSimulation();
+  }
+
+  /** Clear an armed simulation unconditionally (owner shutdown). */
+  private async sweepArmedSimulation(): Promise<void> {
+    await this.pool
+      .query(
+        timedQuery(
+          'UPDATE correlation_policy SET simulated_fault=NULL, simulated_until=NULL WHERE id=1 AND simulated_fault IS NOT NULL',
+          [],
+          2000,
+        ),
+      )
+      .catch(() => {});
   }
 
   /**
@@ -177,12 +245,35 @@ export class PipelineSupervisor {
   private expireSimulation(): void {
     if (!this.simulated) return;
     this.simulated = null;
+    this.simulatedUntil = 0;
     this.simulatedCrashes = [];
     this.sheddingSince = 0;
     void this.pool
       .query(
         timedQuery(
           'UPDATE correlation_policy SET simulated_fault=NULL,simulated_until=NULL WHERE id=1 AND simulated_fault IS NOT NULL',
+          [],
+          2000,
+        ),
+      )
+      .catch(() => {});
+  }
+
+  /**
+   * Retire a simulation window whose expiry has passed, on the shared row.
+   * Scoped to rows this instance did not arm (`simulated === null`), so a live
+   * simulation is never cancelled by a sibling replica's heartbeat. It is run
+   * against the policy row rather than in memory because the orphan is only
+   * visible there.
+   */
+  private async sweepStaleSimulation(): Promise<void> {
+    if (this.simulated) return;
+    await this.pool
+      .query(
+        timedQuery(
+          `UPDATE correlation_policy SET simulated_fault=NULL, simulated_until=NULL
+           WHERE id=1 AND simulated_fault IS NOT NULL
+             AND (simulated_until IS NULL OR simulated_until < now())`,
           [],
           2000,
         ),
@@ -230,7 +321,16 @@ export class PipelineSupervisor {
       .catch(() => {});
   }
 
-  private resetCircuit(): void {
+  /**
+   * Reset breaker state after a confirmed healthy probe.
+   *
+   * `clearShared` is false on the caller's ordinary "database is reachable"
+   * path: that path runs on every heartbeat, and clearing the shared row there
+   * would delete a sibling replica's five-minute pause on the strength of this
+   * replica's own health. A pause is retired by the replica that owns it, by
+   * expiry, or by this instance clearing a pause it deliberately reset.
+   */
+  private resetCircuit(clearShared = false): void {
     if (!this.crashTimestamps.length && !this.pausedUntil) return;
     const wasShared = this.adoptedPause > 0;
     this.crashTimestamps = [];
@@ -239,7 +339,7 @@ export class PipelineSupervisor {
     this.pauseReason = null;
     this.adoptedPause = 0;
     this.ingestor.telemetry.log('INFO', 'supervisor.circuit_breaker_reset');
-    if (wasShared) this.clearPersistedCircuit();
+    if (wasShared && clearShared) this.clearPersistedCircuit();
     this.pump();
   }
 
@@ -253,12 +353,19 @@ export class PipelineSupervisor {
     const log = this.ingestor.telemetry;
     try {
       if (Date.now() >= this.simulatedUntil) this.expireSimulation();
+      // A process that died mid-simulation leaves the shared policy row armed
+      // with an expiry no live instance owns. The heartbeat is the only place
+      // that can retire it, and it must, or a later simulate() inherits a
+      // fault this instance never armed. It is best-effort: housekeeping that
+      // cannot reach the database must not abort the health probe below, which
+      // is what decides shedding, admission and readiness.
+      await this.sweepStaleSimulation().catch(() => {});
       // A breaker must not outlive the outage that opened it. Without this
       // reset, a recovered database still rejected every advisory for the
       // remainder of the five-minute pause.
       if (this.pausedUntil && !this.isPaused()) this.resetCircuit();
 
-      const memory = this.simulated === 'memory' ? 90 : this.memoryPercent();
+      const memory = this.simulated === 'memory' ? 90 : this.sampleMemory();
       if (memory >= 85 && !this.memoryPressure) {
         // Hysteresis on the rise: a single sample is a transient allocation
         // spike, not sustained pressure. Require it to persist for one more
@@ -328,10 +435,16 @@ export class PipelineSupervisor {
           this.adoptedPause = 0;
           this.clearPersistedCircuit();
           this.resetCircuit();
+        } else if (this.pausedUntil) {
+          // A local pause that this instance opened has run its course while the
+          // database stayed reachable; the pause itself expires, and the shared
+          // row is cleared by its owner.
+          this.resetCircuit(true);
         }
         if (!sharedPauseActive) {
-          // The database is reachable. Clear crash evidence and release any
-          // remaining pause so recovery is immediate, not five minutes later.
+          // The database is reachable. Clear crash evidence so recovery is
+          // immediate, not five minutes later, but never delete a sibling's
+          // shared pause from here (see resetCircuit).
           this.resetCircuit();
           const next = this.memoryPressure ? 'DEGRADED_BACKPRESSURE' : 'HEALTHY';
           if (this.health !== next)
@@ -345,14 +458,28 @@ export class PipelineSupervisor {
           });
         }
       } catch (error) {
-        if (this.health !== 'RECOVERING_DB_SEVERANCE')
-          log.log('CRITICAL', 'supervisor.database_unavailable');
-        this.health = 'RECOVERING_DB_SEVERANCE';
-        // pg destroys failed clients; a new connect resolves the configured
-        // failover/proxy endpoint. Never pool.end() the shared application pool.
-        // A simulated outage never contributes to the real breaker.
-        if (this.simulated === 'database') this.simulatedCrashes.push(Date.now());
-        else this.recordCrash();
+        // The block above is more than a connectivity probe: it adopts shared
+        // policy, flushes the dead-letter spool and resets the breaker. Treating
+        // *any* exception there as a database outage was wrong and dangerous —
+        // a spool directory that does not exist flipped the whole pipeline into
+        // RECOVERING_DB_SEVERANCE and opened a five-minute circuit breaker while
+        // the database was perfectly healthy.
+        const code = databaseCode(error);
+        if (isConnectivityFailure(code, error)) {
+          if (this.health !== 'RECOVERING_DB_SEVERANCE')
+            log.log('CRITICAL', 'supervisor.database_unavailable');
+          this.health = 'RECOVERING_DB_SEVERANCE';
+          // pg destroys failed clients; a new connect resolves the configured
+          // failover/proxy endpoint. Never pool.end() the shared application pool.
+          // A simulated outage never contributes to the real breaker.
+          if (this.simulated === 'database') this.simulatedCrashes.push(Date.now());
+          else this.recordCrash();
+        } else {
+          // A logic, schema or disk fault in an auxiliary step. The database is
+          // answering; degrading the whole pipeline over it is a self-inflicted
+          // outage. Report it and keep the current health.
+          log.log('ERROR', 'supervisor.health_step_failed');
+        }
       }
     } finally {
       this.checking = false;
@@ -435,14 +562,13 @@ export class PipelineSupervisor {
       if (this.health === 'RECOVERING_DB_SEVERANCE' || this.memoryPressure) return false;
       if (this.active.size >= this.concurrencyLimit) return false;
     } else {
-      // HIGH is protected from soft shedding, but still bounded by its own
-      // pool and by the configured desired ceiling. It must not open an
-      // unbounded number of workers while memory is exhausted.
-      //
-      // Shedding halves the GLOBAL ceiling, and a proportional share then rounds
-      // HIGH down to a single slot — starving exactly the critical advisories
-      // that shed-for-memory exists to keep alive. HIGH therefore gets its own
-      // floor. The global ceiling and the HIGH pool still bound it.
+      // HIGH is protected from soft shedding but remains bounded: by its own
+      // pool limit, by the global ceiling, and — critically — by a hard memory
+      // ceiling. "HIGH bypasses soft shedding" is only safe if a hard limit
+      // still exists; without one, a crash-loop of critical advisories during
+      // an OOM condition makes the OOM worse. The sampled value is reused so
+      // admission does not recompute what the heartbeat already measured.
+      if (this.lastMemoryPercent >= HARD_MEMORY_CEILING_PERCENT) return false;
       const highFloor = Math.min(
         this.desiredConcurrency,
         Math.max(2, Math.ceil(this.desiredConcurrency / 4)),
@@ -497,10 +623,16 @@ export class PipelineSupervisor {
   private getPoolLimit(priority: IngestPriority): number {
     switch (priority) {
       case 'HIGH': {
-        // Shedding halves the ceiling but must not shrink HIGH below its floor,
-        // otherwise the soft-shedding bypass documented on canAdmit means nothing.
-        const floor = Math.min(this.desiredConcurrency, Math.max(2, Math.ceil(this.desiredConcurrency / 4)));
-        return Math.max(1, this.config.highPool, floor);
+        // Shedding halves the ceiling but must not starve HIGH. The floor keeps
+        // a couple of critical slots alive; it must never *raise* HIGH above its
+        // configured share, which is what `max(1, highPool, floor)` did — with
+        // the default config, shedding turned 4 HIGH workers into 7 exactly
+        // when memory was the scarce resource. The floor is capped by the
+        // original share and by the hard memory ceiling: during shedding HIGH
+        // receives the smaller of its normal pool and its survival floor.
+        const floor = Math.max(2, Math.ceil(this.desiredConcurrency / 4));
+        const normal = Math.max(1, this.baseConfig.highPool);
+        return this.memoryPressure ? Math.max(1, Math.min(normal, floor)) : normal;
       }
       case 'MEDIUM':
         return Math.max(1, this.config.mediumPool);

@@ -8,6 +8,7 @@ import {
 } from './correlation/operations.ts';
 import type { CorrelationRuntime } from './correlation/runtime.ts';
 import { advisoryRecords } from './correlation/stream.ts';
+import { describeAdvisoryError } from './correlation/validation.ts';
 import { Readable } from 'node:stream';
 import express from 'express';
 import { WorkCapacityError } from './workLimiter.ts';
@@ -46,7 +47,7 @@ import { advisoryEmail } from './advisoryEmail';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
 import { emailIsConfigured } from './emailProviders';
 import { parseSyndication, RSS_MAX_BYTES } from './rss';
-import { readEvents, writeEvent } from './events';
+import { describeError, describeRequestFailure, readEvents, writeEvent } from './events';
 import { createDatabaseRateLimiter, type MutationLimiter, INGEST_LIMIT_CAPACITY, INGEST_LIMIT_REFILL_PER_MS } from './rateLimit';
 import { searchNvdCpes, loadNvdApiKey, isNvdRateLimitError, nvdRetryAfterSeconds } from './cpeSearch';
 import { searchThreatIntelligence, ThreatSearchRateLimitError } from './threatSearch';
@@ -467,18 +468,40 @@ export function createApp(
           .strict()
           .parse(req.body);
         let count = 0;
+        // Reject a submission that contains anything unparseable *before* it is
+        // queued. Enqueuing an invalid record would park a permanently
+        // undeliverable job in the pending queue: the worker re-validates,
+        // dead-letters it, and the submitter is told "accepted". The response
+        // names the field and rule only, never the rejected value.
+        const rejected: { record: number; reason: string }[] = [];
+        const accepted: unknown[] = [];
+        for await (const payload of advisoryRecords(
+          Readable.from([Buffer.from(ndjson)], { objectMode: false }),
+        )) {
+          if (++count > 128) throw new HttpError(413, 'At most 128 records per submission');
+          if (payload && typeof payload === 'object' && 'invalidFrame' in payload) {
+            rejected.push({ record: count, reason: String(payload.invalidFrame) });
+            continue;
+          }
+          const reason = describeAdvisoryError(payload);
+          if (reason !== 'VALID') {
+            rejected.push({ record: count, reason });
+            continue;
+          }
+          accepted.push(payload);
+        }
+        if (rejected.length) {
+          res.status(400).json({ error: 'Invalid advisory records', queued: 0, rejected });
+          return;
+        }
         await transaction(pool, async (db) => {
-          for await (const payload of advisoryRecords(
-            Readable.from([Buffer.from(ndjson)], { objectMode: false }),
-          )) {
-            if (++count > 128) throw new HttpError(413, 'At most 128 records per submission');
+          for (const payload of accepted)
             await db.query('INSERT INTO correlation_pending(id,payload) VALUES($1,$2)', [
               randomUUID(),
               JSON.stringify(payload),
             ]);
-          }
         });
-        res.status(202).json({ queued: count });
+        res.status(202).json({ queued: accepted.length });
       }),
     );
     app.get(
@@ -1399,6 +1422,14 @@ export function createApp(
     }),
   );
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'API route not found')));
+  // Unknown *mutation* routes are not pages. Falling through to the SPA shell
+  // answered `POST /api/typo` with 200 + HTML, which a client reads as success
+  // and an operator reads as a working endpoint.
+  app.use((req, _res, next) =>
+    ['GET', 'HEAD', 'OPTIONS'].includes(req.method)
+      ? next()
+      : next(new HttpError(404, 'Route not found')),
+  );
   app.use(
     express.static(path.resolve('dist'), {
       index: false,
@@ -1409,7 +1440,7 @@ export function createApp(
     }),
   );
   app.get('*', (_req, res) => res.sendFile(path.resolve('dist/index.html')));
-  app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  app.use((error: any, request: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (error instanceof WorkCapacityError) {
       res.setHeader('Retry-After', '2');
       return res.status(503).json({ error: 'Authentication capacity is busy; retry shortly' });
@@ -1424,15 +1455,30 @@ export function createApp(
     if (error?.type === 'entity.too.large') return res.status(413).json({ error: 'Request body too large' });
     if (error instanceof SyntaxError) return res.status(400).json({ error: 'Invalid JSON' });
     const reference = randomUUID();
+    const detail = describeError(error);
+    // Keep the client response generic (internals stay server-side) but make the
+    // retained event complete enough to diagnose the failure without the
+    // process log: message, DB error code/detail/hint, route, caller and query.
     void writeEvent(pool, {
       category: 'ISSUE',
       level: 'ERROR',
       code: 'http.request_failed',
       message: 'An API request failed',
-      context: { reference, method: _req.method, path: _req.path, errorType: error?.name || 'Error' },
-    }).catch(() => {});
+      context: describeRequestFailure(error, request, reference),
+    }).catch((writeError) => {
+      // The audit write itself can fail (for example during a database outage);
+      // log that separately instead of hiding it behind the original failure.
+      console.error(
+        JSON.stringify({
+          level: 'error',
+          event: 'event.write_failed',
+          reference,
+          message: writeError instanceof Error ? writeError.message : String(writeError),
+        }),
+      );
+    });
     console.error(
-      JSON.stringify({ level: 'error', reference, type: error?.name || 'Error', code: error?.code }),
+      JSON.stringify({ level: 'error', reference, method: request.method, path: request.path, ...detail }),
     );
     res.status(500).json({ error: 'Server operation failed', reference });
   });

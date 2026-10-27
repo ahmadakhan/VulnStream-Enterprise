@@ -21,6 +21,13 @@ const STANDARD_DROP = new Set([
   'ingestion.duplicate',
 ]);
 const STANDARD_KEEP_PREFIXES = ['dead_letter.', 'database.', 'extraction.isolated', 'validation.'];
+/**
+ * Hard cap on the telemetry rows one advisory may persist in its own
+ * transaction. 48 rows x 14 bound parameters stays far from the 65,535
+ * parameter limit, and the INSERT stays well inside the ingest
+ * statement_timeout; exceeding it is reported through `droppedLogs`.
+ */
+const MAX_PERSIST_ROWS = 48;
 
 /**
  * Fixed allowlist: caller-controlled strings, errors, URLs and payloads cannot
@@ -38,6 +45,8 @@ export class CorrelationTelemetry {
   private drainWaiters = new Set<(error?: Error) => void>();
   private outputError?: Error;
   droppedLogs = 0;
+  /** Count of advisories whose telemetry was truncated at MAX_PERSIST_ROWS. */
+  truncatedPersists = 0;
   /**
    * Operational logging detail. Mutated at runtime from settings so an
    * operator can raise verbosity without restarting the worker; defaults to
@@ -136,6 +145,18 @@ export class CorrelationTelemetry {
     if (STANDARD_KEEP_PREFIXES.some((prefix) => entry.event.startsWith(prefix))) return true;
     return !STANDARD_DROP.has(entry.event);
   }
+  /**
+   * Drop the buffered entries of an advisory whose transaction will never
+   * commit. Without this, every failed advisory leaves its log lines in the
+   * shared ring until the ring cap evicts them — they are never persisted and
+   * never attributed, and under a systematic failure (worker timeout, database
+   * outage) the ring fills with entries that are silently discarded later.
+   */
+  discard(trackingId: string): void {
+    for (let index = this.logs.length - 1; index >= 0; index--)
+      if (this.logs[index].trackingId === trackingId) this.logs.splice(index, 1);
+  }
+
   /** Write-ahead logging: persist telemetry entries to operational_events before commit.
    * Caller MUST call this inside the same transaction that commits the advisory.
    *
@@ -152,6 +173,15 @@ export class CorrelationTelemetry {
       ? this.logs.filter((entry) => entry.trackingId === trackingId)
       : this.logs;
     if (!inFlight.length) return;
+    if (inFlight.length > MAX_PERSIST_ROWS) {
+      // A pathological advisory (verbose mode, many stages) would otherwise
+      // build a statement large enough to trip its own statement_timeout and
+      // abort the advisory it is recording. The oldest rows are kept, the
+      // remainder is counted so the operator can see the truncation.
+      this.droppedLogs += inFlight.length - MAX_PERSIST_ROWS;
+      this.truncatedPersists++;
+      inFlight.splice(0, inFlight.length - MAX_PERSIST_ROWS);
+    }
     const entries = inFlight;
     const values: unknown[] = [];
     const params = entries.map((log, index) => {

@@ -3,6 +3,84 @@ import type { Db } from './db';
 import { EVENT_CATEGORIES, type OperationalEvent } from '../src/types/index.ts';
 
 const sensitive = /password|secret|token|authorization|cookie|api.?key|payload|html|body|credential|privatekey|jwt|authtoken/i;
+const MAX_ERROR_TEXT = 4000;
+/**
+ * Structured description of a thrown value for an operational event.
+ *
+ * The generic HTTP handler used to record only `errorType`, which left an
+ * operator with "Error Type: error" and no way to tell a missing table from a
+ * parsing bug. This keeps the message, error/DB code and driver detail/hint in
+ * the event context, and enough of the stack to locate the throw site. Values
+ * pass through `redactEventContext` when written, so credentials in a context
+ * key are still stripped; the message and stack are bounded here so one
+ * pathological error cannot consume the 32 kB context budget.
+ */
+export function describeError(error: unknown, depth = 0): Record<string, unknown> {
+  if (error === null || error === undefined) return {};
+  if (typeof error !== 'object') return { error: String(error).slice(0, MAX_ERROR_TEXT) };
+
+  const value = error as Record<string, unknown>;
+  const message =
+    typeof value.message === 'string' && value.message.trim() !== '' ? value.message : String(error);
+  const details: Record<string, unknown> = { error: message.slice(0, MAX_ERROR_TEXT) };
+
+  if (typeof value.name === 'string' && value.name) details.errorType = value.name;
+  if (typeof value.code === 'string' || typeof value.code === 'number')
+    details.errorCode = String(value.code);
+  for (const [source, target] of [
+    ['detail', 'errorDetail'],
+    ['hint', 'errorHint'],
+    ['constraint', 'errorConstraint'],
+    ['table', 'errorTable'],
+    ['column', 'errorColumn'],
+    ['schema', 'errorSchema'],
+    ['severity', 'errorSeverity'],
+  ] as const) {
+    if (typeof value[source] === 'string' && value[source]) details[target] = value[source];
+  }
+  if (typeof value.stack === 'string' && value.stack) details.stack = value.stack.slice(0, MAX_ERROR_TEXT);
+
+  // Node wraps low-level socket/DNS failures in `cause`; surface one or two
+  // levels because "fetch failed" alone is not actionable.
+  if (depth < 2 && value.cause !== undefined && value.cause !== error)
+    details.cause = describeError(value.cause, depth + 1);
+  if (depth < 2 && Array.isArray(value.errors))
+    details.errors = value.errors.slice(0, 10).map((item) => describeError(item, depth + 1));
+  return details;
+}
+
+/**
+ * Context persisted for an unhandled request failure. Kept separate from the
+ * Express handler so the shape is unit-testable and every 500 carries the same
+ * fields: error detail, reference, route, authenticated actor and caller IP.
+ */
+export function describeRequestFailure(
+  error: unknown,
+  request: {
+    method?: string;
+    path?: string;
+    route?: { path?: string };
+    query?: unknown;
+    ip?: string;
+    operator?: { username?: string; role?: string };
+  },
+  reference: string,
+): Record<string, unknown> {
+  return {
+    ...describeError(error),
+    reference,
+    httpStatus: 500,
+    method: request.method,
+    path: request.path,
+    ...(request.route?.path ? { route: request.route.path } : {}),
+    query: request.query,
+    ...(request.operator
+      ? { actor: request.operator.username, role: request.operator.role }
+      : {}),
+    ip: request.ip,
+  };
+}
+
 export function redactEventContext(value: unknown, depth = 0): unknown {
   if (depth > 5) return '[truncated]';
   if (typeof value === 'string') return value.slice(0, 2000);

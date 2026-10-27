@@ -72,10 +72,28 @@ const guardedShape = z
     return true;
   }, 'Input exceeds ingestion boundary budget')
   .pipe(advisoryShape);
-export const AdvisoryInputSchema = z.preprocess((raw) => {
+const PREPROCESSED = z.preprocess((raw) => {
   const encoded = boundedJson(raw);
   return encoded === null ? null : JSON.parse(encoded);
 }, guardedShape);
+
+export const AdvisoryInputSchema = PREPROCESSED;
+
+/**
+ * Describe why an advisory was rejected, without echoing its content.
+ *
+ * The ingest pipeline dead-letters malformed input instead of throwing, which
+ * is right, but a publisher needs to know *which* rule was broken. Only the
+ * field path and the rule name are returned: the rejected values themselves
+ * may contain customer data or be the payload of an injection attempt.
+ */
+export function describeAdvisoryError(raw: unknown): string {
+  const result = PREPROCESSED.safeParse(raw);
+  if (result.success) return 'VALID';
+  const first = result.error.issues[0];
+  const field = first?.path.filter((part) => typeof part === 'string').join('.') || 'payload';
+  return `${field}:${first?.code ?? 'invalid'}`;
+}
 export type AdvisoryInput = z.infer<typeof AdvisoryInputSchema>;
 export interface ExtractedText {
   text: string;

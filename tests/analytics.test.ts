@@ -125,6 +125,51 @@ test('computeThreatAnalytics handles empty database', { skip: !database }, async
   }
 });
 
+test(
+  'computeThreatAnalytics runs when the planner selects a parallel plan',
+  { skip: !database },
+  async () => {
+    const base = createPool(database!);
+    const schema = 'test_' + randomUUID().replaceAll('-', '');
+    await base.query(`CREATE SCHEMA "${schema}"`);
+    const url = new URL(database!);
+    url.searchParams.set('options', `-c search_path=${schema} -c debug_parallel_query=on`);
+    const pool = createPool(url.href);
+
+    try {
+      await migrate(pool);
+
+      // Regression: safe_timestamptz/safe_numeric used to be PL/pgSQL functions
+      // with an EXCEPTION block but were declared PARALLEL SAFE. Any query the
+      // planner parallelised (Threat Analytics & Trends once `records` grew)
+      // then failed with "cannot start subtransactions during a parallel
+      // operation" and surfaced as a 500 "Server operation failed".
+      const cve = cveForAnalytics({
+        cveId: 'CVE-2024-ANALYTICS-PARALLEL',
+        publishedDate: new Date().toISOString(),
+        cvss: { version: '3.1', score: 9.8, vector: 'CVSS:3.1/AV:N', severity: 'CRITICAL' },
+        cisaKev: { isKev: true },
+        exploitStatus: 'Active Weaponized',
+        cpeMatches: ['cpe:2.3:a:microsoft:windows_10:*:*:*:*:*:*:*:*'],
+      });
+      await transaction(pool, async (db) => {
+        await put(db, 'cveData', cve.cveId, cve);
+      });
+
+      const result = await computeThreatAnalytics(pool, '30d', 10);
+
+      assert.equal(result.totalCves, 1);
+      assert.equal(result.kevCount, 1);
+      assert.equal(result.severityDistribution.critical, 1);
+      assert.equal(result.topVendors.length, 1);
+    } finally {
+      await pool.end();
+      await base.query(`DROP SCHEMA "${schema}" CASCADE`);
+      await base.end();
+    }
+  },
+);
+
 test('computeThreatAnalytics respects timeline range filter', { skip: !database }, async () => {
   const base = createPool(database!);
   const schema = 'test_' + randomUUID().replaceAll('-', '');

@@ -117,7 +117,7 @@ export const Sidebar: React.FC = () => {
       {/* Nav List with Sections & SVG Icons */}
       <nav
         aria-label="Primary navigation"
-        className="ui-navigation flex-1 overflow-y-auto px-3 py-4 space-y-6"
+        className="ui-navigation flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-6"
       >
         {navSections.map((section) => (
           <div key={section.title}>
@@ -170,7 +170,12 @@ export const Sidebar: React.FC = () => {
       </nav>
 
       {/* Sidebar Footer: Theme Toggle & Session Security */}
-      <div className="p-3 border-t border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 space-y-2 bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50">
+      {/* `shrink-0` is load-bearing. Without it this footer is a flex item that
+          grows to its content height, which squeezes the navigation list above
+          it; on a laptop viewport the list then ends mid-item under the theme
+          toggle and the last sections (Pipeline executions onward) become
+          unreachable. `min-h-0` on the nav lets it scroll instead of overflow. */}
+      <div className="shrink-0 p-3 border-t border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 space-y-2 bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50">
         {/* Light / Dark Mode Toggle Button */}
         <button
           onClick={toggleTheme}
