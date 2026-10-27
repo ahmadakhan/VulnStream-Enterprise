@@ -203,10 +203,10 @@ export class AdvisoryIngestor {
           let unfinishedAdvisoryId: string | null = null;
           // Resolve (or create) the advisory row and report which case applied.
           // The URL is the natural key: the row is inserted, or an existing row
-          // at this URL is updated in place when its content changed. A
-          // fingerprint matching a *different* URL is a duplicate and is
-          // detected inside a savepoint, because a raised unique violation
-          // aborts the enclosing transaction.
+          // at this URL is updated in place when its content changed.
+          // A fingerprint already stored under a different URL is a duplicate;
+          // it is detected by probing for an existing row rather than by
+          // attempting a write that could raise a unique violation.
           const advisoryId = await (async (): Promise<string | null> => {
             const inserted = await query<{ id: string }>(
               `INSERT INTO unstructured_advisories(id,title,content,url,fingerprint)
@@ -214,20 +214,12 @@ export class AdvisoryIngestor {
               [randomUUID(), input.title, extracted.cleanContent, input.url, fingerprint],
             );
             if (inserted.rowCount) return inserted.rows[0].id;
-            await query('SAVEPOINT advisory_fingerprint');
-            let duplicateFingerprint = false;
-            try {
-              // Only a conflict on the fingerprint can raise here; the URL is
-              // already known to exist. The statement is rolled back to the
-              // savepoint so the transaction is usable afterwards.
-              duplicateFingerprint =
-                ((await query('SELECT 1 FROM unstructured_advisories WHERE fingerprint=$1 FOR UPDATE', [fingerprint]))
-                  .rowCount ?? 0) > 0;
-            } catch (conflict) {
-              if (databaseCode(conflict) !== '23505') throw conflict;
-              await query('ROLLBACK TO SAVEPOINT advisory_fingerprint');
-              duplicateFingerprint = true;
-            }
+            // The URL is known to exist (the INSERT above found a conflict), so a
+            // matching fingerprint means duplicate content already stored. FOR
+            // UPDATE locks any matching row so the merge below is race-free.
+            const duplicateFingerprint =
+              ((await query('SELECT 1 FROM unstructured_advisories WHERE fingerprint=$1 FOR UPDATE', [fingerprint]))
+                .rowCount ?? 0) > 0;
             const current = await query<{ id: string; processed: boolean }>(
               `SELECT id, processed_at IS NOT NULL AS processed FROM unstructured_advisories WHERE url=$1`,
               [input.url],

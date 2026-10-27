@@ -1,14 +1,7 @@
 import { PageHeading } from './PageHeading';
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import {
-  ThreatAnalytics,
-  TimelinePoint,
-  SeverityDistribution,
-  ExploitStatusDistribution,
-  VendorAnalytics,
-  CveScoreBin,
-} from '../types';
+import { ThreatAnalytics, TimelinePoint, VendorAnalytics, CveScoreBin } from '../types';
 import {
   BarChart3,
   RefreshCw,
@@ -38,21 +31,6 @@ const SEVERITY_COLORS: Record<string, string> = {
   UNKNOWN: '#9ca3af',
 };
 
-const SEVERITY_LABELS: Record<keyof SeverityDistribution, string> = {
-  critical: 'Critical',
-  high: 'High',
-  medium: 'Medium',
-  low: 'Low',
-  unknown: 'Unknown',
-};
-
-const EXPLOIT_LABELS: Record<keyof ExploitStatusDistribution, string> = {
-  activeWeaponized: 'Active Weaponized',
-  reportedInWild: 'Reported In Wild',
-  pocAvailable: 'PoC Available',
-  none: 'No Known Exploit',
-};
-
 const TIMELINE_OPTIONS: { value: string; label: string }[] = [
   { value: '7d', label: 'Last 7 days' },
   { value: '30d', label: 'Last 30 days' },
@@ -61,7 +39,125 @@ const TIMELINE_OPTIONS: { value: string; label: string }[] = [
   { value: 'all', label: 'All time' },
 ];
 
-const SCORE_COLORS = ['#6b7280', '#3b82f6', '#f59e0b', '#f97316', '#ef4444'];
+const SCORE_COLORS = ['#3b82f6', '#60a5fa', '#f59e0b', '#f97316', '#ef4444'];
+
+function fmtNum(value: number) {
+  return value >= 1000 ? value.toLocaleString() : String(value);
+}
+
+function truncateLabel(label: string, maxChars: number) {
+  return label.length > maxChars ? `${label.slice(0, maxChars)}…` : label;
+}
+
+function niceTicks(maxValue: number, count = 5): number[] {
+  if (maxValue <= 0) return [0];
+  const niceNum = (n: number, round: boolean): number => {
+    const exp = Math.floor(Math.log10(n));
+    const f = n / Math.pow(10, exp);
+    let nf: number;
+    if (round) {
+      if (f < 1.5) nf = 1;
+      else if (f < 3) nf = 2;
+      else if (f < 7) nf = 5;
+      else nf = 10;
+    } else {
+      if (f <= 1) nf = 1;
+      else if (f <= 2) nf = 2;
+      else if (f <= 5) nf = 5;
+      else nf = 10;
+    }
+    return nf * Math.pow(10, exp);
+  };
+  const range = niceNum(maxValue, false);
+  const step = niceNum(range / Math.max(count - 1, 1), true);
+  const ticks: number[] = [];
+  const stop = Math.ceil(maxValue / step) * step;
+  for (let v = 0; v <= stop + step * 0.5; v += step) {
+    ticks.push(Math.round(v));
+  }
+  if (ticks.length === 0) ticks.push(0);
+  // Guarantee the last tick reaches at least the observed maximum.
+  if (ticks[ticks.length - 1] < maxValue) ticks.push(Math.ceil(ticks[ticks.length - 1] + step));
+  return ticks;
+}
+
+function Axis({
+  ticks,
+  maxValue,
+  plotHeight,
+  plotWidth,
+  originY,
+  originX,
+  label,
+}: {
+  ticks: number[];
+  maxValue: number;
+  plotHeight: number;
+  plotWidth: number;
+  originY: number;
+  originX: number;
+  label?: string;
+}) {
+  const yFor = (v: number) => originY - (v / Math.max(maxValue, 1)) * plotHeight;
+  return (
+    <g>
+      {label && (
+        <text
+          x={-plotHeight / 2 - 10}
+          y={-24}
+          textAnchor="middle"
+          fontSize={10}
+          fill="currentColor"
+          className="text-zinc-500 light:text-zinc-600"
+          transform={`rotate(-90 ${-plotHeight / 2 - 24} 0)`}
+        >
+          {label}
+        </text>
+      )}
+      {ticks.map((t) => (
+        <g key={t}>
+          <line
+            x1={originX}
+            y1={yFor(t)}
+            x2={originX + plotWidth}
+            y2={yFor(t)}
+            stroke="currentColor"
+            strokeWidth={1}
+            opacity={0.08}
+          />
+          <text
+            x={originX - 8}
+            y={yFor(t) + 3}
+            textAnchor="end"
+            fontSize={10}
+            fill="currentColor"
+            className="text-zinc-500 light:text-zinc-600"
+          >
+            {fmtNum(t)}
+          </text>
+        </g>
+      ))}
+      <line
+        x1={originX}
+        y1={originY}
+        x2={originX + plotWidth}
+        y2={originY}
+        stroke="currentColor"
+        strokeWidth={1}
+        opacity={0.25}
+      />
+      <line
+        x1={originX}
+        y1={originY - plotHeight}
+        x2={originX}
+        y2={originY}
+        stroke="currentColor"
+        strokeWidth={1}
+        opacity={0.25}
+      />
+    </g>
+  );
+}
 
 function BarChart({
   data,
@@ -76,82 +172,101 @@ function BarChart({
   unit?: string;
   showLabels?: boolean;
 }) {
-  const barHeight = 120;
-  const barWidth = 32;
-  const gap = 12;
-  const totalWidth = data.length * (barWidth + gap);
+  const barHeight = 140;
+  const barWidth = 44;
+  const gap = 14;
+  const chartHeight = barHeight + 50;
+  const chartWidth = Math.max(data.length * (barWidth + gap) + 60, 220);
+  const plotTop = 16;
+  const plotBottom = 44;
+  const plotHeight = barHeight;
+  const originX = 36;
+  const originY = plotTop + plotHeight;
+  const plotWidth = chartWidth - originX - 16;
+  const ticks = niceTicks(maxValue);
+  const yFor = (v: number) => originY - (v / Math.max(maxValue, 1)) * plotHeight;
+
+  if (data.length === 0) {
+    return (
+      <div className="h-40 flex items-center justify-center text-zinc-500 light:text-zinc-600">
+        <span className="text-sm">No data</span>
+      </div>
+    );
+  }
+
   return (
     <svg
-      width={Math.max(totalWidth + 40, 200)}
-      height={barHeight + 40}
-      viewBox={`0 0 ${totalWidth + 40} ${barHeight + 40}`}
+      width="100%"
+      height={chartHeight}
+      viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+      shapeRendering="crispEdges"
     >
-      <g transform={`translate(20, ${barHeight})`}>
-        {data.map((d, i) => {
-          const height = maxValue > 0 ? (d.value / maxValue) * barHeight : 0;
-          const x = i * (barWidth + gap);
-          return (
-            <g key={d.label} transform={`translate(${x}, 0)`}>
-              <rect
-                x={0}
-                y={-height}
-                width={barWidth}
-                height={height}
-                rx={2}
-                fill={color || SEVERITY_COLORS[d.label.split(' ').pop()?.toUpperCase() || 'CRITICAL']}
-                opacity={0.85}
-              />
+      <Axis
+        ticks={ticks}
+        maxValue={maxValue}
+        plotHeight={plotHeight}
+        plotWidth={plotWidth}
+        originX={originX}
+        originY={originY}
+        label={unit ? unit : 'Count'}
+      />
+      {data.map((d, i) => {
+        const height = (d.value / Math.max(maxValue, 1)) * plotHeight;
+        const x = originX + i * (barWidth + gap);
+        return (
+          <g key={d.label} transform={`translate(${x}, ${originY})`}>
+            <rect
+              x={0}
+              y={-height}
+              width={barWidth}
+              height={Math.max(height, 0)}
+              fill={color || '#3b82f6'}
+              rx={3}
+              opacity={0.92}
+            />
+            <text
+              x={barWidth / 2}
+              y={-height - 5}
+              textAnchor="middle"
+              fontSize={10}
+              fill="currentColor"
+              className="text-zinc-300 light:text-zinc-800"
+            >
+              {d.value > 0 ? `${fmtNum(d.value)}${unit}` : ''}
+            </text>
+            {showLabels && (
               <text
                 x={barWidth / 2}
-                y={-height - 4}
+                y={16}
                 textAnchor="middle"
-                fontSize={11}
+                fontSize={10}
                 fill="currentColor"
-                className="text-zinc-400 light:text-zinc-600"
+                className="text-zinc-500 light:text-zinc-600"
               >
-                {d.value > 0 ? `${d.value}${unit}` : ''}
+                {truncateLabel(d.label, 12)}
               </text>
-              {showLabels && (
-                <text
-                  x={barWidth / 2}
-                  y={18}
-                  textAnchor="middle"
-                  fontSize={10}
-                  fill="currentColor"
-                  className="text-zinc-500 light:text-zinc-600"
-                >
-                  {d.label}
-                </text>
-              )}
-            </g>
-          );
-        })}
-      </g>
-      <line
-        x1={20}
-        y1={barHeight}
-        x2={totalWidth + 20}
-        y2={barHeight}
-        stroke="currentColor"
-        strokeWidth={1}
-        opacity={0.2}
-      />
+            )}
+          </g>
+        );
+      })}
     </svg>
   );
 }
 
 function TimelineChart({ data }: { data: TimelinePoint[] }) {
-  const maxValue = Math.max(...data.map((d) => d.cveCount), 1);
-  const chartHeight = 120;
-  const chartWidth = 560;
-  const padding = { top: 10, right: 20, bottom: 40, left: 40 };
+  const chartHeight = 200;
+  const chartWidth = 580;
+  const padding = { top: 26, right: 16, bottom: 46, left: 46 };
   const plotWidth = chartWidth - padding.left - padding.right;
   const plotHeight = chartHeight - padding.top - padding.bottom;
+  const originX = padding.left;
+  const originY = padding.top + plotHeight;
 
-  const yScale = (value: number) => plotHeight - (value / maxValue) * plotHeight;
-
-  const maxCritical = Math.max(...data.map((d) => d.critical), 1);
-  const maxHigh = Math.max(...data.map((d) => d.high), 1);
+  const totalMax = Math.max(...data.map((d) => d.cveCount), 1);
+  const critMax = Math.max(...data.map((d) => d.critical), 1);
+  const highMax = Math.max(...data.map((d) => d.high), 1);
+  const ticks = niceTicks(totalMax);
+  const yMax = Math.max(ticks[ticks.length - 1], 1);
 
   if (data.length === 0) {
     return (
@@ -162,153 +277,232 @@ function TimelineChart({ data }: { data: TimelinePoint[] }) {
     );
   }
 
-  const barWidth = Math.max(20, (plotWidth / data.length) * 0.6);
-  const barGap = (plotWidth - data.length * barWidth) / Math.max(data.length - 1, 1);
+  const slot = plotWidth / data.length;
+  const groupWidth = Math.min(Math.max(slot - 6, 2), 28);
+  const halfWidth = groupWidth / 2;
+  const showLabelEvery = Math.ceil(Math.max(data.length / 12, 1));
+  const rotateLabels = data.length > 8;
 
   return (
-    <svg width={chartWidth} height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
-      <g transform={`translate(${padding.left}, ${padding.top})`}>
-        <line
-          x1={0}
-          y1={plotHeight}
-          x2={plotWidth}
-          y2={plotHeight}
-          stroke="currentColor"
-          strokeWidth={1}
-          opacity={0.2}
-        />
-        {data.map((d, i) => {
-          const x = i * (barWidth + barGap);
-          const criticalHeight = (d.critical / maxCritical) * plotHeight;
-          const highHeight = (d.high / maxHigh) * plotHeight;
-          return (
-            <g key={d.label} transform={`translate(${x}, 0)`}>
-              <rect
-                x={0}
-                y={plotHeight - criticalHeight}
-                width={barWidth / 2}
-                height={criticalHeight}
-                fill={SEVERITY_COLORS.CRITICAL}
-                opacity={0.8}
-              />
-              <rect
-                x={barWidth / 2}
-                y={plotHeight - highHeight}
-                width={barWidth / 2}
-                height={highHeight}
-                fill={SEVERITY_COLORS.HIGH}
-                opacity={0.8}
-              />
+    <svg
+      width="100%"
+      height={chartHeight}
+      viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+      shapeRendering="crispEdges"
+    >
+      <g transform={`translate(${originX + plotWidth - 100}, ${padding.top})`}>
+        <rect x={0} y={0} width={96} height={20} rx={4} fill="currentColor" opacity={0.06} />
+        <rect x={8} y={5} width={9} height={9} fill={SEVERITY_COLORS.CRITICAL} rx={1} />
+        <text x={22} y={13} fontSize={10} fill="currentColor" className="text-zinc-400 light:text-zinc-600">
+          Critical
+        </text>
+        <rect x={60} y={5} width={9} height={9} fill={SEVERITY_COLORS.HIGH} rx={1} />
+        <text x={74} y={13} fontSize={10} fill="currentColor" className="text-zinc-400 light:text-zinc-600">
+          High
+        </text>
+      </g>
+      <Axis
+        ticks={ticks}
+        maxValue={yMax}
+        plotHeight={plotHeight}
+        plotWidth={plotWidth}
+        originX={originX}
+        originY={originY}
+        label="CVEs published"
+      />
+      {data.map((d, i) => {
+        const gx = originX + i * slot + (slot - groupWidth) / 2;
+        const critH = (d.critical / critMax) * plotHeight;
+        const highH = (d.high / highMax) * plotHeight;
+        const valueY = originY - Math.max(critH, highH);
+        const showLabel = i % showLabelEvery === 0 || i === data.length - 1;
+        const angle = rotateLabels ? -40 : 0;
+        return (
+          <g key={d.label} transform={`translate(${gx}, 0)`}>
+            <rect
+              x={0}
+              y={originY - critH}
+              width={halfWidth}
+              height={Math.max(critH, 0)}
+              fill={SEVERITY_COLORS.CRITICAL}
+              stroke={`${SEVERITY_COLORS.CRITICAL}80`}
+              strokeWidth={0.5}
+              rx={2}
+            />
+            <rect
+              x={halfWidth}
+              y={originY - highH}
+              width={halfWidth}
+              height={Math.max(highH, 0)}
+              fill={SEVERITY_COLORS.HIGH}
+              stroke={`${SEVERITY_COLORS.HIGH}80`}
+              strokeWidth={0.5}
+              rx={2}
+            />
+            {d.cveCount > 0 && (
+              <g>
+                <rect
+                  x={-10}
+                  y={valueY - 12}
+                  width={groupWidth + 20}
+                  height={11}
+                  fill="currentColor"
+                  opacity={0.08}
+                  rx={3}
+                />
+                <text
+                  x={groupWidth / 2}
+                  y={valueY - 4}
+                  textAnchor="middle"
+                  fontSize={9}
+                  fontWeight="700"
+                  fill="currentColor"
+                  className="text-zinc-300 light:text-zinc-700"
+                >
+                  {fmtNum(d.cveCount)}
+                </text>
+              </g>
+            )}
+            {showLabel && (
               <text
-                x={barWidth / 2}
-                y={plotHeight + 16}
-                textAnchor="middle"
-                fontSize={10}
-                fill="currentColor"
-                className="text-zinc-500 light:text-zinc-600"
-              >
-                {d.label}
-              </text>
-              <text
-                x={barWidth / 2}
-                y={-4}
+                x={groupWidth / 2}
+                y={originY + 16}
                 textAnchor="middle"
                 fontSize={9}
                 fill="currentColor"
-                className="text-zinc-400 light:text-zinc-600"
+                className="text-zinc-500 light:text-zinc-600"
+                transform={`rotate(${angle} ${gx + groupWidth / 2} ${originY + 16})`}
               >
-                {d.cveCount}
+                {truncateLabel(d.label, rotateLabels ? 8 : 12)}
               </text>
-            </g>
-          );
-        })}
-      </g>
+            )}
+          </g>
+        );
+      })}
+      <text
+        x={originX + plotWidth / 2}
+        y={chartHeight - 6}
+        textAnchor="middle"
+        fontSize={10}
+        fill="currentColor"
+        className="text-zinc-500 light:text-zinc-600"
+      >
+        Timeline bucket
+      </text>
     </svg>
   );
 }
 
 function PieChart({
   data,
-  colors,
-  size = 140,
-  showLegend = true,
+  size = 170,
 }: {
   data: { label: string; value: number; color?: string }[];
-  colors?: string[];
   size?: number;
-  showLegend?: boolean;
 }) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
   if (total === 0) {
     return (
-      <div className="h-32 flex items-center justify-center text-zinc-500 light:text-zinc-600">
+      <div className="h-36 flex items-center justify-center text-zinc-500 light:text-zinc-600">
         <span className="text-sm">No data</span>
       </div>
     );
   }
   const cx = size / 2;
   const cy = size / 2;
-  const r = size / 2 - 10;
+  const r = size / 2 - 14;
+  const rInner = r * 0.55;
 
   let offset = 0;
-  const slices = data.map((d, i) => {
-    const percentage = d.value / total;
-    const degrees = percentage * 360;
-    const startAngle = offset;
-    offset += degrees;
-    const color =
-      d.color || colors?.[i % (colors?.length || 1)] || SEVERITY_COLORS[d.label.toUpperCase()] || '#9ca3af';
+  const slices = data
+    .map((d) => {
+      const percentage = d.value / total;
+      const degrees = percentage * 360;
+      const startAngle = offset;
+      const endAngle = offset + degrees;
+      offset += degrees;
+      if (percentage <= 0) return null;
 
-    if (percentage >= 1) {
       const startRad = (startAngle - 90) * (Math.PI / 180);
-      const endRad = (startAngle + degrees - 90) * (Math.PI / 180);
+      const endRad = (endAngle - 90) * (Math.PI / 180);
       const x1 = cx + r * Math.cos(startRad);
       const y1 = cy + r * Math.sin(startRad);
       const x2 = cx + r * Math.cos(endRad);
       const y2 = cy + r * Math.sin(endRad);
+      const x1i = cx + rInner * Math.cos(startRad);
+      const y1i = cy + rInner * Math.sin(startRad);
+      const x2i = cx + rInner * Math.cos(endRad);
+      const y2i = cy + rInner * Math.sin(endRad);
       const largeArc = degrees > 180 ? 1 : 0;
+      const path = `M ${x1},${y1} A ${r},${r} 0 ${largeArc} 1 ${x2},${y2} L ${x2i},${y2i} A ${rInner},${rInner} 0 ${largeArc} 0 ${x1i},${y1i} Z`;
+      const midAngle = (startAngle + endAngle) / 2;
+      const midRad = (midAngle - 90) * (Math.PI / 180);
+      const labelR = (r + rInner) / 2;
+      const lx = cx + labelR * Math.cos(midRad);
+      const ly = cy + labelR * Math.sin(midRad);
+      const pct = Math.round(percentage * 100);
       return {
-        path: `M ${cx},${cy} L ${x1},${y1} A ${r},${r} 0 ${largeArc} 1 ${x2},${y2} Z`,
-        color,
+        path,
+        color: d.color || '#9ca3af',
         label: d.label,
         value: d.value,
-        percentage,
+        percentage: pct,
+        lx,
+        ly,
       };
-    }
-
-    if (percentage === 0) return null;
-
-    const startRad = (startAngle - 90) * (Math.PI / 180);
-    const endRad = (startAngle + degrees - 90) * (Math.PI / 180);
-    const x1 = cx + r * Math.cos(startRad);
-    const y1 = cy + r * Math.sin(startRad);
-    const x2 = cx + r * Math.cos(endRad);
-    const y2 = cy + r * Math.sin(endRad);
-    const largeArc = degrees > 180 ? 1 : 0;
-    const path = `M ${cx},${cy} L ${x1},${y1} A ${r},${r} 0 ${largeArc} 1 ${x2},${y2} Z`;
-    return { path, color, label: d.label, value: d.value, percentage };
-  });
+    })
+    .filter(Boolean) as Array<{
+    path: string;
+    color: string;
+    label: string;
+    value: number;
+    percentage: number;
+    lx: number;
+    ly: number;
+  }>;
 
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      {slices.filter(Boolean).map((s, i) =>
-        s ? (
-          <g key={`${s.label}-${i}`}>
-            <path d={s.path} fill={s.color} opacity={0.85} />
-          </g>
-        ) : null,
-      )}
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} shapeRendering="crispEdges">
+      {slices.map((s, i) => (
+        <g key={`${s.label}-${i}`}>
+          <path d={s.path} fill={s.color} opacity={0.92} />
+          {s.percentage >= 6 && (
+            <text
+              x={s.lx}
+              y={s.ly}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={11}
+              fontWeight="600"
+              fill="#ffffff"
+            >
+              {s.percentage}%
+            </text>
+          )}
+        </g>
+      ))}
       <text
         x={cx}
-        y={cy}
+        y={cy - 4}
         textAnchor="middle"
         dominantBaseline="middle"
-        fontSize={14}
-        fontWeight="bold"
+        fontSize={15}
+        fontWeight="700"
         fill="currentColor"
         className="text-zinc-100 light:text-zinc-900"
       >
         {total}
+      </text>
+      <text
+        x={cx}
+        y={cy + 14}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fontSize={10}
+        fill="currentColor"
+        className="text-zinc-500 light:text-zinc-600"
+      >
+        total
       </text>
     </svg>
   );
@@ -317,101 +511,140 @@ function PieChart({
 function HistogramChart({ bins }: { bins: CveScoreBin[] }) {
   const maxValue = Math.max(...bins.map((b) => b.count), 1);
   const barHeight = 140;
-  const barWidth = 48;
-  const gap = 6;
-  const totalWidth = bins.length * (barWidth + gap);
+  const chartHeight = barHeight + 50;
+  const chartWidth = 460;
+  const padding = { top: 16, right: 24, bottom: 44, left: 44 };
+  const plotHeight = barHeight;
+  const originX = padding.left;
+  const originY = padding.top + plotHeight;
+  const plotWidth = chartWidth - padding.left - padding.right;
+  const ticks = niceTicks(maxValue);
+  const yFor = (v: number) => originY - (v / Math.max(maxValue, 1)) * plotHeight;
+  const barWidth = 46;
+  const gap = 8;
+
+  if (bins.length === 0) {
+    return (
+      <div className="h-36 flex items-center justify-center text-zinc-500 light:text-zinc-600">
+        <span className="text-sm">No data</span>
+      </div>
+    );
+  }
+
   return (
     <svg
-      width={Math.max(totalWidth + 30, 240)}
-      height={barHeight + 40}
-      viewBox={`0 0 ${totalWidth + 30} ${barHeight + 40}`}
+      width="100%"
+      height={chartHeight}
+      viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+      shapeRendering="crispEdges"
     >
-      <g transform={`translate(15, ${barHeight})`}>
-        {bins.map((bin, i) => {
-          const height = (bin.count / maxValue) * barHeight;
-          const x = i * (barWidth + gap);
-          return (
-            <g key={bin.range} transform={`translate(${x}, 0)`}>
-              <rect
-                x={0}
-                y={-height}
-                width={barWidth}
-                height={height}
-                rx={2}
-                fill={SCORE_COLORS[i % SCORE_COLORS.length]}
-                opacity={0.8}
-              />
+      <Axis
+        ticks={ticks}
+        maxValue={maxValue}
+        plotHeight={plotHeight}
+        plotWidth={plotWidth}
+        originX={originX}
+        originY={originY}
+        label="CVE count"
+      />
+      {bins.map((bin, i) => {
+        const height = (bin.count / Math.max(maxValue, 1)) * plotHeight;
+        const x = originX + i * (barWidth + gap);
+        return (
+          <g key={bin.range} transform={`translate(${x}, ${originY})`}>
+            <rect
+              x={0}
+              y={-height}
+              width={barWidth}
+              height={Math.max(height, 0)}
+              fill={SCORE_COLORS[i % SCORE_COLORS.length]}
+              rx={2}
+              opacity={0.9}
+            />
+            {bin.count > 0 && (
               <text
                 x={barWidth / 2}
-                y={-height - 3}
+                y={-height - 4}
                 textAnchor="middle"
                 fontSize={10}
                 fill="currentColor"
-                className="text-zinc-500 light:text-zinc-600"
+                className="text-zinc-300 light:text-zinc-800"
               >
-                {bin.count > 0 ? bin.count : ''}
+                {fmtNum(bin.count)}
               </text>
-              <text
-                x={barWidth / 2}
-                y={20}
-                textAnchor="middle"
-                fontSize={9}
-                fill="currentColor"
-                className="text-zinc-500 light:text-zinc-600"
-              >
-                {bin.range}
-              </text>
-            </g>
-          );
-        })}
-      </g>
-      <line
-        x1={15}
-        y1={barHeight}
-        x2={totalWidth + 15}
-        y2={barHeight}
-        stroke="currentColor"
-        strokeWidth={1}
-        opacity={0.2}
-      />
+            )}
+            <text
+              x={barWidth / 2}
+              y={16}
+              textAnchor="middle"
+              fontSize={9}
+              fill="currentColor"
+              className="text-zinc-500 light:text-zinc-600"
+            >
+              {bin.range}
+            </text>
+          </g>
+        );
+      })}
     </svg>
   );
 }
 
 function Legend({ items }: { items: { label: string; color: string; value: number }[] }) {
+  const total = items.reduce((sum, i) => sum + i.value, 0);
   return (
     <div className="flex flex-wrap gap-3">
-      {items.map((item) => (
-        <div key={item.label} className="flex flex-wrap items-center gap-2">
-          <span className="w-3 h-3 rounded" style={{ backgroundColor: item.color }} />
-          <span className="text-xs text-zinc-400 light:text-zinc-600">{item.label}</span>
-          <span className="text-xs font-mono text-zinc-300 light:text-zinc-800">{item.value}</span>
-        </div>
-      ))}
+      {items.map((item) => {
+        const pct = total > 0 ? ((item.value / total) * 100).toFixed(1) : '0';
+        return (
+          <div key={item.label} className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded" style={{ backgroundColor: item.color }} />
+            <span className="text-xs text-zinc-400 light:text-zinc-600">{item.label}</span>
+            <span className="text-xs font-mono text-zinc-300 light:text-zinc-800">
+              {fmtNum(item.value)} ({pct}%)
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 export const ThreatAnalyticsView: React.FC = () => {
   const { fetchThreatAnalytics } = useApp();
+  const fetchRef = useRef(fetchThreatAnalytics);
+  // The context value is rebuilt on every render, which makes `fetchThreatAnalytics`
+  // a new reference each render. Holding the latest ref decouples data loading from
+  // that reference, so analytics are only re-fetched when the selected range changes
+  // (not on every re-render). This eliminates the loading-spinner "blink".
+  useEffect(() => {
+    fetchRef.current = fetchThreatAnalytics;
+  });
+
   const [range, setRange] = useState('30d');
   const [analytics, setAnalytics] = useState<ThreatAnalytics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const requestId = useRef(0);
 
   const loadAnalytics = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const currentId = ++requestId.current;
     try {
-      const data = await fetchThreatAnalytics(range, 10);
+      const data = await fetchRef.current(range, 10);
+      // Ignore results from superseded requests (e.g. rapid range changes).
+      if (requestId.current !== currentId) return;
       setAnalytics(data);
     } catch (err) {
+      if (requestId.current !== currentId) return;
       setError(err instanceof Error ? err.message : 'Failed to load analytics');
     } finally {
+      if (requestId.current !== currentId) return;
       setLoading(false);
     }
-  }, [range, fetchThreatAnalytics]);
+  }, [range]);
 
   useEffect(() => {
     void loadAnalytics();
@@ -494,6 +727,7 @@ export const ThreatAnalyticsView: React.FC = () => {
     <div className="space-y-6">
       <PageHeading
         page="threat-analytics"
+        title="Threat Analytics & Trends"
         children={
           <span className="text-sm text-zinc-400 light:text-zinc-600">
             Aggregated vulnerability trends and severity distributions from the NVD CVE cache. Select a time
@@ -503,13 +737,12 @@ export const ThreatAnalyticsView: React.FC = () => {
       />
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           <Calendar className="h-4 w-4 text-zinc-500" />
           <span className="text-sm text-zinc-400 light:text-zinc-600">Timeline:</span>
           {TIMELINE_OPTIONS.map((opt) => (
             <button
               key={opt.value}
-              aria-pressed={range === opt.value}
               onClick={() => handleRangeChange(opt.value)}
               className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
                 range === opt.value
@@ -521,7 +754,7 @@ export const ThreatAnalyticsView: React.FC = () => {
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           {analytics && (
             <>
               <button
@@ -557,9 +790,25 @@ export const ThreatAnalyticsView: React.FC = () => {
         </div>
       )}
 
+      {loading && !analytics && (
+        <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
+          <Loader2 className="mx-auto h-6 w-6 text-blue-400 animate-spin mb-2" />
+          <p className="text-sm text-zinc-400 light:text-zinc-600">Loading threat analytics data...</p>
+        </div>
+      )}
+
+      {!analytics && !loading && !error && (
+        <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
+          <BarChart3 className="mx-auto h-10 w-10 text-zinc-600 light:text-zinc-400 mb-3" />
+          <p className="text-sm text-zinc-400 light:text-zinc-600">
+            Select a timeline range to view threat analytics.
+          </p>
+        </div>
+      )}
+
       {analytics && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <KpiCard
               icon={<Database className="h-5 w-5 text-blue-400" />}
               label="Total CVEs"
@@ -595,20 +844,16 @@ export const ThreatAnalyticsView: React.FC = () => {
               </div>
             </ChartCard>
 
-            <ChartCard title="Severity Distribution">
-              <div className="flex items-center justify-center">
+            <ChartCard title="Severity Distribution" subtitle="Share of CVEs by severity">
+              <div className="flex flex-col items-center gap-3">
                 <PieChart data={severityData} />
-              </div>
-              <div className="mt-3">
                 <Legend items={severityData} />
               </div>
             </ChartCard>
 
-            <ChartCard title="Exploit Status">
-              <div className="flex items-center justify-center">
+            <ChartCard title="Exploit Status" subtitle="Active exploitation posture">
+              <div className="flex flex-col items-center gap-3">
                 <PieChart data={exploitData} />
-              </div>
-              <div className="mt-3">
                 <Legend items={exploitData} />
               </div>
             </ChartCard>
@@ -631,13 +876,15 @@ export const ThreatAnalyticsView: React.FC = () => {
                   showLabels={false}
                 />
               </div>
-              <div className="mt-2 space-y-1">
+              <div className="mt-3 space-y-1">
                 {analytics.topVendors.map((v: VendorAnalytics) => (
                   <div key={v.vendor} className="flex items-center justify-between text-xs">
-                    <span className="text-zinc-400 light:text-zinc-600 truncate max-w-[120px]">
+                    <span className="text-zinc-400 light:text-zinc-600 truncate max-w-[140px]">
                       {v.vendor}
                     </span>
-                    <span className="font-mono text-zinc-300 light:text-zinc-800">{v.cveCount}</span>
+                    <span className="font-mono text-zinc-300 light:text-zinc-800">
+                      {v.cveCount.toLocaleString()}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -650,22 +897,6 @@ export const ThreatAnalyticsView: React.FC = () => {
             </ChartCard>
           </div>
         </>
-      )}
-
-      {loading && (
-        <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
-          <Loader2 className="mx-auto h-6 w-6 text-blue-400 animate-spin mb-2" />
-          <p className="text-sm text-zinc-400 light:text-zinc-600">Loading threat analytics data...</p>
-        </div>
-      )}
-
-      {!analytics && !loading && !error && (
-        <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
-          <BarChart3 className="mx-auto h-10 w-10 text-zinc-600 light:text-zinc-400 mb-3" />
-          <p className="text-sm text-zinc-400 light:text-zinc-600">
-            Select a timeline range to view threat analytics.
-          </p>
-        </div>
       )}
     </div>
   );
@@ -683,7 +914,7 @@ function KpiCard({
   subtitle: string;
 }) {
   return (
-    <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
+    <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
       <div className="flex items-center gap-2 mb-1">{icon}</div>
       <div className="text-2xl font-bold text-zinc-100 light:text-zinc-900">{value}</div>
       <div className="text-sm text-zinc-400 light:text-zinc-600">{label}</div>
@@ -702,7 +933,7 @@ function ChartCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
+    <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
       <div className="mb-3">
         <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800">{title}</h3>
         {subtitle && <p className="text-xs text-zinc-500 light:text-zinc-600">{subtitle}</p>}

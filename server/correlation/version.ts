@@ -85,7 +85,18 @@ function intervalIsOrderedBy(
   bound: readonly number[],
   operator: string,
 ): boolean {
-  if (operator === '=') return true;
+  if (operator === '=') {
+    // Equality is undecidable against an interval that spans the bound: when the
+    // deployment version is short ("1.2" = every 1.2.x), the bound can land
+    // inside the precision interval, so some builds match and others don't. It
+    // is decidable only when the bound is strictly outside the interval, or the
+    // interval is a single point (a fully specified version).
+    return (
+      compareParts(bound, lower) < 0 ||
+      compareParts(bound, upper) > 0 ||
+      compareParts(lower, upper) === 0
+    );
+  }
   const satisfies = (point: readonly number[]) => {
     const cmp = compareParts(point, bound);
     switch (operator) {
