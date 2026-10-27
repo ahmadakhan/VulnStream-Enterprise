@@ -30,7 +30,7 @@ export const pages = {
   'threat-intelligence-search': { section: 'Operations', title: 'Threat intelligence search', icon: Search },
   'threat-data': { section: 'Operations', title: 'Threat intelligence', icon: Database },
   'threat-analytics': { section: 'Operations', title: 'Threat analytics & trends', icon: BarChart3 },
-  'cpe-matcher': { section: 'Operations', title: 'CPE matcher & severity classifier', icon: ScanLine },
+  'cpe-matcher': { section: 'Operations', title: 'CPE matcher & classifier', icon: ScanLine },
   advisories: { section: 'Operations', title: 'Security advisories', icon: FileText },
   correlation: { section: 'Autonomous pipeline', title: 'Live correlation', icon: Zap },
   pipeline: { section: 'Autonomous pipeline', title: 'Pipeline executions', icon: Activity },

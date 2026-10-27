@@ -58,6 +58,23 @@ test('evaluateVersion handles 4-component versions', () => {
   assert.equal(evaluateVersion('2.7.8.0', '>=2.7.8'), 'AFFECTED');
 });
 
+test('evaluateVersion equality is undecidable when the bound falls inside a short version interval', () => {
+  // A deployment version shorter than four components names a line, not a single
+  // release, so an equality bound inside the precision interval could match some
+  // builds and not others. The safe verdict is REVIEW, not a confident
+  // UNAFFECTED (which would miss the vulnerability). Regression: the `=` branch
+  // previously short-circuited to "decidable" and returned UNAFFECTED here.
+  assert.equal(evaluateVersion('9.0', '=9.0.3'), 'REVIEW');
+  assert.equal(evaluateVersion('9.0', '9.0.3'), 'REVIEW');
+  // A bound strictly outside the interval is decidable: no build matches, so the
+  // deployment is confidently UNAFFECTED before and after the fix.
+  assert.equal(evaluateVersion('9.0', '=8.0'), 'UNAFFECTED');
+  assert.equal(evaluateVersion('9.0', '=9.1'), 'UNAFFECTED');
+  // A fully specified (single-point) deployment is decidable, and a matching
+  // equality bound is AFFECTED.
+  assert.equal(evaluateVersion('1.2.3.4', '=1.2.3.4'), 'AFFECTED');
+});
+
 test('evaluateVersionDetailed uses numeric provenance for 4-component fallback', () => {
   const result = evaluateVersionDetailed('2.7.8.1', '>=2.7.8');
   assert.equal(result.provenance, 'numeric');
