@@ -63,6 +63,17 @@ export function SystemHealthView() {
 
   useEffect(() => {
     void refresh();
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'hidden') void refresh();
+    }, 10_000);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   const count = (name: string) => status?.backlog.find((row) => row.status === name)?.count ?? 0;
