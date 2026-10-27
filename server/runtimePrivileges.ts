@@ -22,6 +22,11 @@ export async function grantRuntimePrivileges(db: Db, role = 'vulnstream_app'): P
     GRANT SELECT,INSERT,UPDATE ON pre_cve_clusters TO ${target};
     GRANT SELECT,INSERT ON pre_cve_cluster_members,pre_cve_dispositions TO ${target};
     GRANT UPDATE ON pre_cve_dispositions TO ${target};
+    -- The version-range pushdown index (008) is read and written by the
+    -- correlation worker; without these grants the pipeline fails with a
+    -- 42501 "permission denied" during product matching, so findings are
+    -- never produced and no advisory emails are queued.
+    GRANT SELECT,INSERT,UPDATE,DELETE ON match_asset_index,match_cve_index TO ${target};
     GRANT SELECT,UPDATE ON correlation_policy TO ${target};
     GRANT USAGE,SELECT ON SEQUENCE audit_seq_seq,operational_events_id_seq TO ${target};
     GRANT EXECUTE ON FUNCTION consume_rate_limit_token(text,double precision,double precision) TO ${target};`);

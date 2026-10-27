@@ -922,7 +922,6 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       };
       if (settings.autoDispatchEnabled && pending.length) {
         if (settings.digestBatchingEnabled) {
-          // Buffer findings for the configured window. The delivery worker
           // flushes the window into one recipient-specific combined email, so a
           // burst of detections (including detections from several pipeline
           // runs) produces a single message per recipient instead of a storm.
@@ -959,6 +958,18 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             }
           }
         }
+      } else if (pending.length && !settings.autoDispatchEnabled) {
+        await writeEvent(db, {
+          category: 'EMAIL',
+          level: 'WARNING',
+          code: 'pipeline.auto_dispatch_disabled',
+          message: `Auto-dispatch is disabled. ${pending.length} findings are eligible for notification but will not be queued until autoDispatchEnabled is enabled in settings.`,
+          context: { pendingFindings: pending.length },
+        });
+      }
+      let deliveryLog = `${notificationsQueued} jobs queued${digestBuffered ? `; ${digestBuffered} findings buffered for the digest window` : ''}`;
+      if (pending.length && !settings.autoDispatchEnabled) {
+        deliveryLog += `; ${pending.length} findings pending but autoDispatchEnabled is false`;
       }
       execution = {
         ...correlated.execution,
@@ -970,7 +981,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         logs: [
           ...execution!.logs,
           `Product matching: ${correlated.newFindings.length} current matches; ${reconciled.length} retained findings`,
-          `Delivery queue: ${notificationsQueued} jobs queued${digestBuffered ? `; ${digestBuffered} findings buffered for the digest window` : ''}`,
+          `Delivery queue: ${deliveryLog}`,
         ],
         phases: [
           {
@@ -991,7 +1002,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             name: 'Delivery queue',
             status: 'SUCCESS',
             durationMs: Date.now() - queueStarted,
-            details: `${notificationsQueued} jobs queued${digestBuffered ? `; ${digestBuffered} findings buffered for the digest window` : ''}; transport acceptance is tracked separately`,
+            details: `${notificationsQueued} jobs queued${digestBuffered ? `; ${digestBuffered} findings buffered for the digest window` : ''}${pending.length && !settings.autoDispatchEnabled ? `; ${pending.length} findings pending but autoDispatchEnabled is false` : ''}; transport acceptance is tracked separately`,
           },
         ],
       };
