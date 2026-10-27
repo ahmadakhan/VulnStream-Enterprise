@@ -1425,7 +1425,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                               </p>
                               {cve.cisaKev?.isKev && cve.cisaKev.dateAdded && (
                                 <p className="text-[10px] text-amber-300 light:text-amber-700">
-                                  KEV added {formatDate(cve.cisaKev.dateAdded)}
+                                  KEV added {formatDate(cve.cisaKev?.dateAdded)}
                                 </p>
                               )}
                               {hasEpss(cve.epss) && (
@@ -1605,10 +1605,10 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     {inspect.cve.cisaKev?.isKev ? (
                       <>
                         Known exploited
-                        {inspect.cve.cisaKev.dateAdded
+                        {inspect.cve.cisaKev?.dateAdded
                           ? ` · added ${formatDate(inspect.cve.cisaKev.dateAdded)}`
                           : ''}
-                        {inspect.cve.cisaKev.dueDate
+                        {inspect.cve.cisaKev?.dueDate
                           ? ` · due ${formatDate(inspect.cve.cisaKev.dueDate)}`
                           : ''}
                       </>
@@ -1617,11 +1617,11 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     )}
                   </dd>
                 </div>
-                {inspect.cve.cisaKev.requiredAction && (
+                {inspect.cve.cisaKev?.requiredAction && (
                   <div className="col-span-2 sm:col-span-4">
                     <dt className="text-zinc-500">Required action</dt>
                     <dd className="mt-0.5 leading-relaxed text-zinc-300 light:text-zinc-700">
-                      {inspect.cve.cisaKev.requiredAction}
+                      {inspect.cve.cisaKev?.requiredAction}
                     </dd>
                   </div>
                 )}
