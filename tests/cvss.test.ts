@@ -129,3 +129,26 @@ test('cvssVectorIsValid rejects malformed vectors', () => {
 test('cvssVectorIsValid accepts empty string', () => {
   assert.equal(cvssVectorIsValid(''), true);
 });
+
+test('cvssVectorIsValid rejects vectors with an unknown CVSS prefix', () => {
+  // Regression: the v2 detector used to accept any vector starting with "AV"/"N",
+  // so an unsupported prefix like CVSS:9.9/ slipped through as "valid".
+  assert.equal(cvssVectorIsValid('CVSS:9.9/AV:N/AC:L'), false);
+  assert.equal(cvssVectorIsValid('CVSS:3.2/AV:N/AC:L'), false);
+  assert.equal(cvssVectorIsValid('CVSS:2.0/AV:N/AC:L'), false);
+});
+
+test('cvssVectorIsValid rejects a prefix with an empty body', () => {
+  assert.equal(cvssVectorIsValid('CVSS:3.1/'), false);
+  assert.equal(cvssVectorIsValid('CVSS:4.0/'), false);
+});
+
+test('cvssVectorIsValid rejects segments without a value', () => {
+  assert.equal(cvssVectorIsValid('CVSS:3.1/AV:N/AC:'), false);
+  assert.equal(cvssVectorIsValid('CVSS:3.1/AV:N/:L'), false);
+});
+
+test('cvssVectorIsValid tolerates surrounding whitespace', () => {
+  assert.equal(cvssVectorIsValid(' CVSS:3.1/AV:N/AC:L/PR:N '), true);
+  assert.equal(cvssVectorIsValid('  '), false);
+});

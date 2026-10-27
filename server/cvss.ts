@@ -60,7 +60,12 @@ export function maxCvssVersion(left: CvssVersion | 'UNKNOWN', right: CvssVersion
 
 const CVSS_V3_PREFIX = /^CVSS:3\.[01]\/(.+)/;
 const CVSS_V4_PREFIX = /^CVSS:4\.0\/(.+)/;
-const CVSS_V2_PREFIX = /^(AV|N|AV:[NALP])/i;
+/**
+ * CVSS v2 vectors carry no version prefix, so they are recognised by their
+ * leading base metric (`AV:N/AC:L/...`). An unknown `CVSS:` prefix must never
+ * match here, otherwise `CVSS:9.9/...` would be accepted as a v2 vector.
+ */
+const CVSS_V2_PREFIX = /^(?!CVSS:)(AV|AC|Au|C|I|A):/i;
 
 /**
  * Parses a CVSS vector string into its constituent metric key/value pairs.
@@ -99,11 +104,16 @@ export function parseCvssVector(vector: string): Record<string, string> {
  */
 export function cvssVectorIsValid(vector: string): boolean {
   if (!vector) return true;
-  const isV3 = CVSS_V3_PREFIX.test(vector);
-  const isV4 = CVSS_V4_PREFIX.test(vector);
-  const isV2 = CVSS_V2_PREFIX.test(vector);
+  const trimmed = vector.trim();
+  const isV3 = CVSS_V3_PREFIX.test(trimmed);
+  const isV4 = CVSS_V4_PREFIX.test(trimmed);
+  const isV2 = CVSS_V2_PREFIX.test(trimmed);
   if (!isV3 && !isV4 && !isV2) return false;
-  const parts = vector.split('/');
-  const body = isV3 ? parts.slice(1) : isV4 ? parts.slice(1) : parts;
-  return body.every((part) => part.includes(':') && part.indexOf(':') > 0 && part.indexOf(':') < part.length - 1);
+  const parts = trimmed.split('/');
+  const body = isV3 || isV4 ? parts.slice(1) : parts;
+  if (body.length === 0) return false;
+  return body.every((part) => {
+    const colon = part.indexOf(':');
+    return colon > 0 && colon < part.length - 1;
+  });
 }
