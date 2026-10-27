@@ -65,13 +65,13 @@ export function validateSsrfSafety(value: string): { safe: boolean; reason?: str
   }
 }
 export function determineExploitRisk(cve: NormalizedCVE): ExploitRiskLevel {
-  return cve.cisaKev.isKev
+  return cve.cisaKev?.isKev
     ? 'CISA_KEV_EXPLOITED'
     : cve.exploitationSources?.length || cve.exploitStatus === 'Reported In Wild'
       ? 'REPORTED_IN_WILD_EXPLOIT'
     : cve.exploitStatus === 'Active Weaponized'
       ? 'WEAPONIZED_EXPLOIT'
-      : cve.epss.score >= 0.4
+      : (cve.epss?.score ?? 0) >= 0.4
         ? 'HIGH_EPSS_PROBABILITY'
         : cve.cvss.score >= 7
           ? 'ELEVATED'
