@@ -46,6 +46,14 @@ export interface Job {
     nativeCorrelation?: NativeDelivery;
     cveRevisions?: Record<string, string>;
     findingRevisions?: Record<string, string>;
+    /**
+     * Digest jobs carry only the findings the target is subscribed to. Delivery
+     * revalidation and receipt accounting must use this subset, not the union
+     * advisory, or a KEV-only recipient would be blocked by unrelated findings.
+     */
+    includedFindingIds?: string[];
+    /** Stable per-batch key used for CVE dispatch accounting across recipients. */
+    digestKey?: string;
   };
   attempts: number;
   lock_token: string;
@@ -55,6 +63,14 @@ export interface Job {
 export type MailSender = (
   job: Job,
 ) => Promise<string | { id: string; provider: EmailDeliveryLog['provider'] }>;
+/**
+ * Total attempts, including the first send. Backoff is capped at one hour so a
+ * provider outage is retried durably without hammering the relay, and a
+ * permanently failing caller transitions to FAILED instead of retrying forever.
+ */
+export const DELIVERY_MAX_ATTEMPTS = 6;
+const deliveryBackoffMs = (attempt: number) =>
+  Math.min(60 * 60_000, 60_000 * 2 ** Math.max(0, attempt - 1));
 const revision = (cve: NormalizedCVE) => createHash('sha256').update(stableJson(cve)).digest('hex');
 const findingRevision = (finding: Finding) =>
   createHash('sha256')
@@ -86,11 +102,14 @@ const advisoryRevision = (advisory: Advisory, findings: Finding[]) =>
           // operator dispatch key still distinguishes intentional resends.
           title: advisory.title,
           severity: advisory.severity,
-          cveIds: advisory.cveIds,
-          findingIds: advisory.findingIds,
+          // Delivery content is a set, not a sequence. Sorting here keeps the
+          // dedupe key stable when the pipeline or a digest buffer returns the
+          // same findings in a different database order.
+          cveIds: [...advisory.cveIds].sort(),
+          findingIds: [...advisory.findingIds].sort(),
           executiveSummary: advisory.executiveSummary,
           remediationInstructions: advisory.remediationInstructions,
-          affectedSystems: advisory.affectedSystems,
+          affectedSystems: [...advisory.affectedSystems].sort(),
           isDigestBatch: advisory.isDigestBatch ?? false,
           vendorLink: advisory.vendorLink ?? '',
         },
@@ -101,6 +120,66 @@ const advisoryRevision = (advisory: Advisory, findings: Finding[]) =>
     )
     .digest('hex')
     .slice(0, 20);
+const SEVERITY_ORDER = ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
+const uniqueSorted = (values: string[]) => Array.from(new Set(values)).sort();
+/** Highest severity in a set of findings, used for combined digest subjects. */
+const highestSeverity = (findings: Finding[]): Advisory['severity'] =>
+  findings.reduce(
+    (severity, finding) =>
+      SEVERITY_ORDER.indexOf(finding.cve.cvss.severity) > SEVERITY_ORDER.indexOf(severity)
+        ? finding.cve.cvss.severity
+        : severity,
+    'UNKNOWN' as Advisory['severity'],
+  );
+const findingDetail = (finding: Finding) =>
+  `${finding.cveId} | ${finding.cve.cvss.severity}${finding.cve.cisaKev?.isKev ? ' | CISA KEV' : ''} | ${finding.matchedAssetName}`;
+/** Deterministic vendor link so batch ordering cannot change the dedupe key. */
+const vendorLinkFor = (findings: Finding[]) =>
+  uniqueSorted(
+    findings
+      .map((finding) => finding.cve.remediation.vendorAdvisoryRef || finding.cve.remediation.patchUrl)
+      .filter((link): link is string => !!link),
+  )[0] || '';
+/**
+ * Builds the advisory view for a set of findings. Every recipient receives a
+ * view containing exactly the findings its subscription permits, while the
+ * persisted advisory is the union of all views for queue accounting.
+ */
+function digestView(advisory: Advisory, findings: Finding[]): Advisory {
+  const cveIds = uniqueSorted(findings.map((finding) => finding.cveId));
+  const systems = uniqueSorted(findings.map((finding) => finding.matchedAssetName));
+  const severity = highestSeverity(findings);
+  const summary =
+    findings.length === 1
+      ? '1 inventory correlation requires investigation. Confirm applicability and consult the vendor before remediation.'
+      : `${findings.length} inventory correlations across ${systems.length} system${systems.length === 1 ? '' : 's'} require investigation. Confirm applicability and consult the vendor before remediation.`;
+  return {
+    ...advisory,
+    title: `Vulnerability ${findings.length === 1 ? 'notice' : 'digest'}: ${cveIds.slice(0, 3).join(', ')}${cveIds.length > 3 ? ` (+${cveIds.length - 3} more)` : ''}`,
+    severity,
+    cveIds,
+    findingIds: findings.map((finding) => finding.id),
+    executiveSummary: summary,
+    affectedSystems: systems,
+    vendorLink: vendorLinkFor(findings),
+    isDigestBatch: true,
+  };
+}
+const advisoryPriority = (findings: Finding[]) =>
+  Math.max(
+    0,
+    ...findings.map((finding) =>
+      finding.cve.cisaKev?.isKev
+        ? 100
+        : finding.exploitRisk === 'REPORTED_IN_WILD_EXPLOIT' ||
+            finding.exploitRisk === 'WEAPONIZED_EXPLOIT' ||
+            finding.cve.exploitationSources?.length
+          ? 50
+          : finding.notificationStatus === 'REVIEW_REQUIRED'
+            ? 50
+            : 0,
+    ),
+  );
 export function recipientAllows(recipient: EmailRecipient, finding: Finding): boolean {
   return (
     recipient.subscriptionTier === 'ALL_SEVERITIES' ||
@@ -261,7 +340,9 @@ export async function enqueue(
       provider: EMAIL_PROVIDER_LABELS[configuration.provider],
       status: initialStatus === 'REVIEW' ? 'REVIEW_REQUIRED' : 'QUEUED',
       attemptCount: 0,
-      retrySchedule: ['1m', '2m', '4m', '8m', '16m'],
+      retrySchedule: Array.from({ length: DELIVERY_MAX_ATTEMPTS }, (_, index) =>
+        `${Math.round(deliveryBackoffMs(index + 1) / 60_000)}m`,
+      ),
       nextRetryTime: initialStatus === 'REVIEW' ? null : new Date().toISOString(),
       sentAt: '',
     } satisfies EmailDeliveryLog);
@@ -308,20 +389,7 @@ export async function queueAdvisory(
   const contentRevision = advisoryRevision(advisory, findings);
   const stableDispatchKey = dispatchKey ?? contentRevision;
   let count = 0;
-  const priority = Math.max(
-    0,
-    ...findings.map((finding) =>
-      finding.cve.cisaKev?.isKev
-        ? 100
-        : finding.exploitRisk === 'REPORTED_IN_WILD_EXPLOIT' ||
-            finding.exploitRisk === 'WEAPONIZED_EXPLOIT' ||
-            finding.cve.exploitationSources?.length
-          ? 50
-          : finding.notificationStatus === 'REVIEW_REQUIRED'
-            ? 50
-            : 0,
-    ),
-  );
+  const priority = advisoryPriority(findings);
   for (const recipient of selected)
     if (
       await enqueue(
@@ -358,6 +426,158 @@ export async function queueAdvisory(
   await put(db, 'advisories', advisory.id, advisory);
   return count;
 }
+export interface DigestQueueResult {
+  /** Persisted union advisory, or the supplied advisory when nothing was queued. */
+  advisory: Advisory;
+  /** Number of transport jobs created (email + webhook). */
+  jobs: number;
+  /** Findings that were included in at least one job. */
+  findingIds: string[];
+  /** Number of targets that could receive at least one finding. */
+  eligible: number;
+}
+
+/**
+ * Queues one combined email per recipient (and one webhook per endpoint) for a
+ * batch of findings.
+ *
+ * The union advisory is persisted for queue accounting and UI visibility, while
+ * each transport receives a recipient-specific view containing only the findings
+ * its subscription tier permits. This is what makes a single digest safe for a
+ * mixed set of ALL_SEVERITIES, CRITICAL_HIGH_ONLY and CISA_KEV_ONLY subscribers.
+ *
+ * Deduplication is content-derived and per target. Re-running the same batch is
+ * idempotent, and the stable Message-ID in `createMailSender` lets the receiving
+ * provider collapse a retry that raced a process crash.
+ */
+export async function queueDigestAdvisory(
+  db: Db,
+  advisory: Advisory,
+  findings: Finding[],
+  render?: (advisory: Advisory) => string | undefined,
+  dispatchKey?: string,
+): Promise<DigestQueueResult> {
+  const recipients = (await list<EmailRecipient>(db, 'recipients')).filter(
+    (recipient) => recipient.enabled,
+  );
+  const hooks = (await list<WebhookEndpoint>(db, 'webhooks')).filter((hook) => hook.enabled);
+
+  const recipientBatches = new Map<string, Finding[]>();
+  for (const recipient of recipients) {
+    const permitted = findings.filter((finding) => recipientAllows(recipient, finding));
+    if (permitted.length) recipientBatches.set(recipient.id, permitted);
+  }
+  const webhookBatches = new Map<string, Finding[]>();
+  for (const hook of hooks) {
+    const permitted = findings.filter((finding) => webhookAllows(hook, finding));
+    if (permitted.length) webhookBatches.set(hook.id, permitted);
+  }
+
+  const includedIds = new Set<string>();
+  for (const batch of [...recipientBatches.values(), ...webhookBatches.values()])
+    for (const finding of batch) includedIds.add(finding.id);
+  const included = findings.filter((finding) => includedIds.has(finding.id));
+  if (!included.length)
+    return { advisory, jobs: 0, findingIds: [], eligible: 0 };
+
+  const union = digestView(advisory, included);
+  const contentRevision = advisoryRevision(union, included);
+  const stableDispatchKey = dispatchKey ?? contentRevision;
+  const priority = advisoryPriority(included);
+  let jobs = 0;
+  let recipientCount = 0;
+
+  for (const [recipientId, batch] of recipientBatches) {
+    const recipient = recipients.find((candidate) => candidate.id === recipientId)!;
+    const view = digestView(union, batch);
+    const payload = {
+      ...advisoryEmail(
+        view,
+        render?.(view),
+        batch.map(findingDetail),
+      ),
+      cveIds: view.cveIds,
+      includedFindingIds: batch.map((finding) => finding.id),
+      findingRevisions: Object.fromEntries(
+        batch.map((finding) => [finding.id, findingRevision(finding)]),
+      ),
+      cveRevisions: Object.fromEntries(
+        batch.map((finding) => [finding.cveId, revision(finding.cve)]),
+      ),
+      digestKey: stableDispatchKey,
+      recipientEmail: recipient.email,
+    };
+    if (
+      await enqueue(
+        db,
+        'email',
+        recipient.id,
+        union.id,
+        payload,
+        `${stableDispatchKey}:${contentRevision}:email:${recipient.id}`,
+        recipient.deliveryGroup === 'EVERYONE' ? 'REVIEW' : 'QUEUED',
+        priority,
+      )
+    ) {
+      jobs++;
+      recipientCount++;
+    }
+  }
+
+  for (const [hookId, batch] of webhookBatches) {
+    const view = digestView(union, batch);
+    const payload = {
+      ...advisoryEmail(
+        view,
+        render?.(view),
+        batch.map(findingDetail),
+      ),
+      cveIds: view.cveIds,
+      includedFindingIds: batch.map((finding) => finding.id),
+      findingRevisions: Object.fromEntries(
+        batch.map((finding) => [finding.id, findingRevision(finding)]),
+      ),
+      cveRevisions: Object.fromEntries(
+        batch.map((finding) => [finding.cveId, revision(finding.cve)]),
+      ),
+      digestKey: stableDispatchKey,
+    };
+    if (
+      await enqueue(
+        db,
+        'webhook',
+        hookId,
+        union.id,
+        payload,
+        `${stableDispatchKey}:${contentRevision}:webhook:${hookId}`,
+        'QUEUED',
+        priority,
+      )
+    )
+      jobs++;
+  }
+
+  if (!jobs)
+    return {
+      advisory: union,
+      jobs: 0,
+      // These findings were already accepted by an identical queued batch.
+      // Callers use this to discard them from their local buffer.
+      findingIds: included.map((finding) => finding.id),
+      eligible: recipientBatches.size + webhookBatches.size,
+    };
+
+  union.recipientCount = recipientCount;
+  union.deliveryStatus = 'PENDING';
+  await put(db, 'advisories', union.id, union);
+  return {
+    advisory: union,
+    jobs,
+    findingIds: included.map((finding) => finding.id),
+    eligible: recipientBatches.size + webhookBatches.size,
+  };
+}
+
 export async function deliverNext(
   pool: pg.Pool,
   config: Config,
@@ -380,8 +600,15 @@ export async function deliverNext(
     retryNotBefore = 0;
   let emailProvider: EmailDeliveryLog['provider'] | undefined,
     routeToReview = false;
+  // Declared outside the try block: it is assigned inside and read again by the
+  // post-delivery bookkeeping below. A block-scoped `const` made that read a
+  // compile error and, under a non-strict loader, a ReferenceError *after* the
+  // mail/webhook had already been sent — the outbox row would then never be
+  // marked ACCEPTED and the alert would be re-sent on every retry.
+  let declaredCveIds: string[] = [];
+  let declaredFindingIds: string[] = [];
   try {
-    if (job.attempts > 6) {
+    if (job.attempts > DELIVERY_MAX_ATTEMPTS) {
       permanent = true;
       throw new Error('Delivery retry budget exhausted after worker recovery');
     }
@@ -399,13 +626,20 @@ export async function deliverNext(
       permanent = true;
       throw new Error('Queued advisory no longer exists');
     }
-    if (advisory && advisory.cveIds.some((id) => !job.payload.cveRevisions?.[id])) {
+    // A digest job intentionally carries only the subset of the advisory that
+    // this target may receive. Legacy and non-digest jobs omit these fields and
+    // are validated against the whole advisory exactly as before.
+    declaredCveIds = job.payload.cveIds?.length ? job.payload.cveIds : advisory?.cveIds ?? [];
+    declaredFindingIds = job.payload.includedFindingIds?.length
+      ? job.payload.includedFindingIds
+      : advisory?.findingIds ?? [];
+    if (advisory && declaredCveIds.some((id) => !job.payload.cveRevisions?.[id])) {
       permanent = true;
       throw new Error(
         'Advisory revision is no longer applicable; rebuild legacy queued payload from current intelligence',
       );
     }
-    if (advisory && !advisory.findingIds.length) {
+    if (advisory && !declaredFindingIds.length) {
       permanent = true;
       throw new Error('Advisory has no findings; rebuild from current inventory before delivery');
     }
@@ -417,7 +651,7 @@ export async function deliverNext(
       const vendorAliases = buildAliasMap(aliasEntries, 'VENDOR');
       const productAliases = buildAliasMap(aliasEntries, 'PRODUCT');
       const invalid: string[] = [];
-      for (const id of advisory.findingIds) {
+      for (const id of declaredFindingIds) {
         const finding = await get<Finding>(pool, 'findings', id);
         const [asset, cachedCve, withdrawal] = finding
           ? await Promise.all([
@@ -562,10 +796,9 @@ export async function deliverNext(
   await transaction(pool, async (db) => {
     const current = await db.query('SELECT status,lock_token FROM outbox WHERE id=$1 FOR UPDATE', [job.id]);
     if (current.rows[0]?.lock_token !== job.lock_token) return;
-    const failed = !!error && !routeToReview && (permanent || job.attempts >= 6),
-      next = new Date(
-        Math.max(retryNotBefore, Date.now() + Math.min(3600000, 60000 * 2 ** (job.attempts - 1))),
-      );
+    const failed =
+        !!error && !routeToReview && (permanent || job.attempts >= DELIVERY_MAX_ATTEMPTS),
+      next = new Date(Math.max(retryNotBefore, Date.now() + deliveryBackoffMs(job.attempts)));
     await db.query(
       'UPDATE outbox SET status=$2,next_attempt=$3,error=$4,provider_id=$5,locked_at=NULL,lock_token=NULL,updated_at=now() WHERE id=$1',
       [
@@ -645,13 +878,15 @@ export async function deliverNext(
       advisory.deliveryStatus = totals.pending ? 'PENDING' : totals.failed ? 'FAILED' : 'ACCEPTED';
       await put(db, 'advisories', advisory.id, advisory);
       if (!error)
-        for (const cveId of advisory.cveIds) {
+        for (const cveId of declaredCveIds) {
           const prior = await get<AlertedCVE>(db, 'alertedCves', cveId),
             now = new Date().toISOString();
-          // The dedupe key carries the advisory content revision, so a revised
-          // advisory counts as a new dispatch while a retry of the same
-          // revision does not inflate the dispatch count.
-          const dispatchKey = job.dedupe_key.split(':email:')[0].split(':webhook:')[0];
+          // Digest jobs carry one batch key across every recipient, so the same
+          // CVE is counted once even when several subscription cohorts receive
+          // it. Non-digest jobs retain the original content-revision key.
+          const dispatchKey =
+            job.payload.digestKey ??
+            job.dedupe_key.split(':email:')[0].split(':webhook:')[0];
           const dispatchId = `${cveId}:${dispatchKey}`;
           const same =
             prior?.lastDispatchKey === dispatchKey || !!(await get(db, 'alertDispatches', dispatchId));

@@ -24,6 +24,7 @@ import { RECOMMENDED_FEEDS } from './recommendedFeeds';
 import { createApp } from './app';
 import { createRequester } from './network';
 import { createMailSender, deliverNext } from './delivery';
+import { flushDueDigest } from './digest';
 import { processPipeline } from './pipeline';
 import { runRetention } from './retention';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
@@ -95,7 +96,8 @@ server.requestTimeout = 30000;
 server.headersTimeout = 15000;
 let stopping = false,
   pipeline: Promise<unknown> | null = null,
-  outbox: Promise<unknown> | null = null;
+  outbox: Promise<unknown> | null = null,
+  digest: Promise<unknown> | null = null;
 const report = (event: string) => (error: unknown) => {
   void writeEvent(pool, {category:'ISSUE', level:'ERROR', code:'worker.failed', message:'Background worker failed', context:{component:event,errorType:error instanceof Error ? error.name : 'Error'}}).catch(() => {});
   console.error(
@@ -118,6 +120,12 @@ const tick = () => {
       .catch(report('outbox'))
       .finally(() => {
         outbox = null;
+      });
+  if (!digest)
+    digest = flushDueDigest(pool)
+      .catch(report('digest'))
+      .finally(() => {
+        digest = null;
       });
 };
 const timer = setInterval(tick, 5000);
@@ -227,7 +235,7 @@ async function shutdown() {
   const deadline = setTimeout(() => process.exit(1), 30000);
   deadline.unref();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  await Promise.allSettled([pipeline, outbox, retentionRunning].filter(Boolean) as Promise<unknown>[]);
+  await Promise.allSettled([pipeline, outbox, digest, retentionRunning].filter(Boolean) as Promise<unknown>[]);
   await correlation.stop();
   await pool.end();
   clearTimeout(deadline);

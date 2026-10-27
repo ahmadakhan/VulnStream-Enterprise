@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { createPool, migrate, transaction, put, putMany, list, get } from '../server/db.ts';
 import { queueRun, processPipeline, stopRun } from '../server/pipeline';
-import { deliverNext, queueAdvisory } from '../server/delivery';
+import { deliverNext, queueAdvisory, queueDigestAdvisory } from '../server/delivery';
+import { flushDueDigest } from '../server/digest';
 import { loadConfig } from '../server/config.ts';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import { MITRE_DELTA_URL } from '../server/mitre';
 import { mitreRecord, mitreDelta } from './fixtures/mitre';
 import { applyCommand } from '../server/commands.ts';
-import type { AliasEntry, Finding, NormalizedCVE, WatchListItem } from '../src/types/index.ts';
+import type { Advisory, AliasEntry, Finding, NormalizedCVE, WatchListItem } from '../src/types/index.ts';
 import { deriveInventoryAliases } from '../src/utils/aliasLifecycle.ts';
 const database = process.env.TEST_DATABASE_URL;
 const cpe = (version: string) => `cpe:2.3:a:example:widget:${version}:*:*:*:*:*:*:*`;
@@ -874,6 +875,112 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       await run();
       assert.equal((await pool.query('SELECT count(*)::int AS n FROM outbox')).rows[0].n, 4);
     });
+    await t.test(
+      'combined digest sends at most one email per recipient without leaking other tiers',
+      async () => {
+        await reset();
+        await save('settings', 'main', {
+          ...DEFAULT_SETTINGS,
+          autoDispatchEnabled: true,
+          digestBatchingEnabled: true,
+          digestWindowMinutes: 1,
+        });
+        await save('watchlist', 'asset', asset());
+        const high = vulnerability(),
+          low = {
+            ...vulnerability(),
+            cveId: 'CVE-2026-98002',
+            cvss: { ...vulnerability().cvss, severity: 'LOW', score: 2 },
+          };
+        high.cisaKev = { isKev: true };
+        await save('cveData', high.cveId, high);
+        await save('cveData', low.cveId, low);
+        for (const tier of ['ALL_SEVERITIES', 'CRITICAL_HIGH_ONLY', 'CISA_KEV_ONLY'])
+          await save('recipients', tier, {
+            id: tier,
+            name: tier,
+            email: `${tier.toLowerCase()}@example.invalid`,
+            enabled: true,
+            subscriptionTier: tier,
+          });
+
+        await run();
+        // Nothing is sent immediately: the batch must survive until the window
+        // elapses and be flushed by the worker, not by the pipeline transaction.
+        assert.equal((await pool.query('SELECT count(*)::int AS n FROM outbox')).rows[0].n, 0);
+        // A second run inside the window must extend the same batch, not create
+        // a second one.
+        await run();
+        const buffered = await get<any>(pool, 'digestBuffer', 'pending');
+        assert.equal(buffered.items.length, 2);
+        // The worker flushes only after the window elapses. Move the deadline
+        // into the past instead of sleeping for a real minute.
+        await save('digestBuffer', 'pending', {
+          ...buffered,
+          flushAt: new Date(Date.now() - 1000).toISOString(),
+        });
+
+        await flushDueDigest(pool);
+        const jobs = (await pool.query('SELECT target_id,payload,status FROM outbox')).rows;
+        assert.equal(jobs.length, 3);
+        assert.equal(jobs.filter((job) => job.status === 'QUEUED').length, 3);
+        for (const job of jobs) {
+          const ids = job.payload.cveIds.slice().sort();
+          if (job.target_id === 'ALL_SEVERITIES')
+            assert.deepEqual(ids, [high.cveId, low.cveId].sort());
+          else assert.deepEqual(ids, [high.cveId]);
+          assert.match(job.payload.text, /Findings:/);
+        }
+        const all = jobs.find((job) => job.target_id === 'ALL_SEVERITIES')!;
+        assert.match(all.payload.text, new RegExp(high.cveId));
+        assert.match(all.payload.text, new RegExp(low.cveId));
+
+        // Re-queueing the same content under a fresh advisory ID is idempotent.
+        const advisory = (await list<Advisory>(pool, 'advisories'))[0];
+        const digestFindings = await list<Finding>(pool, 'findings');
+        const duplicate = await transaction(pool, (db) =>
+          queueDigestAdvisory(db, { ...advisory, id: 'ADV-duplicate' }, digestFindings, undefined),
+        );
+        assert.equal(duplicate.jobs, 0);
+        assert.equal((await pool.query('SELECT count(*)::int AS n FROM outbox')).rows[0].n, 3);
+
+        // A transient transport failure must leave the job retryable, not drop
+        // it and not create a second copy.
+        assert.equal(
+          await deliverNext(pool, config, request, async () => {
+            throw new Error('temporary transport outage');
+          }),
+          true,
+        );
+        const retry = (
+          await pool.query("SELECT status,attempts,next_attempt FROM outbox WHERE attempts=1")
+        ).rows[0];
+        assert.equal(retry.status, 'QUEUED');
+        assert.ok(new Date(retry.next_attempt).getTime() > Date.now());
+        assert.equal(
+          (await list<any>(pool, 'emailLogs')).some((log) => log.status === 'RETRYING'),
+          true,
+        );
+        await pool.query("UPDATE outbox SET next_attempt=now() WHERE status='QUEUED'");
+
+        while (await deliverNext(pool, config, request, async () => 'mock-accepted')) {
+          /* Drain the digest jobs, including the retried one. */
+        }
+        assert.equal(
+          (await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='ACCEPTED'")).rows[0].n,
+          3,
+        );
+        assert.equal(
+          (await pool.query("SELECT count(*)::int AS n FROM records WHERE kind='emailLogs'")).rows[0].n,
+          3,
+        );
+
+        // A later pipeline pass must not re-queue findings already delivered.
+        await run();
+        assert.equal((await pool.query('SELECT count(*)::int AS n FROM outbox')).rows[0].n, 3);
+        assert.equal(await flushDueDigest(pool), 0);
+      },
+    );
     await t.test('queued delivery rechecks changed recipient subscriptions', async () => {
       await reset();
       await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });

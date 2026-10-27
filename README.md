@@ -26,6 +26,8 @@ Configure email delivery in **Settings → Email delivery**. Choose one of two m
 
 The example outbound allowlist includes the existing provider API and SMTP hosts. If `EGRESS_ALLOWED_HOSTS` is explicitly set in an existing deployment, add the selected relay or custom API hostname. Provider failures use the durable retry queue and honor `Retry-After`; invalid requests and authorization failures require correction and a manual retry. API delivery, like SMTP, is at least once. Provider acceptance does not prove inbox delivery.
 
+With **Automatic dispatch** enabled, every confirmed threat is queued for email. Enable **Combine threats into one email** to hold detections for the configured digest window and send one combined message per recipient, even when the detections arrived in different pipeline runs. Each recipient receives only the findings its subscription tier permits. Delivery is content-deduplicated: rerunning the same batch, retrying a failed attempt, or restarting the worker does not create a second message, and transient failures retry on an exponential backoff (capped at one hour, six attempts total) before the job is marked failed. Digest state is stored in PostgreSQL, so a restart does not lose buffered detections.
+
 The migration job owns schema changes. The runtime database role has no DDL privileges and cannot update/delete audit records. Existing database volumes do not rerun initialization: changing an environment password alone does not rotate the database role password.
 
 ## Supported behavior

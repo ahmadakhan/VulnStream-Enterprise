@@ -515,6 +515,8 @@ export interface PipelineExecution {
     vexSuppressedCount: number;
     notificationsQueued?: number;
     advisoriesQueued?: number;
+    /** Findings held for the digest window; they are queued by the delivery worker. */
+    digestBuffered?: number;
   };
   logs: string[];
 }

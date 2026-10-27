@@ -31,7 +31,10 @@ import { ingestionWindow, type FeedCursor } from './ingestionState';
 import type { Requester } from './network';
 import type { Config } from './config';
 import { queueAdvisory } from './delivery';
+import { bufferFindingsForDigest } from './digest';
+import { renderAdvisory } from './advisoryRender';
 import { HttpError } from './validation';
+export { renderAdvisory } from './advisoryRender';
 type KevSnapshot = {
   fingerprint: string;
   etag?: string;
@@ -149,25 +152,6 @@ export async function stopRun(pool: pg.Pool, id: string, actor: string): Promise
     undefined,
     { locks: ['pipeline-queue'] },
   );
-}
-export function renderAdvisory(template: string, advisory: Advisory): string {
-  const escape = (v: string) =>
-    v.replace(
-      /[&<>"']/g,
-      (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!,
-    );
-  const values: Record<string, string> = {
-    severity: advisory.severity,
-    advisory_id: advisory.id,
-    advisory_title: advisory.title,
-    dispatch_date: new Date().toISOString(),
-    executive_summary: advisory.executiveSummary,
-    cve_ids: advisory.cveIds.join(', '),
-    affected_systems: advisory.affectedSystems.join('\n'),
-    remediation_steps: advisory.remediationInstructions,
-    vendor_link: advisory.vendorLink || '',
-  };
-  return template.replace(/{{([a-z_]+)}}/g, (_, key) => escape(values[key] || ''));
 }
 export async function processPipeline(pool: pg.Pool, config: Config, request: Requester): Promise<boolean> {
   const lock = await pool.connect();
@@ -891,57 +875,82 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           reviewRequired:rateLimitedMatches.filter(item => item.status === 'REVIEW_REQUIRED').length, zeroDayDigests:zeroDayDigests.length, zeroDaysRateLimited: intelligenceMatches.length - rateLimitedMatches.length }});
       const queueStarted = Date.now();
       let notificationsQueued = 0,
-        advisoriesQueued = 0;
+        advisoriesQueued = 0,
+        digestBuffered = 0;
       // Previously queued findings also become deliverable after enabling dispatch.
       const pending = vexEnforced.filter(
         (f) =>
           (f.notificationStatus === 'QUEUED_FOR_DISPATCH' || f.notificationStatus === 'AUTO_DISPATCHED') &&
           !f.advisoryId &&
           !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status),
-        );
-      if (settings.autoDispatchEnabled && pending.length) {
-        // A KEV-only or high-severity subscriber must never receive unrelated
-        // findings merely because one other item in a bundle passes its filter.
-        const groups = new Map<string, Finding[]>();
-        for (const finding of pending) {
-          const key = `${finding.cve.cvss.severity}:${finding.cve.cisaKev.isKev}`;
-          const group = groups.get(key) || [];
-          group.push(finding);
-          groups.set(key, group);
-        }
-        for (const group of groups.values()) {
-          for (let offset = 0; offset < group.length; offset += 200) {
-            const pending = group.slice(offset, offset + 200);
-            const cveIds = Array.from(new Set(pending.map((finding) => finding.cveId))).sort();
-            const rank = ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-            const advisory: Advisory = {
-              id: settings.advisoryPrefix + randomUUID(),
-              title: `Vulnerability notice: ${cveIds.slice(0, 3).join(', ')}${cveIds.length > 3 ? ` (+${cveIds.length - 3} more)` : ''}`,
-              severity: pending.reduce(
-                (s, f) => (rank.indexOf(f.cve.cvss.severity) > rank.indexOf(s) ? f.cve.cvss.severity : s),
-                'UNKNOWN' as Advisory['severity'],
+      );
+      const buildAdvisory = (batch: Finding[], isDigestBatch: boolean): Advisory => {
+        const cveIds = Array.from(new Set(batch.map((finding) => finding.cveId))).sort();
+        const rank = ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+        return {
+          id: settings.advisoryPrefix + randomUUID(),
+          title: `Vulnerability ${isDigestBatch ? 'digest' : 'notice'}: ${cveIds.slice(0, 3).join(', ')}${cveIds.length > 3 ? ` (+${cveIds.length - 3} more)` : ''}`,
+          severity: batch.reduce(
+            (s, f) => (rank.indexOf(f.cve.cvss.severity) > rank.indexOf(s) ? f.cve.cvss.severity : s),
+            'UNKNOWN' as Advisory['severity'],
+          ),
+          cveIds,
+          findingIds: batch.map((f) => f.id),
+          createdDate: new Date().toISOString(),
+          deliveryStatus: 'PENDING',
+          recipientCount: 0,
+          executiveSummary: `${batch.length} inventory correlations require investigation. Confirm applicability and consult the vendor before remediation.`,
+          remediationInstructions:
+            'Review vendor advisories and deploy tested remediation through your change process.',
+          vendorLink:
+            Array.from(
+              new Set(
+                batch
+                  .map((f) => f.cve.remediation.vendorAdvisoryRef || f.cve.remediation.patchUrl)
+                  .filter(Boolean),
               ),
-              cveIds,
-              findingIds: pending.map((f) => f.id),
-              createdDate: new Date().toISOString(),
-              deliveryStatus: 'PENDING',
-              recipientCount: 0,
-              executiveSummary: `${pending.length} inventory correlations require investigation. Confirm applicability and consult the vendor before remediation.`,
-              remediationInstructions:
-                'Review vendor advisories and deploy tested remediation through your change process.',
-              vendorLink: pending[0].cve.remediation.vendorAdvisoryRef || pending[0].cve.remediation.patchUrl,
-              affectedSystems: Array.from(new Set(pending.map((f) => f.matchedAssetName))),
-            };
-            const count = await queueAdvisory(
-              db,
-              advisory,
-              pending,
-              renderAdvisory(snapshot.advisoryTemplate, advisory),
-            );
-            notificationsQueued += count;
-            advisoriesQueued += count ? 1 : 0;
-            if (count)
-              for (const f of pending) await put(db, 'findings', f.id, { ...f, advisoryId: advisory.id });
+            ).sort()[0] || '',
+          affectedSystems: Array.from(new Set(batch.map((f) => f.matchedAssetName))).sort(),
+          isDigestBatch,
+        };
+      };
+      if (settings.autoDispatchEnabled && pending.length) {
+        if (settings.digestBatchingEnabled) {
+          // Buffer findings for the configured window. The delivery worker
+          // flushes the window into one recipient-specific combined email, so a
+          // burst of detections (including detections from several pipeline
+          // runs) produces a single message per recipient instead of a storm.
+          digestBuffered = await bufferFindingsForDigest(
+            db,
+            pending.map((finding) => finding.id),
+            settings.digestWindowMinutes,
+          );
+        } else {
+          // A KEV-only or high-severity subscriber must never receive unrelated
+          // findings merely because one other item in a bundle passes its filter.
+          const groups = new Map<string, Finding[]>();
+          for (const finding of pending) {
+            const key = `${finding.cve.cvss.severity}:${finding.cve.cisaKev.isKev}`;
+            const group = groups.get(key) || [];
+            group.push(finding);
+            groups.set(key, group);
+          }
+          for (const group of groups.values()) {
+            for (let offset = 0; offset < group.length; offset += 200) {
+              const batch = group.slice(offset, offset + 200);
+              const advisory = buildAdvisory(batch, false);
+              const count = await queueAdvisory(
+                db,
+                advisory,
+                batch,
+                renderAdvisory(snapshot.advisoryTemplate, advisory),
+              );
+              notificationsQueued += count;
+              advisoriesQueued += count ? 1 : 0;
+              if (count)
+                for (const f of batch)
+                  await put(db, 'findings', f.id, { ...f, advisoryId: advisory.id });
+            }
           }
         }
       }
@@ -955,7 +964,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         logs: [
           ...execution!.logs,
           `Product matching: ${correlated.newFindings.length} current matches; ${reconciled.length} retained findings`,
-          `Delivery queue: ${notificationsQueued} jobs queued`,
+          `Delivery queue: ${notificationsQueued} jobs queued${digestBuffered ? `; ${digestBuffered} findings buffered for the digest window` : ''}`,
         ],
         phases: [
           {
@@ -976,13 +985,14 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             name: 'Delivery queue',
             status: 'SUCCESS',
             durationMs: Date.now() - queueStarted,
-            details: `${notificationsQueued} jobs queued; transport acceptance is tracked separately`,
+            details: `${notificationsQueued} jobs queued${digestBuffered ? `; ${digestBuffered} findings buffered for the digest window` : ''}; transport acceptance is tracked separately`,
           },
         ],
       };
       execution.stats.rawIngested = rawCount;
       execution.stats.notificationsQueued = notificationsQueued;
       execution.stats.advisoriesQueued = advisoriesQueued;
+      execution.stats.digestBuffered = digestBuffered;
       await put(db, 'executions', execution.id, execution);
       // Clear next_catchup_run if all feeds have completed their catch-up.
       const pendingCatchup = acceptedResults.some((r) => r.syncState?.catch_up && r.syncState.hasMore);

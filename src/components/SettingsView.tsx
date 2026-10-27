@@ -74,7 +74,9 @@ export function SettingsView() {
     form.schedulerEnabled !== settings.schedulerEnabled ||
      form.autoDispatchEnabled !== settings.autoDispatchEnabled ||
      (form.autoDispatchConfidenceThreshold ?? 90) !==
-       (settings.autoDispatchConfidenceThreshold ?? 90);
+       (settings.autoDispatchConfidenceThreshold ?? 90) ||
+     (form.digestBatchingEnabled ?? false) !== (settings.digestBatchingEnabled ?? false) ||
+     (form.digestWindowMinutes ?? 5) !== (settings.digestWindowMinutes ?? 5);
   const sections = [
     ...(admin
       ? [
@@ -321,6 +323,49 @@ export function SettingsView() {
                         <span className="ui-description mt-0.5 block">
                           Minimum confidence (0-100) for automatic email dispatch. Set to 0 to send all
                           findings regardless of confidence level.
+                        </span>
+                      </span>
+                    </div>
+                  </label>
+                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
+                    <input
+                      type="checkbox"
+                      checked={form.digestBatchingEnabled ?? false}
+                      onChange={(e) =>
+                        setForm({ ...form, digestBatchingEnabled: e.target.checked })
+                      }
+                    />
+                    <span>
+                      <span className="block font-medium text-zinc-200 light:text-zinc-800">
+                        Combine threats into one email
+                      </span>
+                      <span className="ui-description mt-0.5 block">
+                        Buffer detections for the window and send one combined email per recipient.
+                        Each recipient only receives the findings permitted by its subscription tier.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        min="1"
+                        max="1440"
+                        value={form.digestWindowMinutes ?? 5}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            digestWindowMinutes: Math.max(1, parseInt(e.target.value) || 1),
+                          })
+                        }
+                        className="mt-1 w-16 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none light:border-zinc-300 light:bg-white light:text-zinc-900"
+                      />
+                      <span>
+                        <span className="block font-medium text-zinc-200 light:text-zinc-800">
+                          Digest window (minutes)
+                        </span>
+                        <span className="ui-description mt-0.5 block">
+                          How long to collect detections before sending the combined email.
                         </span>
                       </span>
                     </div>
