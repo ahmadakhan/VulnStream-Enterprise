@@ -279,6 +279,8 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       assert.equal((await viewer.get('/api/events')).status, 200);
       assert.equal((await viewer.get('/api/events?before=9999999999999999999')).status, 400);
       assert.equal((await viewer.get('/api/events?category=INVALID')).status, 400);
+      assert.equal((await viewer.get('/api/collections/notACollection')).status, 404);
+      assert.equal((await viewer.get('/api/collections/cveData?limit=1')).status, 200);
       assert.equal(
         (
           await admin

@@ -44,7 +44,7 @@ import { queueRun, stopRun, renderAdvisory } from './pipeline';
 import { recoveryAt } from './feedRecovery';
 import { enqueue, queueAdvisory } from './delivery';
 import { advisoryEmail } from './advisoryEmail';
-import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
+import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG, isCollectionKind } from '../shared/state.ts';
 import { emailIsConfigured } from './emailProviders';
 import { parseSyndication, RSS_MAX_BYTES } from './rss';
 import { describeError, describeRequestFailure, readEvents, writeEvent } from './events';
@@ -769,6 +769,10 @@ export function createApp(
           articleIds: z.string().max(4000).optional(),
         })
         .parse(req.query);
+      // An unknown collection is a client error, not a server fault. Validating
+      // here keeps it out of the 500 path (and out of the incident log).
+      if (!isCollectionKind(req.params.kind))
+        throw new HttpError(404, `Unknown collection: ${req.params.kind}`);
       // VIEWER is a read role: it gets the same server-side filtering and
       // pagination as ADMIN/OPERATOR. Silently forcing offset 0 and dropping
       // search made every read-only history view show only its first page.
@@ -1275,17 +1279,40 @@ export function createApp(
     requireRole('ADMIN', 'OPERATOR'),
     asyncRoute(async (req, res) => {
       await transaction(pool, async (db) => {
+        // Failed jobs restart with a fresh retry budget; a job already waiting
+        // on a scheduled retry can be sent now without losing its attempt
+        // history. Jobs that are already due (or in flight) are left to the
+        // worker so a manual retry cannot double-send.
         const row = await db.query(
-          "UPDATE outbox SET status='QUEUED',attempts=0,next_attempt=now(),error=NULL WHERE id=$1 AND channel='email' AND status='FAILED' RETURNING id",
+          `WITH target AS (
+             SELECT id, status FROM outbox
+              WHERE id=$1 AND channel='email'
+                AND (status='FAILED' OR (status='QUEUED' AND next_attempt>now()))
+              FOR UPDATE
+           )
+           UPDATE outbox o
+              SET status='QUEUED',
+                  attempts=CASE WHEN target.status='FAILED' THEN 0 ELSE o.attempts END,
+                  next_attempt=now(),
+                  error=NULL,
+                  locked_at=NULL,
+                  lock_token=NULL,
+                  updated_at=now()
+             FROM target
+            WHERE o.id=target.id
+           RETURNING target.status AS "previousStatus", o.attempts`,
           [req.params.id],
         );
-        if (!row.rowCount) throw new HttpError(409, 'Only failed deliveries may be retried');
+        if (!row.rowCount)
+          throw new HttpError(409, 'Only failed or scheduled deliveries may be retried');
+        const previousStatus = String(row.rows[0].previousStatus);
+        const attempts = Number(row.rows[0].attempts);
         const log = await getForUpdate<any>(db, 'emailLogs', String(req.params.id));
         if (log)
           await put(db, 'emailLogs', String(req.params.id), {
             ...log,
             status: 'QUEUED',
-            attemptCount: 0,
+            attemptCount: previousStatus === 'FAILED' ? 0 : attempts,
             nextRetryTime: new Date().toISOString(),
             errorMessage: undefined,
           });

@@ -98,6 +98,14 @@ export function EmailQueueView() {
     setRetryingId(null);
   };
 
+  // A queued job with attempts already spent is waiting on the retry backoff.
+  // Operators can send it now instead of waiting for the scheduled attempt.
+  const awaitingRetry = (item: EmailQueueItem) =>
+    item.status === 'QUEUED' &&
+    item.attempts > 0 &&
+    !!item.nextAttemptAt &&
+    new Date(item.nextAttemptAt).getTime() > Date.now();
+
   const confirmDelete = async () => {
     if (!deleting || deleteBusy) return;
     setDeleteBusy(true);
@@ -304,6 +312,21 @@ export function EmailQueueView() {
                                 aria-hidden="true"
                               />
                               Retry
+                            </button>
+                          )}
+                          {awaitingRetry(item) && (
+                            <button
+                              type="button"
+                              onClick={() => void retry(item.id)}
+                              disabled={retryingId === item.id}
+                              title="Send now instead of waiting for the scheduled retry"
+                              className="ui-secondary min-h-8 px-2.5 py-1 text-[11px]"
+                            >
+                              <RotateCw
+                                className={`h-3 w-3 ${retryingId === item.id ? 'animate-spin' : ''}`}
+                                aria-hidden="true"
+                              />
+                              Retry now
                             </button>
                           )}
                           {item.status !== 'SENDING' && item.status !== 'REVIEW' && (

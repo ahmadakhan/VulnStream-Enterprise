@@ -1,5 +1,5 @@
 import { validateNativeDelivery, type NativeDelivery } from './correlation/notificationEvidence.ts';
-import { writeEvent } from './events';
+import { describeError, writeEvent } from './events';
 import { advisoryEmail } from './advisoryEmail';
 import type pg from 'pg';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
@@ -658,6 +658,9 @@ export async function deliverNext(
     error = '',
     permanent = false,
     retryNotBefore = 0;
+  // Structured transport failure for the event log; `error` stays the short
+  // message used by retry policy and the outbox row.
+  let errorInfo: Record<string, unknown> = {};
   let emailProvider: EmailDeliveryLog['provider'] | undefined,
     routeToReview = false;
   // Declared outside the try block: it is assigned inside and read again by the
@@ -853,6 +856,7 @@ export async function deliverNext(
       providerId = String(statusCode);
     }
   } catch (e) {
+    errorInfo = describeError(e);
     error = e instanceof Error ? e.message : 'Delivery failed';
     if (e instanceof EmailProviderError) {
       permanent = e.status >= 400 && e.status < 500 && ![408, 429].includes(e.status);
@@ -1001,7 +1005,13 @@ export async function deliverNext(
       level: error ? 'WARNING' : 'INFO',
       code: error ? 'delivery.attempt_failed' : 'delivery.accepted',
       message: error ? 'Delivery attempt failed; retry policy applied' : 'Transport accepted delivery',
-      context: { jobId: job.id, channel: job.channel, attempt: job.attempts, advisoryId: job.advisory_id },
+      context: {
+        jobId: job.id,
+        channel: job.channel,
+        attempt: job.attempts,
+        advisoryId: job.advisory_id,
+        ...(error ? errorInfo : {}),
+      },
     });
     if (failed && error) {
       await writeEvent(db, {
@@ -1015,6 +1025,7 @@ export async function deliverNext(
           attempts: job.attempts,
           advisoryId: job.advisory_id,
           error,
+          ...errorInfo,
         },
       });
     }

@@ -38,6 +38,14 @@ export const EmailHistoryView: React.FC = () => {
     }
   };
 
+  // A queued/retrying log with attempts already spent is waiting on the retry
+  // backoff. Operators can send it now instead of waiting for the schedule.
+  const awaitingRetry = (log: EmailDeliveryLog) =>
+    (log.status === 'QUEUED' || log.status === 'RETRYING') &&
+    log.attemptCount > 0 &&
+    !!log.nextRetryTime &&
+    new Date(log.nextRetryTime).getTime() > Date.now();
+
   const handleRefresh = async () => {
     await refresh();
     await reload();
@@ -181,6 +189,17 @@ export const EmailHistoryView: React.FC = () => {
                           >
                             <RotateCw className={`w-3 h-3 ${retryingId === log.id ? 'animate-spin' : ''}`} />
                             <span>Retry</span>
+                          </button>
+                        )}
+                        {awaitingRetry(log) && (
+                          <button
+                            onClick={() => handleRetry(log.id)}
+                            disabled={retryingId === log.id}
+                            title="Send now instead of waiting for the scheduled retry"
+                            className="px-2.5 py-1 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 dark:hover:bg-zinc-700 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 text-xs font-medium inline-flex items-center space-x-1 transition"
+                          >
+                            <RotateCw className={`w-3 h-3 ${retryingId === log.id ? 'animate-spin' : ''}`} />
+                            <span>Retry now</span>
                           </button>
                         )}
                       </td>

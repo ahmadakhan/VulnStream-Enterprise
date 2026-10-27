@@ -128,7 +128,7 @@ test(
 
       // The retry is audited with the operator's identity.
       const audit = await pool.query(
-        "SELECT data FROM audit WHERE data->>'action' ILIKE '%retry%'",
+        "SELECT data FROM audit WHERE data->>'event' ILIKE '%retry%'",
       );
       assert.ok((audit.rowCount ?? 0) >= 2, 'each accepted retry must leave an audit record');
     });
