@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useId } from 'react';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 import { X } from 'lucide-react';
 
 export interface LogDetailField {
@@ -29,10 +30,6 @@ interface LogDetailModalProps {
   onClose: () => void;
 }
 
-/** Theme-aware detail popup for a single operational-log or audit-trail row.
- * Matches the modal chrome used throughout the app (RecipientsView,
- * ThreatFeedsView, AliasesView): dark zinc card with light-mode overrides,
- * no backdrop-click or Escape close, just the explicit close button. */
 export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   icon,
   eyebrow,
@@ -41,65 +38,87 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   timestamp,
   fields,
   onClose,
-}) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-    <div className="ui-panel relative w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl light:border-zinc-200 light:bg-white">
-      <button
-        onClick={onClose}
-        aria-label="Close"
-        className="absolute right-4 top-4 text-zinc-500 transition hover:text-zinc-200 light:hover:text-zinc-900"
-      >
-        <X className="h-5 w-5" />
-      </button>
+}) => {
+  const dialogRef = useDialogFocus(onClose);
+  const titleId = useId();
+  return (
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      tabIndex={-1}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+    >
+      <div className="ui-panel relative w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl light:border-zinc-200 light:bg-white">
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-lg border border-zinc-700 text-zinc-500 transition hover:text-zinc-200 light:hover:text-zinc-900"
+        >
+          <X className="h-5 w-5" />
+        </button>
 
-      <div className="flex items-start gap-3 pr-8">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-zinc-700/80 bg-zinc-800/60 text-zinc-300 light:border-zinc-200 light:bg-zinc-100 light:text-zinc-700">
-          {icon}
-        </span>
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{eyebrow}</p>
-          <h2 className="mt-0.5 break-words text-sm font-semibold text-zinc-100 light:text-zinc-900">
-            {title}
-          </h2>
+        <div className="flex items-start gap-3 pr-8">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-zinc-700/80 bg-zinc-800/60 text-zinc-300 light:border-zinc-200 light:bg-zinc-100 light:text-zinc-700">
+            {icon}
+          </span>
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{eyebrow}</p>
+            <h2
+              id={titleId}
+              className="mt-0.5 break-words text-sm font-semibold text-zinc-100 light:text-zinc-900"
+            >
+              {title}
+            </h2>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span
+            className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold ${LEVEL_BADGE[level]}`}
+          >
+            {level}
+          </span>
+          <span className="text-[11px] text-zinc-500">
+            {new Intl.DateTimeFormat(undefined, {
+              dateStyle: 'medium',
+              timeStyle: 'medium',
+              timeZone: 'UTC',
+            }).format(new Date(timestamp))}{' '}
+            UTC
+          </span>
+        </div>
+
+        <dl className="mt-5 max-h-[60vh] space-y-3.5 overflow-y-auto pr-1 text-xs">
+          {fields
+            .filter((f) => !f.hidden)
+            .map((field) => (
+              <div key={field.label}>
+                <dt className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  {field.label}
+                </dt>
+                <dd
+                  className={
+                    field.block
+                      ? `mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-700/50 bg-zinc-950/80 p-3 text-[11px] leading-relaxed text-zinc-300 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-700 ${field.mono ? 'font-mono' : ''}`
+                      : `mt-1 break-words text-[12px] text-zinc-200 light:text-zinc-800 ${field.mono ? 'font-mono' : ''}`
+                  }
+                >
+                  {field.value}
+                </dd>
+              </div>
+            ))}
+        </dl>
+        <div className="mt-5 flex justify-end border-t border-zinc-800 pt-4">
+          <button className="ui-secondary" onClick={onClose}>
+            Close details
+          </button>
         </div>
       </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <span
-          className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold ${LEVEL_BADGE[level]}`}
-        >
-          {level}
-        </span>
-        <span className="text-[11px] text-zinc-500">
-          {new Intl.DateTimeFormat(undefined, {
-            dateStyle: 'medium',
-            timeStyle: 'medium',
-            timeZone: 'UTC',
-          }).format(new Date(timestamp))}{' '}
-          UTC
-        </span>
-      </div>
-
-      <dl className="mt-5 max-h-[60vh] space-y-3.5 overflow-y-auto pr-1 text-xs">
-        {fields
-          .filter((f) => !f.hidden)
-          .map((field) => (
-            <div key={field.label}>
-              <dt className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                {field.label}
-              </dt>
-              <dd
-                className={
-                  field.block
-                    ? `mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-700/50 bg-zinc-950/80 p-3 text-[11px] leading-relaxed text-zinc-300 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-700 ${field.mono ? 'font-mono' : ''}`
-                    : `mt-1 break-words text-[12px] text-zinc-200 light:text-zinc-800 ${field.mono ? 'font-mono' : ''}`
-                }
-              >
-                {field.value}
-              </dd>
-            </div>
-          ))}
-      </dl>
     </div>
-  </div>
-);
+  );
+};

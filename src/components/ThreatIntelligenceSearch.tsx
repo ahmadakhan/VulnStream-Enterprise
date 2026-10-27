@@ -52,7 +52,7 @@ interface ExecutedSearch {
 }
 
 const panel =
-  'rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white';
+  'ui-panel rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white';
 const inputClass =
   'w-full rounded-[10px] border border-zinc-800 bg-zinc-950 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 transition focus:border-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900';
 const labelClass =

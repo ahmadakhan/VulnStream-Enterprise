@@ -618,3 +618,18 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
 .ui-segmented { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 4px; padding: 4px; border: 1px solid var(--ui-divider); border-radius: 12px; background: var(--ui-subtle); }
 .ui-segmented > button { margin-inline: 0; flex: 1 1 auto; justify-content: center; min-height: 36px; }
 .ui-segmented > button[aria-pressed="true"] { color: var(--ui-accent); background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+
+/* Page-level headings also appear without an action toolbar on search and tools. */
+.ui-main > div > .ui-page-heading {
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--ui-divider);
+}
+.ui-main :is(.grid, .flex) > .min-w-0 { overflow-wrap: anywhere; }
+.ui-main [role="dialog"] { overscroll-behavior: contain; }
+.ui-main [role="dialog"] h2 { letter-spacing: -.02em; line-height: 1.45; }
+.ui-main table td button:focus-visible { outline-offset: 4px; }
+@media (max-width: 639px) {
+  .ui-main .ui-page-title-row { align-items: flex-start; }
+  .ui-main .ui-page-title-row h1 { font-size: 22px; }
+  .ui-main [role="dialog"] :is(button[aria-label^="Close"], button[title^="Copy"]) { min-height: 36px; min-width: 36px; }
+}

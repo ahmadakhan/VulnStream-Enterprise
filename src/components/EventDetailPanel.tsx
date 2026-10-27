@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 import {
   X,
   Search,
@@ -56,15 +57,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 }
 
 /** One labelled fact in the metric strip. */
-function Metric({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Clock;
-  label: string;
-  value: React.ReactNode;
-}) {
+function Metric({ icon: Icon, label, value }: { icon: typeof Clock; label: string; value: React.ReactNode }) {
   return (
     <div className="min-w-0 rounded-xl border-zinc-800/80 bg-zinc-950/60 px-3 py-2.5 light:border-zinc-200 light:bg-zinc-50">
       <dt className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
@@ -92,19 +85,7 @@ export const EventDetailPanel: React.FC<{
   onFilterByTrackingId?: (trackingId: string) => void;
 }> = ({ event, onClose, onFilterByTrackingId }) => {
   const [raw, setRaw] = React.useState(false);
-  const closeRef = useRef<HTMLButtonElement>(null);
-
-  // Move focus into the drawer and restore it on close, so keyboard users are
-  // not left behind the overlay. Escape closes, which is what every other
-  // dialog in the app does.
-  useEffect(() => {
-    closeRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const dialogRef = useDialogFocus(onClose);
 
   const title = event.event ? prettyEventName(event.event) : event.code;
   const errorText = event.context?.error;
@@ -118,6 +99,8 @@ export const EventDetailPanel: React.FC<{
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-labelledby="event-detail-title"
@@ -157,7 +140,6 @@ export const EventDetailPanel: React.FC<{
               )}
             </div>
             <button
-              ref={closeRef}
               onClick={onClose}
               aria-label="Close event details"
               className="shrink-0 rounded-lg border-zinc-700/70 p-1.5 text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 light:border-zinc-300 light:hover:bg-zinc-100 light:hover:text-zinc-900"
@@ -188,19 +170,13 @@ export const EventDetailPanel: React.FC<{
               label="Occurred (UTC)"
               value={new Date(event.timestamp).toISOString().slice(0, 19).replace('T', ' ')}
             />
-                {event.runId && (
-              <Metric icon={Cpu} label="Execution" value={event.runId.slice(0, 8)} />
+            {event.runId && <Metric icon={Cpu} label="Execution" value={event.runId.slice(0, 8)} />}
+            {timings.map((timing) => (
+              <Metric key={timing.label} icon={timing.icon} label={timing.label} value={timing.value} />
+            ))}
+            {event.sequence !== undefined && (
+              <Metric icon={Fingerprint} label="Worker seq" value={`#${event.sequence}`} />
             )}
-            {
-                  timings.map((timing) => (
-                    <Metric key={timing.label} icon={timing.icon} label={timing.label} value={timing.value} />
-                  ))
-                }
-            {
-                  event.sequence !== undefined && (
-                    <Metric icon={Fingerprint} label="Worker seq" value={`#${event.sequence}`} />
-                  )
-                }
           </dl>
 
           {event.runId && (
@@ -254,11 +230,8 @@ export const EventDetailPanel: React.FC<{
               </button>
             </div>
             <pre className="mt-2 max-h-[45vh] overflow-auto whitespace-pre-wrap break-words rounded-xl border-zinc-800/80 bg-zinc-950/70 p-3 font-mono text-[11px] leading-relaxed text-zinc-300 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-700">
-              {raw
-                ? (JSON.stringify(event.context, null, 2) ?? 'null')
-                : formatEventContext(event.context)}
+              {raw ? (JSON.stringify(event.context, null, 2) ?? 'null') : formatEventContext(event.context)}
             </pre>
-            
           </div>
         </div>
 

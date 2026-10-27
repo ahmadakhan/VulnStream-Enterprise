@@ -81,7 +81,11 @@ function BarChart({
   const gap = 12;
   const totalWidth = data.length * (barWidth + gap);
   return (
-    <svg width={Math.max(totalWidth + 40, 200)} height={barHeight + 40} viewBox={`0 0 ${totalWidth + 40} ${barHeight + 40}`}>
+    <svg
+      width={Math.max(totalWidth + 40, 200)}
+      height={barHeight + 40}
+      viewBox={`0 0 ${totalWidth + 40} ${barHeight + 40}`}
+    >
       <g transform={`translate(20, ${barHeight})`}>
         {data.map((d, i) => {
           const height = maxValue > 0 ? (d.value / maxValue) * barHeight : 0;
@@ -123,7 +127,15 @@ function BarChart({
           );
         })}
       </g>
-      <line x1={20} y1={barHeight} x2={totalWidth + 20} y2={barHeight} stroke="currentColor" strokeWidth={1} opacity={0.2} />
+      <line
+        x1={20}
+        y1={barHeight}
+        x2={totalWidth + 20}
+        y2={barHeight}
+        stroke="currentColor"
+        strokeWidth={1}
+        opacity={0.2}
+      />
     </svg>
   );
 }
@@ -156,7 +168,15 @@ function TimelineChart({ data }: { data: TimelinePoint[] }) {
   return (
     <svg width={chartWidth} height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
       <g transform={`translate(${padding.left}, ${padding.top})`}>
-        <line x1={0} y1={plotHeight} x2={plotWidth} y2={plotHeight} stroke="currentColor" strokeWidth={1} opacity={0.2} />
+        <line
+          x1={0}
+          y1={plotHeight}
+          x2={plotWidth}
+          y2={plotHeight}
+          stroke="currentColor"
+          strokeWidth={1}
+          opacity={0.2}
+        />
         {data.map((d, i) => {
           const x = i * (barWidth + barGap);
           const criticalHeight = (d.critical / maxCritical) * plotHeight;
@@ -179,10 +199,24 @@ function TimelineChart({ data }: { data: TimelinePoint[] }) {
                 fill={SEVERITY_COLORS.HIGH}
                 opacity={0.8}
               />
-              <text x={barWidth / 2} y={plotHeight + 16} textAnchor="middle" fontSize={10} fill="currentColor" className="text-zinc-500 light:text-zinc-600">
+              <text
+                x={barWidth / 2}
+                y={plotHeight + 16}
+                textAnchor="middle"
+                fontSize={10}
+                fill="currentColor"
+                className="text-zinc-500 light:text-zinc-600"
+              >
                 {d.label}
               </text>
-              <text x={barWidth / 2} y={-4} textAnchor="middle" fontSize={9} fill="currentColor" className="text-zinc-400 light:text-zinc-600">
+              <text
+                x={barWidth / 2}
+                y={-4}
+                textAnchor="middle"
+                fontSize={9}
+                fill="currentColor"
+                className="text-zinc-400 light:text-zinc-600"
+              >
                 {d.cveCount}
               </text>
             </g>
@@ -222,7 +256,8 @@ function PieChart({
     const degrees = percentage * 360;
     const startAngle = offset;
     offset += degrees;
-    const color = d.color || colors?.[i % (colors?.length || 1)] || SEVERITY_COLORS[d.label.toUpperCase()] || '#9ca3af';
+    const color =
+      d.color || colors?.[i % (colors?.length || 1)] || SEVERITY_COLORS[d.label.toUpperCase()] || '#9ca3af';
 
     if (percentage >= 1) {
       const startRad = (startAngle - 90) * (Math.PI / 180);
@@ -232,7 +267,13 @@ function PieChart({
       const x2 = cx + r * Math.cos(endRad);
       const y2 = cy + r * Math.sin(endRad);
       const largeArc = degrees > 180 ? 1 : 0;
-      return { path: `M ${cx},${cy} L ${x1},${y1} A ${r},${r} 0 ${largeArc} 1 ${x2},${y2} Z`, color, label: d.label, value: d.value, percentage };
+      return {
+        path: `M ${cx},${cy} L ${x1},${y1} A ${r},${r} 0 ${largeArc} 1 ${x2},${y2} Z`,
+        color,
+        label: d.label,
+        value: d.value,
+        percentage,
+      };
     }
 
     if (percentage === 0) return null;
@@ -252,12 +293,21 @@ function PieChart({
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
       {slices.filter(Boolean).map((s, i) =>
         s ? (
-           <g key={`${s.label}-${i}`}>
+          <g key={`${s.label}-${i}`}>
             <path d={s.path} fill={s.color} opacity={0.85} />
-           </g>
+          </g>
         ) : null,
       )}
-      <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize={14} fontWeight="bold" fill="currentColor" className="text-zinc-100 light:text-zinc-900">
+      <text
+        x={cx}
+        y={cy}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fontSize={14}
+        fontWeight="bold"
+        fill="currentColor"
+        className="text-zinc-100 light:text-zinc-900"
+      >
         {total}
       </text>
     </svg>
@@ -271,7 +321,11 @@ function HistogramChart({ bins }: { bins: CveScoreBin[] }) {
   const gap = 6;
   const totalWidth = bins.length * (barWidth + gap);
   return (
-    <svg width={Math.max(totalWidth + 30, 240)} height={barHeight + 40} viewBox={`0 0 ${totalWidth + 30} ${barHeight + 40}`}>
+    <svg
+      width={Math.max(totalWidth + 30, 240)}
+      height={barHeight + 40}
+      viewBox={`0 0 ${totalWidth + 30} ${barHeight + 40}`}
+    >
       <g transform={`translate(15, ${barHeight})`}>
         {bins.map((bin, i) => {
           const height = (bin.count / maxValue) * barHeight;
@@ -287,17 +341,39 @@ function HistogramChart({ bins }: { bins: CveScoreBin[] }) {
                 fill={SCORE_COLORS[i % SCORE_COLORS.length]}
                 opacity={0.8}
               />
-              <text x={barWidth / 2} y={-height - 3} textAnchor="middle" fontSize={10} fill="currentColor" className="text-zinc-500 light:text-zinc-600">
+              <text
+                x={barWidth / 2}
+                y={-height - 3}
+                textAnchor="middle"
+                fontSize={10}
+                fill="currentColor"
+                className="text-zinc-500 light:text-zinc-600"
+              >
                 {bin.count > 0 ? bin.count : ''}
               </text>
-              <text x={barWidth / 2} y={20} textAnchor="middle" fontSize={9} fill="currentColor" className="text-zinc-500 light:text-zinc-600">
+              <text
+                x={barWidth / 2}
+                y={20}
+                textAnchor="middle"
+                fontSize={9}
+                fill="currentColor"
+                className="text-zinc-500 light:text-zinc-600"
+              >
                 {bin.range}
               </text>
             </g>
           );
         })}
       </g>
-      <line x1={15} y1={barHeight} x2={totalWidth + 15} y2={barHeight} stroke="currentColor" strokeWidth={1} opacity={0.2} />
+      <line
+        x1={15}
+        y1={barHeight}
+        x2={totalWidth + 15}
+        y2={barHeight}
+        stroke="currentColor"
+        strokeWidth={1}
+        opacity={0.2}
+      />
     </svg>
   );
 }
@@ -306,7 +382,7 @@ function Legend({ items }: { items: { label: string; color: string; value: numbe
   return (
     <div className="flex flex-wrap gap-3">
       {items.map((item) => (
-        <div key={item.label} className="flex items-center gap-2">
+        <div key={item.label} className="flex flex-wrap items-center gap-2">
           <span className="w-3 h-3 rounded" style={{ backgroundColor: item.color }} />
           <span className="text-xs text-zinc-400 light:text-zinc-600">{item.label}</span>
           <span className="text-xs font-mono text-zinc-300 light:text-zinc-800">{item.value}</span>
@@ -367,11 +443,19 @@ export const ThreatAnalyticsView: React.FC = () => {
     () =>
       analytics
         ? [
-            { label: 'Critical', value: analytics.severityDistribution.critical, color: SEVERITY_COLORS.CRITICAL },
+            {
+              label: 'Critical',
+              value: analytics.severityDistribution.critical,
+              color: SEVERITY_COLORS.CRITICAL,
+            },
             { label: 'High', value: analytics.severityDistribution.high, color: SEVERITY_COLORS.HIGH },
             { label: 'Medium', value: analytics.severityDistribution.medium, color: SEVERITY_COLORS.MEDIUM },
             { label: 'Low', value: analytics.severityDistribution.low, color: SEVERITY_COLORS.LOW },
-            { label: 'Unknown', value: analytics.severityDistribution.unknown, color: SEVERITY_COLORS.UNKNOWN },
+            {
+              label: 'Unknown',
+              value: analytics.severityDistribution.unknown,
+              color: SEVERITY_COLORS.UNKNOWN,
+            },
           ]
         : [],
     [analytics],
@@ -381,10 +465,26 @@ export const ThreatAnalyticsView: React.FC = () => {
     () =>
       analytics
         ? [
-            { label: 'Active Weaponized', value: analytics.exploitStatusDistribution.activeWeaponized, color: SEVERITY_COLORS.CRITICAL },
-            { label: 'Reported In Wild', value: analytics.exploitStatusDistribution.reportedInWild, color: SEVERITY_COLORS.HIGH },
-            { label: 'PoC Available', value: analytics.exploitStatusDistribution.pocAvailable, color: SEVERITY_COLORS.MEDIUM },
-            { label: 'No Known Exploit', value: analytics.exploitStatusDistribution.none, color: SEVERITY_COLORS.LOW },
+            {
+              label: 'Active Weaponized',
+              value: analytics.exploitStatusDistribution.activeWeaponized,
+              color: SEVERITY_COLORS.CRITICAL,
+            },
+            {
+              label: 'Reported In Wild',
+              value: analytics.exploitStatusDistribution.reportedInWild,
+              color: SEVERITY_COLORS.HIGH,
+            },
+            {
+              label: 'PoC Available',
+              value: analytics.exploitStatusDistribution.pocAvailable,
+              color: SEVERITY_COLORS.MEDIUM,
+            },
+            {
+              label: 'No Known Exploit',
+              value: analytics.exploitStatusDistribution.none,
+              color: SEVERITY_COLORS.LOW,
+            },
           ]
         : [],
     [analytics],
@@ -394,22 +494,22 @@ export const ThreatAnalyticsView: React.FC = () => {
     <div className="space-y-6">
       <PageHeading
         page="threat-analytics"
-        title="Threat Analytics & Trends"
         children={
           <span className="text-sm text-zinc-400 light:text-zinc-600">
-            Aggregated vulnerability trends and severity distributions from the NVD CVE cache.
-            Select a time range to update all charts below.
+            Aggregated vulnerability trends and severity distributions from the NVD CVE cache. Select a time
+            range to update all charts below.
           </span>
         }
       />
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Calendar className="h-4 w-4 text-zinc-500" />
           <span className="text-sm text-zinc-400 light:text-zinc-600">Timeline:</span>
           {TIMELINE_OPTIONS.map((opt) => (
             <button
               key={opt.value}
+              aria-pressed={range === opt.value}
               onClick={() => handleRangeChange(opt.value)}
               className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
                 range === opt.value
@@ -421,7 +521,7 @@ export const ThreatAnalyticsView: React.FC = () => {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {analytics && (
             <>
               <button
@@ -459,7 +559,7 @@ export const ThreatAnalyticsView: React.FC = () => {
 
       {analytics && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <KpiCard
               icon={<Database className="h-5 w-5 text-blue-400" />}
               label="Total CVEs"
@@ -475,7 +575,9 @@ export const ThreatAnalyticsView: React.FC = () => {
             <KpiCard
               icon={<TrendingUp className="h-5 w-5 text-rose-400" />}
               label="Critical + High"
-              value={(analytics.severityDistribution.critical + analytics.severityDistribution.high).toLocaleString()}
+              value={(
+                analytics.severityDistribution.critical + analytics.severityDistribution.high
+              ).toLocaleString()}
               subtitle="Severe vulnerabilities"
             />
             <KpiCard
@@ -513,7 +615,10 @@ export const ThreatAnalyticsView: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <ChartCard title="Top Vendors by CVE Count" subtitle={`Top ${Math.min(10, analytics.topVendors.length)} vendors`}>
+            <ChartCard
+              title="Top Vendors by CVE Count"
+              subtitle={`Top ${Math.min(10, analytics.topVendors.length)} vendors`}
+            >
               <div className="overflow-x-auto">
                 <BarChart
                   data={analytics.topVendors.map((v: VendorAnalytics) => ({
@@ -529,7 +634,9 @@ export const ThreatAnalyticsView: React.FC = () => {
               <div className="mt-2 space-y-1">
                 {analytics.topVendors.map((v: VendorAnalytics) => (
                   <div key={v.vendor} className="flex items-center justify-between text-xs">
-                    <span className="text-zinc-400 light:text-zinc-600 truncate max-w-[120px]">{v.vendor}</span>
+                    <span className="text-zinc-400 light:text-zinc-600 truncate max-w-[120px]">
+                      {v.vendor}
+                    </span>
                     <span className="font-mono text-zinc-300 light:text-zinc-800">{v.cveCount}</span>
                   </div>
                 ))}
@@ -546,14 +653,14 @@ export const ThreatAnalyticsView: React.FC = () => {
       )}
 
       {loading && (
-        <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
+        <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
           <Loader2 className="mx-auto h-6 w-6 text-blue-400 animate-spin mb-2" />
           <p className="text-sm text-zinc-400 light:text-zinc-600">Loading threat analytics data...</p>
         </div>
       )}
 
       {!analytics && !loading && !error && (
-        <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
+        <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
           <BarChart3 className="mx-auto h-10 w-10 text-zinc-600 light:text-zinc-400 mb-3" />
           <p className="text-sm text-zinc-400 light:text-zinc-600">
             Select a timeline range to view threat analytics.
@@ -576,7 +683,7 @@ function KpiCard({
   subtitle: string;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
+    <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
       <div className="flex items-center gap-2 mb-1">{icon}</div>
       <div className="text-2xl font-bold text-zinc-100 light:text-zinc-900">{value}</div>
       <div className="text-sm text-zinc-400 light:text-zinc-600">{label}</div>
@@ -595,7 +702,7 @@ function ChartCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
+    <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
       <div className="mb-3">
         <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800">{title}</h3>
         {subtitle && <p className="text-xs text-zinc-500 light:text-zinc-600">{subtitle}</p>}

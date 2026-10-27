@@ -1,11 +1,7 @@
 import { PageHeading } from './PageHeading';
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import {
-  CpeMatchSimulation,
-  CpeParseResult,
-  SeverityClassification,
-} from '../types';
+import { CpeMatchSimulation, CpeParseResult, SeverityClassification } from '../types';
 import {
   ScanLine,
   Check,
@@ -31,10 +27,12 @@ function validateCpeInput(cpe: string): { valid: boolean; message?: string } {
   if (!cpe) return { valid: false, message: 'CPE string is required' };
   if (!cpe.startsWith('cpe:2.3:')) return { valid: false, message: 'Must start with cpe:2.3:' };
   const parts = cpe.split(':');
-  if (parts.length < 13) return { valid: false, message: `Expected ≥13 colon-separated parts, got ${parts.length}` };
+  if (parts.length < 13)
+    return { valid: false, message: `Expected ≥13 colon-separated parts, got ${parts.length}` };
   if (parts.length > 13) return { valid: false, message: `Expected at most 13 parts, got ${parts.length}` };
   const part = parts[2];
-  if (!['a', 'o', 'h', '*'].includes(part)) return { valid: false, message: `Invalid part "${part}" — expected a, o, h, or *` };
+  if (!['a', 'o', 'h', '*'].includes(part))
+    return { valid: false, message: `Invalid part "${part}" — expected a, o, h, or *` };
   return { valid: true };
 }
 
@@ -207,19 +205,20 @@ export const CpeMatcherView: React.FC = () => {
     <div className="space-y-6">
       <PageHeading
         page="cpe-matcher"
-        title="CPE Matcher & Severity Classifier"
         children={
           <span className="text-sm text-zinc-400 light:text-zinc-600">
-            Simulate CPE 2.3 matching between an asset and a vulnerability.
-            The simulator parses both CPEs, expands aliases, checks version ranges,
-            and runs false-positive elimination rules before producing a severity classification.
+            Simulate CPE 2.3 matching between an asset and a vulnerability. The simulator parses both CPEs,
+            expands aliases, checks version ranges, and runs false-positive elimination rules before producing
+            a severity classification.
           </span>
         }
       />
 
-      <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4">
+      <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4">
         <div className="flex flex-wrap gap-1.5 pb-2 -mx-4 border-b border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200">
-          <span className="px-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Presets</span>
+          <span className="px-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            Presets
+          </span>
           {CPE_PRESETS.map((preset) => (
             <button
               key={preset.label}
@@ -300,17 +299,17 @@ export const CpeMatcherView: React.FC = () => {
           <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
             Asset version (for range checking)
           </label>
-             <input
-               type="text"
-               value={assetVersion}
-               onChange={(e) => setAssetVersion(e.target.value)}
-               onKeyDown={handleKeyDown}
-               placeholder="e.g. 10.0.19041"
-               className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
-             />
+          <input
+            type="text"
+            value={assetVersion}
+            onChange={(e) => setAssetVersion(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="e.g. 10.0.19041"
+            className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-zinc-500"
+          />
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
@@ -360,23 +359,25 @@ export const CpeMatcherView: React.FC = () => {
           >
             {copied ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
           </button>
-           <button
-             type="button"
-             onClick={handleClear}
-             className="px-4 py-2 border border-zinc-700 bg-zinc-800/30 text-zinc-300 rounded-md font-medium hover:bg-zinc-700 hover:border-zinc-600 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100 transition-colors flex items-center gap-2 text-xs"
-           >
-             <RotateCcw size={14} />
-             Clear
-           </button>
-           <button
-             type="button"
-             onClick={() => void handleSimulate()}
-             disabled={loading || !assetCpe || !vulnerabilityCpe}
-             className="px-4 py-2 bg-blue-500/15 border border-blue-400/30 text-blue-300 light:text-blue-800 rounded-md font-medium hover:bg-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-           >
-             {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+          <button
+            type="button"
+            onClick={handleClear}
+            className="px-4 py-2 border border-zinc-700 bg-zinc-800/30 text-zinc-300 rounded-md font-medium hover:bg-zinc-700 hover:border-zinc-600 light:border-zinc-300 light:bg-white light:text-zinc-800 light:hover:bg-zinc-100 transition-colors flex items-center gap-2 text-xs"
+          >
+            <RotateCcw size={14} />
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSimulate()}
+            disabled={loading || !assetCpe || !vulnerabilityCpe}
+            className="px-4 py-2 bg-blue-500/15 border border-blue-400/30 text-blue-300 light:text-blue-800 rounded-md font-medium hover:bg-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+          >
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
             Simulate CPE match
-            <kbd className="hidden sm:inline-block text-[10px] text-zinc-500 light:text-zinc-600">· Cmd+Enter</kbd>
+            <kbd className="hidden sm:inline-block text-[10px] text-zinc-500 light:text-zinc-600">
+              · Cmd+Enter
+            </kbd>
           </button>
         </div>
       </div>
@@ -390,38 +391,62 @@ export const CpeMatcherView: React.FC = () => {
 
       {result && (
         <div className="space-y-6">
-          <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 overflow-hidden">
+          <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 overflow-hidden">
             <div className="p-4 border-b border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {result.match.matched ? (
                     <ShieldCheck className="h-5 w-5 text-emerald-400 light:text-emerald-700" />
                   ) : (
                     <ShieldX className="h-5 w-5 text-rose-400 light:text-rose-700" />
                   )}
                   <span className="text-lg font-medium text-zinc-100 light:text-zinc-900">
-                    Match result: <span className={result.match.matched ? 'text-emerald-400 light:text-emerald-700' : 'text-rose-400 light:text-rose-700'}>{result.match.matched ? 'MATCHED' : 'NO MATCH'}</span>
+                    Match result:{' '}
+                    <span
+                      className={
+                        result.match.matched
+                          ? 'text-emerald-400 light:text-emerald-700'
+                          : 'text-rose-400 light:text-rose-700'
+                      }
+                    >
+                      {result.match.matched ? 'MATCHED' : 'NO MATCH'}
+                    </span>
                   </span>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-zinc-500 light:text-zinc-600">Confidence:</span>
-                <span className="text-sm font-mono font-medium text-zinc-200 light:text-zinc-900">{result.match.confidence}%</span>
+                <span className="text-sm font-mono font-medium text-zinc-200 light:text-zinc-900">
+                  {result.match.confidence}%
+                </span>
               </div>
             </div>
             <div className="p-4 space-y-3">
               <div>
                 <span className="text-xs font-medium text-zinc-500 light:text-zinc-600">Method</span>
-                <div className="text-sm font-mono text-zinc-300 light:text-zinc-800 mt-0.5">{result.match.method}</div>
+                <div className="text-sm font-mono text-zinc-300 light:text-zinc-800 mt-0.5">
+                  {result.match.method}
+                </div>
               </div>
               <div>
                 <span className="text-xs font-medium text-zinc-500 light:text-zinc-600">Evidence</span>
-                <div className="text-sm text-zinc-300 light:text-zinc-800 mt-0.5">{result.match.evidence}</div>
+                <div className="text-sm text-zinc-300 light:text-zinc-800 mt-0.5">
+                  {result.match.evidence}
+                </div>
               </div>
-              {result.match.reason && <div><span className="text-xs font-medium text-zinc-500 light:text-zinc-600">Reason</span><div className="text-sm text-zinc-400 light:text-zinc-600 mt-0.5">{result.match.reason}</div></div>}
+              {result.match.reason && (
+                <div>
+                  <span className="text-xs font-medium text-zinc-500 light:text-zinc-600">Reason</span>
+                  <div className="text-sm text-zinc-400 light:text-zinc-600 mt-0.5">
+                    {result.match.reason}
+                  </div>
+                </div>
+              )}
               {result.match.viaAlias && (
                 <div>
-                  <span className="text-xs font-medium text-zinc-500 light:text-zinc-600">Matched via alias</span>
+                  <span className="text-xs font-medium text-zinc-500 light:text-zinc-600">
+                    Matched via alias
+                  </span>
                   <span className="text-xs text-teal-300 light:text-teal-800 ml-2">Yes</span>
                 </div>
               )}
@@ -434,39 +459,45 @@ export const CpeMatcherView: React.FC = () => {
           </div>
 
           {(result.assetVendorAlias || result.assetProductAlias) && (
-            <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
+            <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
               <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800 mb-3">Alias Expansion</h3>
               <div className="space-y-2">
-                {result.assetVendorAlias && (
-                  <AliasExpansionDisplay alias={result.assetVendorAlias} />
-                )}
-                {result.assetProductAlias && (
-                  <AliasExpansionDisplay alias={result.assetProductAlias} />
-                )}
+                {result.assetVendorAlias && <AliasExpansionDisplay alias={result.assetVendorAlias} />}
+                {result.assetProductAlias && <AliasExpansionDisplay alias={result.assetProductAlias} />}
               </div>
             </div>
           )}
 
           {result.versionRangeCheck && (
-            <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
-              <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800 mb-2">Version Range Check</h3>
-              <div className="flex items-center gap-2">
-                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                  result.versionRangeCheck.inRange
-                    ? 'bg-emerald-500/10 text-emerald-300 light:text-emerald-800 border border-emerald-500/30'
-                    : 'bg-rose-500/10 text-rose-300 light:text-rose-800 border border-rose-500/30'
-                }`}>
+            <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
+              <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800 mb-2">
+                Version Range Check
+              </h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                    result.versionRangeCheck.inRange
+                      ? 'bg-emerald-500/10 text-emerald-300 light:text-emerald-800 border border-emerald-500/30'
+                      : 'bg-rose-500/10 text-rose-300 light:text-rose-800 border border-rose-500/30'
+                  }`}
+                >
                   {result.versionRangeCheck.inRange ? 'In range' : 'Out of range'}
                 </span>
               </div>
-              <p className="text-xs text-zinc-500 light:text-zinc-600 mt-1">{result.versionRangeCheck.reason}</p>
+              <p className="text-xs text-zinc-500 light:text-zinc-600 mt-1">
+                {result.versionRangeCheck.reason}
+              </p>
             </div>
           )}
 
-          <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
-            <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800 mb-3">False-Positive Elimination Checks</h3>
+          <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
+            <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800 mb-3">
+              False-Positive Elimination Checks
+            </h3>
             {result.falsePositiveChecks.length === 0 ? (
-              <p className="text-xs text-zinc-500 light:text-zinc-600">No false-positive checks configured for this match.</p>
+              <p className="text-xs text-zinc-500 light:text-zinc-600">
+                No false-positive checks configured for this match.
+              </p>
             ) : (
               <div className="space-y-2">
                 {result.falsePositiveChecks.map((check, i) => (
@@ -484,13 +515,17 @@ export const CpeMatcherView: React.FC = () => {
                       <X className="h-4 w-4 text-rose-400 light:text-rose-800 flex-shrink-0 mt-0.5" />
                     )}
                     <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-zinc-300 light:text-zinc-800">{check.name}</span>
-                        <span className={`text-[10px] px-1.5 py-0.25 rounded ${
-                          check.severity === 'BLOCK'
-                            ? 'bg-rose-500/10 text-rose-300 light:text-rose-800'
-                            : 'bg-amber-500/10 text-amber-300 light:text-amber-800'
-                        }`}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium text-zinc-300 light:text-zinc-800">
+                          {check.name}
+                        </span>
+                        <span
+                          className={`text-[10px] px-1.5 py-0.25 rounded ${
+                            check.severity === 'BLOCK'
+                              ? 'bg-rose-500/10 text-rose-300 light:text-rose-800'
+                              : 'bg-amber-500/10 text-amber-300 light:text-amber-800'
+                          }`}
+                        >
                           {check.severity}
                         </span>
                       </div>
@@ -502,12 +537,10 @@ export const CpeMatcherView: React.FC = () => {
             )}
           </div>
 
-          {result.severity && (
-            <SeverityCard severity={result.severity} />
-          )}
+          {result.severity && <SeverityCard severity={result.severity} />}
 
           {loading && (
-            <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
+            <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
               <Loader2 className="mx-auto h-6 w-6 text-blue-400 animate-spin mb-2" />
               <p className="text-sm text-zinc-400 light:text-zinc-600">Simulating CPE match...</p>
             </div>
@@ -516,7 +549,7 @@ export const CpeMatcherView: React.FC = () => {
       )}
 
       {!result && !loading && !error && (
-        <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
+        <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
           <ScanLine className="mx-auto h-10 w-10 text-zinc-600 light:text-zinc-400 mb-3" />
           <p className="text-sm text-zinc-400 light:text-zinc-600">
             Enter CPE 2.3 strings and click "Simulate CPE match" to start.
@@ -530,7 +563,7 @@ export const CpeMatcherView: React.FC = () => {
 function CpeParseCard({ title, parsed }: { title: string; parsed: CpeParseResult }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
+    <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-medium text-zinc-300 light:text-zinc-800">{title}</h3>
         <button
@@ -540,9 +573,7 @@ function CpeParseCard({ title, parsed }: { title: string; parsed: CpeParseResult
           {expanded ? 'Collapse' : 'Expand'}
         </button>
       </div>
-      <div className="font-mono text-xs text-zinc-400 light:text-zinc-600 break-all mb-2">
-        {parsed.cpe}
-      </div>
+      <div className="font-mono text-xs text-zinc-400 light:text-zinc-600 break-all mb-2">{parsed.cpe}</div>
       {parsed.errors.length > 0 && (
         <div className="mb-2 space-y-1">
           {parsed.errors.map((err, i) => (
@@ -555,11 +586,13 @@ function CpeParseCard({ title, parsed }: { title: string; parsed: CpeParseResult
       )}
       {parsed.parsed && (
         <div>
-          <div className={`inline-flex items-center px-1.5 py-0.25 rounded text-xs font-medium ${
-            parsed.parsed.isValid
-              ? 'bg-emerald-500/10 text-emerald-300 light:text-emerald-800 border border-emerald-500/30'
-              : 'bg-rose-500/10 text-rose-300 light:text-rose-800 border border-rose-500/30'
-          }`}>
+          <div
+            className={`inline-flex items-center px-1.5 py-0.25 rounded text-xs font-medium ${
+              parsed.parsed.isValid
+                ? 'bg-emerald-500/10 text-emerald-300 light:text-emerald-800 border border-emerald-500/30'
+                : 'bg-rose-500/10 text-rose-300 light:text-rose-800 border border-rose-500/30'
+            }`}
+          >
             {parsed.parsed.isValid ? 'Valid CPE 2.3' : 'Invalid CPE'}
           </div>
         </div>
@@ -569,7 +602,9 @@ function CpeParseCard({ title, parsed }: { title: string; parsed: CpeParseResult
           {parsed.components.map((comp) => (
             <div key={comp.field} className="grid grid-cols-4 gap-2 text-xs">
               <span className="text-zinc-500 light:text-zinc-600">{comp.field}</span>
-              <span className="col-span-2 font-mono text-zinc-400 light:text-zinc-700 break-all">{comp.value || '—'}</span>
+              <span className="col-span-2 font-mono text-zinc-400 light:text-zinc-700 break-all">
+                {comp.value || '—'}
+              </span>
               <span className="text-zinc-600 light:text-zinc-500 text-right">
                 {comp.isWildcard ? 'wildcard' : ''}
                 {comp.isAmbiguous ? 'ambiguous' : ''}
@@ -607,7 +642,10 @@ function AliasExpansionDisplay({ alias }: { alias: NonNullable<CpeMatchSimulatio
         {alias.matchedAliases.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1">
             {alias.matchedAliases.map((a) => (
-              <code key={a} className="text-[10px] px-1 py-0.25 bg-zinc-800/60 dark:bg-zinc-800 light:bg-zinc-100 rounded text-zinc-400 light:text-zinc-600">
+              <code
+                key={a}
+                className="text-[10px] px-1 py-0.25 bg-zinc-800/60 dark:bg-zinc-800 light:bg-zinc-100 rounded text-zinc-400 light:text-zinc-600"
+              >
                 {a}
               </code>
             ))}
@@ -641,7 +679,9 @@ function SeverityCard({ severity }: { severity: SeverityClassification }) {
       {severity.vector && (
         <div className="mt-2">
           <span className="text-xs text-zinc-500 light:text-zinc-600">CVSS Vector</span>
-          <div className="font-mono text-xs text-zinc-400 light:text-zinc-600 mt-0.5 break-all">{severity.vector}</div>
+          <div className="font-mono text-xs text-zinc-400 light:text-zinc-600 mt-0.5 break-all">
+            {severity.vector}
+          </div>
         </div>
       )}
       {severity.rationale.length > 0 && (

@@ -324,7 +324,14 @@ const AuditTrailView: React.FC = () => {
                     </td>
                     <td className="max-w-xl px-4 py-3.5 font-sans">
                       <div className="text-xs font-semibold text-zinc-200 light:text-zinc-900">
-                        {log.event}
+                        <button
+                          type="button"
+                          className="text-left underline decoration-dotted underline-offset-4"
+                          onClick={() => setSelectedLog(log)}
+                          aria-label={`View audit details: ${log.event}`}
+                        >
+                          {log.event}
+                        </button>
                       </div>
                       <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-zinc-400 light:text-zinc-600">
                         {log.details}
@@ -392,9 +399,13 @@ export const OperationalLogsView: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const validRunId = !runId || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(runId);
   const [selectedEvent, setSelectedEvent] = useState<OperationalEvent | null>(null);
   useEffect(() => {
-    if (tab !== 'events') return;
+    if (tab !== 'events' || !validRunId) {
+      setLoading(false);
+      return;
+    }
     let disposed = false;
     const timer = setTimeout(() => {
       setLoading(true);
@@ -488,7 +499,7 @@ export const OperationalLogsView: React.FC = () => {
               <Filter className="h-3.5 w-3.5" />
               Search and filter
             </div>
-            <div className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_190px_160px_minmax(220px,0.8fr)_auto]">
+            <div className="grid items-end gap-3 sm:grid-cols-2 2xl:grid-cols-[minmax(200px,1fr)_160px_140px_minmax(180px,0.8fr)_auto]">
               <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
                 Search events
                 <input
@@ -539,6 +550,8 @@ export const OperationalLogsView: React.FC = () => {
                 Execution ID
                 <input
                   aria-label="Filter by execution ID"
+                  aria-invalid={!validRunId}
+                  aria-describedby={!validRunId ? 'execution-id-help' : undefined}
                   value={runId}
                   placeholder="Execution UUID"
                   maxLength={36}
@@ -562,6 +575,25 @@ export const OperationalLogsView: React.FC = () => {
               </button>
             </div>
           </div>
+          {!validRunId && (
+            <p id="execution-id-help" role="status" className="text-xs text-amber-400">
+              Enter a complete execution UUID to apply this filter.
+            </p>
+          )}
+          {(query || category || level || runId) && (
+            <button
+              className="ui-secondary"
+              onClick={() => {
+                setQuery('');
+                setCategory('');
+                setLevel('');
+                setRunId('');
+                setCursor('');
+              }}
+            >
+              Clear filters
+            </button>
+          )}
           {error && (
             <div
               role="alert"
@@ -658,7 +690,14 @@ export const OperationalLogsView: React.FC = () => {
                           </td>
                           <td className="px-4 py-3.5 font-mono text-[11px] text-zinc-300 light:text-zinc-700">
                             <span className="rounded-md bg-zinc-800/70 px-1.5 py-1 light:bg-zinc-100">
-                              {event.code}
+                              <button
+                                type="button"
+                                className="text-left underline decoration-dotted underline-offset-4 break-all"
+                                aria-label={`View event details: ${event.code}`}
+                                onClick={() => setSelectedEvent(event)}
+                              >
+                                {event.code}
+                              </button>
                             </span>
                           </td>
                           <td className="max-w-xs px-4 py-3.5 font-sans">
@@ -667,7 +706,12 @@ export const OperationalLogsView: React.FC = () => {
                             </div>
                             {event.level === 'ERROR' && event.context?.error !== undefined && (
                               <div className="mt-1 line-clamp-1 font-mono text-[10px] text-rose-300 light:text-rose-700">
-                                {String(event.context.error as string).split('\n')[0]}
+                                {
+                                  (typeof event.context.error === 'object'
+                                    ? formatEventContext(event.context.error as Record<string, unknown>)
+                                    : String(event.context.error)
+                                  ).split('\n')[0]
+                                }
                               </div>
                             )}
                             <div className="mt-1.5 flex-wrap items-center gap-1.5">
