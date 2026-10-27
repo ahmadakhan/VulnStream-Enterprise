@@ -1,8 +1,20 @@
 import { describeError, writeEvent } from './events';
 import { mergeArticles, matchIntelligence } from '../src/utils/intelligenceMatcher';
+import { formatExecutionName } from '../src/utils/executionName';
 import type pg from 'pg';
 import { randomUUID, createHash } from 'node:crypto';
-import { get, getForUpdate, list, put, putMany, remove, transaction, appendAudit, pipelineState, schemaLockKey } from './db';
+import {
+  get,
+  getForUpdate,
+  list,
+  put,
+  putMany,
+  remove,
+  transaction,
+  appendAudit,
+  pipelineState,
+  schemaLockKey,
+} from './db';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import type {
   AppSettings,
@@ -22,7 +34,12 @@ import {
 } from '../src/utils/aliasLifecycle';
 import { mergeCveRecords, normalizeCveId, stableJson } from '../src/utils/deduplicator';
 import { reconcileFindings } from '../src/engine/reconcileFindings';
-import { applyVexSuppression, determineExploitRisk, rankAndRateLimitZeroDays, runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
+import {
+  applyVexSuppression,
+  determineExploitRisk,
+  rankAndRateLimitZeroDays,
+  runVulnerabilityPipeline,
+} from '../src/engine/pipelineEngine';
 import { ingestFeed, type IngestContext } from './ingestion';
 import { bindClusterToCve, clusterSuppressedAssets } from './correlation/clusters.ts';
 import { refreshCandidatePairs } from './versionIndex';
@@ -47,21 +64,39 @@ const sourceFingerprint = (feed: ThreatFeed) =>
 const matchingCveSignature = (cves: NormalizedCVE[]) => {
   const digest = createHash('sha256');
   for (const cve of [...cves].sort((a, b) => a.cveId.localeCompare(b.cveId)))
-    digest.update(stableJson({
-      cveId: cve.cveId,
-      title: cve.title,
-      description: cve.description,
-      cpeMatches: cve.cpeMatches,
-      cpeMatchDetails: cve.cpeMatchDetails,
-      versionRange: cve.versionRange,
-      purls: cve.purls,
-      applicabilityRequiresReview: cve.applicabilityRequiresReview,
-    }));
+    digest.update(
+      stableJson({
+        cveId: cve.cveId,
+        title: cve.title,
+        description: cve.description,
+        cpeMatches: cve.cpeMatches,
+        cpeMatchDetails: cve.cpeMatchDetails,
+        versionRange: cve.versionRange,
+        purls: cve.purls,
+        applicabilityRequiresReview: cve.applicabilityRequiresReview,
+      }),
+    );
   return digest.digest('hex');
 };
 const inventorySignature = (assets: WatchListItem[]) => {
   const digest = createHash('sha256');
   for (const asset of [...assets].sort((a, b) => a.id.localeCompare(b.id))) digest.update(stableJson(asset));
+  return digest.digest('hex');
+};
+const aliasSignature = (entries: readonly AliasEntry[]) => {
+  const digest = createHash('sha256');
+  for (const entry of [...entries].sort((a, b) => a.id.localeCompare(b.id)))
+    digest.update(
+      stableJson({
+        id: entry.id,
+        scope: entry.scope,
+        canonical: entry.canonical,
+        aliases: entry.aliases,
+        source: entry.source,
+        provenance: entry.provenance,
+        expiresAt: entry.expiresAt,
+      }),
+    );
   return digest.digest('hex');
 };
 /** (vendor, product) identities a CVE asserts, used to join pre-CVE clusters.
@@ -96,8 +131,10 @@ export async function queueRun(
       );
       if (existing) return existing;
       const settings = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
+      const id = randomUUID();
       const execution: PipelineExecution = {
-        id: randomUUID(),
+        id,
+        name: formatExecutionName(id),
         startTime: new Date().toISOString(),
         endTime: null,
         status: 'QUEUED',
@@ -117,9 +154,14 @@ export async function queueRun(
         },
         logs: [],
       };
-      await put(db, 'executions', execution.id, execution);
-      await writeEvent(db, { category:'PIPELINE', code:'pipeline.queued', message:'Pipeline queued', runId:execution.id });
-      await appendAudit(db, 'Pipeline queued', `Execution ${execution.id}`, actor, 'PIPELINE');
+      await put(db, 'executions', id, execution);
+      await writeEvent(db, {
+        category: 'PIPELINE',
+        code: 'pipeline.queued',
+        message: 'Pipeline queued',
+        runId: id,
+      });
+      await appendAudit(db, 'Pipeline queued', `Execution ${id}`, actor, 'PIPELINE');
       return execution;
     },
     undefined,
@@ -145,7 +187,12 @@ export async function stopRun(pool: pg.Pool, id: string, actor: string): Promise
       }
       run.logs.push('Operator requested stop');
       await put(db, 'executions', id, run);
-      await writeEvent(db, { category:'PIPELINE', code:'pipeline.stop_requested', message:'Operator requested pipeline stop', runId:id });
+      await writeEvent(db, {
+        category: 'PIPELINE',
+        code: 'pipeline.stop_requested',
+        message: 'Operator requested pipeline stop',
+        runId: id,
+      });
       await appendAudit(db, 'Pipeline stop requested', `Execution ${id}`, actor, 'PIPELINE');
       return run;
     },
@@ -165,9 +212,8 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     execution: PipelineExecution | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   try {
-    locked = (
-      await lock.query(`SELECT pg_try_advisory_lock(800003, ${schemaLockKey}) AS locked`)
-    ).rows[0].locked;
+    locked = (await lock.query(`SELECT pg_try_advisory_lock(800003, ${schemaLockKey}) AS locked`)).rows[0]
+      .locked;
     if (!locked) return false;
     const runs = await list<PipelineExecution>(pool, 'executions');
     // Owning the advisory lock proves no other live worker owns a run. Recovery
@@ -204,7 +250,10 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           await put(db, 'executions', stale.id, {
             ...stale,
             status: 'QUEUED',
-            logs: [...stale.logs, `Recovered interrupted worker (attempt ${recoveryCount}/3); restarting idempotently`],
+            logs: [
+              ...stale.logs,
+              `Recovered interrupted worker (attempt ${recoveryCount}/3); restarting idempotently`,
+            ],
           });
         }
       }
@@ -214,28 +263,41 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       .find((e) => e.status === 'QUEUED');
     if (!execution) {
       const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
-      const last = (await pool.query('SELECT last_run, next_catchup_run FROM scheduler_state WHERE id=1')).rows[0];
+      const last = (await pool.query('SELECT last_run, next_catchup_run FROM scheduler_state WHERE id=1'))
+        .rows[0];
       const configuredFeeds = await list<ThreatFeed>(pool, 'feeds');
-      const cursors = new Map((await pool.query("SELECT id,data FROM records WHERE kind='feedCursors'")).rows.map(row => [row.id, row.data as FeedCursor]));
+      const cursors = new Map(
+        (await pool.query("SELECT id,data FROM records WHERE kind='feedCursors'")).rows.map((row) => [
+          row.id,
+          row.data as FeedCursor,
+        ]),
+      );
       const now = Date.now();
       const catchupDue = configuredFeeds.some((feed) => {
         const cursor = cursors.get(feed.id);
         if (!feed.enabled || cursor?.fingerprint !== sourceFingerprint(feed)) return false;
         if (Date.parse(feed.circuitOpenUntil || '') > now) return false;
-        // A catch-up in progress with next_catchup_at due, or any pending hasMore.
-        if (cursor.catch_up && cursor.next_catchup_at && Date.parse(cursor.next_catchup_at) <= now) return true;
+        // A catch-up in progress respects its next_catchup_at cooldown: hasMore
+        // alone must not bypass the cooldown, or multi-run catch-up storms the
+        // provider immediately after a partial run.
+        if (cursor?.catch_up) {
+          if (!cursor.next_catchup_at) return false;
+          return Date.parse(cursor.next_catchup_at) <= now;
+        }
         return Boolean(cursor?.hasMore);
       });
       // Prioritize catch-up run if scheduled.
       const catchupScheduled = last?.next_catchup_run && Date.parse(last.next_catchup_run) <= now;
       const recoveryProbeDue = configuredFeeds.some((feed) => recoveryDue(feed));
-      if (shouldStartAutomaticRun({
-        schedulerEnabled: settings.schedulerEnabled,
-        recoveryProbeDue,
-        catchupDue: catchupDue || catchupScheduled,
-        lastRun: last ? new Date(last.last_run).toISOString() : null,
-        intervalMinutes: settings.schedulerIntervalMinutes,
-      }))
+      if (
+        shouldStartAutomaticRun({
+          schedulerEnabled: settings.schedulerEnabled,
+          recoveryProbeDue,
+          catchupDue: catchupDue || catchupScheduled,
+          lastRun: last ? new Date(last.last_run).toISOString() : null,
+          intervalMinutes: settings.schedulerIntervalMinutes,
+        })
+      )
         execution = await queueRun(pool, undefined, 'scheduler');
     }
     await pool.query('UPDATE scheduler_state SET heartbeat=now() WHERE id=1');
@@ -276,7 +338,12 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       await checkpoint(db);
       await put(db, 'executions', execution!.id, execution);
       await db.query('UPDATE scheduler_state SET last_run=now() WHERE id=1');
-      await writeEvent(db, {category:'PIPELINE', code:'pipeline.started', message:'Pipeline started', runId:execution!.id});
+      await writeEvent(db, {
+        category: 'PIPELINE',
+        code: 'pipeline.started',
+        message: 'Pipeline started',
+        runId: execution!.id,
+      });
     });
     const feeds = (await list<ThreatFeed>(pool, 'feeds')).filter((f) => f.enabled);
     const [cachedCves, cachedWithdrawals, inventory, aliasEntries] = await Promise.all([
@@ -305,6 +372,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     let preliminaryCorrelation: ReturnType<typeof runVulnerabilityPipeline> | undefined;
     let preliminaryCveSignature = '';
     let preliminaryInventorySignature = '';
+    let preliminaryAliasSignature = '';
     let preliminarySourceIds: string[] = [];
     // Bound cross-feed concurrency; each adapter also paces its own pages.
     const ingestSources = async (sources: ThreatFeed[], targets: string[] = []) => {
@@ -315,10 +383,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           const i = nextIndex++;
           const feed = sources[i];
           await checkpoint();
-          if (
-            feed.circuitOpenUntil &&
-            Date.parse(feed.circuitOpenUntil) > Date.now()
-          ) {
+          if (feed.circuitOpenUntil && Date.parse(feed.circuitOpenUntil) > Date.now()) {
             execution!.logs.push(
               `Feed ${feed.id}: skipped (circuit open, ${feed.consecutiveFailures} consecutive failures)`,
             );
@@ -329,13 +394,15 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           // pacing that bootstrap needs over 40 minutes for detail retrieval.
           // Give that source enough time to finish atomically while preserving
           // the configured limit for all other feeds.
-          const maxDurationSeconds = feed.type === 'MITRE_CVE'
-            ? Math.max(config.FEED_MAX_DURATION_SECONDS, 3600)
-            : config.FEED_MAX_DURATION_SECONDS;
+          const maxDurationSeconds =
+            feed.type === 'MITRE_CVE'
+              ? Math.max(config.FEED_MAX_DURATION_SECONDS, 3600)
+              : config.FEED_MAX_DURATION_SECONDS;
           const deadline = start + maxDurationSeconds * 1000;
           const sourceCheckpoint = async () => {
             await checkpoint();
-            if (Date.now() >= deadline) throw new Error('Feed ingestion exceeded its configured duration limit');
+            if (Date.now() >= deadline)
+              throw new Error('Feed ingestion exceeded its configured duration limit');
           };
           try {
             const checkedRequest: Requester = async (url, options) => {
@@ -366,7 +433,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             const cursor = savedCursor?.fingerprint === sourceFingerprint(feed) ? savedCursor : undefined;
             if (['NVD_API', 'OPENCVE_API', 'MITRE_CVE', 'VULNCHECK_KEV'].includes(feed.type)) {
               const window = ingestionWindow(execution!.scopeHours, cursor);
-              execution!.logs.push(`Feed ${feed.id}: ${window.incremental ? 'incremental' : 'initial bounded'} sync ${window.start.toISOString()} to ${window.end.toISOString()}`);
+              execution!.logs.push(
+                `Feed ${feed.id}: ${window.incremental ? 'incremental' : 'initial bounded'} sync ${window.start.toISOString()} to ${window.end.toISOString()}`,
+              );
             }
             const savedKev =
               feed.type === 'CISA_KEV' ? await get<KevSnapshot>(pool, 'feedSnapshots', feed.id) : undefined;
@@ -408,8 +477,13 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
               execution!.logs.push(`Feed ${feed.id}: no applicable CVEs; EPSS network retrieval skipped`);
               // No request was needed: clear expired recovery state without claiming
               // a successful connectivity check or changing lastSync.
-              feedUpdates.push({ ...feed, healthStatus: 'UNTESTED', errorLog: null,
-                consecutiveFailures: 0, circuitOpenUntil: null });
+              feedUpdates.push({
+                ...feed,
+                healthStatus: 'UNTESTED',
+                errorLog: null,
+                consecutiveFailures: 0,
+                circuitOpenUntil: null,
+              });
               continue;
             }
             feedUpdates.push({
@@ -454,10 +528,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     const primaryIngestionStartedAt = Date.now();
     await ingestSources(feeds.filter((feed) => feed.type !== 'EPSS_API'));
     const primaryIngestionDuration = Date.now() - primaryIngestionStartedAt;
-    const preliminaryCorpus = mergeCveRecords([
-      ...cachedCves,
-      ...results.flatMap((result) => result.cves),
-    ]);
+    const preliminaryCorpus = mergeCveRecords([...cachedCves, ...results.flatMap((result) => result.cves)]);
     const preliminaryCves = [...preliminaryCorpus.values()];
     // Push structured identity + typed version-range filtering into PostgreSQL.
     // The JS matcher still decides every candidate; this only avoids the full
@@ -488,6 +559,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     );
     preliminaryCveSignature = matchingCveSignature(preliminaryCves);
     preliminaryInventorySignature = inventorySignature(inventory);
+    preliminaryAliasSignature = aliasSignature(aliasEntries);
     preliminarySourceIds = results
       .filter((result) => result.cves.length > 0 || (result.withdrawals?.length || 0) > 0)
       .map((result) => result.sourceId || '')
@@ -497,14 +569,17 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     if (epssFeeds.length) {
       // EPSS changes risk, not product applicability. Query only CVEs that can
       // currently affect inventory, including uncertain matches awaiting review.
-      await ingestSources(epssFeeds, [...new Set(preliminaryCorrelation.newFindings.map((finding) => finding.cveId))]);
+      await ingestSources(epssFeeds, [
+        ...new Set(preliminaryCorrelation.newFindings.map((finding) => finding.cveId)),
+      ]);
     }
     const epssIngestionDuration = Date.now() - epssIngestionStartedAt;
     results.sort((a, b) => (a.sourceId || '').localeCompare(b.sourceId || ''));
     const ingestionDuration = primaryIngestionDuration + epssIngestionDuration;
     execution.phases[0] = {
       name: 'Feed ingestion',
-      status: succeeded < feeds.length || results.some((result) => result.warnings?.length) ? 'WARNING' : 'SUCCESS',
+      status:
+        succeeded < feeds.length || results.some((result) => result.warnings?.length) ? 'WARNING' : 'SUCCESS',
       durationMs: ingestionDuration,
       details: `${succeeded}/${feeds.length} feeds succeeded; ${rawCount} records read`,
     };
@@ -575,7 +650,8 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             ? result.syncState
             : { ...result.syncState, catch_up: false, next_catchup_at: undefined };
           await put(db, 'feedCursors', source.id, {
-            ...cursorState, fingerprint: sourceFingerprint(source),
+            ...cursorState,
+            fingerprint: sourceFingerprint(source),
           } satisfies FeedCursor);
         }
         if (result.kev && !result.notModified) {
@@ -587,10 +663,20 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           } satisfies KevSnapshot);
         }
       }
-      for (const update of feedUpdates.filter((feed) => validSources.has(feed.id))) await writeEvent(db, { category:'FEED',
-        level:update.healthStatus === 'DOWN' ? 'ERROR' : update.healthStatus === 'DEGRADED' ? 'WARNING' : 'INFO',
-        code:'feed.ingestion', message:`${update.name}: ${update.healthStatus}`, runId:execution!.id,
-        context:{ feedId:update.id, count:update.itemCountLastRun, latencyMs:update.latencyMs } });
+      for (const update of feedUpdates.filter((feed) => validSources.has(feed.id)))
+        await writeEvent(db, {
+          category: 'FEED',
+          level:
+            update.healthStatus === 'DOWN'
+              ? 'ERROR'
+              : update.healthStatus === 'DEGRADED'
+                ? 'WARNING'
+                : 'INFO',
+          code: 'feed.ingestion',
+          message: `${update.name}: ${update.healthStatus}`,
+          runId: execution!.id,
+          context: { feedId: update.id, count: update.itemCountLastRun, latencyMs: update.latencyMs },
+        });
       // Commit a durable native-correlation handoff with the source checkpoint.
       // Existing inventory remains authoritative; no record-store assets are copied.
       for (const result of acceptedResults)
@@ -608,8 +694,19 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             ],
           );
       const snapshot = await pipelineState(db);
-      const articles = mergeArticles([...snapshot.intelligenceArticles, ...acceptedResults.flatMap(result => result.articles || [])]);
-      await putMany(db, 'intelligenceArticles', articles.map(data => ({id:data.id,data})));
+      // Re-read alias entries inside the commit transaction: operator alias
+      // changes during ingestion (save/promote/revoke) must not be silently
+      // overwritten by a stale snapshot loaded before network I/O.
+      const aliasEntries = await list<AliasEntry>(db, 'aliases');
+      const articles = mergeArticles([
+        ...snapshot.intelligenceArticles,
+        ...acceptedResults.flatMap((result) => result.articles || []),
+      ]);
+      await putMany(
+        db,
+        'intelligenceArticles',
+        articles.map((data) => ({ id: data.id, data })),
+      );
       const byId = mergeCveRecords([
         ...snapshot.cveData,
         ...acceptedResults.filter((result) => !result.notModified).flatMap((result) => result.cves),
@@ -628,7 +725,11 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         const old = oldWithdrawals.get(entry.cveId);
         return !old || old.modifiedDate !== entry.modifiedDate;
       });
-      await putMany(db, 'cveWithdrawals', changedWithdrawals.map((entry) => ({ id: entry.cveId, data: entry })));
+      await putMany(
+        db,
+        'cveWithdrawals',
+        changedWithdrawals.map((entry) => ({ id: entry.cveId, data: entry })),
+      );
       for (const entry of withdrawals.values()) {
         const cve = byId.get(entry.cveId);
         if (cve && Date.parse(cve.modifiedDate) <= Date.parse(entry.modifiedDate)) byId.delete(entry.cveId);
@@ -647,13 +748,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       );
       if (
         cisaKevEnabled &&
-        !acceptedResults.some(
-          (result) => currentFeeds.get(result.sourceId || '')?.type === 'CISA_KEV',
-        )
+        !acceptedResults.some((result) => currentFeeds.get(result.sourceId || '')?.type === 'CISA_KEV')
       )
-        execution!.logs.push(
-          'CISA KEV was not refreshed; cached KEV flags are retained and may be stale',
-        );
+        execution!.logs.push('CISA KEV was not refreshed; cached KEV flags are retained and may be stale');
       const exploitedReports = acceptedResults.filter((result) => result.exploited && !result.notModified);
       const epssReports = acceptedResults.filter((result) => result.epss && !result.notModified);
       const epssScopes = new Map(epssReports.map((result) => [result, new Set(result.epssScope)]));
@@ -663,7 +760,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           .map((result) => result.sourceId!)
           .sort();
         if (exploitationSources.length) {
-          cve.exploitationSources = [...new Set([...(cve.exploitationSources || []), ...exploitationSources])];
+          cve.exploitationSources = [
+            ...new Set([...(cve.exploitationSources || []), ...exploitationSources]),
+          ];
           if (cve.exploitStatus === 'None') cve.exploitStatus = 'Reported In Wild';
         }
         if (kevReports.length) {
@@ -736,7 +835,11 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           pending: [],
           updatedAt: new Date().toISOString(),
         });
-      await putMany(db, 'cveData', changedCves.map((cve) => ({ id: cve.cveId, data: cve })));
+      await putMany(
+        db,
+        'cveData',
+        changedCves.map((cve) => ({ id: cve.cveId, data: cve })),
+      );
       const keys = await db.query("SELECT id FROM records WHERE kind='cveData'");
       for (const { id } of keys.rows) {
         const canonical = normalizeCveId(id);
@@ -757,7 +860,8 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         preliminaryCorrelation !== undefined &&
         stableJson(preliminarySourceIds) === stableJson(finalSourceIds) &&
         preliminaryCveSignature === matchingCveSignature(finalCves) &&
-        preliminaryInventorySignature === inventorySignature(snapshot.watchlist);
+        preliminaryInventorySignature === inventorySignature(snapshot.watchlist) &&
+        preliminaryAliasSignature === aliasSignature(aliasEntries);
       // Inventory may have changed while this run was ingesting. Re-derive its
       // automatic aliases for the final snapshot so both the PostgreSQL
       // candidate index and the JavaScript matcher use the same expanded keys.
@@ -851,6 +955,11 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       // by either source are removed, while operator-managed rows are never
       // touched. The effective maps include this run's changes so news evidence
       // matching also sees the freshly learned names.
+      // A stop requested during the commit window must surface before the
+      // alias reconciliation writes back: once upserts/removals hit the table,
+      // a cancellation can no longer prevent a lossy overwrite of concurrent
+      // operator alias edits.
+      await checkpoint(db);
       const desiredAutoAliases = [
         ...deriveInventoryAliases(snapshot.watchlist, aliasEntries),
         ...deriveCorrelationAliases(persistedFindings, snapshot.watchlist, byId, aliasEntries),
@@ -872,13 +981,33 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         // product evidence is limited to the run's published/modified window.
         execution!.scopeHours,
       );
-      await putMany(db, 'intelligenceMatches', intelligenceMatches.map(data => ({id:data.id,data})));
-      await db.query("DELETE FROM records WHERE kind='intelligenceMatches' AND NOT (id=ANY($1::text[]))", [intelligenceMatches.map(item => item.id)]);
+      await putMany(
+        db,
+        'intelligenceMatches',
+        intelligenceMatches.map((data) => ({ id: data.id, data })),
+      );
+      await db.query("DELETE FROM records WHERE kind='intelligenceMatches' AND NOT (id=ANY($1::text[]))", [
+        intelligenceMatches.map((item) => item.id),
+      ]);
       // Apply zero-day rate limiting and digest consolidation.
-      const { matches: rateLimitedMatches, digests: zeroDayDigests } = rankAndRateLimitZeroDays(vexEnforced, intelligenceMatches);
-      await writeEvent(db, {category:'MATCHING', code:'matching.completed', message:'Structured applicability and news evidence correlation completed', runId:execution!.id,
-        context:{ findings:correlated.newFindings.length, articles:articles.length, evidenceMatches:rateLimitedMatches.length,
-          reviewRequired:rateLimitedMatches.filter(item => item.status === 'REVIEW_REQUIRED').length, zeroDayDigests:zeroDayDigests.length, zeroDaysRateLimited: intelligenceMatches.length - rateLimitedMatches.length }});
+      const { matches: rateLimitedMatches, digests: zeroDayDigests } = rankAndRateLimitZeroDays(
+        vexEnforced,
+        intelligenceMatches,
+      );
+      await writeEvent(db, {
+        category: 'MATCHING',
+        code: 'matching.completed',
+        message: 'Structured applicability and news evidence correlation completed',
+        runId: execution!.id,
+        context: {
+          findings: correlated.newFindings.length,
+          articles: articles.length,
+          evidenceMatches: rateLimitedMatches.length,
+          reviewRequired: rateLimitedMatches.filter((item) => item.status === 'REVIEW_REQUIRED').length,
+          zeroDayDigests: zeroDayDigests.length,
+          zeroDaysRateLimited: intelligenceMatches.length - rateLimitedMatches.length,
+        },
+      });
       const queueStarted = Date.now();
       let notificationsQueued = 0,
         advisoriesQueued = 0,
@@ -953,8 +1082,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
               notificationsQueued += count;
               advisoriesQueued += count ? 1 : 0;
               if (count)
-                for (const f of batch)
-                  await put(db, 'findings', f.id, { ...f, advisoryId: advisory.id });
+                for (const f of batch) await put(db, 'findings', f.id, { ...f, advisoryId: advisory.id });
             }
           }
         }
@@ -986,7 +1114,10 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         phases: [
           {
             name: 'Feed ingestion',
-            status: succeeded < feeds.length || acceptedResults.some((result) => result.warnings?.length) ? 'WARNING' : 'SUCCESS',
+            status:
+              succeeded < feeds.length || acceptedResults.some((result) => result.warnings?.length)
+                ? 'WARNING'
+                : 'SUCCESS',
             durationMs: ingestionDuration,
             details: `${succeeded}/${feeds.length} feeds succeeded; ${rawCount} records read; cached intelligence retained`,
           },
@@ -1014,11 +1145,28 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       // Clear next_catchup_run if all feeds have completed their catch-up.
       const pendingCatchup = acceptedResults.some((r) => r.syncState?.catch_up && r.syncState.hasMore);
       if (pendingCatchup) {
-        await db.query('UPDATE scheduler_state SET last_run=now(), next_catchup_run=now() WHERE id=1');
+        // Back off to the latest per-feed next_catchup_at so the scheduler does
+        // not retrigger catch-up before the per-feed cooldown has elapsed.
+        const allCatchup = acceptedResults.flatMap((r) =>
+          r.syncState?.catch_up && r.syncState?.next_catchup_at
+            ? [Date.parse(r.syncState.next_catchup_at)]
+            : [],
+        );
+        const nextCatchupRun = allCatchup.length ? Math.max(...allCatchup) : Date.now() + 60000;
+        await db.query('UPDATE scheduler_state SET last_run=now(), next_catchup_run=$1 WHERE id=1', [
+          new Date(Math.max(nextCatchupRun, Date.now())).toISOString(),
+        ]);
       } else {
         await db.query('UPDATE scheduler_state SET last_run=now(), next_catchup_run=NULL WHERE id=1');
       }
-      await writeEvent(db, {category:'PIPELINE', level:execution!.status === 'FAILED' ? 'ERROR' : 'INFO', code:'pipeline.finished', message:`Pipeline ${execution!.status.toLowerCase()}`, runId:execution!.id, context:{stats:execution!.stats}});
+      await writeEvent(db, {
+        category: 'PIPELINE',
+        level: execution!.status === 'FAILED' ? 'ERROR' : 'INFO',
+        code: 'pipeline.finished',
+        message: `Pipeline ${execution!.status.toLowerCase()}`,
+        runId: execution!.id,
+        context: { stats: execution!.stats },
+      });
       await appendAudit(
         db,
         execution.status === 'FAILED' ? 'Pipeline failed' : 'Pipeline completed',
@@ -1048,7 +1196,17 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           endTime: new Date().toISOString(),
           logs: [...execution!.logs, e instanceof Error ? e.message : 'Worker failed'],
         });
-        await writeEvent(db, {category:e instanceof PipelineStopped ? 'PIPELINE' : 'ISSUE', level:e instanceof PipelineStopped ? 'INFO' : 'ERROR', code:e instanceof PipelineStopped ? 'pipeline.cancelled' : 'pipeline.failed', message:e instanceof PipelineStopped ? 'Pipeline stopped by operator' : 'Pipeline failed; inspect execution details', runId:execution!.id, context: failure});
+        await writeEvent(db, {
+          category: e instanceof PipelineStopped ? 'PIPELINE' : 'ISSUE',
+          level: e instanceof PipelineStopped ? 'INFO' : 'ERROR',
+          code: e instanceof PipelineStopped ? 'pipeline.cancelled' : 'pipeline.failed',
+          message:
+            e instanceof PipelineStopped
+              ? 'Pipeline stopped by operator'
+              : 'Pipeline failed; inspect execution details',
+          runId: execution!.id,
+          context: failure,
+        });
         await appendAudit(
           db,
           e instanceof PipelineStopped ? 'Pipeline stopped' : 'Pipeline failed',
@@ -1065,11 +1223,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
   } finally {
     if (heartbeat) clearInterval(heartbeat);
     if (locked)
-      await lock
-        .query(`SELECT pg_advisory_unlock(800003, ${schemaLockKey})`)
-        .catch(() => {
-          connectionLost = true;
-        });
+      await lock.query(`SELECT pg_advisory_unlock(800003, ${schemaLockKey})`).catch(() => {
+        connectionLost = true;
+      });
     lock.removeListener('error', onError);
     lock.release(connectionLost);
   }
