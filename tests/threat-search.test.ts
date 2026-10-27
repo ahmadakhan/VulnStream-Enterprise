@@ -103,7 +103,7 @@ function createRequester(response: { status: number; body: string; headers?: Rec
   });
 }
 
-test('searchThreatIntelligence searches NVD by CPE name and returns matching CVEs', async () => {
+test('searchThreatIntelligence searches NVD by CPE virtual match and returns matching CVEs', async () => {
   const requester = createRequester({
     status: 200,
     body: JSON.stringify({
@@ -252,7 +252,7 @@ test('searchThreatIntelligence resolves vendor aliases from custom thesaurus', a
   assert.ok(result.hits.length >= 1);
 });
 
-test('searchThreatIntelligence generates CPE prefixes for parts a, o, h', async () => {
+test('searchThreatIntelligence generates CPE virtual-match prefixes for parts a, o, h', async () => {
   let calledUrls: string[] = [];
   const requester: Requester = async (url) => {
     calledUrls.push(url);
@@ -271,9 +271,39 @@ test('searchThreatIntelligence generates CPE prefixes for parts a, o, h', async 
     limit: 50,
   });
 
-  const cpeNameUrls = calledUrls.filter((u) => u.includes('cpeName='));
-  assert.ok(cpeNameUrls.length >= 1, 'should make at least one CPE name search request');
-  const firstCpe = new URL(cpeNameUrls[0]).searchParams.get('cpeName');
-  assert.ok(firstCpe, 'cpeName parameter should be present');
-  assert.ok(firstCpe.startsWith('cpe:2.3:'), 'should use CPE 2.3 format');
+  const matchUrls = calledUrls.filter((u) => u.includes('virtualMatchString='));
+  assert.ok(matchUrls.length >= 1, 'should make at least one CPE virtual-match request');
+  const matchString = new URL(matchUrls[0]).searchParams.get('virtualMatchString');
+  assert.ok(matchString, 'virtualMatchString parameter should be present');
+  assert.ok(matchString.startsWith('cpe:2.3:'), 'should use CPE 2.3 format');
+  assert.ok(
+    matchString.endsWith(':microsoft:windows_10'),
+    'should target the vendor/product prefix without a version',
+  );
+});
+
+test('keyword fallback normalizes CPE-style underscores for NVD text search', async () => {
+  const calledUrls: string[] = [];
+  const requester: Requester = async (url) => {
+    calledUrls.push(url);
+    return {
+      status: 200,
+      body: JSON.stringify({ totalResults: 0, vulnerabilities: [] }),
+      headers: {},
+    };
+  };
+
+  await searchThreatIntelligence(requester, createMockDb(false), config, {
+    vendor: 'apache',
+    product: 'http_server',
+    limit: 50,
+  });
+
+  const keywordUrl = calledUrls.find((url) => url.includes('keywordSearch='));
+  assert.ok(keywordUrl, 'should fall back to keyword search');
+  assert.equal(
+    new URL(keywordUrl).searchParams.get('keywordSearch'),
+    'apache http server',
+    'should send plain words, not CPE identifiers',
+  );
 });

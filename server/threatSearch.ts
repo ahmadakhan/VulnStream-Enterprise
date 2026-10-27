@@ -33,10 +33,11 @@ export class ThreatSearchRateLimitError extends Error {
 
 /**
  * Searches the NVD CVE API for vulnerabilities affecting the given vendor
- * and product. Uses CPE 2.3 `cpeName` search as the primary path, falling
- * back to keyword search when the CPE dictionary yields no results. Custom
- * aliases from the operator-managed thesaurus are merged onto the built-in
- * baseline to broaden the vendor/product match.
+ * and product. Uses NVD's CPE virtual match (`virtualMatchString`) as the
+ * primary path so every version of a product is covered, falling back to
+ * keyword search when the CPE dictionary yields no results. Custom aliases
+ * from the operator-managed thesaurus are merged onto the built-in baseline
+ * to broaden the vendor/product match.
  *
  * All requests go through the shared SSRF-protected requester, so the NVD
  * host must appear in EGRESS_ALLOWED_HOSTS (it is present by default).
@@ -99,9 +100,11 @@ export async function searchThreatIntelligence(
     }
   }
 
-  // If no exact CPE matches, fall back to keyword search
+  // If no exact CPE matches, fall back to keyword search. NVD keyword search
+  // matches literal text, so CPE-style underscores must become spaces; a
+  // query like "apache http_server" otherwise returns nothing.
   if (hits.length === 0 && !rateLimited) {
-    const keyword = `${trimmedVendor} ${trimmedProduct}`;
+    const keyword = `${trimmedVendor} ${trimmedProduct}`.replace(/_/g, ' ').replace(/\s+/g, ' ');
     try {
       const result = await fetchNvdCvesByKeyword(request, apiKey, keyword, limit * 2);
       for (const cve of result.cves) {
@@ -157,11 +160,14 @@ interface NvdFetchResult {
 async function fetchNvdCves(
   request: Requester,
   apiKey: string,
-  cpeName: string,
+  matchString: string,
   limit: number,
 ): Promise<NvdFetchResult> {
   const url = new URL(NVD_CVE_ENDPOINT);
-  url.searchParams.set('cpeName', cpeName);
+  // `cpeName` requires an exact dictionary entry; a wildcard version suffix
+  // (…:product:*:*) returns 404. `virtualMatchString` matches every version
+  // of the CPE prefix, which is what an operator searching a product expects.
+  url.searchParams.set('virtualMatchString', matchString);
   url.searchParams.set('resultsPerPage', String(Math.min(Math.max(1, limit), 2000)));
   if (apiKey) url.searchParams.set('apiKey', apiKey);
 
@@ -233,9 +239,7 @@ function parseRetryAfter(header: string): number | undefined {
 }
 
 function generateCpePrefixes(vendor: string, product: string): string[] {
-  return (['a', 'o', 'h'] as const).map((part) =>
-    `cpe:2.3:${part}:${vendor}:${product}:*:*:*:*:*:*:*:*`,
-  );
+  return (['a', 'o', 'h'] as const).map((part) => `cpe:2.3:${part}:${vendor}:${product}`);
 }
 
 function findMatchingCpes(
