@@ -495,6 +495,8 @@ export interface PipelinePhase {
 
 export interface PipelineExecution {
   id: string;
+  /** Human-friendly label for this run, e.g. `Run 3add6860`. Absent on legacy rows. */
+  name?: string;
   startTime: string;
   endTime: string | null;
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'QUARANTINED' | 'CANCELLED';
@@ -608,7 +610,8 @@ export interface EmailDeliveryLog {
   recipientEmail: string;
   advisoryId: string;
   subject: string;
-  provider: 'Mailgun' | 'Mailtrap' | 'SendGrid' | 'Postmark' | 'Custom API' | 'SMTP_Relay' | 'Local_Mock' | 'Mailjet';
+  provider:
+    'Mailgun' | 'Mailtrap' | 'SendGrid' | 'Postmark' | 'Custom API' | 'SMTP_Relay' | 'Local_Mock' | 'Mailjet';
   status:
     'REVIEW_REQUIRED' | 'QUEUED' | 'ACCEPTED' | 'DELIVERED' | 'BOUNCED' | 'RETRYING' | 'FAILED' | 'CANCELLED';
   attemptCount: number;
@@ -645,7 +648,13 @@ export interface AuditLog {
   hash: string;
 }
 
-export const SMTP_EMAIL_PROVIDERS = ['SMTP_CUSTOM', 'MAILEROO_SMTP', 'LETTR_SMTP', 'MAILJET_SMTP', 'SENDGRID_SMTP'] as const;
+export const SMTP_EMAIL_PROVIDERS = [
+  'SMTP_CUSTOM',
+  'MAILEROO_SMTP',
+  'LETTR_SMTP',
+  'MAILJET_SMTP',
+  'SENDGRID_SMTP',
+] as const;
 export const EMAIL_PROVIDERS = [
   'SMTP',
   'API',
@@ -697,12 +706,7 @@ export interface RetentionConfig {
 }
 
 /** Record kinds the retention policy is allowed to delete. */
-export type RetentionKind =
-  | 'cveData'
-  | 'intelligenceArticles'
-  | 'emailLogs'
-  | 'webhookLogs'
-  | 'executions';
+export type RetentionKind = 'cveData' | 'intelligenceArticles' | 'emailLogs' | 'webhookLogs' | 'executions';
 
 export interface RetentionRunResult {
   ranAt: string;

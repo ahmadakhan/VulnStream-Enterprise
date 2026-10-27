@@ -50,6 +50,8 @@ export interface CorrelationPolicy {
 }
 export interface CorrelationWorkflows {
   policy: CorrelationPolicy;
+  /** Fleet-wide fault-simulation gate state (`correlation_policy.fault_simulation_armed`). */
+  faultSimulationArmed: boolean;
   counts: { pending: number; reviews: number; deadLetters: number };
   reviews: {
     id: string;

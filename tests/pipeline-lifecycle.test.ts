@@ -140,6 +140,36 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       await save('feeds', source.id, { ...source, enabled: false });
       assert.equal(await processPipeline(pool, config, request), false);
     });
+    await t.test('catch-up cooldown blocks immediate re-run after a partial catch-up', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: true, schedulerIntervalMinutes: 60 });
+      const source = { id: 'catchup-cd', name: 'NVD cooldown', type: 'NVD_API', url: 'https://example.com/nvd', authType: 'NONE', rateLimitPerMin: 600, enabled: true };
+      await save('feeds', source.id, source);
+      // First run to establish a cursor with the correct fingerprint.
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async () => ({ status: 200, headers: {}, body: JSON.stringify({ startIndex: 0, totalResults: 0, vulnerabilities: [] }) }));
+      const cursor = await get<any>(pool, 'feedCursors', source.id);
+      // Simulate a partial catch-up: hasMore true, catch_up true, next_catchup_at in the future.
+      const futureCooldown = new Date(Date.now() + 60000).toISOString();
+      const oldCursor = new Date(Date.now() - 72 * 3600000).toISOString();
+      await save('feedCursors', source.id, { ...cursor, cursor: oldCursor, hasMore: true, catch_up: true, next_catchup_at: futureCooldown });
+      // Set scheduler_state: last_run recent so interval check fails, next_catchup_run NULL.
+      await pool.query('UPDATE scheduler_state SET last_run=$1, next_catchup_run=NULL WHERE id=1', [new Date(Date.now() - 30000).toISOString()]);
+      const noOp = async () => { throw new Error('should not reach network'); };
+      // Cooldown not elapsed → should not start (hasMore no longer bypasses the cooldown).
+      assert.equal(await processPipeline(pool, config, noOp), false);
+      const unchanged = await get<any>(pool, 'feedCursors', source.id);
+      assert.equal(unchanged.cursor, oldCursor);
+      assert.equal(unchanged.hasMore, true);
+      assert.equal(unchanged.catch_up, true);
+      // Advance cooldown to the past.
+      await save('feedCursors', source.id, { ...cursor, cursor: oldCursor, hasMore: true, catch_up: true, next_catchup_at: new Date(Date.now() - 1000).toISOString() });
+      // Cooldown elapsed → should start.
+      assert.equal(
+        await processPipeline(pool, config, async () => ({ status: 200, headers: {}, body: JSON.stringify({ startIndex: 0, totalResults: 0, vulnerabilities: [] }) })),
+        true,
+      );
+    });
     await t.test('MITRE CVE and overlapping feeds persist one CVE and stable inventory findings across runs', async () => {
       await reset();
       await save('watchlist', 'asset', asset());
@@ -1257,6 +1287,113 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         ),
         [],
       );
+    });
+    await t.test('alias changes during ingestion are reloaded inside the commit transaction', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: false });
+      // Asset whose CPE vendor (acme_inc) differs from the inventory vendor
+      // (Acme Corp) so an AUTO alias is derivable from inventory.
+      const aliasedAsset: WatchListItem = {
+        id: 'aliased-asset',
+        vendor: 'Acme Corp',
+        product: 'Widget Pro',
+        cpes: ['cpe:2.3:a:acme_inc:widget_pro:1.0:*:*:*:*:*:*:*'],
+        assetTag: 'TEST',
+        ownerGroup: 'test',
+        active: true,
+        createdAt: new Date().toISOString(),
+      };
+      await save('watchlist', aliasedAsset.id, aliasedAsset);
+      const feedSource = { id: 'alias-nvd', name: 'NVD', type: 'NVD_API', url: 'https://example.com/nvd', authType: 'NONE', rateLimitPerMin: 600, enabled: true };
+      await save('feeds', feedSource.id, feedSource);
+      const cve: NormalizedCVE = {
+        ...vulnerability(),
+        cveId: 'CVE-2026-98002',
+        cpeMatches: ['cpe:2.3:a:acme_inc:widget_pro:*:*:*:*:*:*:*:*'],
+        versionRange: { versionEndExcluding: '2.0' },
+      };
+      await save('cveData', cve.cveId, cve);
+      // Pre-existing AUTO alias derived from inventory CPE vendor mismatch.
+      const createdAt = new Date().toISOString();
+      const autoAlias: AliasEntry = {
+        id: 'auto:vendor:acme corp',
+        scope: 'VENDOR',
+        canonical: 'acme corp',
+        aliases: ['acme_inc'],
+        source: 'AUTO',
+        provenance: 'INVENTORY',
+        createdAt,
+        firstSeenAt: createdAt,
+        lastSeenAt: createdAt,
+        expiresAt: new Date(Date.parse(createdAt) + 86400000).toISOString(),
+      };
+      await save('aliases', autoAlias.id, autoAlias);
+      // Promote the AUTO alias to MANUAL *during* ingestion. Before the fix the
+      // pipeline used a stale aliasEntries snapshot committed before network I/O
+      // and overwrote the promotion back to AUTO.
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async () => {
+        await transaction(pool, (db) =>
+          applyCommand(db, config, { action: 'alias.promote', id: autoAlias.id, actor: 'test' }),
+        );
+        return { status: 200, headers: {}, body: JSON.stringify({ startIndex: 0, totalResults: 0, vulnerabilities: [] }) };
+      });
+      const promoted = await get<AliasEntry>(pool, 'aliases', autoAlias.id);
+      assert.equal(promoted?.source, 'MANUAL', 'promotion must survive the pipeline commit');
+      assert.equal(promoted?.provenance, 'OPERATOR');
+      assert.deepEqual(promoted?.aliases, ['acme_inc'], 'alias aliases must be preserved');
+    });
+    await t.test('alias revocation during ingestion is reloaded and blocks re-learning', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, schedulerEnabled: false });
+      const aliasedAsset: WatchListItem = {
+        id: 'revoked-asset',
+        vendor: 'Acme Corp',
+        product: 'Widget Pro',
+        cpes: ['cpe:2.3:a:acme_inc:widget_pro:1.0:*:*:*:*:*:*:*'],
+        assetTag: 'TEST',
+        ownerGroup: 'test',
+        active: true,
+        createdAt: new Date().toISOString(),
+      };
+      await save('watchlist', aliasedAsset.id, aliasedAsset);
+      const feedSource = { id: 'revoke-nvd', name: 'NVD', type: 'NVD_API', url: 'https://example.com/nvd', authType: 'NONE', rateLimitPerMin: 600, enabled: true };
+      await save('feeds', feedSource.id, feedSource);
+      const cve: NormalizedCVE = {
+        ...vulnerability(),
+        cveId: 'CVE-2026-98003',
+        cpeMatches: ['cpe:2.3:a:acme_inc:widget_pro:*:*:*:*:*:*:*:*'],
+        versionRange: { versionEndExcluding: '2.0' },
+      };
+      await save('cveData', cve.cveId, cve);
+      const createdAt = new Date().toISOString();
+      const autoAlias: AliasEntry = {
+        id: 'auto:vendor:acme corp',
+        scope: 'VENDOR',
+        canonical: 'acme corp',
+        aliases: ['acme_inc'],
+        source: 'AUTO',
+        provenance: 'INVENTORY',
+        createdAt,
+        firstSeenAt: createdAt,
+        lastSeenAt: createdAt,
+        expiresAt: new Date(Date.parse(createdAt) + 86400000).toISOString(),
+      };
+      await save('aliases', autoAlias.id, autoAlias);
+      // Revoke the AUTO alias during ingestion. Before the fix, the stale snapshot
+      // would re-add the alias from desiredAutoAliases, resurrecting a relation
+      // the operator explicitly blocked.
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async () => {
+        await transaction(pool, (db) =>
+          applyCommand(db, config, { action: 'alias.revoke', id: autoAlias.id, actor: 'test' }),
+        );
+        return { status: 200, headers: {}, body: JSON.stringify({ startIndex: 0, totalResults: 0, vulnerabilities: [] }) };
+      });
+      const tombstone = await get<AliasEntry>(pool, 'aliases', `revoked:${autoAlias.id}`);
+      assert.ok(tombstone, 'revocation tombstone must be preserved');
+      assert.equal(tombstone?.source, 'REVOKED');
+      assert.equal((await get<AliasEntry>(pool, 'aliases', autoAlias.id))?.source, undefined, 'original AUTO row must not be resurrected');
     });
   } finally {
     await pool.end();

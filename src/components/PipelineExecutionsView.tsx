@@ -19,6 +19,7 @@ import type { PipelineExecution, PipelinePhase } from '../types';
 import { Pagination } from './Pagination';
 import { useCollection } from '../hooks/useCollection';
 import { SCOPE_PRESETS, formatScopeLabel } from '../utils/scopePresets';
+import { formatExecutionName } from '../utils/executionName';
 
 const stages = [
   {
@@ -313,7 +314,9 @@ export const PipelineExecutionsView: React.FC = () => {
                   className={`w-full flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3 text-left ${execution?.id === run.id ? 'border-blue-500/60 bg-blue-500/5' : 'border-zinc-800 light:border-zinc-200'}`}
                 >
                   <div>
-                    <p className="text-xs font-mono text-zinc-200 light:text-zinc-800 break-all">{run.id}</p>
+                    <p className="text-sm font-semibold text-zinc-100 light:text-zinc-900 break-all">
+                      {run.name || formatExecutionName(run.id)}
+                    </p>
                     <p className="mt-1 text-xs text-zinc-400 light:text-zinc-600">
                       {new Date(run.startTime).toLocaleString()} · {run.stats?.matchedWatchlist ?? 0} matches
                     </p>

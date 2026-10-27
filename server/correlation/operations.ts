@@ -45,8 +45,39 @@ export async function updateCorrelationPolicy(
   await appendAudit(db, 'Correlation policy updated', 'Notification and retention policy changed', actor);
   return getCorrelationPolicy(db);
 }
+
+/** Read the fleet-wide fault-simulation gate (`correlation_policy.fault_simulation_armed`).
+ * This is the per-database half of the gate: the per-replica FAULT_SIMULATION_ENABLED
+ * env var alone must never authorize a simulated fault. */
+export async function getFaultSimulationArmed(db: Db): Promise<boolean> {
+  const result = await db.query<{ armed: boolean }>(
+    `SELECT fault_simulation_armed AS armed FROM correlation_policy WHERE id=1`,
+  );
+  if (!result.rows[0]) throw new Error('CORRELATION_POLICY_MISSING');
+  return result.rows[0].armed;
+}
+
+/** Arm or disarm the fleet-wide fault-simulation gate (`fault_simulation_armed`).
+ * This is the per-database counterpart to the per-replica FAULT_SIMULATION_ENABLED
+ * env var: arming the gate on one replica does not arm it fleet-wide on its own. */
+export async function setFaultSimulationArmed(
+  db: Db,
+  armed: boolean,
+  actor: string,
+): Promise<boolean> {
+  await db.query(`UPDATE correlation_policy SET fault_simulation_armed=$1 WHERE id=1`, [armed]);
+  await appendAudit(
+    db,
+    'Fault simulation arming changed',
+    `Fault simulation gate ${armed ? 'armed' : 'disarmed'}`,
+    actor,
+    'PIPELINE',
+  );
+  return armed;
+}
 export async function correlationWorkflows(db: Db): Promise<CorrelationWorkflows> {
   const policy = await getCorrelationPolicy(db);
+  const faultSimulationArmed = await getFaultSimulationArmed(db);
   const reviews = await db.query<
     CorrelationWorkflows['reviews'][number]
   >(`SELECT b.id,b.advisory_id AS "advisoryId",
@@ -63,7 +94,7 @@ export async function correlationWorkflows(db: Db): Promise<CorrelationWorkflows
     (SELECT count(*)::int FROM correlation_pending) AS pending,
     (SELECT count(*)::int FROM low_confidence_review_buffer b WHERE NOT EXISTS(SELECT 1 FROM correlation_review_decisions d WHERE d.review_id=b.id)) AS reviews,
     (SELECT count(*)::int FROM correlation_dead_letters l WHERE NOT EXISTS(SELECT 1 FROM correlation_dead_letter_actions a WHERE a.letter_id=l.id)) AS "deadLetters"`);
-  return { policy, reviews: reviews.rows, deadLetters: deadLetters.rows, counts: counts.rows[0] };
+  return { policy, faultSimulationArmed, reviews: reviews.rows, deadLetters: deadLetters.rows, counts: counts.rows[0] };
 }
 export async function decideCorrelationReview(
   db: Db,

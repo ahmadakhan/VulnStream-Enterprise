@@ -4,6 +4,8 @@ import {
   decideCorrelationReview,
   decideDeadLetter,
   updateCorrelationPolicy,
+  getFaultSimulationArmed,
+  setFaultSimulationArmed,
   retainCorrelationData,
 } from './correlation/operations.ts';
 import type { CorrelationRuntime } from './correlation/runtime.ts';
@@ -459,13 +461,20 @@ export function createApp(
       '/api/correlation/fault',
       requireRole('ADMIN'),
       asyncRoute(async (req, res) => {
-        // Two independent gates: the explicit opt-in (absence of which is the
-        // default) and the environment. NODE_ENV alone was not a boundary -- a
-        // production image started with NODE_ENV=development exposed an
-        // endpoint that can open the shared circuit breaker and stop ingestion
-        // on every replica for five minutes.
+        // Three independent gates, none bypassable by a single misconfiguration:
+        // (1) NODE_ENV is not production, (2) the per-replica FAULT_SIMULATION_ENABLED
+        // opt-in env var, and (3) the fleet-wide `fault_simulation_armed` flag on the
+        // shared correlation_policy row. The env var alone is intentionally not a
+        // boundary: a production image started with NODE_ENV=development would still
+        // need an operator to arm the gate, and arming one replica does not arm a fleet.
         if (config.NODE_ENV === 'production' || config.FAULT_SIMULATION_ENABLED !== 'true')
           throw new HttpError(403, 'Fault simulation is disabled in this deployment');
+        const armed = await getFaultSimulationArmed(pool);
+        if (!armed)
+          throw new HttpError(
+            403,
+            'Fault simulation is not armed. POST /api/correlation/fault/arming with { "armed": true } to enable it.',
+          );
         const { fault } = z
           .object({ fault: z.enum(['memory', 'database']) })
           .strict()
@@ -475,6 +484,17 @@ export function createApp(
           appendAudit(db, 'Correlation fault simulated', `Simulated ${fault} fault via dashboard`, req.operator!.username),
         ).catch(() => {});
         res.json({ accepted: true });
+      }),
+    );
+    app.post(
+      '/api/correlation/fault/arming',
+      requireRole('ADMIN'),
+      asyncRoute(async (req, res) => {
+        const { armed } = z.object({ armed: z.boolean() }).strict().parse(req.body);
+        const faultSimulationArmed = await transaction(pool, (db) =>
+          setFaultSimulationArmed(db, armed, req.operator!.username),
+        );
+        res.json({ ok: true, faultSimulationArmed });
       }),
     );
     app.post(

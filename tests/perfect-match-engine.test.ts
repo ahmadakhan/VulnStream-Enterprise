@@ -49,6 +49,24 @@ test('a bound with less precision than the deployed version is REVIEW, not a gue
   assert.equal(evaluateVersion('5.0.0', '<5.0.1'), 'AFFECTED');
 });
 
+test('equality against a truncated deployment version cannot be decided confidently', () => {
+  // Regression: intervalIsOrderedBy short-circuited "=" to true without
+  // checking whether the bound lands inside the deployment's precision
+  // interval. A "9.0" deployment denotes every 9.0.x build, so "=9.0.3"
+  // straddles it — some builds match and most don't. The old code reported
+  // a confident UNAFFECTED here, a silent false negative.
+  assert.equal(evaluateVersion('9.0', '=9.0.3'), 'REVIEW');
+  // A bound that sits exactly on the interval's lower edge is also only
+  // partially covered by the line and therefore undecidable.
+  assert.equal(evaluateVersion('9.0', '=9.0.0'), 'REVIEW');
+  // A bound strictly outside the widened interval is decidable and unaffected.
+  assert.equal(evaluateVersion('9.0', '=8.0.3'), 'UNAFFECTED');
+  // A full-precision deployment collapses to a single point, so equality is
+  // decidable in both the matching and non-matching direction.
+  assert.equal(evaluateVersion('9.0.0.0', '=9.0.0'), 'AFFECTED');
+  assert.equal(evaluateVersion('9.0.0.0', '=9.0.3'), 'UNAFFECTED');
+});
+
 test('digit-leading distribution revisions are classified as backports', () => {
   // Leading-letter suffixes were the only accepted shape; "12ubuntu2" and
   // "1.el8" fell through to semver coercion and were decided on rebuild order.

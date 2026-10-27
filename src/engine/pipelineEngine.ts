@@ -23,6 +23,7 @@ import {
   parseCPE23,
 } from '../utils/cpeMatcher';
 import { deriveInventoryAliases } from '../utils/aliasLifecycle';
+import { formatExecutionName } from '../utils/executionName';
 import { isPublicAddress } from '../utils/ipSafety';
 import ipaddr from 'ipaddr.js';
 
@@ -69,13 +70,13 @@ export function determineExploitRisk(cve: NormalizedCVE): ExploitRiskLevel {
     ? 'CISA_KEV_EXPLOITED'
     : cve.exploitationSources?.length || cve.exploitStatus === 'Reported In Wild'
       ? 'REPORTED_IN_WILD_EXPLOIT'
-    : cve.exploitStatus === 'Active Weaponized'
-      ? 'WEAPONIZED_EXPLOIT'
-      : (cve.epss?.score ?? 0) >= 0.4
-        ? 'HIGH_EPSS_PROBABILITY'
-        : cve.cvss.score >= 7
-          ? 'ELEVATED'
-          : 'STANDARD';
+      : cve.exploitStatus === 'Active Weaponized'
+        ? 'WEAPONIZED_EXPLOIT'
+        : (cve.epss?.score ?? 0) >= 0.4
+          ? 'HIGH_EPSS_PROBABILITY'
+          : cve.cvss.score >= 7
+            ? 'ELEVATED'
+            : 'STANDARD';
 }
 /**
  * VEX enforcement and the exploitability lattice live in their own module so
@@ -178,14 +179,8 @@ export function runVulnerabilityPipeline(
       merged[key] = [...new Set([...(merged[key] || []), ...values])];
     return merged;
   };
-  const effectiveVendorAliases = mergeAliasMaps(
-    vendorAliases,
-    buildAliasMap(autoAliasEntries, 'VENDOR'),
-  );
-  const effectiveProductAliases = mergeAliasMaps(
-    productAliases,
-    buildAliasMap(autoAliasEntries, 'PRODUCT'),
-  );
+  const effectiveVendorAliases = mergeAliasMaps(vendorAliases, buildAliasMap(autoAliasEntries, 'VENDOR'));
+  const effectiveProductAliases = mergeAliasMaps(productAliases, buildAliasMap(autoAliasEntries, 'PRODUCT'));
   // Index inventory once. Matching the entire CVE cache against every asset
   // on every run is the dominant avoidable cost for large installations.
   // The candidate selection is deliberately a superset: wildcard criteria,
@@ -204,12 +199,7 @@ export function runVulnerabilityPipeline(
   const aliasVendorKeys = (v: string): string[] =>
     !v
       ? [v]
-      : [
-          ...new Set([
-            v.toLowerCase(),
-            ...aliasGroupKeys(v, DEFAULT_VENDOR_ALIASES, effectiveVendorAliases),
-          ]),
-        ];
+      : [...new Set([v.toLowerCase(), ...aliasGroupKeys(v, DEFAULT_VENDOR_ALIASES, effectiveVendorAliases)])];
   const aliasProductKeys = (p: string): string[] =>
     !p
       ? [p]
@@ -369,7 +359,8 @@ export function runVulnerabilityPipeline(
       if (!result?.matched) continue;
       const requiresReview = cve.applicabilityRequiresReview || result.applicabilityRequiresReview;
       if (requiresReview) result.confidence = 0;
-      const confirmed = !requiresReview && result.confidence >= (settings.autoDispatchConfidenceThreshold ?? 90);
+      const confirmed =
+        !requiresReview && result.confidence >= (settings.autoDispatchConfidenceThreshold ?? 90);
       const evidence = confirmed
         ? 'Structured package/version correlation'
         : 'Product correlation; version or applicability requires review';
@@ -404,8 +395,10 @@ export function runVulnerabilityPipeline(
     }
   }
   const matchingDurationMs = Math.round(performance.now() - matchingStarted);
+  const id = crypto.randomUUID();
   const execution: PipelineExecution = {
-    id: crypto.randomUUID(),
+    id,
+    name: formatExecutionName(id),
     startTime: started.toISOString(),
     endTime: new Date().toISOString(),
     status: 'COMPLETED',
