@@ -90,6 +90,21 @@ export const INITIAL_FEEDS: ThreatFeed[] = [
     itemCountLastRun: 250,
     ssrfValidated: true,
   },
+  {
+    id: 'feed-wordpress-security',
+    name: 'WordPress Security Advisories',
+    type: 'RSS_ATOM',
+    url: 'https://wordpress.org/security/feed/',
+    authType: 'NONE',
+    rateLimitPerMin: 5,
+    enabled: false,
+    healthStatus: 'HEALTHY',
+    lastSync: '2026-10-20T01:30:00.000Z',
+    latencyMs: 88,
+    vendorSeed: true,
+    itemCountLastRun: 7,
+    ssrfValidated: true,
+  },
 ];
 
 export const INITIAL_WATCHLIST: WatchListItem[] = [
@@ -188,6 +203,38 @@ export const INITIAL_WATCHLIST: WatchListItem[] = [
     active: true,
     notes: 'Public SSH jump host protected by Duo MFA',
     createdAt: '2026-08-01T12:00:00Z',
+  },
+  {
+    id: 'asset-wp-01',
+    vendor: 'wordpress',
+    product: 'wordpress',
+    version: '6.4.3',
+    purls: ['pkg:composer/wordpress/wordpress@6.4.3'],
+    cpes: [
+      'cpe:2.3:a:wordpress:wordpress:6.4.3:*:*:*:*:*:*:*',
+    ],
+    exposure: 'INTERNET_FACING',
+    assetTag: 'CMS-WP-CORP-BLOG',
+    ownerGroup: 'Digital-Experience',
+    active: true,
+    notes: 'Corporate WordPress blog and content management system running on PHP 8.2',
+    createdAt: '2026-09-10T09:15:00Z',
+  },
+  {
+    id: 'asset-debian-web',
+    vendor: 'debian',
+    product: 'debian_linux',
+    version: '12.5',
+    purls: ['pkg:deb/debian/openssh-server@1:9.2p1-2+deb12u2?arch=amd64'],
+    cpes: [
+      'cpe:2.3:o:debian:debian_linux:12.5:*:*:*:*:*:*:*',
+    ],
+    exposure: 'DMZ',
+    assetTag: 'WEB-APP-01',
+    ownerGroup: 'AppOps-Web',
+    active: true,
+    notes: 'Debian 12 bookworm web application server hosting internal customer portal',
+    createdAt: '2026-07-22T10:45:00Z',
   },
 ];
 
