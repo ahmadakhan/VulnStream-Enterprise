@@ -9,7 +9,10 @@
  */
 const CACHE = new Map<string, Intl.DateTimeFormat>();
 
-const formatter = (timezone: string | undefined, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat => {
+const formatter = (
+  timezone: string | undefined,
+  options: Intl.DateTimeFormatOptions,
+): Intl.DateTimeFormat => {
   const tz = resolveTimezone(timezone);
   const key = `${tz ?? '__default'}|${JSON.stringify(options)}`;
   const cached = CACHE.get(key);

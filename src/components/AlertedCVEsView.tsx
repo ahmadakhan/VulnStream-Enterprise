@@ -101,10 +101,10 @@ export const AlertedCVEsView: React.FC = () => {
                     {item.advisoryId}
                   </td>
                   <td className="py-3 px-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono text-[11px]">
-                    {new Date(item.firstAlertedAt).toLocaleString()}
+                    {fmtDateTime(item.firstAlertedAt)}
                   </td>
                   <td className="py-3 px-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono text-[11px]">
-                    {new Date(item.lastAlertedAt).toLocaleString()}
+                    {fmtDateTime(item.lastAlertedAt)}
                     {item.lastDispatchReason && (
                       <div className="text-[10px] text-zinc-500 light:text-zinc-600 font-sans italic line-clamp-1">
                         Reason: {item.lastDispatchReason}

@@ -2,7 +2,20 @@ import { PageHeading } from './PageHeading';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Finding, FindingStatus } from '../types';
-import { Flame, ExternalLink, ChevronRight, Filter, Search, Terminal, FileCheck, Copy, Check, X, Send, Trash2 } from 'lucide-react';
+import {
+  Flame,
+  ExternalLink,
+  ChevronRight,
+  Filter,
+  Search,
+  Terminal,
+  FileCheck,
+  Copy,
+  Check,
+  X,
+  Send,
+  Trash2,
+} from 'lucide-react';
 import { Pagination } from './Pagination';
 import { useCollection } from '../hooks/useCollection';
 import { copyText } from '../utils/clipboard';
@@ -11,8 +24,11 @@ import { formatCveDate } from '../utils/findingSort';
 import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 export const FindingsView: React.FC = () => {
-  const { selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification, deleteFinding } = useApp();
-  const [removeFeedback, setRemoveFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const { selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification, deleteFinding } =
+    useApp();
+  const [removeFeedback, setRemoveFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(
+    null,
+  );
 
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState('ALL');
@@ -254,8 +270,11 @@ export const FindingsView: React.FC = () => {
                               </span>
                               <span className="text-[10px] text-zinc-500">{finding.cve.cvss.severity}</span>
                             </div>
-                              <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-500">
-                              EPSS: {finding.cve.epss?.score != null ? `${(finding.cve.epss.score * 100).toFixed(1)}%` : '—'}
+                            <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-500">
+                              EPSS:{' '}
+                              {finding.cve.epss?.score != null
+                                ? `${(finding.cve.epss.score * 100).toFixed(1)}%`
+                                : '—'}
                             </div>
                           </td>
 
@@ -639,9 +658,9 @@ export const FindingsView: React.FC = () => {
               Remove Vulnerability Entry?
             </h3>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 leading-relaxed mb-6">
-              Are you sure you want to remove <strong>{removeConfirm.cveId}</strong>? This permanently deletes the
-              finding from the database. The correlation pipeline may regenerate it on the next run if the CVE
-              still matches a monitored product.
+              Are you sure you want to remove <strong>{removeConfirm.cveId}</strong>? This permanently deletes
+              the finding from the database. The correlation pipeline may regenerate it on the next run if the
+              CVE still matches a monitored product.
             </p>
             <div className="flex justify-end space-x-2">
               <button

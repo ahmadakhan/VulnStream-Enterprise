@@ -1,4 +1,5 @@
 import type { Finding } from '../types';
+import { formatDate } from './dateTime';
 
 const timestamp = (value: string): number => {
   const parsed = Date.parse(value);
@@ -18,5 +19,5 @@ export function compareFindingsByRecency(a: Finding, b: Finding): number {
 
 export function formatCveDate(value: string): string {
   const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? new Date(parsed).toLocaleDateString() : '—';
+  return Number.isFinite(parsed) ? formatDate(value) : '—';
 }

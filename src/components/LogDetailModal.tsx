@@ -84,9 +84,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
           >
             {level}
           </span>
-          <span className="text-[11px] text-zinc-500">
-            {fmtDateTime(timestamp, 'UTC')} UTC
-          </span>
+          <span className="text-[11px] text-zinc-500">{fmtDateTime(timestamp, 'UTC')} UTC</span>
         </div>
 
         <dl className="mt-5 max-h-[60vh] space-y-3.5 overflow-y-auto pr-1 text-xs">

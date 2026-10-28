@@ -304,12 +304,7 @@ const AuditTrailView: React.FC = () => {
                     className="cursor-pointer transition hover:bg-zinc-800/25 light:hover:bg-zinc-50"
                   >
                     <td className="whitespace-nowrap px-4 py-3.5 text-[11px] text-zinc-400 light:text-zinc-600">
-                      {new Intl.DateTimeFormat(undefined, {
-                        dateStyle: 'medium',
-                        timeStyle: 'medium',
-                        timeZone: 'UTC',
-                      }).format(new Date(log.timestamp))}{' '}
-                      <span className="text-zinc-600">UTC</span>
+                      {fmtDateTime(log.timestamp, 'UTC')} UTC
                     </td>
                     <td className="px-4 py-3.5 text-[11px] text-zinc-300 light:text-zinc-700">
                       <span className="rounded-md border border-zinc-700/70 bg-zinc-800/70 px-2 py-1 light:border-zinc-200 light:bg-zinc-100">
@@ -511,8 +506,8 @@ export const OperationalLogsView: React.FC = () => {
                     setQuery(e.target.value);
                     setCursor('');
                   }}
-                   className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900"
-                   placeholder="Code, message or context"
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900"
+                  placeholder="Code, message or context"
                 />
               </label>
               <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
@@ -658,17 +653,10 @@ export const OperationalLogsView: React.FC = () => {
                                 column width the single-line form clipped the
                                 value ("Oct 25, 2026, 9:"). */}
                             <div className="whitespace-nowrap tabular-nums">
-                              {new Intl.DateTimeFormat(undefined, {
-                                dateStyle: 'medium',
-                                timeZone: 'UTC',
-                              }).format(new Date(event.timestamp))}
+                              {fmtDateTime(event.timestamp, 'UTC')}
                             </div>
                             <div className="mt-0.5 whitespace-nowrap font-mono text-[10px] tabular-nums text-zinc-500">
-                              {new Intl.DateTimeFormat(undefined, {
-                                timeStyle: 'medium',
-                                timeZone: 'UTC',
-                              }).format(new Date(event.timestamp))}{' '}
-                              UTC
+                              {fmtDateTime(event.timestamp, 'UTC')} UTC
                             </div>
                           </td>
                           <td className="px-4 py-3.5 align-top text-[11px] text-zinc-300 light:text-zinc-700">

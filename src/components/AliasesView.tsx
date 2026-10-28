@@ -3,7 +3,20 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { AliasEntry } from '../types';
 import { DEFAULT_VENDOR_ALIASES, DEFAULT_PRODUCT_ALIASES } from '../utils/cpeMatcher';
-import { Tags, Plus, Trash2, Pencil, X, Search, AlertCircle, Lock, Info, ShieldCheck, Ban, Clock } from 'lucide-react';
+import {
+  Tags,
+  Plus,
+  Trash2,
+  Pencil,
+  X,
+  Search,
+  AlertCircle,
+  Lock,
+  Info,
+  ShieldCheck,
+  Ban,
+  Clock,
+} from 'lucide-react';
 import { formatDate as fmtDate, formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 export const AliasesView: React.FC = () => {
@@ -23,9 +36,10 @@ export const AliasesView: React.FC = () => {
 
   const term = searchTerm.toLowerCase();
   const aliasesFor = (entry: AliasEntry) =>
-    entry.source === 'REVOKED' ? entry.revokedAliases ?? [] : entry.aliases;
+    entry.source === 'REVOKED' ? (entry.revokedAliases ?? []) : entry.aliases;
   const filteredCustom = customForTab.filter(
-    (a) => a.canonical.toLowerCase().includes(term) || aliasesFor(a).some((x) => x.toLowerCase().includes(term)),
+    (a) =>
+      a.canonical.toLowerCase().includes(term) || aliasesFor(a).some((x) => x.toLowerCase().includes(term)),
   );
   const filteredDefaults = Object.entries(defaultsForTab).filter(
     ([canonical, list]) =>
@@ -181,8 +195,10 @@ export const AliasesView: React.FC = () => {
                       <span
                         className="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-zinc-800 light:bg-zinc-100 text-zinc-400"
                         title={[
-                          entry.provenance === 'CONFIRMED_CORRELATION' ? 'Correlation evidence' : 'Inventory evidence',
-                          entry.firstSeenAt ? `first learned ${new Date(entry.firstSeenAt).toLocaleString()}` : '',
+                          entry.provenance === 'CONFIRMED_CORRELATION'
+                            ? 'Correlation evidence'
+                            : 'Inventory evidence',
+                          entry.firstSeenAt ? `first learned ${fmtDateTime(entry.firstSeenAt)}` : '',
                           entry.evidenceCount ? `${entry.evidenceCount} confirmed finding(s)` : '',
                         ]
                           .filter(Boolean)
@@ -198,11 +214,11 @@ export const AliasesView: React.FC = () => {
                         title="Automatic rows are removed when this date passes without fresh evidence"
                       >
                         <Clock className="w-3 h-3" />
-                        {new Date(entry.expiresAt).toLocaleDateString()}
+                        {fmtDate(entry.expiresAt)}
                       </span>
                     )}
                     <span className="text-zinc-600">&rarr;</span>
-                    {(entry.source === 'REVOKED' ? entry.revokedAliases ?? [] : entry.aliases).map((a) => (
+                    {(entry.source === 'REVOKED' ? (entry.revokedAliases ?? []) : entry.aliases).map((a) => (
                       <span
                         key={a}
                         className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-100 ${
@@ -223,8 +239,7 @@ export const AliasesView: React.FC = () => {
                       <>
                         <button
                           onClick={async () => {
-                            if (!(await promoteAlias(entry.id)))
-                              setErrorMsg('Could not promote this alias.');
+                            if (!(await promoteAlias(entry.id))) setErrorMsg('Could not promote this alias.');
                           }}
                           className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 transition"
                           title="Promote to a permanent operator alias"
@@ -233,8 +248,7 @@ export const AliasesView: React.FC = () => {
                         </button>
                         <button
                           onClick={async () => {
-                            if (!(await revokeAlias(entry.id)))
-                              setErrorMsg('Could not revoke this alias.');
+                            if (!(await revokeAlias(entry.id))) setErrorMsg('Could not revoke this alias.');
                           }}
                           className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 transition"
                           title="Revoke: stop using and re-learning this relation"
@@ -271,11 +285,11 @@ export const AliasesView: React.FC = () => {
         )}
         <p className="text-[11px] text-zinc-500 mt-2 flex items-start gap-1.5">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-          Inventory aliases come from each active asset&rsquo;s declared vendor/product and its own CPE spellings.
-          Correlation aliases are learned only from findings that were auto-dispatched, delivered, or resolved by an
-          operator &mdash; never from unreviewed text matches. Automatic rows expire 30 days after their last
-          supporting evidence; promote one to keep it permanently, or revoke it to block re-learning. Operator
-          aliases are never changed automatically.
+          Inventory aliases come from each active asset&rsquo;s declared vendor/product and its own CPE
+          spellings. Correlation aliases are learned only from findings that were auto-dispatched, delivered,
+          or resolved by an operator &mdash; never from unreviewed text matches. Automatic rows expire 30 days
+          after their last supporting evidence; promote one to keep it permanently, or revoke it to block
+          re-learning. Operator aliases are never changed automatically.
         </p>
       </div>
 

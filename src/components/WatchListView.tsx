@@ -93,7 +93,7 @@ export const WatchListView: React.FC = () => {
 
   const [nvdSearchProduct, setNvdSearchProduct] = useState('');
 
-   // NVD Verified CPE search
+  // NVD Verified CPE search
   const [nvdResults, setNvdResults] = useState<NvdCpeSearchResult[]>([]);
   const [nvdLoading, setNvdLoading] = useState(false);
   const [nvdError, setNvdError] = useState<string | null>(null);
@@ -291,17 +291,17 @@ export const WatchListView: React.FC = () => {
     setNotesInput('');
     setPurlInput('');
     setCpeExpressionInput('');
-setNvdSearchProduct('');
-      setNvdResults([]);
-      setNvdResultsFilter('');
-      setNvdLoading(false);
-      setNvdError(null);
-      setSelectedNvdCpes([]);
-      setRemovedAutoCpes(new Set());
-      setCustomAddedCpes([]);
-      setCustomCpeInput('');
-      setEditingItem(null);
-      setShowAddModal(true);
+    setNvdSearchProduct('');
+    setNvdResults([]);
+    setNvdResultsFilter('');
+    setNvdLoading(false);
+    setNvdError(null);
+    setSelectedNvdCpes([]);
+    setRemovedAutoCpes(new Set());
+    setCustomAddedCpes([]);
+    setCustomCpeInput('');
+    setEditingItem(null);
+    setShowAddModal(true);
   };
 
   const handleOpenEdit = (item: WatchListItem) => {
@@ -861,7 +861,9 @@ setNvdSearchProduct('');
                   <p>
                     {result.autoAction} · {result.method}
                   </p>
-                  <p className="text-sm text-zinc-400 dark:text-zinc-400 light:text-zinc-600">{result.evidence}</p>
+                  <p className="text-sm text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                    {result.evidence}
+                  </p>
                 </article>
               ))}
             </div>
@@ -933,7 +935,10 @@ setNvdSearchProduct('');
                 <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
                   {paginatedAssets.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-xs">
+                      <td
+                        colSpan={7}
+                        className="py-8 text-center text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-xs"
+                      >
                         No matching monitored products found.
                       </td>
                     </tr>
@@ -1158,7 +1163,9 @@ setNvdSearchProduct('');
 
                 {/* Popular Vendor Shortcuts */}
                 <div className="flex flex-wrap gap-1.5 mt-2">
-                  <span className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono mr-1">Quick Select:</span>
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono mr-1">
+                    Quick Select:
+                  </span>
                   {[
                     'Microsoft',
                     'Cisco',
@@ -1318,78 +1325,81 @@ setNvdSearchProduct('');
                             key={r.cpeNameId || r.cpeName}
                             className="bg-zinc-950/70 dark:bg-zinc-950/70 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 flex items-center justify-between"
                           >
-                          <div className="min-w-0 flex-1">
-                            <code
-                              className="block text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono truncate"
-                              title={r.cpeName}
-                            >
-                              {r.cpeName}
-                            </code>
-                            <div className="text-[9px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 flex items-center gap-2 mt-0.5">
-                              <span className="flex items-center gap-1">
-                                {parsed.isValid ? (
-                                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                ) : (
-                                  <AlertCircle className="w-3 h-3 text-rose-400" />
-                                )}
-                                <span>Valid CPE 2.3</span>
-                              </span>
-                              <span className="text-zinc-600 dark:text-zinc-600 light:text-zinc-700">·</span>
-                              <span className="flex items-center gap-1">
-                                <span className="px-1 py-0.25 rounded bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-[8px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-                                  ver: {hasVersionWildcard ? `${parsed.version} (wildcard)` : parsed.version}
+                            <div className="min-w-0 flex-1">
+                              <code
+                                className="block text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono truncate"
+                                title={r.cpeName}
+                              >
+                                {r.cpeName}
+                              </code>
+                              <div className="text-[9px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 flex items-center gap-2 mt-0.5">
+                                <span className="flex items-center gap-1">
+                                  {parsed.isValid ? (
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                  ) : (
+                                    <AlertCircle className="w-3 h-3 text-rose-400" />
+                                  )}
+                                  <span>Valid CPE 2.3</span>
                                 </span>
-                              </span>
-                              <span className="flex items-center gap-1">
-                                {r.vendor} / {r.product} · part {r.part}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                arch{' '}
-                                {hasArchWildcard
-                                  ? `${parsed.targetHw || '*'} (wildcard)`
-                                  : parsed.targetHw || '*'}
-                              </span>
+                                <span className="text-zinc-600 dark:text-zinc-600 light:text-zinc-700">
+                                  ·
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <span className="px-1 py-0.25 rounded bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-[8px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                                    ver:{' '}
+                                    {hasVersionWildcard ? `${parsed.version} (wildcard)` : parsed.version}
+                                  </span>
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  {r.vendor} / {r.product} · part {r.part}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  arch{' '}
+                                  {hasArchWildcard
+                                    ? `${parsed.targetHw || '*'} (wildcard)`
+                                    : parsed.targetHw || '*'}
+                                </span>
+                              </div>
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => addNvdCpe(r.cpeName)}
+                              className="shrink-0 ml-2 text-[10px] font-mono px-2 py-0.75 rounded bg-emerald-900/40 dark:bg-emerald-900/40 light:bg-emerald-100 border border-emerald-800 dark:border-emerald-800 light:border-emerald-300 text-emerald-300 dark:text-emerald-300 light:text-emerald-700 hover:bg-emerald-900/60"
+                            >
+                              Add
+                            </button>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => addNvdCpe(r.cpeName)}
-                            className="shrink-0 ml-2 text-[10px] font-mono px-2 py-0.75 rounded bg-emerald-900/40 dark:bg-emerald-900/40 light:bg-emerald-100 border border-emerald-800 dark:border-emerald-800 light:border-emerald-300 text-emerald-300 dark:text-emerald-300 light:text-emerald-700 hover:bg-emerald-900/60"
-                          >
-                            Add
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-              {selectedNvdCpes.length > 0 && (
-                <div className="space-y-1">
-                  <div className="text-[10px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-                    Selected verified CPEs ({selectedNvdCpes.length}):
-                  </div>
-                  {selectedNvdCpes.map((cpe) => (
-                    <div key={cpe} className="flex items-center gap-2">
-                      <code
-                        className="min-w-0 flex-1 truncate text-xs text-zinc-300 dark:text-zinc-300 light:text-zinc-700"
-                        title={cpe}
-                      >
-                        {cpe}
-                      </code>
-                      <button
-                        type="button"
-                        onClick={() => removeNvdCpe(cpe)}
-                        aria-label={`Remove verified CPE ${cpe}`}
-                        className="shrink-0 rounded-lg p-1 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 hover:text-rose-400 transition"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
+                        );
+                      })}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                  </>
+                )}
+                {selectedNvdCpes.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[10px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                      Selected verified CPEs ({selectedNvdCpes.length}):
+                    </div>
+                    {selectedNvdCpes.map((cpe) => (
+                      <div key={cpe} className="flex items-center gap-2">
+                        <code
+                          className="min-w-0 flex-1 truncate text-xs text-zinc-300 dark:text-zinc-300 light:text-zinc-700"
+                          title={cpe}
+                        >
+                          {cpe}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => removeNvdCpe(cpe)}
+                          aria-label={`Remove verified CPE ${cpe}`}
+                          className="shrink-0 rounded-lg p-1 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 hover:text-rose-400 transition"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {editingItem && (
                 <div>
@@ -1518,7 +1528,9 @@ setNvdSearchProduct('');
                       className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 font-mono text-xs flex items-center justify-between text-zinc-200 dark:text-zinc-200 light:text-zinc-800 shadow-sm"
                     >
                       <div className="truncate mr-2">
-                        <span className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 mr-1.5">[{item.product}]</span>
+                        <span className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 mr-1.5">
+                          [{item.product}]
+                        </span>
                         <span className="text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold">
                           {item.cpe}
                         </span>
