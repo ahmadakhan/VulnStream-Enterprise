@@ -296,6 +296,8 @@ function useApplication() {
       safely(() => request('/users', data)),
     updateUser: (id: string, data: { role: string; disabled: boolean }) =>
       safely(() => request(`/users/${encodeURIComponent(id)}`, data, 'PATCH')),
+    resetUserPassword: (id: string, password: string) =>
+      safely(() => request(`/users/${encodeURIComponent(id)}/reset-password`, { password })),
     fetchEvents: (query: string) =>
       request<{ events: import('../types').OperationalEvent[]; nextCursor: string | null }>(
         `/events?${query}`,

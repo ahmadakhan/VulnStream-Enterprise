@@ -474,6 +474,40 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       });
       assert.equal(feed.status, 400);
     });
+    await t.test('vendor-seeded feeds cannot be deleted but can be toggled', async () => {
+      const seeded = await command('feed.save', {
+        name: 'Seeded NVD',
+        type: 'NVD_API',
+        url: 'https://8.8.8.8/nvd',
+        authType: 'NONE',
+        rateLimitPerMin: 10,
+        enabled: true,
+        vendorSeed: true,
+      });
+      assert.equal(seeded.status, 200);
+      const seededFeed = seeded.body as { id: string };
+      assert.equal(
+        (await command('feed.delete', undefined, seededFeed.id)).status,
+        403,
+        'vendor-seeded feed should be rejected',
+      );
+      assert.equal(
+        (await command('feed.toggle', undefined, seededFeed.id)).status,
+        200,
+        'vendor-seeded feed should be toggleable',
+      );
+      const custom = await command('feed.save', {
+        name: 'Custom Feed',
+        type: 'RSS_ATOM',
+        url: 'https://8.8.8.8/feed',
+        authType: 'NONE',
+        rateLimitPerMin: 5,
+        enabled: false,
+      });
+      assert.equal(custom.status, 200);
+      const customResult = await command('feed.delete', undefined, (custom.body as { id: string }).id);
+      assert.equal(customResult.status, 200);
+    });
     await t.test('retention policy persists through settings.save', async () => {
       const retentionConfig = {
         enabled: true,

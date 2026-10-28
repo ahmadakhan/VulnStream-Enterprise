@@ -804,6 +804,39 @@ export function createApp(
       res.json({ success: true });
     }),
   );
+  app.post(
+    '/api/users/:id/reset-password',
+    requireRole('ADMIN'),
+    asyncRoute(async (req, res) => {
+      const data = z
+        .object({ password: z.string().min(14).max(128) })
+        .parse(req.body);
+      const userId = z.uuid().safeParse(req.params.id);
+      if (!userId.success) throw invalidId();
+      const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
+      if (data.password.length < settings.securityPolicy.minPasswordLen)
+        throw new HttpError(400, 'Password does not meet configured minimum');
+      const hash = await passwordHash(data.password);
+      await transaction(pool, async (db) => {
+        const changed = await db.query('UPDATE users SET password_hash=$2 WHERE id=$1 RETURNING id', [
+          userId.data,
+          hash,
+        ]);
+        if (!changed.rowCount) throw new HttpError(404, 'Operator not found');
+        await db.query('DELETE FROM sessions WHERE user_id=$1', [req.params.id]);
+        await appendAudit(
+          db,
+          'Password reset',
+          `Admin ${req.operator!.username} reset password`,
+          req.operator!.username,
+          'SECURITY',
+          'INFO',
+          req.ip || '',
+        );
+      });
+      res.json({ success: true });
+    }),
+  );
   app.get(
     '/api/state',
     asyncRoute(async (_req, res) =>

@@ -421,21 +421,23 @@ export const ThreatFeedsView: React.FC = () => {
                           )}
                           <span>{isTesting ? 'Testing...' : 'Test'}</span>
                         </button>
-                        <button
+                         <button
                           onClick={() => handleOpenEdit(feed)}
                           className="p-1 text-zinc-400 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
                           title="Edit Feed"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                        <button
-                          onClick={() => setDeletingFeed(feed)}
-                          className="p-1 text-zinc-400 hover:text-red-400 dark:text-zinc-400 dark:hover:text-red-400 light:text-zinc-600 light:hover:text-red-500 transition"
-                          title="Delete Feed"
-                          aria-label={`Delete ${feed.name}`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {!feed.vendorSeed && (
+                          <button
+                            onClick={() => setDeletingFeed(feed)}
+                            className="p-1 text-zinc-400 hover:text-red-400 dark:text-zinc-400 dark:hover:text-red-400 light:text-zinc-600 light:hover:text-red-500 transition"
+                            title="Delete Feed"
+                            aria-label={`Delete ${feed.name}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

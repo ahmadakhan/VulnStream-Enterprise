@@ -59,7 +59,7 @@ function SectionHeading({
 }
 
 export function SettingsView() {
-  const { settings, updateSettings, changePassword, session, listUsers, createUser, updateUser, pending } =
+  const { settings, updateSettings, changePassword, session, listUsers, createUser, updateUser, resetUserPassword, pending } =
     useApp();
   const [form, setForm] = useState<AppSettings>(() => withEmailRetryDefaults(settings));
   const [message, setMessage] = useState('');
@@ -72,6 +72,8 @@ export function SettingsView() {
   const [accountMessage, setAccountMessage] = useState('');
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState('');
+  const [resetUserId, setResetUserId] = useState<string | null>(null);
+  const [resetPassword, setResetPassword] = useState('');
   const admin = session?.role === 'ADMIN';
   const [activeSection, setActiveSection] = useState(admin ? 'processing' : 'security');
   const processingDirty =
@@ -832,6 +834,20 @@ export function SettingsView() {
                               </div>
                             </div>
                           </div>
+                          <div className="flex items-center gap-1.5">
+                          {user.username !== session?.username && !user.disabled && (
+                            <button
+                              type="button"
+                              className="min-h-8 rounded-lg border border-zinc-700 px-3 py-1.5 text-[11px] font-medium text-zinc-300 hover:bg-zinc-800 transition light:border-zinc-300 light:text-zinc-700 light:hover:bg-zinc-100"
+                              onClick={() => {
+                                setResetUserId(user.id);
+                                setResetPassword('');
+                              }}
+                            >
+                              <KeyRound className="h-3 w-3 inline mr-1" />
+                              Reset password
+                            </button>
+                          )}
                           {user.username !== session?.username && (
                             <button
                               type="button"
@@ -849,6 +865,7 @@ export function SettingsView() {
                               {user.disabled ? 'Enable account' : 'Disable account'}
                             </button>
                           )}
+                        </div>
                         </li>
                       ))}
                   </ul>
@@ -862,6 +879,61 @@ export function SettingsView() {
           )}
         </div>
       </div>
+
+      {resetUserId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+            <button
+              aria-label="Close"
+              onClick={() => setResetUserId(null)}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-800"
+            >
+              <span className="text-xl">×</span>
+            </button>
+            <h3 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-4">
+              Reset password
+            </h3>
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
+              Enter a new password for this operator. All active sessions will be signed out.
+            </p>
+            <input
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={14}
+              maxLength={128}
+              className={field}
+              value={resetPassword}
+              onChange={(e) => setResetPassword(e.target.value)}
+              placeholder="New password (min 14 characters)"
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                type="button"
+                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 text-xs font-medium transition"
+                onClick={() => setResetUserId(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold disabled:opacity-50 transition"
+                disabled={pending > 0 || resetPassword.length < 14}
+                onClick={async () => {
+                  const ok = await resetUserPassword(resetUserId!, resetPassword);
+                  if (ok) {
+                    await reloadUsers();
+                    setResetUserId(null);
+                    setResetPassword('');
+                  }
+                }}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
