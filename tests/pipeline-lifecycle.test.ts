@@ -12,6 +12,7 @@ import { mitreRecord, mitreDelta } from './fixtures/mitre';
 import { applyCommand } from '../server/commands.ts';
 import type { Advisory, AliasEntry, Finding, NormalizedCVE, WatchListItem } from '../src/types/index.ts';
 import { deriveInventoryAliases } from '../src/utils/aliasLifecycle.ts';
+import { encrypt } from '../server/secrets.ts';
 const database = process.env.TEST_DATABASE_URL;
 const cpe = (version: string) => `cpe:2.3:a:example:widget:${version}:*:*:*:*:*:*:*`;
 const asset = (version = '1.5'): WatchListItem => ({
@@ -461,6 +462,52 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       const finding = (await list<Finding>(pool, 'findings'))[0];
       assert.equal(finding.notificationStatus, 'REVIEW_REQUIRED');
       assert.equal(finding.cve.epss.score, 0.9);
+    });
+    await t.test('delivery honors the saved confidence policy for email and webhooks', async () => {
+      for (const tightenPolicy of [false, true]) {
+        await reset();
+        await save('settings', 'main', {
+          ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 80,
+        });
+        await save('watchlist', 'asset', {
+          ...asset(), vendor: 'example_alias', cpes: [cpe('1.5').replace(':example:', ':example_alias:')],
+        });
+        await save('aliases', 'vendor-alias', {
+          id: 'vendor-alias', scope: 'VENDOR', canonical: 'example', aliases: ['example_alias'],
+          source: 'MANUAL', createdAt: new Date().toISOString(),
+        });
+        await save('cveData', vulnerability().cveId, vulnerability());
+        await save('recipients', 'recipient', {
+          id: 'recipient', name: 'test', email: 'test@example.invalid', enabled: true,
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        await save('webhooks', 'hook', {
+          id: 'hook', name: 'test', provider: 'GENERIC_HMAC', enabled: true, events: ['ALL'],
+          url: encrypt('https://example.com/hook', config.ENCRYPTION_KEY, 'webhook-url:hook'),
+          secretToken: encrypt('test-secret', config.ENCRYPTION_KEY, 'webhook:hook'), deliveryCount: 0,
+        });
+        await run();
+        const finding = (await list<Finding>(pool, 'findings'))[0];
+        assert.equal(finding.matchingMethod, 'VENDOR_PRODUCT_ALIAS');
+        assert.equal(finding.notificationStatus, 'QUEUED_FOR_DISPATCH');
+        assert.equal((await pool.query('SELECT count(*)::int AS n FROM outbox')).rows[0].n, 2);
+        if (tightenPolicy)
+          await save('settings', 'main', {
+            ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 90,
+          });
+        let emails = 0, webhooks = 0;
+        const webhookRequest = async () => {
+          webhooks++;
+          return { status: 200, body: '', headers: {} };
+        };
+        const mail = async () => { emails++; return 'accepted-current-policy'; };
+        while (await deliverNext(pool, config, webhookRequest, mail)) { /* Mock transports only. */ }
+        assert.equal(emails, tightenPolicy ? 0 : 1);
+        assert.equal(webhooks, tightenPolicy ? 0 : 1);
+        const jobs = (await pool.query('SELECT status, error FROM outbox')).rows;
+        assert.ok(jobs.every(job => job.status === (tightenPolicy ? 'FAILED' : 'ACCEPTED')));
+        if (tightenPolicy) assert.ok(jobs.every(job => /no longer applicable/.test(job.error)));
+      }
     });
     await t.test(
       'delivery rechecks current inventory before sending an already queued advisory',

@@ -686,10 +686,8 @@ export async function deliverNext(
   if (!job) return false;
   // Email retries follow the operator policy; webhooks retain the historical
   // six-attempt policy because their budget is not exposed as an email setting.
-  const settings = job.channel === 'email'
-    ? (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS
-    : DEFAULT_SETTINGS;
-  const retryPolicy = emailRetryPolicy(settings);
+  const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
+  const retryPolicy = emailRetryPolicy(job.channel === 'email' ? settings : DEFAULT_SETTINGS);
   let providerId = '',
     statusCode = 0,
     signature = '',
@@ -781,7 +779,7 @@ export async function deliverNext(
                 [asset],
                 [],
                 [],
-                { ...DEFAULT_SETTINGS, scopeHours: 0 },
+                { ...settings, scopeHours: 0 },
                 'Server worker',
                 false,
                 vendorAliases,
