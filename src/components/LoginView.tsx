@@ -4,7 +4,11 @@ import { useApp } from '../context/AppContext';
 
 type ResetStep = 'username' | 'code' | 'newPassword';
 
-export function LoginView() {
+interface LoginViewProps {
+  sessionExpired?: boolean;
+}
+
+export function LoginView({ sessionExpired = false }: LoginViewProps) {
   const {
     login,
     error,
@@ -187,6 +191,11 @@ export function LoginView() {
               {error && (
                 <p role="alert" className="login-error">
                   {error}
+                </p>
+              )}
+              {sessionExpired && (
+                <p role="status" className="login-error">
+                  Your session has expired. Please sign in again.
                 </p>
               )}
             </form>

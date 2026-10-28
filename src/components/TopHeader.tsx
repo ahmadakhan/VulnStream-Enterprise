@@ -2,7 +2,7 @@ import { pages, type PageId } from '../design/pages';
 import { SCOPE_PRESETS, formatScopeLabel } from '../utils/scopePresets';
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { RotateCw, Play, ChevronDown, CheckCircle2, Clock, Cpu, Sun, Moon, Menu } from 'lucide-react';
+import { RotateCw, Play, ChevronDown, CheckCircle2, Clock, Cpu, Sun, Moon, Menu, KeyRound } from 'lucide-react';
 
 export const TopHeader: React.FC = () => {
   const {
@@ -17,6 +17,8 @@ export const TopHeader: React.FC = () => {
     settings,
     mobileNavOpen,
     setMobileNavOpen,
+    sessionTimeRemainingSec,
+    resetSessionTimeout,
   } = useApp();
 
   const [scopeDropdownOpen, setScopeDropdownOpen] = useState(false);
@@ -32,6 +34,10 @@ export const TopHeader: React.FC = () => {
   };
 
   const meta = pages[activeTab as PageId] || { section: 'OPERATIONS', title: 'Vulnerability Intelligence' };
+
+  const sessionMins = Math.floor(sessionTimeRemainingSec / 60);
+  const sessionSecs = sessionTimeRemainingSec % 60;
+  const sessionWarning = sessionTimeRemainingSec <= 120 && sessionTimeRemainingSec > 0;
 
   return (
     <header className="ui-topbar border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-white/80 backdrop-blur-md sticky top-0 z-20 transition-colors duration-200">
@@ -170,6 +176,24 @@ export const TopHeader: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Session Renewal */}
+          <button
+            type="button"
+            onClick={() => void resetSessionTimeout()}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-[11px] font-mono focus-visible:outline focus-visible:outline-2 focus-visible:outline-zinc-400 transition ${
+              sessionWarning
+                ? 'text-amber-300 bg-amber-900/40 hover:text-amber-200 border border-amber-700/60'
+                : 'text-zinc-500 bg-zinc-900/40 dark:bg-zinc-900/40 light:bg-zinc-100 hover:text-zinc-300'
+            }`}
+            title="Renew session"
+            aria-label={`Renew session, ${sessionMins} minutes and ${sessionSecs} seconds remaining${sessionWarning ? '. Session expiring soon' : ''}`}
+          >
+            <KeyRound className={`w-3 h-3 ${sessionWarning ? 'text-amber-400' : 'text-zinc-500'}`} />
+            <span>
+              Session: {String(sessionMins).padStart(2, '0')}:{String(sessionSecs).padStart(2, '0')}
+            </span>
+          </button>
         </div>
       </div>
 

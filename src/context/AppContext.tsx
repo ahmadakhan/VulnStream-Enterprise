@@ -31,6 +31,9 @@ import type {
   CpeMatchSimulation,
 } from '../types';
 import { compileCustomizedTemplate } from '../utils/templateCompiler';
+
+const SESSION_RENEW_THRESHOLD_SEC = 60;
+
 function useApplication() {
   const [snapshot, setSnapshot] = useState<AppState>(emptyState);
   const [session, setSession] = useState<SessionInfo | null>(null),
@@ -53,6 +56,8 @@ function useApplication() {
     [pending, setPending] = useState(0);
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const sessionRenewingRef = useRef(false);
   // Monotonic id so an older snapshot response can never overwrite a newer one.
   const refreshId = useRef(0);
   const request = useCallback(
@@ -78,6 +83,7 @@ function useApplication() {
         .catch(() => ({ error: `Server returned an empty or non-JSON response (HTTP ${response.status})` }));
       if (!response.ok) {
         if (response.status === 401) {
+          setSessionExpired(true);
           setSession(null);
           setSnapshot(emptyState());
         }
@@ -179,12 +185,29 @@ function useApplication() {
     const timer = setInterval(() => {
       setClock(Date.now());
       if (sessionRef.current && Date.now() >= new Date(sessionRef.current.expiresAt).getTime()) {
+        setSessionExpired(true);
         setSession(null);
         setSnapshot(emptyState());
       }
     }, 1000);
     return () => clearInterval(timer);
   }, [session]);
+  useEffect(() => {
+    if (!session || sessionRenewingRef.current) return;
+    const now = Date.now();
+    const expiresAt = new Date(session.expiresAt).getTime();
+    const remaining = Math.max(0, Math.floor((expiresAt - now) / 1000));
+    if (remaining > SESSION_RENEW_THRESHOLD_SEC || remaining <= 0) return;
+    sessionRenewingRef.current = true;
+    void request<{ expiresAt: string }>('/session/renew', {})
+      .then((result) => {
+        setSession((s) => (s ? { ...s, expiresAt: result.expiresAt } : null));
+      })
+      .catch(() => {})
+      .finally(() => {
+        sessionRenewingRef.current = false;
+      });
+  }, [clock, session, request]);
   useEffect(() => {
     if (!session) return;
     let active = true;
@@ -216,6 +239,7 @@ function useApplication() {
       const info = await request<SessionInfo>('/login', { username, password });
       sessionRef.current = info;
       setSession(info);
+      setSessionExpired(false);
       await refresh();
       return true;
     });
@@ -280,6 +304,7 @@ function useApplication() {
     session,
     loading,
     error,
+    sessionExpired,
     clearError: () => setError(null),
     pending,
     login,

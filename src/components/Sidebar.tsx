@@ -1,7 +1,7 @@
 import { pages, type PageId } from '../design/pages';
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Server, Shield, Sun, Moon, KeyRound } from 'lucide-react';
+import { Shield } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
   const [isMobileView, setIsMobileView] = useState(
@@ -15,19 +15,9 @@ export const Sidebar: React.FC = () => {
     summary,
     watchlist,
     feeds,
-    theme,
-    toggleTheme,
-    sessionTimeRemainingSec,
-    resetSessionTimeout,
-    session,
   } = useApp();
 
-  // Use the server-computed total; the snapshot's findings array is a capped
-  // recent slice and would under-count the navigation badge.
   const activeFindingsCount = summary.activeFindings;
-
-  const sessionMins = Math.floor(sessionTimeRemainingSec / 60);
-  const sessionSecs = sessionTimeRemainingSec % 60;
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)');
@@ -52,10 +42,10 @@ export const Sidebar: React.FC = () => {
         { id: 'dashboard' },
         { id: 'watchlist', count: watchlist.length },
         { id: 'findings', count: activeFindingsCount },
-         { id: 'threat-intelligence-search' },
-         { id: 'threat-analytics' },
-         { id: 'cpe-matcher' },
-         { id: 'threat-data' },
+        { id: 'threat-intelligence-search' },
+        { id: 'threat-analytics' },
+        { id: 'cpe-matcher' },
+        { id: 'threat-data' },
         { id: 'advisories' },
       ],
     },
@@ -168,61 +158,6 @@ export const Sidebar: React.FC = () => {
           </div>
         ))}
       </nav>
-
-      {/* Sidebar Footer: Theme Toggle & Session Security */}
-      {/* `shrink-0` is load-bearing. Without it this footer is a flex item that
-          grows to its content height, which squeezes the navigation list above
-          it; on a laptop viewport the list then ends mid-item under the theme
-          toggle and the last sections (Pipeline executions onward) become
-          unreachable. `min-h-0` on the nav lets it scroll instead of overflow. */}
-      <div className="shrink-0 p-3 border-t border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 space-y-2 bg-zinc-950/60 dark:bg-zinc-950/60 light:bg-zinc-50">
-        {/* Light / Dark Mode Toggle Button */}
-        <button
-          onClick={toggleTheme}
-          className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-900/80 dark:bg-zinc-900/80 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 light:text-zinc-700 light:hover:text-zinc-900 transition shadow-sm"
-          title="Toggle light and dark mode"
-          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-          aria-pressed={theme === 'light'}
-        >
-          <div className="flex items-center space-x-2">
-            {theme === 'dark' ? (
-              <Moon className="w-3.5 h-3.5 text-zinc-300" />
-            ) : (
-              <Sun className="w-3.5 h-3.5 text-amber-500" />
-            )}
-            <span className="font-medium text-[11px]">{theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</span>
-          </div>
-          <span className="text-[10px] font-mono text-zinc-500 uppercase">
-            {theme === 'dark' ? 'Switch Light' : 'Switch Dark'}
-          </span>
-        </button>
-
-        {/* Session Security Indicator */}
-        <button
-          type="button"
-          onClick={() => void resetSessionTimeout()}
-          className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl text-[11px] font-mono text-zinc-500 bg-zinc-900/40 dark:bg-zinc-900/40 light:bg-zinc-100 hover:text-zinc-300 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-zinc-400"
-          title="Renew session"
-          aria-label={`Renew session, ${sessionMins} minutes and ${sessionSecs} seconds remaining`}
-        >
-          <div className="flex items-center space-x-1.5">
-            <KeyRound className="w-3 h-3 text-zinc-500" />
-            <span>Session:</span>
-          </div>
-          <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-bold">
-            {String(sessionMins).padStart(2, '0')}:{String(sessionSecs).padStart(2, '0')}
-          </span>
-        </button>
-
-        {/* NTP & Live Status */}
-        <div className="flex items-center justify-between px-3 py-1 text-[10px] font-mono text-zinc-500">
-          <div className="flex items-center space-x-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            <span>Server-backed session</span>
-          </div>
-          <span>Authenticated</span>
-        </div>
-      </div>
     </aside>
   );
 };

@@ -93,9 +93,19 @@ const Footer: React.FC = () => {
 };
 
 const AppShell: React.FC = () => {
-  const { theme, session, loading, error, clearError, logout, pending, mobileNavOpen, setMobileNavOpen } =
-    useApp();
-  if (loading || !session) return <LoginView />;
+  const {
+    theme,
+    session,
+    loading,
+    error,
+    sessionExpired,
+    clearError,
+    logout,
+    pending,
+    mobileNavOpen,
+    setMobileNavOpen,
+  } = useApp();
+  if (loading || !session) return <LoginView sessionExpired={sessionExpired} />;
 
   return (
     <div
