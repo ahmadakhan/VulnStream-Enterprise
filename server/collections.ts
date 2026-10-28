@@ -48,7 +48,7 @@ const SORTS: Partial<Record<CollectionKind, Record<string, string>>> = {
 
 const DEFAULT_ORDER: Partial<Record<CollectionKind, string>> = {
   cveData: "safe_timestamptz(data->>'modifiedDate') DESC NULLS LAST, id DESC",
-  findings: `${FINDINGS_RECENT_ACTIVITY} DESC NULLS LAST, id DESC`,
+  findings: "safe_timestamptz(data->'cve'->>'modifiedDate') DESC NULLS LAST, id DESC",
   advisories: "safe_timestamptz(data->>'createdDate') DESC NULLS LAST, id DESC",
   alertedCves: "safe_timestamptz(data->>'lastAlertedAt') DESC NULLS LAST, id DESC",
   emailLogs: "safe_timestamptz(data->>'sentAt') DESC NULLS LAST, id DESC",

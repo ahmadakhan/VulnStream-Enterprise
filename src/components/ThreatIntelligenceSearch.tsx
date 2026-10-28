@@ -1,7 +1,7 @@
 import { PageHeading } from './PageHeading';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import type { NormalizedCVE, ThreatSearchHit } from '../types';
+import type { NormalizedCVE, ThreatSearchHit, ThreatFeed } from '../types';
 import {
   ENTERPRISE_VENDOR_CATALOG,
   getCatalogProductsForVendor,
@@ -32,6 +32,7 @@ import {
   ShieldAlert,
   Tag,
   X,
+  Calendar,
 } from 'lucide-react';
 import { copyText } from '../utils/clipboard';
 import { CveLink } from './CveLink';
@@ -51,6 +52,7 @@ interface ExecutedSearch {
   productName: string;
   at: string;
   limit: number;
+  startDate?: string;
 }
 
 const panel =
@@ -230,7 +232,7 @@ function ThreatDetailDialog({ children, onClose }: { children: React.ReactNode; 
 }
 
 export const ThreatIntelligenceSearch: React.FC = () => {
-  const { searchThreatIntelligence } = useApp();
+  const { searchThreatIntelligence, feeds, updateFeed, addFeed } = useApp();
 
   // Search parameters
   const [vendorQuery, setVendorQuery] = useState('');
@@ -244,6 +246,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
   const [productSelected, setProductSelected] = useState('');
   const [customProduct, setCustomProduct] = useState('');
   const [resultLimit, setResultLimit] = useState(50);
+  const [startDate, setStartDate] = useState('');
 
   // Search lifecycle
   const [results, setResults] = useState<ThreatSearchHit[] | null>(null);
@@ -319,7 +322,8 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     !!executedSearch &&
     (executedSearch.vendor !== vendorSelected ||
       executedSearch.product !== effectiveProduct ||
-      executedSearch.limit !== resultLimit);
+      executedSearch.limit !== resultLimit ||
+      executedSearch.startDate !== startDate);
 
   useEffect(() => {
     setActiveVendorIndex(0);
@@ -444,7 +448,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     resetResultControls();
 
     try {
-      const response = await searchThreatIntelligence(vendor, product, resultLimit);
+      const response = await searchThreatIntelligence(vendor, product, resultLimit, startDate || undefined);
       if (sequence !== searchSequence.current) return;
       setResults(response.hits);
       setTotalResults(response.totalResults);
@@ -455,20 +459,31 @@ export const ThreatIntelligenceSearch: React.FC = () => {
         productName,
         at: new Date().toISOString(),
         limit: resultLimit,
+        startDate: startDate || undefined,
       });
       if (response.rateLimited) {
         setError(
-          'NVD rate limit reached. The API has a limited request budget; wait a few seconds or configure an API key in Settings.',
+          `NVD rate limit reached. NVD limits anonymous requests; wait before retrying${
+            response.apiKeyUsed
+              ? ' or lower the result count.'
+              : ' or add an API key under Feeds.'
+          }`,
         );
       }
     } catch (caught) {
       if (sequence !== searchSequence.current) return;
       const message = caught instanceof Error ? caught.message : 'Search failed.';
-      setError(
-        /rate limit/i.test(message)
-          ? `${message}. NVD limits anonymous requests; wait before retrying or add an API key in Settings.`
-          : message,
-      );
+      if (/rate limit/i.test(message)) {
+        const noApiKey = /no API key loaded/i.test(message);
+        setError(
+          `${message}. ${noApiKey
+            ? 'The NVD API key was not loaded; verify it under Feeds or check server logs.'
+            : 'Wait a few seconds before retrying.'
+          }`,
+        );
+      } else {
+        setError(message);
+      }
     } finally {
       if (sequence === searchSequence.current) setLoading(false);
     }
@@ -485,6 +500,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     setProductSelected('');
     setCustomProduct('');
     setResultLimit(50);
+    setStartDate('');
     setResults(null);
     setTotalResults(0);
     setExecutedSearch(null);
@@ -720,7 +736,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             void handleSearch();
           }}
         >
-          <div className="threat-search-fields grid gap-5 lg:grid-cols-12">
+          <div className="threat-search-fields grid gap-5 lg:grid-cols-14">
             {/* Vendor */}
             <div className="lg:col-span-4">
               <label htmlFor="threat-vendor" className={labelClass}>
@@ -951,26 +967,61 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             </div>
 
             {/* Limit */}
-            <div className="lg:col-span-2">
-              <label htmlFor="threat-limit" className={labelClass}>
-                Max results
-              </label>
-              <select
-                id="threat-limit"
-                value={resultLimit}
-                onChange={(event) => setResultLimit(Number(event.target.value))}
-                className={`${inputClass} px-3`}
-              >
-                {[25, 50, 100, 200].map((limit) => (
-                  <option key={limit} value={limit}>
-                    {limit}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                Per search
-              </p>
-            </div>
+             <div className="lg:col-span-2">
+               <label htmlFor="threat-limit" className={labelClass}>
+                 Max results
+               </label>
+               <select
+                 id="threat-limit"
+                 value={resultLimit}
+                 onChange={(event) => setResultLimit(Number(event.target.value))}
+                 className={`${inputClass} px-3`}
+               >
+                 {[25, 50, 100, 200].map((limit) => (
+                   <option key={limit} value={limit}>
+                     {limit}
+                   </option>
+                 ))}
+               </select>
+               <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                 Per search
+               </p>
+             </div>
+
+             {/* Scan start date */}
+             <div className="lg:col-span-2">
+               <label htmlFor="threat-start-date" className={labelClass}>
+                 Published from
+               </label>
+               <div className="relative">
+                 <Calendar
+                   className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
+                   aria-hidden="true"
+                 />
+                 <input
+                   id="threat-start-date"
+                   type="date"
+                   value={startDate}
+                   max={new Date().toISOString().slice(0, 10)}
+                   onChange={(event) => setStartDate(event.target.value)}
+                   placeholder="YYYY-MM-DD"
+                   className={`${inputClass} pl-9 pr-9`}
+                 />
+                 {startDate && (
+                   <button
+                     type="button"
+                     onClick={() => setStartDate('')}
+                     aria-label="Clear start date"
+                     className="absolute right-1 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 light:hover:bg-zinc-200 light:hover:text-zinc-900"
+                   >
+                     <X className="h-3 w-3" aria-hidden="true" />
+                   </button>
+                 )}
+               </div>
+               <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                 Only CVEs published on or after this date
+               </p>
+             </div>
           </div>
 
           <div className="threat-search-actions">
@@ -1170,7 +1221,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             <MetricCard
               label="Exact CPE coverage"
               value={`${summary.exactPct}%`}
-              hint={`${summary.exact} of ${summary.total} via CPE`}
+               hint={`${summary.exact} of ${summary.total} via CPE`}
               icon={Crosshair}
               tone="bg-emerald-500/10 text-emerald-400 light:bg-emerald-50 light:text-emerald-700"
             />
@@ -1190,11 +1241,17 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                           </span>{' '}
                           / {executedSearch.productName}
                         </span>
-                        <span className="inline-flex items-center gap-1">
-                          <Clock3 className="h-3 w-3" aria-hidden="true" />
-                          {formatDateTime(executedSearch.at)}
-                        </span>
-                      </>
+                         <span className="inline-flex items-center gap-1">
+                           <Clock3 className="h-3 w-3" aria-hidden="true" />
+                           {formatDateTime(executedSearch.at)}
+                         </span>
+                         {executedSearch.startDate && (
+                           <span className="inline-flex items-center gap-1">
+                             <Calendar className="h-3 w-3" aria-hidden="true" />
+                             Published from {formatDate(executedSearch.startDate)}
+                           </span>
+                         )}
+                       </>
                     )}
                     {totalResults > (results?.length ?? 0) && (
                       <span>

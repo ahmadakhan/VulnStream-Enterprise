@@ -563,10 +563,7 @@ export function createApp(
   });
   if (options.correlation) {
     const runtime = options.correlation;
-    app.get(
-      '/api/correlation/workflows',
-      asyncRoute(async (_req, res) => res.json(await correlationWorkflows(pool))),
-    );
+    app.get('/api/correlation/workflows', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (_req, res) => res.json(await correlationWorkflows(pool))));
     app.patch(
       '/api/correlation/policy',
       requireRole('ADMIN'),
@@ -614,9 +611,7 @@ export function createApp(
         res.json({ removed });
       }),
     );
-    app.get(
-      '/api/correlation/assets',
-      asyncRoute(async (req, res) => {
+    app.get('/api/correlation/assets', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (req, res) => {
         const query = z
           .object({ q: z.string().trim().max(200).default(''), after: z.uuid().optional() })
           .strict()
@@ -636,10 +631,7 @@ export function createApp(
       }),
     );
 
-    app.get(
-      '/api/correlation',
-      asyncRoute(async (_req, res) => res.json(await runtime.supervisor.snapshot())),
-    );
+    app.get('/api/correlation', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (_req, res) => res.json(await runtime.supervisor.snapshot())));
     app.post(
       '/api/correlation/concurrency',
       requireRole('ADMIN', 'OPERATOR'),
@@ -762,9 +754,7 @@ export function createApp(
         res.status(202).json({ queued: accepted.length });
       }),
     );
-    app.get(
-      '/api/correlation/search',
-      asyncRoute(async (req, res) => {
+    app.get('/api/correlation/search', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (req, res) => {
         const { q } = z.object({ q: z.string().trim().min(1).max(200) }).parse(req.query);
         const result = await pool.query(
           `SELECT id,title,url,processed_at FROM unstructured_advisories
@@ -775,9 +765,12 @@ export function createApp(
       }),
     );
   }
-  app.get('/api/session', (req, res) =>
-    res.json({
-      username: req.operator!.username,
+  app.get(
+    '/api/session',
+    requireAuth(pool, config),
+    (req, res) =>
+      res.json({
+        username: req.operator!.username,
       // The operator's own address. It is not a secret from them, and the
       // account form prefills it so an edit does not silently clear it.
       email: req.operator!.email,
@@ -806,7 +799,7 @@ export function createApp(
           if (retryAfter) res.setHeader('Retry-After', String(retryAfter));
           throw new HttpError(429, 'NVD rate limit reached; retry later');
         }
-        throw new HttpError(502, error instanceof Error ? error.message : 'NVD CPE search failed');
+        throw new HttpError(502, 'CPE search upstream request failed');
       }
     }),
   );
@@ -814,11 +807,16 @@ export function createApp(
     '/api/threat/intelligence/search',
     requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
     asyncRoute(async (req, res) => {
-      const { vendor, product, limit } = z
+       const { vendor, product, limit, startDate } = z
         .object({
           vendor: z.string().trim().min(1).max(200),
           product: z.string().trim().max(200).default(''),
           limit: z.coerce.number().int().min(1).max(200).default(50),
+          startDate: z
+            .string()
+            .trim()
+            .regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Must be YYYY-MM-DD' })
+            .optional(),
         })
         .parse(req.query);
       try {
@@ -826,10 +824,14 @@ export function createApp(
           vendor,
           product,
           limit,
+          startDate,
         });
         if (result.rateLimited) {
           if (result.retryAfter) res.setHeader('Retry-After', String(result.retryAfter));
-          throw new HttpError(429, 'NVD rate limit reached; retry later');
+          throw new HttpError(
+            429,
+            `NVD rate limit reached; retry later${result.apiKeyUsed ? '' : ' (no API key loaded)'}`,
+          );
         }
         res.json(result);
       } catch (error) {
@@ -898,9 +900,7 @@ export function createApp(
       res.json(result);
     }),
   );
-  app.post(
-    '/api/session/renew',
-    asyncRoute(async (req, res) => {
+  app.post('/api/session/renew', requireAuth(pool, config), asyncRoute(async (req, res) => {
       const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
       const row = (
         await pool.query(
@@ -908,12 +908,19 @@ export function createApp(
           [req.operator!.sessionHash, settings.securityPolicy.sessionTimeoutMins],
         )
       ).rows[0];
+      // A session can be invalidated between requireAuth and this handler
+      // (e.g. a password change on another tab, or a cleanup sweep). A null
+      // row is a normal expiry, not a server fault: clear the cookie so the
+      // browser stops sending a dead token and signal 401 so the client
+      // shows the session-expired flow instead of a generic 500.
+      if (!row) {
+        res.clearCookie(cookieName(config), sessionCookieOptions(config));
+        throw new HttpError(401, 'Session expired');
+      }
       res.json({ expiresAt: row.expires_at.toISOString() });
     }),
   );
-  app.post(
-    '/api/logout',
-    asyncRoute(async (req, res) => {
+  app.post('/api/logout', requireAuth(pool, config), asyncRoute(async (req, res) => {
       await pool.query('DELETE FROM sessions WHERE token_hash=$1', [req.operator!.sessionHash]);
       // __Host- cookies are only cleared when the deletion carries the same
       // Secure/Path attributes as the original cookie.
@@ -921,9 +928,7 @@ export function createApp(
       res.json({ success: true });
     }),
   );
-  app.post(
-    '/api/password',
-    asyncRoute(async (req, res) => {
+  app.post('/api/password', requireAuth(pool, config), asyncRoute(async (req, res) => {
       const data = z
         .object({ currentPassword: z.string().min(1).max(128), newPassword: z.string().min(14).max(128) })
         .parse(req.body);
@@ -1070,9 +1075,7 @@ export function createApp(
       res.json(publicState(await state(pool, { limits: STATE_COLLECTION_LIMITS }))),
     ),
   );
-  app.get(
-    '/api/collections/:kind',
-    asyncRoute(async (req, res) => {
+  app.get('/api/collections/:kind', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (req, res) => {
       const query = z
         .object({
           limit: z.coerce.number().int().min(1).max(1000).default(50),
@@ -1122,9 +1125,7 @@ export function createApp(
       );
     }),
   );
-  app.get(
-    '/api/audit/verify',
-    asyncRoute(async (req, res) => {
+  app.get('/api/audit/verify', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (req, res) => {
       const rows = await pool.query('SELECT data FROM audit ORDER BY seq ASC');
       const logs = rows.rows.map((row) => row.data);
       const verified = verifyAuditChain(logs.reverse());
@@ -1210,9 +1211,7 @@ export function createApp(
       });
     }),
   );
-  app.get(
-    '/api/email-queue',
-    asyncRoute(async (_req, res) => {
+  app.get('/api/email-queue', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (_req, res) => {
       const rows = await pool.query(
         `SELECT id, payload->>'recipientEmail' AS "recipientEmail", advisory_id AS "advisoryId",
           payload->>'subject' AS subject, status, attempts,

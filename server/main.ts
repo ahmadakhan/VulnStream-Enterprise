@@ -325,6 +325,7 @@ async function shutdown() {
   stopping = true;
   clearInterval(timer);
   clearInterval(retentionTimer);
+  clearInterval(dailyDigestTimer);
   clearInterval(cleanup);
   const deadline = setTimeout(() => process.exit(1), 30000);
   deadline.unref();

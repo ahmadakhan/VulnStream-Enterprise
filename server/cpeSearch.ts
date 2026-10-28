@@ -26,13 +26,45 @@ export async function loadNvdApiKey(db: Db, config: Config): Promise<string> {
   try {
     feeds = await list<ThreatFeed>(db, 'feeds');
   } catch {
+    console.warn(JSON.stringify({ level: 'warn', event: 'nvd_api_key_feed_query_failed' }));
     return '';
   }
   const nvd = feeds.find((f) => f.type === 'NVD_API' && f.authType === 'API_KEY' && f.enabled);
-  if (!nvd?.authSecretKey) return '';
+  if (!nvd) {
+    const nvdFeeds = feeds.filter((f) => f.type === 'NVD_API');
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        event: 'nvd_api_key_not_configured',
+        nvdFeedCount: nvdFeeds.length,
+        authTypes: nvdFeeds.map((f) => f.authType),
+        enabledFlags: nvdFeeds.map((f) => f.enabled),
+      }),
+    );
+    return '';
+  }
+  if (!nvd.authSecretKey) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        event: 'nvd_api_key_secret_missing',
+        feedId: nvd.id,
+        authType: nvd.authType,
+      }),
+    );
+    return '';
+  }
   try {
     return decrypt(nvd.authSecretKey, config.ENCRYPTION_KEY, `feed:${nvd.id}`);
-  } catch {
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        event: 'nvd_api_key_decrypt_failed',
+        feedId: nvd.id,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
     return '';
   }
 }
@@ -70,7 +102,10 @@ export async function searchNvdCpes(
   // NVD reports rejected credentials with 404 and a diagnostic message header.
   // Only that case can fall back to the public budget: an unrelated 404 is an
   // upstream failure, never evidence that the dictionary has no matches.
-  const message = response.headers.message;
+  // HTTP headers are case-insensitive; access by lowercased key to avoid relying
+  // on the implementation detail that Node lowercases response header names.
+  const allHeaders = response.headers as Record<string, string | string[] | undefined>;
+  const message = allHeaders['message'] ?? allHeaders['Message'] ?? allHeaders['MESSAGE'];
   if (
     response.status === 404 &&
     apiKey &&

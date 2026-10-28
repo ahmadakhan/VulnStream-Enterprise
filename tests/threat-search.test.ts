@@ -307,3 +307,108 @@ test('keyword fallback normalizes CPE-style underscores for NVD text search', as
     'should send plain words, not CPE identifiers',
   );
 });
+
+test('searchThreatIntelligence passes pubStartDate to the NVD API when startDate is provided', async () => {
+  const calledUrls: string[] = [];
+  const requester: Requester = async (url) => {
+    calledUrls.push(url);
+    return {
+      status: 200,
+      body: JSON.stringify({
+        totalResults: 1,
+        vulnerabilities: [{ cve: mockCve }],
+      }),
+      headers: {},
+    };
+  };
+
+  const db = createMockDb(false);
+
+  await searchThreatIntelligence(requester, db, config, {
+    vendor: 'microsoft',
+    product: 'windows_10',
+    limit: 50,
+    startDate: '2024-01-01',
+  });
+
+  const cpeUrls = calledUrls.filter((u) => u.includes('virtualMatchString='));
+  assert.ok(cpeUrls.length >= 1, 'should make CPE virtual-match requests');
+  const startDate = new URL(cpeUrls[0]).searchParams.get('pubStartDate');
+  assert.equal(startDate, '2024-01-01T00:00:00.000', 'should send pubStartDate in ISO 8601 with milliseconds');
+});
+
+test('searchThreatIntelligence omits pubStartDate when no startDate is given', async () => {
+  const calledUrls: string[] = [];
+  const requester: Requester = async (url) => {
+    calledUrls.push(url);
+    return {
+      status: 200,
+      body: JSON.stringify({
+        totalResults: 1,
+        vulnerabilities: [{ cve: mockCve }],
+      }),
+      headers: {},
+    };
+  };
+
+  const db = createMockDb(false);
+
+  await searchThreatIntelligence(requester, db, config, {
+    vendor: 'microsoft',
+    product: 'windows_10',
+    limit: 50,
+  });
+
+  const cpeUrls = calledUrls.filter((u) => u.includes('virtualMatchString='));
+  assert.ok(cpeUrls.length >= 1);
+  const startDate = new URL(cpeUrls[0]).searchParams.get('pubStartDate');
+  assert.equal(startDate, null, 'should not send pubStartDate when no startDate given');
+});
+
+test('searchThreatIntelligence passes pubStartDate to keyword fallback requests', async () => {
+  const calledUrls: string[] = [];
+  const requester: Requester = async (url) => {
+    calledUrls.push(url);
+    return {
+      status: 200,
+      body: JSON.stringify({
+        totalResults: 0,
+        vulnerabilities: [],
+      }),
+      headers: {},
+    };
+  };
+
+  await searchThreatIntelligence(requester, createMockDb(false), config, {
+    vendor: 'apache',
+    product: 'http_server',
+    limit: 50,
+    startDate: '2024-06-01',
+  });
+
+  const keywordUrls = calledUrls.filter((u) => u.includes('keywordSearch='));
+  assert.ok(keywordUrls.length >= 1, 'should fall back to keyword search');
+  const startDate = new URL(keywordUrls[0]).searchParams.get('pubStartDate');
+  assert.equal(startDate, '2024-06-01T00:00:00.000', 'keyword fallback should also receive the start date');
+});
+
+test('searchThreatIntelligence returns startDate in the response', async () => {
+  const requester = createRequester({
+    status: 200,
+    body: JSON.stringify({
+      totalResults: 1,
+      vulnerabilities: [{ cve: mockCve }],
+    }),
+  });
+
+  const db = createMockDb(false);
+
+  const result = await searchThreatIntelligence(requester, db, config, {
+    vendor: 'microsoft',
+    product: 'windows_10',
+    limit: 50,
+    startDate: '2024-01-01',
+  });
+
+  assert.equal(result.startDate, '2024-01-01');
+});

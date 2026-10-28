@@ -20,7 +20,6 @@ import { Pagination } from './Pagination';
 import { useCollection } from '../hooks/useCollection';
 import { copyText } from '../utils/clipboard';
 import { CveLink } from './CveLink';
-import { formatCveDate } from '../utils/findingSort';
 import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 export const FindingsView: React.FC = () => {
@@ -33,7 +32,7 @@ export const FindingsView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
-  const [sortFilter, setSortFilter] = useState('latest');
+  const [sortFilter, setSortFilter] = useState('modified');
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -180,12 +179,12 @@ export const FindingsView: React.FC = () => {
           </div>
 
           {/* Clear Filters */}
-          {(severityFilter !== 'ALL' || statusFilter !== 'ALL' || sortFilter !== 'latest' || searchTerm) && (
+          {(severityFilter !== 'ALL' || statusFilter !== 'ALL' || sortFilter !== 'modified' || searchTerm) && (
             <button
               onClick={() => {
                 setSeverityFilter('ALL');
                 setStatusFilter('ALL');
-                setSortFilter('latest');
+                setSortFilter('modified');
                 setSearchTerm('');
                 setCurrentPage(1);
               }}
@@ -257,10 +256,10 @@ export const FindingsView: React.FC = () => {
 
                           {/* CVE dates */}
                           <td className="py-3 px-3.5 whitespace-nowrap text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono text-[11px]">
-                            {formatCveDate(finding.cve.publishedDate)}
+                            {fmtDateTime(finding.cve.publishedDate)}
                           </td>
                           <td className="py-3 px-3.5 whitespace-nowrap text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono text-[11px]">
-                            {formatCveDate(finding.cve.modifiedDate)}
+                            {fmtDateTime(finding.cve.modifiedDate)}
                           </td>
 
                           {/* Matched Product */}

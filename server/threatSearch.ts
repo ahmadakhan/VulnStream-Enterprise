@@ -3,10 +3,15 @@ import type { Requester } from './network';
 import type { NormalizedCVE, ThreatSearchHit, ThreatSearchResponse } from '../src/types/index.ts';
 import { loadNvdApiKey } from './cpeSearch';
 import { normalizeNvd } from './ingestion';
-import { parseCPE23, matchVendorWithAliases, matchProductWithAliases } from '../src/utils/cpeMatcher';
+import {
+  parseCPE23,
+  matchVendorWithAliases,
+  matchProductWithAliases,
+  buildAliasMap,
+} from '../src/utils/cpeMatcher';
+import { normalizeCveId } from '../src/utils/deduplicator';
 import type { Db } from './db';
 import { list } from './db';
-import { buildAliasMap } from '../src/utils/cpeMatcher';
 
 const NVD_CVE_ENDPOINT = 'https://services.nvd.nist.gov/rest/json/cves/2.0';
 
@@ -20,6 +25,12 @@ export interface ThreatSearchOptions {
   vendor: string;
   product: string;
   limit: number;
+  /**
+   * Optional start date (YYYY-MM-DD) constraining the scan to CVEs published
+   * on or after this date. Forwarded to the NVD API as `pubStartDate` and used
+   * to filter the local threat-feed cache.
+   */
+  startDate?: string;
 }
 
 export class ThreatSearchRateLimitError extends Error {
@@ -48,10 +59,13 @@ export async function searchThreatIntelligence(
   config: Config,
   options: ThreatSearchOptions,
 ): Promise<ThreatSearchResponse> {
-  const { vendor, product, limit } = options;
+  const { vendor, product, limit, startDate } = options;
   const apiKey = await loadNvdApiKey(db, config);
+  const apiKeyUsed = Boolean(apiKey);
   const trimmedVendor = vendor.trim().toLowerCase();
   const trimmedProduct = product.trim().toLowerCase();
+  // NVD expects ISO 8601 with milliseconds; the client sends YYYY-MM-DD.
+  const nvdStartDate = startDate ? `${startDate}T00:00:00.000` : undefined;
 
   const allAliases = await list<AliasEntry>(db, 'aliases');
   const customVendorAliases = buildAliasMap(
@@ -74,12 +88,13 @@ export async function searchThreatIntelligence(
   // Try exact CPE 2.3 match first
   for (const cpePrefix of cpePrefixes) {
     try {
-      const result = await fetchNvdCves(request, apiKey, cpePrefix, limit);
+      const result = await fetchNvdCves(request, apiKey, cpePrefix, limit, nvdStartDate);
       for (const cve of result.cves) {
         const matchingCpes = findMatchingCpes(cve, cpePrefix, trimmedVendor, trimmedProduct, customVendorAliases, customProductAliases);
         if (matchingCpes.length > 0) {
-          if (!seenCves.has(cve.cveId)) {
-            seenCves.add(cve.cveId);
+          const normId = normalizeCveId(cve.cveId);
+          if (!normId || !seenCves.has(normId)) {
+            if (normId) seenCves.add(normId);
             hits.push({
               cve,
               matchingCpes,
@@ -106,7 +121,7 @@ export async function searchThreatIntelligence(
   if (hits.length === 0 && !rateLimited) {
     const keyword = `${trimmedVendor} ${trimmedProduct}`.replace(/_/g, ' ').replace(/\s+/g, ' ');
     try {
-      const result = await fetchNvdCvesByKeyword(request, apiKey, keyword, limit * 2);
+      const result = await fetchNvdCvesByKeyword(request, apiKey, keyword, limit * 2, nvdStartDate);
       for (const cve of result.cves) {
         const matchingCpes = findMatchingCpesByAlias(
           cve,
@@ -116,8 +131,9 @@ export async function searchThreatIntelligence(
           customProductAliases,
         );
         if (matchingCpes.length > 0) {
-          if (!seenCves.has(cve.cveId)) {
-            seenCves.add(cve.cveId);
+          const normId = normalizeCveId(cve.cveId);
+          if (!normId || !seenCves.has(normId)) {
+            if (normId) seenCves.add(normId);
             hits.push({
               cve,
               matchingCpes,
@@ -131,9 +147,9 @@ export async function searchThreatIntelligence(
       if (err instanceof ThreatSearchRateLimitError) {
         rateLimited = true;
         retryAfter = err.retryAfter ?? undefined;
-      }
-    }
-  }
+       }
+     }
+   }
 
   // Sort by CVSS severity descending
   hits.sort((a, b) => {
@@ -150,6 +166,8 @@ export async function searchThreatIntelligence(
     product,
     rateLimited,
     retryAfter,
+    apiKeyUsed,
+    startDate,
   };
 }
 
@@ -162,6 +180,7 @@ async function fetchNvdCves(
   apiKey: string,
   matchString: string,
   limit: number,
+  startDate?: string,
 ): Promise<NvdFetchResult> {
   const url = new URL(NVD_CVE_ENDPOINT);
   // `cpeName` requires an exact dictionary entry; a wildcard version suffix
@@ -170,6 +189,7 @@ async function fetchNvdCves(
   url.searchParams.set('virtualMatchString', matchString);
   url.searchParams.set('resultsPerPage', String(Math.min(Math.max(1, limit), 2000)));
   if (apiKey) url.searchParams.set('apiKey', apiKey);
+  if (startDate) url.searchParams.set('pubStartDate', startDate);
 
   return fetchNvdResponse(request, url.href);
 }
@@ -179,11 +199,13 @@ async function fetchNvdCvesByKeyword(
   apiKey: string,
   keyword: string,
   limit: number,
+  startDate?: string,
 ): Promise<NvdFetchResult> {
   const url = new URL(NVD_CVE_ENDPOINT);
   url.searchParams.set('keywordSearch', keyword);
   url.searchParams.set('resultsPerPage', String(Math.min(Math.max(1, limit), 2000)));
   if (apiKey) url.searchParams.set('apiKey', apiKey);
+  if (startDate) url.searchParams.set('pubStartDate', startDate);
 
   return fetchNvdResponse(request, url.href);
 }

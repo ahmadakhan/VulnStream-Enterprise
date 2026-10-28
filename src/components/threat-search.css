@@ -43,6 +43,12 @@
   min-height: 46px;
   font-size: 13px;
 }
+.threat-search-fields input[type='date'] {
+  padding-inline-end: 3rem;
+}
+.threat-search-fields input[type='date']::-webkit-calendar-picker {
+  padding-inline-start: 0.5rem;
+}
 .threat-search-fields p {
   line-height: 1.6;
 }

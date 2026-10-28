@@ -388,6 +388,66 @@ test('enterprise hardening invariants', { skip: !database }, async (t) => {
       assert.deepEqual(epss.items.map((item) => item.cveId), ['CVE-2026-83002']);
     });
 
+    await t.test('findings default order ranks by the newest of published and modified dates', async () => {
+      await reset();
+      // Each finding's "latest activity" is the more recent of its two CVE dates.
+      // The page defaults to last-modified; selecting "Latest" instead orders by
+      // GREATEST(published, modified). The two orderings diverge here (modified-first
+      // puts b ahead of a, while GREATEST puts a ahead of b), which also guards that
+      // a published-first default never creeps back in.
+      const a = finding(cve('CVE-2026-90101', {
+        publishedDate: '2026-10-26T13:00:00Z',
+        modifiedDate: '2020-01-01T00:00:00Z',
+      }));
+      const b = finding(cve('CVE-2026-90202', {
+        publishedDate: '2019-01-01T00:00:00Z',
+        modifiedDate: '2026-10-26T12:00:00Z',
+      }));
+      const c = finding(cve('CVE-2026-90303', {
+        publishedDate: '2021-06-01T00:00:00Z',
+        modifiedDate: '2021-06-01T00:00:00Z',
+      }));
+      await put(pool, 'findings', 'finding-latest-a', a);
+      await put(pool, 'findings', 'finding-latest-b', b);
+      await put(pool, 'findings', 'finding-latest-c', c);
+
+      const cveOrder = (rows: { cveId: string }[]) => rows.map((row) => row.cveId);
+
+      // Default ordering is last-modified only: b (modified 12:00) > c (2021) > a (2020).
+      const latest = await queryCollection<{ cveId: string }>(pool, 'findings', {
+        limit: 10,
+        offset: 0,
+      });
+      assert.deepEqual(cveOrder(latest.items), ['CVE-2026-90202', 'CVE-2026-90303', 'CVE-2026-90101']);
+
+      // Latest (GREATEST of published+modified) is a distinct modifier: a (13:00) > b (12:00) > c (2021).
+      const explicit = await queryCollection<{ cveId: string }>(pool, 'findings', {
+        limit: 10,
+        offset: 0,
+        sort: 'latest',
+        order: 'desc',
+      });
+      assert.deepEqual(cveOrder(explicit.items), ['CVE-2026-90101', 'CVE-2026-90202', 'CVE-2026-90303']);
+
+      // Sort by published only: a (13:00) > c (2021) > b (2019).
+      const published = await queryCollection<{ cveId: string }>(pool, 'findings', {
+        limit: 10,
+        offset: 0,
+        sort: 'published',
+        order: 'desc',
+      });
+      assert.deepEqual(cveOrder(published.items), ['CVE-2026-90101', 'CVE-2026-90303', 'CVE-2026-90202']);
+
+      // Sort by modified only: b (12:00) > c (2021) > a (2020).
+      const modified = await queryCollection<{ cveId: string }>(pool, 'findings', {
+        limit: 10,
+        offset: 0,
+        sort: 'modified',
+        order: 'desc',
+      });
+      assert.deepEqual(cveOrder(modified.items), ['CVE-2026-90202', 'CVE-2026-90303', 'CVE-2026-90101']);
+    });
+
     await t.test('state slices are bounded while counts and summary stay exact', async () => {
       await reset();
       const critical = cve('CVE-2026-82001', {

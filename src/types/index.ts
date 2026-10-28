@@ -340,6 +340,10 @@ export interface ThreatSearchResponse {
   product: string;
   rateLimited: boolean;
   retryAfter?: number;
+  /** Whether an NVD API key was loaded and supplied with the request. */
+  apiKeyUsed: boolean;
+  /** ISO date string (YYYY-MM-DD) the scan was constrained to, when a start date was supplied. */
+  startDate?: string;
 }
 
 /** Granularity for the analytics timeline buckets. */

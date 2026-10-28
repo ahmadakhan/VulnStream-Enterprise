@@ -22,7 +22,7 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     products: [
       {
         name: 'Windows Server 2025',
-        normalizedId: 'windows_2025',
+        normalizedId: 'windows_server_2025',
         part: 'o',
         description: 'Enterprise Server Operating System',
       },

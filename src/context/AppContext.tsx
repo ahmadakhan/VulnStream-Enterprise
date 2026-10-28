@@ -406,8 +406,9 @@ function useApplication() {
       const params = new URLSearchParams({ vendor, product, limit: String(limit) });
       return request<NvdCpeSearchResponse>(`/cpes/search?${params}`);
     },
-    searchThreatIntelligence: async (vendor: string, product: string, limit = 50) => {
+    searchThreatIntelligence: async (vendor: string, product: string, limit = 50, startDate?: string) => {
       const params = new URLSearchParams({ vendor, product, limit: String(limit) });
+      if (startDate) params.set('startDate', startDate);
       return request<ThreatSearchResponse>(`/threat/intelligence/search?${params}`);
     },
     fetchThreatAnalytics: async (range: string, limit = 10) => {
