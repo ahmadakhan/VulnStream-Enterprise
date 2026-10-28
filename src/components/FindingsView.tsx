@@ -138,6 +138,23 @@ export const FindingsView: React.FC = () => {
               <option value="UNKNOWN">Unscored</option>
             </select>
           </div>
+
+          {/* Clear Filters */}
+          {(severityFilter !== 'ALL' || statusFilter !== 'ALL' || searchTerm) && (
+            <button
+              onClick={() => {
+                setSeverityFilter('ALL');
+                setStatusFilter('ALL');
+                setSearchTerm('');
+                setCurrentPage(1);
+              }}
+              className="text-xs px-3 py-1.5 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 transition flex items-center space-x-1.5"
+              title="Clear all filters and search"
+            >
+              <X className="w-3 h-3" />
+              <span>Clear</span>
+            </button>
+          )}
         </div>
       </div>
 
