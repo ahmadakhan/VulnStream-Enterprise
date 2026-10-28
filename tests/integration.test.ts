@@ -634,6 +634,39 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
         await pool.query("DELETE FROM records WHERE kind='feeds' AND id=$1", [feedId]);
       }
     });
+    await t.test('RSS connectivity tests use the reader identity and validate the feed response', async () => {
+      const feedId = 'rss-reader-test';
+      await put(pool, 'feeds', feedId, {
+        id: feedId, name: 'BleepingComputer Security News', type: 'RSS_ATOM',
+        url: 'https://www.bleepingcomputer.com/feed/', authType: 'NONE',
+        enabled: false, rateLimitPerMin: 1, healthStatus: 'UNTESTED',
+      });
+      try {
+        responseBody = '<rss version="2.0"><channel><title>BleepingComputer</title></channel></rss>';
+        const tested = await post(`/api/feeds/${feedId}/test`);
+        assert.equal(tested.status, 200);
+        assert.equal(tested.body.success, true);
+        assert.equal(capturedUrl, 'https://www.bleepingcomputer.com/feed/');
+        assert.equal(capturedHeaders['user-agent'], 'VulnStream/1.0 RSS reader');
+        assert.match(capturedHeaders.accept, /application\/rss\+xml/);
+        assert.equal((await get<any>(pool, 'feeds', feedId)).healthStatus, 'HEALTHY');
+
+        responseStatus = 403;
+        responseBody = '<html>Forbidden</html>';
+        const denied = await post(`/api/feeds/${feedId}/test`);
+        assert.equal(denied.body.success, false);
+        assert.match(denied.body.error, /HTTP 403/);
+        assert.equal((await get<any>(pool, 'feeds', feedId)).healthStatus, 'DOWN');
+
+        responseStatus = 200;
+        responseBody = '<html>Challenge</html>';
+        assert.equal((await post(`/api/feeds/${feedId}/test`)).body.success, false);
+      } finally {
+        responseStatus = 200;
+        responseBody = '[]';
+        await pool.query("DELETE FROM records WHERE kind='feeds' AND id=$1", [feedId]);
+      }
+    });
     await t.test('records persist and feed secrets are encrypted and redacted', async () => {
       assert.equal(
         (

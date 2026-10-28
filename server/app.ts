@@ -1312,7 +1312,7 @@ export function createApp(
       const start = performance.now();
       const headers: Record<string, string> =
         feed.type === 'RSS_ATOM'
-          ? { 'User-Agent': RSS_USER_AGENT, Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' }
+          ? { 'user-agent': RSS_USER_AGENT, accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' }
           : {};
       let secret: string;
       try {

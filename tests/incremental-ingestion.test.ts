@@ -12,6 +12,24 @@ const feed = (type: ThreatFeed['type']): ThreatFeed => ({ id: 'source', name: 'S
 const response = (data: unknown) => ({ status: 200, body: JSON.stringify(data), headers: { etag: 'index-v1' } });
 const sleep = async () => {};
 
+test('RSS ingestion identifies the real reader and preserves conditional fetches', async () => {
+  const source = { ...feed('RSS_ATOM'), url: 'https://www.bleepingcomputer.com/feed/', etag: 'rss-v1' };
+  const result = await ingestFeed(source, 24, async (url, options) => {
+    assert.equal(url, source.url);
+    assert.equal(options?.headers?.['user-agent'], 'VulnStream/1.0 RSS reader');
+    assert.match(options!.headers!.accept, /application\/rss\+xml/);
+    assert.equal(options?.headers?.['If-None-Match'], 'rss-v1');
+    return {
+      status: 200,
+      body: `<rss version="2.0"><channel><title>Security News</title><item><title>Security update</title><link>https://www.bleepingcomputer.com/news/security/example/</link><pubDate>${new Date().toUTCString()}</pubDate></item></channel></rss>`,
+      headers: { etag: 'rss-v2' },
+    };
+  }, config, sleep);
+  assert.equal(result.articles?.length, 1);
+  assert.equal(result.etag, 'rss-v2');
+  await assert.rejects(ingestFeed(source, 24, async () => ({ status: 403, body: '<html>Forbidden</html>', headers: {} }), config, sleep), /HTTP 403/);
+});
+
 test('bootstrap is bounded and checkpoints catch up without gaps in bounded daily windows', () => {
   const now = Date.parse('2026-10-22T00:00:00Z');
   assert.equal(now - ingestionWindow(2880, {}, now).start.getTime(), 24 * 3600000);
