@@ -331,3 +331,57 @@
     animation: none;
   }
 }
+
+/* Keep all search parameters aligned, including the optional publication date. */
+.threat-search-page .threat-search-fields {
+  grid-template-columns: minmax(0, 1fr);
+}
+.threat-search-page .threat-search-fields > div {
+  grid-column: auto;
+  min-width: 0;
+}
+.threat-search-page .threat-search-fields > div > label {
+  margin-bottom: 8px;
+}
+.threat-search-page .threat-product-heading label {
+  margin-bottom: 0;
+}
+.threat-search-page .threat-search-fields input[type='date'] {
+  padding-left: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.threat-result-controls > .relative {
+  flex: 1 1 270px;
+  max-width: none;
+}
+.threat-result-controls > select {
+  width: auto;
+  flex: 0 1 165px;
+}
+.threat-result-controls > button {
+  min-height: 40px;
+}
+.threat-result-controls > span:last-child {
+  padding: 6px 0;
+}
+@media (min-width: 768px) {
+  .threat-search-page .threat-search-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 22px;
+  }
+}
+@media (min-width: 1280px) {
+  .threat-search-page .threat-search-fields {
+    grid-template-columns: minmax(160px, 1fr) minmax(210px, 1.35fr) minmax(90px, 0.5fr) minmax(185px, 0.9fr);
+  }
+}
+@media (max-width: 767px) {
+  .threat-result-controls > .relative,
+  .threat-result-controls > select {
+    flex: none;
+    width: 100%;
+  }
+  .threat-result-controls > span:last-child {
+    margin-left: 0;
+  }
+}

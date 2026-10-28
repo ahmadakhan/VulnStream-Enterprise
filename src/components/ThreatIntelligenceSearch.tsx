@@ -259,6 +259,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
   const [resultQuery, setResultQuery] = useState('');
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('ALL');
   const [kevOnly, setKevOnly] = useState(false);
+  const [evidenceFilter, setEvidenceFilter] = useState<'ALL' | 'EXACT' | 'KEYWORD'>('ALL');
   const [sortKey, setSortKey] = useState<SortKey>('score');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [page, setPage] = useState(1);
@@ -345,12 +346,13 @@ export const ThreatIntelligenceSearch: React.FC = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [resultQuery, severityFilter, kevOnly, sortKey, sortOrder]);
+  }, [resultQuery, severityFilter, kevOnly, evidenceFilter, sortKey, sortOrder]);
 
   const resetResultControls = () => {
     setResultQuery('');
     setSeverityFilter('ALL');
     setKevOnly(false);
+    setEvidenceFilter('ALL');
     setSortKey('score');
     setSortOrder('desc');
     setPage(1);
@@ -464,9 +466,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
       if (response.rateLimited) {
         setError(
           `NVD rate limit reached. NVD limits anonymous requests; wait before retrying${
-            response.apiKeyUsed
-              ? ' or lower the result count.'
-              : ' or add an API key under Feeds.'
+            response.apiKeyUsed ? ' or lower the result count.' : ' or add an API key under Feeds.'
           }`,
         );
       }
@@ -476,9 +476,10 @@ export const ThreatIntelligenceSearch: React.FC = () => {
       if (/rate limit/i.test(message)) {
         const noApiKey = /no API key loaded/i.test(message);
         setError(
-          `${message}. ${noApiKey
-            ? 'The NVD API key was not loaded; verify it under Feeds or check server logs.'
-            : 'Wait a few seconds before retrying.'
+          `${message}. ${
+            noApiKey
+              ? 'The NVD API key was not loaded; verify it under Feeds or check server logs.'
+              : 'Wait a few seconds before retrying.'
           }`,
         );
       } else {
@@ -515,6 +516,8 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     const filtered = results.filter((hit) => {
       if (severityFilter !== 'ALL' && hit.cve.cvss.severity !== severityFilter) return false;
       if (kevOnly && !hit.cve.cisaKev?.isKev) return false;
+      if (evidenceFilter === 'EXACT' && hit.source !== 'NVD_API') return false;
+      if (evidenceFilter === 'KEYWORD' && hit.source === 'NVD_API') return false;
       if (!query) return true;
       return [
         hit.cve.cveId,
@@ -544,7 +547,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
       if (severityDelta !== 0) return direction * severityDelta;
       return direction * (left.cve.cvss.score - right.cve.cvss.score);
     });
-  }, [results, resultQuery, severityFilter, kevOnly, sortKey, sortOrder]);
+  }, [results, resultQuery, severityFilter, kevOnly, evidenceFilter, sortKey, sortOrder]);
 
   const summary = useMemo(() => {
     if (!results) return null;
@@ -571,7 +574,8 @@ export const ThreatIntelligenceSearch: React.FC = () => {
   const pageCount = Math.max(1, Math.ceil(filteredResults.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const pageResults = filteredResults.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const hasResultFilters = resultQuery.trim().length > 0 || severityFilter !== 'ALL' || kevOnly;
+  const hasResultFilters =
+    resultQuery.trim().length > 0 || severityFilter !== 'ALL' || kevOnly || evidenceFilter !== 'ALL';
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -967,61 +971,57 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             </div>
 
             {/* Limit */}
-             <div className="lg:col-span-2">
-               <label htmlFor="threat-limit" className={labelClass}>
-                 Max results
-               </label>
-               <select
-                 id="threat-limit"
-                 value={resultLimit}
-                 onChange={(event) => setResultLimit(Number(event.target.value))}
-                 className={`${inputClass} px-3`}
-               >
-                 {[25, 50, 100, 200].map((limit) => (
-                   <option key={limit} value={limit}>
-                     {limit}
-                   </option>
-                 ))}
-               </select>
-               <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                 Per search
-               </p>
-             </div>
+            <div className="lg:col-span-2">
+              <label htmlFor="threat-limit" className={labelClass}>
+                Max results
+              </label>
+              <select
+                id="threat-limit"
+                value={resultLimit}
+                onChange={(event) => setResultLimit(Number(event.target.value))}
+                className={`${inputClass} px-3`}
+              >
+                {[25, 50, 100, 200].map((limit) => (
+                  <option key={limit} value={limit}>
+                    {limit}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                Per search
+              </p>
+            </div>
 
-             {/* Scan start date */}
-             <div className="lg:col-span-2">
-               <label htmlFor="threat-start-date" className={labelClass}>
-                 Published from
-               </label>
-               <div className="relative">
-                 <Calendar
-                   className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
-                   aria-hidden="true"
-                 />
-                 <input
-                   id="threat-start-date"
-                   type="date"
-                   value={startDate}
-                   max={new Date().toISOString().slice(0, 10)}
-                   onChange={(event) => setStartDate(event.target.value)}
-                   placeholder="YYYY-MM-DD"
-                   className={`${inputClass} pl-9 pr-9`}
-                 />
-                 {startDate && (
-                   <button
-                     type="button"
-                     onClick={() => setStartDate('')}
-                     aria-label="Clear start date"
-                     className="absolute right-1 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 light:hover:bg-zinc-200 light:hover:text-zinc-900"
-                   >
-                     <X className="h-3 w-3" aria-hidden="true" />
-                   </button>
-                 )}
-               </div>
-               <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                 Only CVEs published on or after this date
-               </p>
-             </div>
+            {/* Scan start date */}
+            <div className="lg:col-span-2">
+              <label htmlFor="threat-start-date" className={labelClass}>
+                Published from
+              </label>
+              <div className="relative">
+                <input
+                  id="threat-start-date"
+                  type="date"
+                  value={startDate}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={(event) => setStartDate(event.target.value)}
+                  placeholder="YYYY-MM-DD"
+                  className={`${inputClass} px-3`}
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                Only CVEs published on or after this date
+                {startDate && (
+                  <button
+                    type="button"
+                    aria-label="Clear start date"
+                    onClick={() => setStartDate('')}
+                    className="ml-2 text-blue-400 light:text-blue-700 hover:underline"
+                  >
+                    Clear
+                  </button>
+                )}
+              </p>
+            </div>
           </div>
 
           <div className="threat-search-actions">
@@ -1219,9 +1219,9 @@ export const ThreatIntelligenceSearch: React.FC = () => {
               tone="bg-amber-500/10 text-amber-400 light:bg-amber-50 light:text-amber-700"
             />
             <MetricCard
-              label="Exact CPE coverage"
+              label="Exact match share"
               value={`${summary.exactPct}%`}
-               hint={`${summary.exact} of ${summary.total} via CPE`}
+              hint={`${summary.exact} of ${summary.total} via CPE`}
               icon={Crosshair}
               tone="bg-emerald-500/10 text-emerald-400 light:bg-emerald-50 light:text-emerald-700"
             />
@@ -1241,17 +1241,17 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                           </span>{' '}
                           / {executedSearch.productName}
                         </span>
-                         <span className="inline-flex items-center gap-1">
-                           <Clock3 className="h-3 w-3" aria-hidden="true" />
-                           {formatDateTime(executedSearch.at)}
-                         </span>
-                         {executedSearch.startDate && (
-                           <span className="inline-flex items-center gap-1">
-                             <Calendar className="h-3 w-3" aria-hidden="true" />
-                             Published from {formatDate(executedSearch.startDate)}
-                           </span>
-                         )}
-                       </>
+                        <span className="inline-flex items-center gap-1">
+                          <Clock3 className="h-3 w-3" aria-hidden="true" />
+                          {formatDateTime(executedSearch.at)}
+                        </span>
+                        {executedSearch.startDate && (
+                          <span className="inline-flex items-center gap-1">
+                            <Calendar className="h-3 w-3" aria-hidden="true" />
+                            Published from {formatDate(executedSearch.startDate)}
+                          </span>
+                        )}
+                      </>
                     )}
                     {totalResults > (results?.length ?? 0) && (
                       <span>
@@ -1299,7 +1299,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                 </div>
               </div>
 
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+              <div className="threat-result-controls mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                 <div className="relative w-full sm:max-w-xs">
                   <Search
                     className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
@@ -1340,6 +1340,17 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   <option value="MEDIUM">Medium</option>
                   <option value="LOW">Low</option>
                   <option value="UNKNOWN">Unknown</option>
+                </select>
+
+                <select
+                  aria-label="Filter by match evidence"
+                  value={evidenceFilter}
+                  onChange={(event) => setEvidenceFilter(event.target.value as typeof evidenceFilter)}
+                  className={`${inputClass} threat-evidence-filter`}
+                >
+                  <option value="ALL">All match evidence</option>
+                  <option value="EXACT">Exact CPE matches</option>
+                  <option value="KEYWORD">Keyword matches</option>
                 </select>
 
                 <button
@@ -1454,7 +1465,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                             No results match these filters
                           </p>
                           <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                            Clear the text, severity, or KEV filters to restore the full result set.
+                            Clear the text, severity, evidence, or KEV filters to restore the full result set.
                           </p>
                           <button
                             type="button"

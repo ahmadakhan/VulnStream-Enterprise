@@ -1,7 +1,7 @@
-import { PageHeading } from './PageHeading';
 import React, { useState } from 'react';
+import { PageHeading } from './PageHeading';
 import { useApp } from '../context/AppContext';
-import { AliasEntry } from '../types';
+import type { AliasEntry } from '../types';
 import { DEFAULT_VENDOR_ALIASES, DEFAULT_PRODUCT_ALIASES } from '../utils/cpeMatcher';
 import {
   Tags,
@@ -16,431 +16,564 @@ import {
   ShieldCheck,
   Ban,
   Clock,
+  Sparkles,
+  ArrowRight,
+  Loader2,
 } from 'lucide-react';
-import { formatDate as fmtDate, formatDateTime as fmtDateTime } from '../utils/dateTime';
+import { formatDate, formatDateTime } from '../utils/dateTime';
+import { useDialogFocus } from '../hooks/useDialogFocus';
+import './investigation-pages.css';
+import './aliases.css';
 
+type Scope = AliasEntry['scope'];
+type SourceFilter = 'ALL' | 'MANUAL' | 'AUTO' | 'REVOKED';
+const namesFor = (entry: AliasEntry) =>
+  entry.source === 'REVOKED' ? (entry.revokedAliases ?? []) : entry.aliases;
+const sourceFor = (entry: AliasEntry) => entry.source ?? 'MANUAL';
+function AliasDialog({
+  title,
+  children,
+  onClose,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  const ref = useDialogFocus(onClose);
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      tabIndex={-1}
+      className="alias-dialog"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="ui-panel">{children}</div>
+    </div>
+  );
+}
 export const AliasesView: React.FC = () => {
   const { aliases, addAlias, updateAlias, deleteAlias, promoteAlias, revokeAlias, session } = useApp();
   const admin = session?.role === 'ADMIN';
-
-  const [activeTab, setActiveTab] = useState<'VENDOR' | 'PRODUCT'>('VENDOR');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [scope, setScope] = useState<Scope>('VENDOR');
+  const [search, setSearch] = useState('');
+  const [source, setSource] = useState<SourceFilter>('ALL');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<AliasEntry | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<AliasEntry | null>(null);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ canonical: '', aliasText: '', notes: '' });
-
-  const defaultsForTab = activeTab === 'VENDOR' ? DEFAULT_VENDOR_ALIASES : DEFAULT_PRODUCT_ALIASES;
-  const customForTab = aliases.filter((a) => a.scope === activeTab);
-
-  const term = searchTerm.toLowerCase();
-  const aliasesFor = (entry: AliasEntry) =>
-    entry.source === 'REVOKED' ? (entry.revokedAliases ?? []) : entry.aliases;
-  const filteredCustom = customForTab.filter(
-    (a) =>
-      a.canonical.toLowerCase().includes(term) || aliasesFor(a).some((x) => x.toLowerCase().includes(term)),
-  );
-  const filteredDefaults = Object.entries(defaultsForTab).filter(
-    ([canonical, list]) =>
-      canonical.toLowerCase().includes(term) || list.some((x) => x.toLowerCase().includes(term)),
-  );
-
-  const openAdd = () => {
-    setEditing(null);
-    setForm({ canonical: '', aliasText: '', notes: '' });
-    setErrorMsg(null);
-    setShowModal(true);
-  };
-  const openEdit = (entry: AliasEntry) => {
+  const term = search.trim().toLowerCase();
+  const managed = aliases.filter((entry) => entry.scope === scope);
+  const filtered = managed
+    .filter(
+      (entry) =>
+        (source === 'ALL' || sourceFor(entry) === source) &&
+        [entry.canonical, ...namesFor(entry), entry.notes || ''].some((value) =>
+          value.toLowerCase().includes(term),
+        ),
+    )
+    .sort((a, b) => a.canonical.localeCompare(b.canonical));
+  const defaults = Object.entries(scope === 'VENDOR' ? DEFAULT_VENDOR_ALIASES : DEFAULT_PRODUCT_ALIASES)
+    .filter(([canonical, names]) => [canonical, ...names].some((value) => value.toLowerCase().includes(term)))
+    .sort(([a], [b]) => a.localeCompare(b));
+  const openForm = (entry: AliasEntry | null = null) => {
     setEditing(entry);
-    setForm({ canonical: entry.canonical, aliasText: entry.aliases.join(', '), notes: entry.notes || '' });
-    setErrorMsg(null);
+    setForm({
+      canonical: entry?.canonical ?? '',
+      aliasText: entry?.aliases.join(', ') ?? '',
+      notes: entry?.notes ?? '',
+    });
+    setError('');
+    setMessage('');
     setShowModal(true);
   };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    const canonical = form.canonical.trim();
-    const aliasList = Array.from(
-      new Set(
+  const closeForm = () => {
+    if (!busy) {
+      setShowModal(false);
+      setError('');
+    }
+  };
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setError('');
+    const canonical = form.canonical.trim().toLowerCase();
+    const names = [
+      ...new Set(
         form.aliasText
-          .split(',')
-          .map((s) => s.trim())
+          .split(/[,\n]/)
+          .map((value) => value.trim().toLowerCase())
           .filter(Boolean),
       ),
-    );
-    if (!canonical) {
-      setErrorMsg('Canonical name is required.');
-      return;
-    }
-    if (!aliasList.length) {
-      setErrorMsg('Add at least one alias.');
-      return;
-    }
-    const payload = {
-      scope: activeTab,
-      canonical,
-      aliases: aliasList,
-      notes: form.notes.trim() || undefined,
-    };
-    const ok = editing ? await updateAlias({ ...editing, ...payload }) : await addAlias(payload);
-    if (ok) {
+    ];
+    if (!canonical || !names.length)
+      return setError('Enter a canonical name and at least one alternate name.');
+    if (names.length > 50 || names.some((name) => name.length > 200))
+      return setError('Use up to 50 alternate names, with no more than 200 characters each.');
+    setBusy(true);
+    try {
+      const payload = {
+        scope: editing?.scope ?? scope,
+        canonical,
+        aliases: names,
+        notes: form.notes.trim() || undefined,
+      };
+      const saved = editing ? await updateAlias({ ...editing, ...payload }) : await addAlias(payload);
+      if (!saved) return setError('Could not save this mapping. Review the fields and try again.');
       setShowModal(false);
-      setEditing(null);
-    } else {
-      setErrorMsg('Could not save this alias. Check the fields and try again.');
+      setMessage(editing ? 'Alias mapping updated.' : 'Alias mapping added.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not save this mapping.');
+    } finally {
+      setBusy(false);
     }
   };
-
+  const changeSource = async (entry: AliasEntry, action: 'promote' | 'revoke') => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const ok = action === 'promote' ? await promoteAlias(entry.id) : await revokeAlias(entry.id);
+      if (!ok) setError(`Could not ${action} this mapping. Please retry.`);
+      else
+        setMessage(
+          action === 'promote'
+            ? 'Mapping kept as a permanent operator alias.'
+            : 'Mapping revoked. This relation will not be learned again.',
+        );
+    } catch {
+      setError('Could not update this mapping. Please retry.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (!deleting || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      if (await deleteAlias(deleting.id)) {
+        setDeleting(null);
+        setMessage('Alias mapping removed.');
+      } else setError('Could not remove this mapping. Please retry.');
+    } catch {
+      setError('Could not remove this mapping. Please retry.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const clearFilters = () => {
+    setSearch('');
+    setSource('ALL');
+  };
   return (
-    <div className="space-y-6">
-      <div className="ui-page-header">
+    <div className="aliases-page space-y-6">
+      <header className="ui-page-header">
         <PageHeading page="aliases">
-          Vendor and product name synonyms the matching engine uses to correlate inventory with CVE
-          identifiers when a strict CPE/PURL match isn't available.
+          Connect alternate vendor and product names so inventory and vulnerability records resolve to the
+          same identity.
         </PageHeading>
         {admin ? (
-          <button
-            onClick={openAdd}
-            className="text-xs px-3.5 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition flex items-center space-x-1.5 shadow-sm"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add Alias</span>
+          <button type="button" className="ui-primary" onClick={() => openForm()}>
+            <Plus size={16} aria-hidden="true" />
+            Add alias mapping
           </button>
         ) : (
-          <div className="text-[11px] text-zinc-500 flex items-center gap-1.5">
-            <Lock className="w-3.5 h-3.5" />
-            Administrator role required to edit
-          </div>
+          <span className="alias-readonly">
+            <Lock size={14} aria-hidden="true" />
+            Read-only access
+          </span>
         )}
-      </div>
-
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 dark:border-zinc-800 light:border-zinc-200 pb-3">
-        <div className="flex items-center space-x-1.5 bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 p-1 rounded-xl w-fit">
-          {(['VENDOR', 'PRODUCT'] as const).map((tab) => (
+      </header>
+      <div className="alias-toolbar ui-panel">
+        <div className="investigation-tabs" aria-label="Alias scope">
+          {(['VENDOR', 'PRODUCT'] as const).map((value) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition ${
-                activeTab === tab
-                  ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm'
-                  : 'text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900'
-              }`}
+              type="button"
+              key={value}
+              aria-pressed={scope === value}
+              onClick={() => {
+                setScope(value);
+                setError('');
+                setMessage('');
+              }}
             >
-              {tab === 'VENDOR' ? 'Vendor Aliases' : 'Product Aliases'}
+              <Tags size={15} aria-hidden="true" />
+              {value === 'VENDOR' ? 'Vendor aliases' : 'Product aliases'}
             </button>
           ))}
         </div>
-        <div className="relative w-full sm:w-56">
-          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+        <div className="alias-search">
+          <Search size={16} aria-hidden="true" />
           <input
-            type="text"
-            placeholder="Search aliases..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:outline-none focus:border-zinc-600"
+            aria-label="Search aliases"
+            placeholder="Search canonical or alternate names…"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
           />
+          {search && (
+            <button type="button" aria-label="Clear alias search" onClick={() => setSearch('')}>
+              <X size={14} />
+            </button>
+          )}
         </div>
       </div>
-
-      <div>
-        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 mb-2">
-          Managed {activeTab === 'VENDOR' ? 'vendor' : 'product'} aliases ({filteredCustom.length})
-        </h2>
-        {errorMsg && !showModal && (
-          <div className="mb-2 p-2.5 bg-zinc-950 border border-rose-800/60 rounded-xl text-xs text-rose-300 flex items-center space-x-1.5">
-            <AlertCircle className="w-4 h-4" />
-            <span>{errorMsg}</span>
+      <div className="alias-summary">
+        {[
+          {
+            label: 'Operator managed',
+            count: managed.filter((entry) => sourceFor(entry) === 'MANUAL').length,
+            icon: ShieldCheck,
+            hint: 'Permanent mappings',
+          },
+          {
+            label: 'Learned automatically',
+            count: managed.filter((entry) => entry.source === 'AUTO').length,
+            icon: Sparkles,
+            hint: 'Supported by inventory or findings',
+          },
+          {
+            label: 'Revoked relations',
+            count: managed.filter((entry) => entry.source === 'REVOKED').length,
+            icon: Ban,
+            hint: 'Blocked from matching and re-learning',
+          },
+        ].map(({ label, count, icon: Icon, hint }) => (
+          <div className="ui-panel" key={label}>
+            <div>
+              <span>{label}</span>
+              <strong>{count}</strong>
+              <p>{hint}</p>
+            </div>
+            <Icon size={19} aria-hidden="true" />
           </div>
-        )}
-        {filteredCustom.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-zinc-800 dark:border-zinc-800 light:border-zinc-300 p-6 text-center text-xs text-zinc-500">
-            No managed aliases yet{searchTerm ? ' matching your search' : ''}.
+        ))}
+      </div>
+      {message && (
+        <p className="alias-feedback" role="status">
+          <ShieldCheck size={16} aria-hidden="true" />
+          {message}
+        </p>
+      )}
+      {error && !showModal && !deleting && (
+        <p className="alias-feedback is-error" role="alert">
+          <AlertCircle size={16} aria-hidden="true" />
+          {error}
+        </p>
+      )}
+      <section className="ui-panel alias-mappings" aria-labelledby="managed-aliases-title">
+        <div className="alias-section-header">
+          <div>
+            <h2 id="managed-aliases-title">Managed {scope === 'VENDOR' ? 'vendor' : 'product'} mappings</h2>
+            <p>Review the names your matching engine treats as equivalent.</p>
+          </div>
+          <label className="alias-source-filter">
+            <span className="sr-only">Filter managed mappings by source</span>
+            <select
+              aria-label="Filter alias source"
+              value={source}
+              onChange={(event) => setSource(event.target.value as SourceFilter)}
+            >
+              <option value="ALL">All sources</option>
+              <option value="MANUAL">Operator managed</option>
+              <option value="AUTO">Automatically learned</option>
+              <option value="REVOKED">Revoked</option>
+            </select>
+          </label>
+        </div>
+        <div className="alias-list-status">
+          <span aria-live="polite">
+            {filtered.length} {filtered.length === 1 ? 'mapping' : 'mappings'}
+            {term || source !== 'ALL' ? ` of ${managed.length}` : ''}
+          </span>
+          {(term || source !== 'ALL') && (
+            <button type="button" onClick={clearFilters}>
+              Clear filters
+            </button>
+          )}
+        </div>
+        {!filtered.length ? (
+          <div className="alias-empty">
+            <Tags size={28} strokeWidth={1.5} aria-hidden="true" />
+            <h3>
+              {term || source !== 'ALL' ? 'No mappings match these filters' : 'No managed mappings yet'}
+            </h3>
+            <p>
+              {term || source !== 'ALL'
+                ? 'Try another name or source. Built-in mappings are shown below.'
+                : 'Add alternate names for your environment, or review mappings learned from supporting evidence.'}
+            </p>
+            {admin && !term && source === 'ALL' && (
+              <button type="button" className="ui-secondary" onClick={() => openForm()}>
+                <Plus size={14} />
+                Add your first mapping
+              </button>
+            )}
           </div>
         ) : (
-          <div className="rounded-xl border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 divide-y divide-zinc-800 dark:divide-zinc-800 light:divide-zinc-200 overflow-hidden">
-            {filteredCustom.map((entry) => (
-              <div
+          <div className="alias-list">
+            {filtered.map((entry) => (
+              <article
+                className={`alias-row ${entry.source === 'REVOKED' ? 'is-revoked' : ''}`}
                 key={entry.id}
-                className="flex items-start justify-between gap-4 p-3.5 bg-zinc-900/40 dark:bg-zinc-900/40 light:bg-white"
               >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-mono font-semibold text-zinc-100 dark:text-zinc-100 light:text-zinc-900">
-                      {entry.canonical}
+                <div className="alias-row-content">
+                  <div className="alias-row-heading">
+                    <code>{entry.canonical}</code>
+                    <span className={`alias-source source-${sourceFor(entry).toLowerCase()}`}>
+                      {entry.source === 'AUTO'
+                        ? 'Automatic'
+                        : entry.source === 'REVOKED'
+                          ? 'Revoked'
+                          : 'Operator managed'}
                     </span>
-                    {entry.source === 'AUTO' && (
-                      <span
-                        className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                        title={
-                          entry.provenance === 'CONFIRMED_CORRELATION'
-                            ? 'Learned from a confirmed correlation; expires without fresh evidence unless promoted'
-                            : 'Derived from the inventory record and its CPE identity; expires without fresh evidence unless promoted'
-                        }
-                      >
-                        Auto
-                      </span>
-                    )}
-                    {entry.source === 'REVOKED' && (
-                      <span
-                        className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-red-500/10 text-red-400 border border-red-500/20"
-                        title="Operator revocation: this relation is never used for matching and will not be re-learned"
-                      >
-                        Revoked
-                      </span>
-                    )}
-                    {entry.source === 'AUTO' && entry.provenance && (
-                      <span
-                        className="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-zinc-800 light:bg-zinc-100 text-zinc-400"
-                        title={[
-                          entry.provenance === 'CONFIRMED_CORRELATION'
-                            ? 'Correlation evidence'
-                            : 'Inventory evidence',
-                          entry.firstSeenAt ? `first learned ${fmtDateTime(entry.firstSeenAt)}` : '',
-                          entry.evidenceCount ? `${entry.evidenceCount} confirmed finding(s)` : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      >
-                        {entry.provenance === 'CONFIRMED_CORRELATION' ? 'Correlation' : 'Inventory'}
-                        {entry.evidenceCount && entry.evidenceCount > 1 ? ` ×${entry.evidenceCount}` : ''}
-                      </span>
-                    )}
-                    {entry.source === 'AUTO' && entry.expiresAt && (
-                      <span
-                        className="text-[9px] text-zinc-500 flex items-center gap-1"
-                        title="Automatic rows are removed when this date passes without fresh evidence"
-                      >
-                        <Clock className="w-3 h-3" />
-                        {fmtDate(entry.expiresAt)}
-                      </span>
-                    )}
-                    <span className="text-zinc-600">&rarr;</span>
-                    {(entry.source === 'REVOKED' ? (entry.revokedAliases ?? []) : entry.aliases).map((a) => (
-                      <span
-                        key={a}
-                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-100 ${
-                          entry.source === 'REVOKED'
-                            ? 'text-red-300 line-through'
-                            : 'text-zinc-300 dark:text-zinc-300 light:text-zinc-700'
-                        }`}
-                      >
-                        {a}
-                      </span>
+                  </div>
+                  <div className="alias-names">
+                    <ArrowRight size={14} aria-label="Alternate names" />
+                    {namesFor(entry).map((name) => (
+                      <code key={name}>{name}</code>
                     ))}
                   </div>
-                  {entry.notes && <p className="text-[11px] text-zinc-500 mt-1.5">{entry.notes}</p>}
+                  {entry.notes && <p className="alias-notes">{entry.notes}</p>}
+                  {entry.source === 'AUTO' && (
+                    <div className="alias-evidence">
+                      <span>
+                        {entry.provenance === 'CONFIRMED_CORRELATION'
+                          ? 'Confirmed correlation'
+                          : 'Inventory evidence'}
+                        {entry.evidenceCount ? ` · ${entry.evidenceCount} supporting findings` : ''}
+                      </span>
+                      {entry.expiresAt && (
+                        <span title={`Expires ${formatDateTime(entry.expiresAt)}`}>
+                          <Clock size={12} aria-hidden="true" />
+                          Expires {formatDate(entry.expiresAt)}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {admin && (
-                  <div className="flex items-center gap-1 shrink-0">
-                    {entry.source === 'AUTO' && (
+                  <div className="alias-row-actions">
+                    {entry.source === 'AUTO' ? (
                       <>
                         <button
-                          onClick={async () => {
-                            if (!(await promoteAlias(entry.id))) setErrorMsg('Could not promote this alias.');
-                          }}
-                          className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 transition"
-                          title="Promote to a permanent operator alias"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void changeSource(entry, 'promote')}
+                          aria-label={`Keep ${entry.canonical} permanently`}
                         >
-                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <ShieldCheck size={14} />
+                          Keep
                         </button>
                         <button
-                          onClick={async () => {
-                            if (!(await revokeAlias(entry.id))) setErrorMsg('Could not revoke this alias.');
-                          }}
-                          className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 transition"
-                          title="Revoke: stop using and re-learning this relation"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void changeSource(entry, 'revoke')}
+                          aria-label={`Revoke ${entry.canonical}`}
                         >
-                          <Ban className="w-3.5 h-3.5" />
+                          <Ban size={14} />
+                          Revoke
                         </button>
                       </>
-                    )}
-                    {entry.source !== 'AUTO' && entry.source !== 'REVOKED' && (
-                      <button
-                        onClick={() => openEdit(entry)}
-                        className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 transition"
-                        title="Edit"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
+                    ) : (
+                      entry.source !== 'REVOKED' && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => openForm(entry)}
+                          aria-label={`Edit ${entry.canonical}`}
+                        >
+                          <Pencil size={14} />
+                          Edit
+                        </button>
+                      )
                     )}
                     <button
-                      onClick={() => setDeletingId(entry.id)}
-                      className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-100 transition"
-                      title={
-                        entry.source === 'REVOKED'
-                          ? 'Delete the revocation (allows automatic re-learning)'
-                          : 'Delete'
-                      }
+                      type="button"
+                      disabled={busy}
+                      aria-label={`Remove ${entry.canonical}`}
+                      onClick={() => {
+                        setError('');
+                        setDeleting(entry);
+                      }}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 size={14} />
+                      Remove
                     </button>
                   </div>
                 )}
-              </div>
+              </article>
             ))}
           </div>
         )}
-        <p className="text-[11px] text-zinc-500 mt-2 flex items-start gap-1.5">
-          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-          Inventory aliases come from each active asset&rsquo;s declared vendor/product and its own CPE
-          spellings. Correlation aliases are learned only from findings that were auto-dispatched, delivered,
-          or resolved by an operator &mdash; never from unreviewed text matches. Automatic rows expire 30 days
-          after their last supporting evidence; promote one to keep it permanently, or revoke it to block
-          re-learning. Operator aliases are never changed automatically.
+      </section>
+      <details className="ui-panel alias-guidance">
+        <summary>
+          <Info size={16} aria-hidden="true" />
+          How automatic aliases are managed
+        </summary>
+        <p>
+          Inventory aliases come from an active asset’s declared names and CPE identity. Correlation aliases
+          require confirmed findings. Automatic mappings expire 30 days after their last supporting evidence.
+          Keep a mapping to make it permanent, or revoke it to block matching and re-learning. Operator
+          mappings are never changed automatically.
         </p>
-      </div>
-
-      <div>
-        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-1.5">
-          <Lock className="w-3 h-3" />
-          Built-in baseline ({filteredDefaults.length}) &mdash; not editable here
-        </h2>
-        <div className="rounded-xl border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 divide-y divide-zinc-800 dark:divide-zinc-800 light:divide-zinc-200 overflow-hidden opacity-80">
-          {filteredDefaults.map(([canonical, list]) => (
-            <div
-              key={canonical}
-              className="flex items-center gap-2 flex-wrap p-3 bg-zinc-900/20 dark:bg-zinc-900/20 light:bg-zinc-50"
-            >
-              <span className="text-xs font-mono font-semibold text-zinc-200 dark:text-zinc-200 light:text-zinc-800">
-                {canonical}
-              </span>
-              <span className="text-zinc-600">&rarr;</span>
-              {list.map((a) => (
-                <span
-                  key={a}
-                  className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-zinc-800/60 dark:bg-zinc-800/60 light:bg-zinc-100 text-zinc-400 dark:text-zinc-400 light:text-zinc-600"
-                >
-                  {a}
-                </span>
-              ))}
-            </div>
-          ))}
-        </div>
-        <p className="text-[11px] text-zinc-500 mt-2 flex items-start gap-1.5">
-          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-          These ship with the matching engine and are code-reviewed for correctness. Custom aliases above add
-          to this list &mdash; they can't remove or override a built-in mapping.
-        </p>
-      </div>
-
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
-            <button
-              onClick={() => setShowModal(false)}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <h2 className="text-base font-bold text-zinc-100 mb-1 flex items-center gap-2">
-              <Tags className="w-4 h-4 text-zinc-300" />
-              {editing ? 'Edit' : 'Add'} {activeTab === 'VENDOR' ? 'Vendor' : 'Product'} Alias
+      </details>
+      <section className="ui-panel alias-mappings" aria-labelledby="baseline-aliases-title">
+        <div className="alias-section-header">
+          <div>
+            <h2 id="baseline-aliases-title">
+              <Lock size={15} aria-hidden="true" />
+              Built-in baseline
             </h2>
-            <p className="text-xs text-zinc-400 mb-4">
-              Map alternate names a CVE's CPE/PURL might use to the canonical name your inventory uses.
-            </p>
-
-            {errorMsg && (
-              <div className="mb-3 p-2.5 bg-zinc-950 border border-rose-800/60 rounded-xl text-xs text-rose-300 flex items-center space-x-1.5">
-                <AlertCircle className="w-4 h-4" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Canonical name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. pan_os"
-                  value={form.canonical}
-                  onChange={(e) => setForm({ ...form, canonical: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono text-[11px] focus:border-zinc-600 focus:outline-none"
-                />
-                <p className="text-[10px] text-zinc-500 mt-1">
-                  The name as it appears in a CVE's CPE or PURL{' '}
-                  {activeTab === 'VENDOR' ? 'vendor' : 'product'} field.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Aliases *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="comma-separated, e.g. panos, pan-os"
-                  value={form.aliasText}
-                  onChange={(e) => setForm({ ...form, aliasText: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono text-[11px] focus:border-zinc-600 focus:outline-none"
-                />
-                <p className="text-[10px] text-zinc-500 mt-1">
-                  Alternate names your inventory might use that should resolve to the canonical name above.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Notes</label>
-                <textarea
-                  rows={2}
-                  placeholder="Optional context for other operators"
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:border-zinc-600 focus:outline-none resize-none"
-                />
-              </div>
-
-              <div className="flex justify-end space-x-2 pt-3 border-t border-zinc-800">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 font-semibold"
-                >
-                  {editing ? 'Save Changes' : 'Add Alias'}
-                </button>
-              </div>
-            </form>
+            <p>Reviewed mappings included with the matching engine. Managed mappings extend this baseline.</p>
           </div>
+          <span className="alias-readonly">
+            {defaults.length} {defaults.length === 1 ? 'mapping' : 'mappings'}
+          </span>
         </div>
-      )}
-
-      {deletingId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
-            <h3 className="text-sm font-bold text-zinc-100 mb-2">Remove this alias?</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed mb-6">
-              The matching engine will stop treating these names as equivalent. This does not affect existing
-              findings.
+        <div className="alias-baseline-list">
+          {defaults.length ? (
+            defaults.map(([canonical, names]) => (
+              <div className="alias-baseline-row" key={canonical}>
+                <code>{canonical}</code>
+                <div className="alias-names">
+                  <ArrowRight size={14} aria-hidden="true" />
+                  {names.map((name) => (
+                    <code key={name}>{name}</code>
+                  ))}
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="alias-empty">No built-in mappings match your search.</p>
+          )}
+        </div>
+      </section>
+      {showModal && (
+        <AliasDialog title={editing ? 'Edit alias mapping' : 'Add alias mapping'} onClose={closeForm}>
+          <button
+            type="button"
+            className="alias-dialog-close"
+            onClick={closeForm}
+            disabled={busy}
+            aria-label="Close alias form"
+          >
+            <X size={19} />
+          </button>
+          <span className="investigation-icon">
+            <Tags size={20} />
+          </span>
+          <h2>
+            {editing ? 'Edit' : 'Add'} {scope === 'VENDOR' ? 'vendor' : 'product'} mapping
+          </h2>
+          <p>Link a canonical identifier with the alternate names used in your environment.</p>
+          {error && (
+            <p className="alias-feedback is-error" role="alert">
+              <AlertCircle size={16} />
+              {error}
             </p>
-            <div className="flex justify-end space-x-2">
-              <button
-                onClick={() => setDeletingId(null)}
-                className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium"
-              >
+          )}
+          <form onSubmit={submit}>
+            <label htmlFor="alias-canonical">
+              Canonical name
+              <input
+                id="alias-canonical"
+                required
+                maxLength={200}
+                value={form.canonical}
+                onChange={(event) => setForm({ ...form, canonical: event.target.value })}
+                placeholder={scope === 'VENDOR' ? 'e.g. paloaltonetworks' : 'e.g. pan_os'}
+              />
+              <small>The canonical vendor or product identifier.</small>
+            </label>
+            <label htmlFor="alias-names">
+              Alternate names
+              <textarea
+                id="alias-names"
+                required
+                rows={3}
+                value={form.aliasText}
+                onChange={(event) => setForm({ ...form, aliasText: event.target.value })}
+                placeholder="Separate names with commas or new lines"
+              />
+              <small>Up to 50 names. Duplicate names are combined.</small>
+            </label>
+            <label htmlFor="alias-notes">
+              Notes <span>(optional)</span>
+              <textarea
+                id="alias-notes"
+                maxLength={500}
+                rows={2}
+                value={form.notes}
+                onChange={(event) => setForm({ ...form, notes: event.target.value })}
+                placeholder="Context for other operators"
+              />
+            </label>
+            <footer>
+              <button type="button" className="ui-secondary" onClick={closeForm} disabled={busy}>
                 Cancel
               </button>
-              <button
-                onClick={async () => {
-                  const deleted = await deleteAlias(deletingId);
-                  if (deleted) setDeletingId(null);
-                }}
-                className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
-              >
-                Remove
+              <button type="submit" className="ui-primary" disabled={busy}>
+                {busy && <Loader2 size={14} className="animate-spin" />}
+                {busy ? 'Saving…' : editing ? 'Save changes' : 'Add mapping'}
               </button>
-            </div>
-          </div>
-        </div>
+            </footer>
+          </form>
+        </AliasDialog>
+      )}
+      {deleting && (
+        <AliasDialog
+          title="Remove alias mapping"
+          onClose={() => {
+            if (!busy) {
+              setDeleting(null);
+              setError('');
+            }
+          }}
+        >
+          <span className="investigation-icon">
+            <Trash2 size={20} />
+          </span>
+          <h2>Remove this mapping?</h2>
+          <p>
+            <strong>{deleting.canonical}</strong>
+            {deleting.source === 'REVOKED'
+              ? ' will no longer be blocked from automatic re-learning.'
+              : deleting.source === 'AUTO'
+                ? ' may be learned again if its supporting evidence remains. Revoke the mapping to block it instead.'
+                : ' and its alternate names will be removed from the managed mappings. Built-in mappings and existing findings are unchanged.'}
+          </p>
+          {error && (
+            <p className="alias-feedback is-error" role="alert">
+              {error}
+            </p>
+          )}
+          <footer>
+            <button
+              type="button"
+              className="ui-secondary"
+              onClick={() => {
+                setDeleting(null);
+                setError('');
+              }}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+            <button type="button" className="alias-danger" onClick={() => void remove()} disabled={busy}>
+              {busy ? 'Removing…' : 'Remove mapping'}
+            </button>
+          </footer>
+        </AliasDialog>
       )}
     </div>
   );

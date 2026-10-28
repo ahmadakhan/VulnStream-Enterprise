@@ -173,6 +173,19 @@ class PipelineStopped extends Error {
     super('Pipeline stopped by operator; uncommitted results discarded');
   }
 }
+/** Atomically reject a stale worker write after an operator has stopped a run.
+ * A checkpoint read alone leaves a race before the following JSON upsert. */
+async function saveActiveExecution(db: pg.PoolClient, execution: PipelineExecution) {
+  const saved = await db.query(
+    `UPDATE records SET data=$2::jsonb,updated_at=now()
+     WHERE kind='executions' AND id=$1 AND data->>'status' IN ('QUEUED','RUNNING')
+       AND COALESCE(data->>'stopRequestedAt','')='' RETURNING id`,
+    [execution.id, JSON.stringify(execution)],
+  );
+  if (saved.rowCount) return;
+  if (!(await get(db, 'executions', execution.id))) throw new Error('Pipeline execution no longer exists');
+  throw new PipelineStopped();
+}
 export async function stopRun(pool: pg.Pool, id: string, actor: string): Promise<PipelineExecution> {
   return transaction(
     pool,
@@ -219,7 +232,27 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     // Owning the advisory lock proves no other live worker owns a run. Recovery
     // is safe because records, advisories and outbox are committed atomically.
     await lockedTransaction(async (db) => {
-      for (const stale of runs.filter((e) => e.status === 'RUNNING')) {
+      for (const scanned of runs.filter((e) => e.status === 'RUNNING')) {
+        const stale = await getForUpdate<PipelineExecution>(db, 'executions', scanned.id);
+        if (!stale || stale.status !== 'RUNNING') continue;
+        if (stale.stopRequestedAt) {
+          await put(db, 'executions', stale.id, {
+            ...stale,
+            status: 'CANCELLED',
+            endTime: new Date().toISOString(),
+            phases: stale.phases.map((phase) =>
+              ['RUNNING', 'PENDING'].includes(phase.status) ? { ...phase, status: 'CANCELLED' } : phase,
+            ),
+            logs: [...stale.logs, 'Recovered interrupted worker with an outstanding stop request; cancelled'],
+          });
+          await writeEvent(db, {
+            category: 'PIPELINE',
+            code: 'pipeline.cancelled',
+            message: 'Recovered pipeline stop request',
+            runId: stale.id,
+          });
+          continue;
+        }
         const recoveryCount = stale.logs.filter((l) => l.includes('Recovered interrupted worker')).length + 1;
         if (recoveryCount > 3) {
           await put(db, 'executions', stale.id, {
@@ -336,7 +369,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     heartbeat.unref();
     await lockedTransaction(async (db) => {
       await checkpoint(db);
-      await put(db, 'executions', execution!.id, execution);
+      await saveActiveExecution(db, execution!);
       await db.query('UPDATE scheduler_state SET last_run=now() WHERE id=1');
       await writeEvent(db, {
         category: 'PIPELINE',
@@ -460,7 +493,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
                       execution!.phases[0].durationMs = Date.now() - Date.parse(execution!.startTime);
                       execution!.phases[0].details = `NVD: ${offset.toLocaleString()} of ${total.toLocaleString()} records in incremental sync; ${records.toLocaleString()} retrieved`;
                       execution!.stats.rawIngested = rawCount + records;
-                      await put(db, 'executions', execution!.id, execution);
+                      await saveActiveExecution(db, execution!);
                     });
                   }
                 : undefined,
@@ -517,7 +550,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             execution!.phases[0].durationMs = Date.now() - Date.parse(execution!.startTime);
             execution!.phases[0].details = `${results.length + feedUpdates.filter((f) => f.healthStatus === 'DOWN').length}/${feeds.length} sources processed; ${rawCount} records read`;
             execution!.stats.rawIngested = rawCount;
-            await put(db, 'executions', execution!.id, execution);
+            await saveActiveExecution(db, execution!);
           });
         }
       };
@@ -528,6 +561,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     const primaryIngestionStartedAt = Date.now();
     await ingestSources(feeds.filter((feed) => feed.type !== 'EPSS_API'));
     const primaryIngestionDuration = Date.now() - primaryIngestionStartedAt;
+    const matchingSettings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
     const preliminaryCorpus = mergeCveRecords([...cachedCves, ...results.flatMap((result) => result.cves)]);
     const preliminaryCves = [...preliminaryCorpus.values()];
     // Push structured identity + typed version-range filtering into PostgreSQL.
@@ -549,7 +583,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       inventory,
       [],
       [],
-      { ...DEFAULT_SETTINGS, scopeHours: 0 },
+      { ...matchingSettings, scopeHours: 0 },
       'Server worker',
       false,
       vendorAliases,
@@ -588,7 +622,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
     execution.phases[2].details = 'Waiting for normalized CVEs';
     await lockedTransaction(async (db) => {
       await checkpoint(db);
-      await put(db, 'executions', execution!.id, execution);
+      await saveActiveExecution(db, execution!);
     });
     await lockedTransaction(async (db) => {
       await checkpoint(db);
@@ -861,7 +895,9 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         stableJson(preliminarySourceIds) === stableJson(finalSourceIds) &&
         preliminaryCveSignature === matchingCveSignature(finalCves) &&
         preliminaryInventorySignature === inventorySignature(snapshot.watchlist) &&
-        preliminaryAliasSignature === aliasSignature(aliasEntries);
+        preliminaryAliasSignature === aliasSignature(aliasEntries) &&
+        (matchingSettings.autoDispatchConfidenceThreshold ?? 90) ===
+          (settings.autoDispatchConfidenceThreshold ?? 90);
       // Inventory may have changed while this run was ingesting. Re-derive its
       // automatic aliases for the final snapshot so both the PostgreSQL
       // candidate index and the JavaScript matcher use the same expanded keys.
@@ -1141,7 +1177,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       execution.stats.notificationsQueued = notificationsQueued;
       execution.stats.advisoriesQueued = advisoriesQueued;
       execution.stats.digestBuffered = digestBuffered;
-      await put(db, 'executions', execution.id, execution);
+      await saveActiveExecution(db, execution);
       // Clear next_catchup_run if all feeds have completed their catch-up.
       const pendingCatchup = acceptedResults.some((r) => r.syncState?.catch_up && r.syncState.hasMore);
       if (pendingCatchup) {
@@ -1184,17 +1220,21 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       // carries an error payload into the event and the audit trail.
       const failure: Record<string, unknown> = e instanceof PipelineStopped ? {} : describeError(e);
       await lockedTransaction(async (db) => {
+        const current = await getForUpdate<PipelineExecution>(db, 'executions', execution!.id);
         await put(db, 'executions', execution!.id, {
           ...execution,
           status: e instanceof PipelineStopped ? 'CANCELLED' : 'FAILED',
-          stopRequestedAt: (await get<PipelineExecution>(db, 'executions', execution!.id))?.stopRequestedAt,
+          stopRequestedAt: current?.stopRequestedAt,
           phases: execution!.phases.map((phase) =>
             phase.status === 'RUNNING' || phase.status === 'PENDING'
               ? { ...phase, status: e instanceof PipelineStopped ? 'CANCELLED' : 'FAILED' }
               : phase,
           ),
           endTime: new Date().toISOString(),
-          logs: [...execution!.logs, e instanceof Error ? e.message : 'Worker failed'],
+          logs: [
+            ...new Set([...(current?.logs || []), ...execution!.logs]),
+            e instanceof Error ? e.message : 'Worker failed',
+          ],
         });
         await writeEvent(db, {
           category: e instanceof PipelineStopped ? 'PIPELINE' : 'ISSUE',

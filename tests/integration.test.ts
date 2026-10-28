@@ -933,13 +933,18 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       );
     });
     await t.test('session renewal returns 401 when the session is concurrently invalidated', async () => {
+      // The preceding password-change scenario deliberately revoked the old
+      // session. Establish a fresh one before testing explicit invalidation.
+      const freshLogin = await admin.post('/api/login').set('Origin', config.APP_ORIGIN)
+        .send({ username: 'admin', password: password + 'changed' });
+      assert.equal(freshLogin.status, 200);
       const sessionHash = (await pool.query("SELECT token_hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE u.username='admin'")).rows[0]?.token_hash;
       assert.ok(sessionHash, 'admin should have an active session');
       await pool.query('DELETE FROM sessions WHERE token_hash=$1', [sessionHash]);
       const renewed = await admin
         .post('/api/session/renew')
         .set('Origin', config.APP_ORIGIN)
-        .set('x-csrf-token', csrf)
+        .set('x-csrf-token', freshLogin.body.csrfToken)
         .send({});
       assert.equal(renewed.status, 401, 'concurrently invalidated session must yield 401, not a 500 TypeError');
     });
