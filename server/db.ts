@@ -349,6 +349,18 @@ export async function get<T>(db: Db, kind: string, id: string): Promise<T | unde
   return (await db.query('SELECT data FROM records WHERE kind=$1 AND id=$2', [kind, id])).rows[0]?.data;
 }
 /**
+ * Fetch multiple records of the same kind in a single query. Returns a map of
+ * id -> data for all ids that exist. Used to collapse N+1 read patterns.
+ */
+export async function getMany<T>(db: Db, kind: string, ids: readonly string[]): Promise<Map<string, T>> {
+  if (!ids.length) return new Map();
+  const rows = await db.query<{ id: string; data: T }>(
+    'SELECT id,data FROM records WHERE kind=$1 AND id = ANY($2::text[])',
+    [kind, [...ids]],
+  );
+  return new Map(rows.rows.map((row) => [row.id, row.data]));
+}
+/**
  * Reads a record while holding a row-level lock. Command handlers use this for
  * read-modify-write sequences so two concurrent operators cannot overwrite each
  * other's changes without taking the installation-wide lock.

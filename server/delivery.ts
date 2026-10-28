@@ -11,7 +11,7 @@ import { randomUUID, createHmac, createHash } from 'node:crypto';
 import { stableJson } from '../src/utils/deduplicator';
 import nodemailer from 'nodemailer';
 import type { Config } from './config';
-import { transaction, get, list, put, appendAudit } from './db';
+import { transaction, get, getMany, list, put, appendAudit } from './db';
 import type { Db } from './db';
 import { createRequester, type Requester } from './network';
 import {
@@ -806,15 +806,20 @@ export async function deliverNext(
       const vendorAliases = buildAliasMap(aliasEntries, 'VENDOR');
       const productAliases = buildAliasMap(aliasEntries, 'PRODUCT');
       const invalid: string[] = [];
+      const findingMap = await getMany<Finding>(pool, 'findings', declaredFindingIds);
+      const findings = [...findingMap.values()];
+      const assetIds = [...new Set(findings.map((f) => f.matchedAssetId))];
+      const cveIds = [...new Set(findings.map((f) => f.cveId))];
+      const [assetMap, cveMap, withdrawalMap] = await Promise.all([
+        getMany<WatchListItem>(pool, 'watchlist', assetIds),
+        getMany<NormalizedCVE>(pool, 'cveData', cveIds),
+        getMany<{ modifiedDate: string }>(pool, 'cveWithdrawals', cveIds),
+      ]);
       for (const id of declaredFindingIds) {
-        const finding = await get<Finding>(pool, 'findings', id);
-        const [asset, cachedCve, withdrawal] = finding
-          ? await Promise.all([
-              get<WatchListItem>(pool, 'watchlist', finding.matchedAssetId),
-              get<NormalizedCVE>(pool, 'cveData', finding.cveId),
-              get<{ modifiedDate: string }>(pool, 'cveWithdrawals', finding.cveId),
-            ])
-          : [undefined, undefined, undefined];
+        const finding = findingMap.get(id);
+        const asset = finding ? assetMap.get(finding.matchedAssetId) : undefined;
+        const cachedCve = finding ? cveMap.get(finding.cveId) : undefined;
+        const withdrawal = finding ? withdrawalMap.get(finding.cveId) : undefined;
         // Retention may delete the regenerable threat-cache record while a
         // manually reviewed advisory is still queued. The finding embeds the
         // validated CVE snapshot, so fall back to it instead of permanently
