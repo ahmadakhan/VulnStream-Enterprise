@@ -98,10 +98,18 @@ const schema = z.object({
         'cisecurity.com', // cisecurity.com redirects to the www spelling
         'cisecurity.org', // www.cisecurity.com -> cisecurity.org -> www.cisecurity.org
         'www.cisecurity.org',
-        'seclists.org',
+         'seclists.org',
         'blog.sucuri.net',
         'www.welivesecurity.com',
         'wordpress.org',
+        // Additional recommended RSS/Atom sources
+        'www.darkreading.com',
+        'blog.google',
+        'www.greynoise.io',
+        'www.malwarebytes.com',
+        'cloudblog.withgoogle.com',
+        'www.sophos.com',
+        'therecord.media',
       ].join(','),
     ),
   // Appended to the default allowlist instead of replacing it, so a deployment
