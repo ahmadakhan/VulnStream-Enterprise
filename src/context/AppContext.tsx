@@ -311,10 +311,23 @@ function useApplication() {
         return true;
       }),
     listUsers: () => safely(() => request<any[]>('/users')),
-    createUser: (data: { username: string; password: string; role: string }) =>
+    createUser: (data: { username: string; password: string; role: string; email: string }) =>
       safely(() => request('/users', data)),
-     updateUser: (id: string, data: { role: string; disabled: boolean }) =>
-      safely(() => request(`/users/${encodeURIComponent(id)}`, data, 'PATCH')),
+    // Every field is optional on the server: the account form sends username-free
+    // edits of role, email and disabled state independently.
+    updateUser: (id: string, data: { role?: string; disabled?: boolean; email?: string | null }) =>
+      safely(async () => {
+        const result = await request(`/users/${encodeURIComponent(id)}`, data, 'PATCH');
+        // An administrator editing their own account changes the cached session
+        // (a new reset address must show without a re-login), and a self-role or
+        // self-disable edit is refused by the server, so re-reading is harmless.
+        if (data.email !== undefined || data.role !== undefined) {
+          const current = await request<SessionInfo>('/session');
+          setSession(current);
+          sessionRef.current = current;
+        }
+        return result;
+      }),
     deleteUser: (id: string) => safely(() => request(`/users/${encodeURIComponent(id)}`, {}, 'DELETE')),
     resetUserPassword: (id: string, password: string) =>
       safely(() => request(`/users/${encodeURIComponent(id)}/reset-password`, { password })),

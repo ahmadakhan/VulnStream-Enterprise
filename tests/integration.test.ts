@@ -806,7 +806,9 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
     });
     await t.test('self-service password reset via OTP', async () => {
       const resetUser = 'resetter';
-      await createUser(pool, resetUser, password, 'OPERATOR');
+      // The reset code is delivered to the account's own address. A username
+      // that merely looks like an address must not be used as the mailbox.
+      await createUser(pool, resetUser, password, 'OPERATOR', '', 'resetter@example.com');
       const request = (path: string, data: any) =>
         supertest(app).post(path).set('Origin', config.APP_ORIGIN).send(data);
       const requested = await request('/api/password-reset/request', { username: resetUser });
@@ -814,6 +816,14 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       assert.equal(requested.body.success, true);
       const devOtp = requested.body.code;
       assert.ok(devOtp, 'OTP should be returned in test/dev mode');
+      // An account with no reset address gets no code, and the response is
+      // indistinguishable from an unknown account.
+      await createUser(pool, 'no-address', password, 'VIEWER');
+      const withoutAddress = await request('/api/password-reset/request', { username: 'no-address' });
+      assert.equal(withoutAddress.status, 200);
+      assert.equal(withoutAddress.body.success, true);
+      assert.equal(withoutAddress.body.code, undefined);
+      assert.equal((await pool.query("SELECT 1 FROM password_reset_tokens WHERE username='no-address'")).rowCount, 0);
       const nonexistent = await request('/api/password-reset/request', { username: 'does-not-exist' });
       assert.equal(nonexistent.status, 200);
       assert.equal(nonexistent.body.success, true);

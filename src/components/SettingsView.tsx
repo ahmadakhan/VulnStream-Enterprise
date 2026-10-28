@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   KeyRound,
   LockKeyhole,
+  Pencil,
    Plus,
    Settings2,
    ShieldCheck,
@@ -80,6 +81,11 @@ export function SettingsView() {
   const [disablingUserId, setDisablingUserId] = useState<string | null>(null);
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState('');
+  const [email, setEmail] = useState('');
+  // The account being edited in the popup form, or null when the form is closed.
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState({ username: '', role: 'VIEWER', email: '', disabled: false });
+  const [editMessage, setEditMessage] = useState('');
   const admin = session?.role === 'ADMIN';
   const [activeSection, setActiveSection] = useState(admin ? 'processing' : 'security');
   const processingDirty =
@@ -834,6 +840,16 @@ export function SettingsView() {
                       setAccountMessage('Username, password, and role are required.');
                       return;
                     }
+                    // Without an address there is nowhere to send a reset code,
+                    // so it is part of what makes an account usable.
+                    if (!email.trim()) {
+                      setAccountMessage('An email address is required for password reset.');
+                      return;
+                    }
+                    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+                      setAccountMessage('Enter a valid email address, for example name@company.com.');
+                      return;
+                    }
                     if (password.length < 14) {
                       setAccountMessage('Password must be at least 14 characters.');
                       return;
@@ -845,10 +861,11 @@ export function SettingsView() {
                       return;
                     }
                     setAccountMessage('');
-                    if (await createUser({ username, password, role })) {
+                    if (await createUser({ username, password, role, email: email.trim() })) {
                       setUsername('');
                       setPassword('');
                       setRole('VIEWER');
+                      setEmail('');
                       await reloadUsers();
                       setAccountMessage('Operator created successfully.');
                     } else {
@@ -882,6 +899,22 @@ export function SettingsView() {
                       value={password}
                       onChange={(e) => {
                         setPassword(e.target.value);
+                        setAccountMessage('');
+                      }}
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                    Reset email address
+                    <input
+                      type="email"
+                      required
+                      autoComplete="email"
+                      maxLength={254}
+                      placeholder="name@company.com"
+                      className={field}
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
                         setAccountMessage('');
                       }}
                     />
@@ -954,6 +987,9 @@ export function SettingsView() {
                             </span>
                             <div className="min-w-0">
                               <p className="truncate text-sm font-medium">{user.username}</p>
+                              <p className="truncate text-[11px] text-zinc-500 light:text-zinc-600">
+                                {user.email || 'No reset email set'}
+                              </p>
                               <div className="mt-1.5 flex flex-wrap items-center gap-2">
                                 <span
                                   className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
@@ -981,6 +1017,23 @@ export function SettingsView() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            className="min-h-8 rounded-lg border border-zinc-700 px-3 py-1.5 text-[11px] font-medium text-zinc-300 hover:bg-zinc-800 transition light:border-zinc-300 light:text-zinc-700 light:hover:bg-zinc-100"
+                            onClick={() => {
+                              setEditingUser(user);
+                              setEditForm({
+                                username: user.username,
+                                role: user.role,
+                                email: user.email || '',
+                                disabled: !!user.disabled,
+                              });
+                              setEditMessage('');
+                            }}
+                          >
+                            <Pencil className="h-3 w-3 inline mr-1" />
+                            Edit
+                          </button>
                           {user.username !== session?.username && !user.disabled && (
                             <button
                               type="button"
@@ -1093,6 +1146,122 @@ export function SettingsView() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Edit Account Modal */}
+      {editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <form
+            className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative space-y-4"
+            aria-labelledby="edit-account-title"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const address = editForm.email.trim();
+              if (!address) {
+                setEditMessage('An email address is required for password reset.');
+                return;
+              }
+              if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+                setEditMessage('Enter a valid email address, for example name@company.com.');
+                return;
+              }
+              setEditMessage('');
+              const ok = await updateUser(editingUser.id, {
+                role: editForm.role,
+                email: address,
+                disabled: editForm.disabled,
+              });
+              if (!ok) {
+                setEditMessage('The account could not be updated.');
+                return;
+              }
+              await reloadUsers();
+              setEditingUser(null);
+            }}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3
+                  id="edit-account-title"
+                  className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900"
+                >
+                  Edit workspace account
+                </h3>
+                <p className="mt-1 text-xs text-zinc-400 light:text-zinc-600">
+                  The username <strong>{editForm.username}</strong> is the login and cannot be changed. Use
+                  Reset password to set a new one.
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setEditingUser(null)}
+                className="text-zinc-500 hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-800"
+              >
+                <span className="text-xl">×</span>
+              </button>
+            </div>
+            <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+              Reset email address
+              <input
+                type="email"
+                required
+                maxLength={254}
+                className={field}
+                value={editForm.email}
+                onChange={(e) => {
+                  setEditForm((f) => ({ ...f, email: e.target.value }));
+                  setEditMessage('');
+                }}
+              />
+            </label>
+            <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+              Access role
+              <select
+                className={field}
+                value={editForm.role}
+                // The server refuses to demote or disable your own account; the
+                // control is locked here so the reason is visible before saving.
+                disabled={editingUser.id === users.find((u) => u.username === session?.username)?.id}
+                onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}
+              >
+                <option>VIEWER</option>
+                <option>OPERATOR</option>
+                <option>ADMIN</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-xs text-zinc-300 light:text-zinc-700">
+              <input
+                type="checkbox"
+                checked={editForm.disabled}
+                disabled={editingUser.id === users.find((u) => u.username === session?.username)?.id}
+                onChange={(e) => setEditForm((f) => ({ ...f, disabled: e.target.checked }))}
+              />
+              Account disabled (cannot sign in; active sessions are revoked)
+            </label>
+            {editMessage && (
+              <p role="alert" className="text-xs text-rose-400 light:text-rose-700">
+                {editMessage}
+              </p>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setEditingUser(null)}
+                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 text-xs font-medium transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={pending > 0}
+                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold disabled:opacity-50 transition"
+              >
+                {pending > 0 ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

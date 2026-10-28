@@ -167,6 +167,8 @@ export const emptyState = (): AppState => ({
 export type Role = 'ADMIN' | 'OPERATOR' | 'VIEWER';
 export interface SessionInfo {
   username: string;
+  /** Address the operator's password-reset code is sent to; null until set. */
+  email?: string | null;
   role: Role;
   csrfToken: string;
   expiresAt: string;

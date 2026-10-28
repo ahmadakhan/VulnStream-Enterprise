@@ -9,9 +9,24 @@ import { transaction, appendAudit, get } from './db';
 import { DEFAULT_SETTINGS, type Role } from '../shared/state.ts';
 import type { AppSettings } from '../src/types/index.ts';
 import { HttpError } from './validation';
+/**
+ * The address a password-reset code is delivered to.
+ *
+ * Kept as a plain column rather than a username convention: the reset flow used
+ * to fall back to `username.includes('@') ? username : SMTP_FROM`, which sent
+ * every non-email login's code to the shared deployment mailbox. Codes must go
+ * to a mailbox the operator controls.
+ */
+export const accountEmail = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(254)
+  .pipe(z.email('Must be a valid email address'));
 export interface Operator {
   id: string;
   username: string;
+  email: string | null;
   role: Role;
   sessionHash: string;
   csrf: string;
@@ -67,7 +82,7 @@ export function requireAuth(pool: pg.Pool, config: Config) {
     const hash = tokenHash(token);
     const found = (
       await pool.query(
-        `SELECT u.id,u.username,u.role,s.csrf,s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE token_hash=$1 AND s.expires_at>now() AND s.absolute_expires_at>now() AND NOT u.disabled`,
+        `SELECT u.id,u.username,u.email,u.role,s.csrf,s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE token_hash=$1 AND s.expires_at>now() AND s.absolute_expires_at>now() AND NOT u.disabled`,
         [hash],
       )
     ).rows[0];
@@ -75,6 +90,7 @@ export function requireAuth(pool: pg.Pool, config: Config) {
     req.operator = {
       id: found.id,
       username: found.username,
+      email: found.email ?? null,
       role: found.role,
       sessionHash: hash,
       csrf: found.csrf,
@@ -98,25 +114,71 @@ export function requireRole(...roles: Role[]) {
       : next(new HttpError(403, 'Insufficient role'));
   };
 }
-export async function createUser(pool: pg.Pool, username: string, password: string, role: Role, ipAddress = '') {
+export async function createUser(
+  pool: pg.Pool,
+  username: string,
+  password: string,
+  role: Role,
+  ipAddress = '',
+  email: string | null = null,
+) {
   z.string()
     .regex(/^[a-zA-Z0-9._@-]{3,100}$/)
+  // Usernames may contain '@' (they were historically used as addresses),
+  // but a login name is not proof of ownership of a mailbox, so it is never
+  // copied into the email column.
     .parse(username);
   z.string().min(14).max(128).parse(password);
   z.enum(['ADMIN', 'OPERATOR', 'VIEWER']).parse(role);
+  const address = email === null || email === '' ? null : accountEmail.parse(email);
   const policy = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
   if (password.length < policy.securityPolicy.minPasswordLen)
     throw new HttpError(400, 'Password does not meet configured minimum');
   const hash = await passwordHash(password);
   await transaction(pool, async (db) => {
-    await db.query('INSERT INTO users(id,username,password_hash,role) VALUES($1,$2,$3,$4)', [
+    await db.query('INSERT INTO users(id,username,password_hash,role,email) VALUES($1,$2,$3,$4,$5)', [
       randomUUID(),
       username.toLowerCase(),
       hash,
       role,
+      address,
     ]);
-    await appendAudit(db, 'Operator created', `Role ${role}`, username.toLowerCase(), 'SECURITY', 'INFO', ipAddress);
+    await appendAudit(
+      db,
+      'Operator created',
+      `Role ${role}; reset email ${address ? 'set' : 'not set'}`,
+      username.toLowerCase(),
+      'SECURITY',
+      'INFO',
+      ipAddress,
+    );
   });
+}
+/**
+ * Apply an administrative edit to an account in one statement.
+ *
+ * Password is deliberately not part of this: changing it revokes sessions and
+ * has its own endpoint, so folding it in here would let an email-only edit log
+ * the operator out. `email: null` clears the address, `undefined` leaves it.
+ */
+export async function updateUser(
+  pool: pg.Pool,
+  userId: string,
+  change: { role?: Role; disabled?: boolean; email?: string | null },
+  actor: string,
+  ipAddress = '',
+) {
+  const email = change.email === undefined ? undefined : change.email === null || change.email === '' ? null : accountEmail.parse(change.email);
+  const changed = await transaction(pool, async (db) => {
+    const result = await db.query(
+      `UPDATE users SET role=COALESCE($2,role), disabled=COALESCE($3,disabled), email=CASE WHEN $4 THEN $5 ELSE email END
+       WHERE id=$1 RETURNING username,role,disabled,email`,
+      [userId, change.role ?? null, change.disabled ?? null, email !== undefined, email ?? null],
+    );
+    if (!result.rowCount) throw new HttpError(404, 'Operator not found');
+    return result.rows[0];
+  });
+  return changed as { username: string; role: Role; disabled: boolean; email: string | null };
 }
 export async function deleteUser(pool: pg.Pool, userId: string, actor: string, ipAddress = '') {
   await transaction(pool, async (db) => {

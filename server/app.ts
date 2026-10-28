@@ -29,9 +29,11 @@ import {
   requireRole,
   loginHandler,
   cookieName,
+  accountEmail,
   createUser,
   deleteUser,
   sessionCookieOptions,
+  updateUser,
 } from './auth';
 import { transaction, state, get, getForUpdate, put, appendAudit, list } from './db';
 import { queryCollection } from './collections';
@@ -339,9 +341,16 @@ export function createApp(
             .transform((s) => s.toLowerCase()),
         })
         .parse(req.body);
-      const user = (await pool.query('SELECT id FROM users WHERE username=$1 AND disabled=false', [username]))
-        .rows[0];
+      const user = (
+        await pool.query('SELECT id,email FROM users WHERE username=$1 AND disabled=false', [username])
+      ).rows[0];
       if (!user) return res.json({ success: true });
+      // No address, no delivery. The code used to fall back to SMTP_FROM, which
+      // sent it to the operator's own mailbox (or a shared alerting inbox) and
+      // turned a self-service reset into a mail to whoever runs the deployment.
+      // Answering exactly like an unknown user keeps the response free of any
+      // signal about which accounts exist.
+      if (!user.email) return res.json({ success: true });
       const code = String(randomInt(100000, 999999));
       const codeHash = tokenHash(code);
       const expiresAt = new Date(Date.now() + 10 * 60_000);
@@ -353,7 +362,23 @@ export function createApp(
           expiresAt,
         ]);
       });
-      if (config.SMTP_HOST && config.SMTP_FROM) {
+      // Refuse before minting a code that could never reach its owner. In
+      // development the code is still returned in the response (below) so the
+      // flow remains testable without a mail server.
+      if (!config.SMTP_HOST || !config.SMTP_FROM) {
+        if (config.NODE_ENV === 'production') {
+          await appendAudit(
+            pool,
+            'Password reset unavailable',
+            'OTP request refused: outbound mail is not configured',
+            username,
+            'SECURITY',
+            'ERROR',
+            req.ip || '',
+          );
+          throw new HttpError(503, 'Password reset email is not configured for this deployment');
+        }
+      } else {
         const transporter = nodemailer.createTransport({
           host: config.SMTP_HOST,
           port: config.SMTP_PORT,
@@ -366,10 +391,9 @@ export function createApp(
           greetingTimeout: 10000,
           socketTimeout: 20000,
         });
-        const to = username.includes('@') ? username : config.SMTP_FROM;
         await transporter.sendMail({
           from: config.SMTP_FROM,
-          to,
+          to: user.email,
           subject: 'Your password reset code',
           text: `Your password reset code is: ${code}\n\nThis code expires in 10 minutes.\nIf you did not request this reset, you can safely ignore this email.`,
           html: `<p>Your password reset code is: <strong>${code}</strong></p><p>This code expires in 10 minutes. If you did not request this reset, you can safely ignore this email.</p>`,
@@ -711,6 +735,9 @@ export function createApp(
   app.get('/api/session', (req, res) =>
     res.json({
       username: req.operator!.username,
+      // The operator's own address. It is not a secret from them, and the
+      // account form prefills it so an edit does not silently clear it.
+      email: req.operator!.email,
       role: req.operator!.role,
       csrfToken: req.operator!.csrf,
       expiresAt: req.operator!.expiresAt,
@@ -887,7 +914,11 @@ export function createApp(
     requireRole('ADMIN'),
     asyncRoute(async (_req, res) =>
       res.json(
-        (await pool.query('SELECT id,username,role,disabled,created_at FROM users ORDER BY username')).rows,
+        (
+          await pool.query(
+            'SELECT id,username,email,role,disabled,created_at FROM users ORDER BY username',
+          )
+        ).rows,
       ),
     ),
   );
@@ -896,9 +927,16 @@ export function createApp(
     requireRole('ADMIN'),
     asyncRoute(async (req, res) => {
       const data = z
-        .object({ username: z.string(), password: z.string(), role: z.enum(['ADMIN', 'OPERATOR', 'VIEWER']) })
+        .object({
+          username: z.string(),
+          password: z.string(),
+          role: z.enum(['ADMIN', 'OPERATOR', 'VIEWER']),
+          // Required for new accounts: without it a reset code has nowhere to go
+          // except the shared deployment mailbox, which is what this replaced.
+          email: accountEmail,
+        })
         .parse(req.body);
-      await createUser(pool, data.username, data.password, data.role);
+      await createUser(pool, data.username, data.password, data.role, req.ip || '', data.email);
       res.status(201).json({ success: true });
     }),
   );
@@ -906,32 +944,48 @@ export function createApp(
     '/api/users/:id',
     requireRole('ADMIN'),
     asyncRoute(async (req, res) => {
+      // Every field is optional so the same route serves a role change, a
+      // disable/enable, and an email edit from the account form. `email: null`
+      // clears the address; omitting it leaves the address untouched.
       const data = z
-        .object({ role: z.enum(['ADMIN', 'OPERATOR', 'VIEWER']), disabled: z.boolean() })
+        .object({
+          role: z.enum(['ADMIN', 'OPERATOR', 'VIEWER']).optional(),
+          disabled: z.boolean().optional(),
+          email: accountEmail.nullable().optional(),
+        })
+        .refine(
+          (value) => value.role !== undefined || value.disabled !== undefined || value.email !== undefined,
+          'No account changes were supplied',
+        )
         .parse(req.body);
       const userId = z.uuid().safeParse(req.params.id);
       // `id` is a uuid column; an unparseable id is a client error, not a 500.
       if (!userId.success) throw invalidId();
-      if (req.params.id === req.operator!.id && (data.disabled || data.role !== 'ADMIN'))
+      if (
+        req.params.id === req.operator!.id &&
+        ((data.disabled !== undefined && data.disabled) || (data.role !== undefined && data.role !== 'ADMIN'))
+      )
         throw new HttpError(400, 'Cannot remove your own administrator access');
-      await transaction(pool, async (db) => {
-        const changed = await db.query('UPDATE users SET role=$2,disabled=$3 WHERE id=$1 RETURNING id', [
-          userId.data,
-          data.role,
-          data.disabled,
-        ]);
-        if (!changed.rowCount) throw new HttpError(404, 'Operator not found');
-        await db.query('DELETE FROM sessions WHERE user_id=$1', [req.params.id]);
-        await appendAudit(
-          db,
-          'Operator access changed',
-          `Operator ${req.params.id}; role ${data.role}; disabled ${data.disabled}`,
-          req.operator!.username,
-          'SECURITY',
-          'INFO',
-          req.ip || '',
-        );
-      });
+      const changed = await updateUser(
+        pool,
+        userId.data,
+        { role: data.role, disabled: data.disabled, email: data.email },
+        req.operator!.username,
+        req.ip || '',
+      );
+      // Sessions are revoked only when the account can no longer be used or its
+      // authority changed. An email-only edit must not sign the operator out.
+      const revokesSessions = data.disabled === true || data.role !== undefined;
+      if (revokesSessions) await pool.query('DELETE FROM sessions WHERE user_id=$1', [userId.data]);
+      await appendAudit(
+        pool,
+        'Operator access changed',
+        `Operator ${changed.username}; role ${changed.role}; disabled ${changed.disabled}; reset email ${changed.email ? 'set' : 'not set'}`,
+        req.operator!.username,
+        'SECURITY',
+        'INFO',
+        req.ip || '',
+      );
       res.json({ success: true });
     }),
   );

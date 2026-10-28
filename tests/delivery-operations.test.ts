@@ -114,7 +114,12 @@ test(
         .post('/api/users')
         .set('Origin', origin)
         .set('x-csrf-token', csrf)
-        .send({ username: 'viewer-one', password: 'Disposable-viewer-password-2026!', role: 'VIEWER' });
+        .send({
+          username: 'viewer-one',
+          password: 'Disposable-viewer-password-2026!',
+          role: 'VIEWER',
+          email: 'viewer-one@example.com',
+        });
       assert.equal(created.status, 201);
       const viewer = (await pool.query("SELECT id FROM users WHERE username='viewer-one'")).rows[0];
       const updated = await agent
@@ -126,6 +131,76 @@ test(
      });
      assert.notEqual(outcome, null);
    },
+);
+
+test(
+  'workspace accounts carry a required reset email that an administrator can edit',
+  { skip: !process.env.TEST_DATABASE_URL },
+  async () => {
+    const outcome = await withDatabase(async (pool) => {
+      const { agent, csrf, origin } = await adminAgent(pool);
+      const send = (method: 'post' | 'patch', path: string, body: any) =>
+        agent[method](path).set('Origin', origin).set('x-csrf-token', csrf).send(body);
+
+      // Creating an account without an address is refused: a reset code would
+      // have nowhere to go except the shared deployment mailbox.
+      const missing = await send('post', '/api/users', {
+        username: 'no-email',
+        password: 'Disposable-viewer-password-2026!',
+        role: 'VIEWER',
+      });
+      assert.equal(missing.status, 400);
+      const malformed = await send('post', '/api/users', {
+        username: 'bad-email',
+        password: 'Disposable-viewer-password-2026!',
+        role: 'VIEWER',
+        email: 'not-an-address',
+      });
+      assert.equal(malformed.status, 400);
+
+      // The address is normalized (trimmed, lowercased) on the way in.
+      const created = await send('post', '/api/users', {
+        username: 'email-user',
+        password: 'Disposable-viewer-password-2026!',
+        role: 'VIEWER',
+        email: '  Email-User@Example.COM ',
+      });
+      assert.equal(created.status, 201);
+      const row = (await pool.query("SELECT id,email FROM users WHERE username='email-user'")).rows[0];
+      assert.equal(row.email, 'email-user@example.com');
+
+      // An email-only edit is accepted and does not disturb the role.
+      const edited = await send('patch', `/api/users/${row.id}`, { email: 'new-address@example.org' });
+      assert.equal(edited.status, 200);
+      const after = (await pool.query('SELECT email,role FROM users WHERE id=$1', [row.id])).rows[0];
+      assert.equal(after.email, 'new-address@example.org');
+      assert.equal(after.role, 'VIEWER');
+
+      // An edit that changes nothing is a client error, not a silent no-op.
+      assert.equal((await send('patch', `/api/users/${row.id}`, {})).status, 400);
+      assert.equal((await send('patch', `/api/users/${row.id}`, { email: 'bad' })).status, 400);
+
+      // The session payload carries the caller's own address (null until set),
+      // so the account form can prefill it instead of silently clearing it.
+      const session = await agent.get('/api/session');
+      assert.equal(session.body.email, null, 'the administrator has no address of their own yet');
+
+      // An address edit must not revoke the target's sessions. A role change
+      // still does, so an email edit cannot quietly become an authority change.
+      await pool.query(
+        "INSERT INTO sessions(token_hash,user_id,csrf,expires_at,absolute_expires_at) VALUES('probe',$1,'probe',now()+interval '1 hour',now()+interval '1 day')",
+        [row.id],
+      );
+      const sessionCount = async () =>
+        (await pool.query('SELECT count(*)::int AS n FROM sessions WHERE user_id=$1', [row.id])).rows[0].n as number;
+      assert.equal(await sessionCount(), 1);
+      assert.equal((await send('patch', `/api/users/${row.id}`, { email: 'third@example.org' })).status, 200);
+      assert.equal(await sessionCount(), 1, 'an email-only edit keeps the account signed in');
+      assert.equal((await send('patch', `/api/users/${row.id}`, { role: 'OPERATOR' })).status, 200);
+      assert.equal(await sessionCount(), 0, 'a role change revokes sessions');
+    });
+    assert.notEqual(outcome, null);
+  },
 );
 
 test(
@@ -145,7 +220,12 @@ test(
         .post('/api/users')
         .set('Origin', origin)
         .set('x-csrf-token', csrf)
-        .send({ username: 'viewer-two', password: 'Disposable-viewer-password-2026!', role: 'VIEWER' });
+        .send({
+          username: 'viewer-two',
+          password: 'Disposable-viewer-password-2026!',
+          role: 'VIEWER',
+          email: 'viewer-two@example.com',
+        });
       assert.equal(created.status, 201);
       const viewer = (await pool.query("SELECT id FROM users WHERE username='viewer-two'")).rows[0];
       const deleted = await agent
