@@ -14,11 +14,11 @@ export function publicAddress(address: string): boolean {
 export type Resolver = (
   host: string,
   options: { all: true; verbatim: true },
-) => Promise<{ address: string; family: number }[]>;
+) => Promise<unknown>;
 export async function resolvePublic(
   url: URL,
   allowedHosts: string[],
-  resolver: Resolver = lookup,
+  resolver: Resolver = lookup as Resolver,
   allowedPorts: readonly string[] = ['443'],
 ) {
   const host = url.hostname
@@ -36,12 +36,27 @@ export async function resolvePublic(
         timer = setTimeout(() => reject(new Error('DNS lookup timed out')), 5000);
       }),
     ]).finally(() => clearTimeout(timer));
+  // DNS answers arrive as { address, family } objects when `all` is set, but
+  // resolvers are pluggable, so accept a bare address string as well and never
+  // let an unexpected shape reach the connect path as `undefined`.
+  const asRecord = (record: unknown) => {
+    if (typeof record === 'string') return { address: record, family: record.includes(':') ? 6 : 4 };
+    const candidate = record as { address?: unknown; family?: unknown } | null;
+    if (typeof candidate?.address !== 'string' || !candidate.address) return undefined;
+    return {
+      address: candidate.address,
+      family: candidate.family === 6 ? 6 : candidate.family === 4 ? 4 : candidate.address.includes(':') ? 6 : 4,
+    };
+  };
   const addresses = ipaddr.isValid(host)
     ? [{ address: host, family: ipaddr.parse(host).kind() === 'ipv4' ? 4 : 6 }]
-    : await resolveAddresses();
-  if (!addresses.length || addresses.some((record) => !publicAddress(record.address)))
+    : (await resolveAddresses() as unknown[] | undefined)?.map(asRecord);
+  if (!addresses?.length || addresses.some((record) => !record))
+    throw new Error(`Destination hostname ${host} did not resolve`);
+  const records = addresses as { address: string; family: number }[];
+  if (records.some((record) => !publicAddress(record.address)))
     throw new Error('Destination resolves to a non-public address');
-  return addresses[0];
+  return records[0];
 }
 export interface ResponseData {
   status: number;
@@ -257,9 +272,15 @@ async function doRequest(
         ...(hooks.connect
           ? { createConnection: hooks.connect }
           : {
-              // Node calls lookup once per connection with this signature.
-              lookup: ((_hostname: string, _lookupOptions: unknown, callback: (error: Error | null, address: string, family: number) => void) =>
-                callback(null, selected.address, selected.family)) as unknown as LookupFunction,
+              // Pin the connection to the address that passed validation. Node's
+              // lookup contract has two shapes: `all: true` expects an address
+              // array, otherwise (host, family, callback). Always answering the
+              // scalar form left the family undefined and the array absent, so
+              // every request failed with "Invalid IP address: undefined".
+              lookup: ((_hostname: string, lookupOptions: { all?: boolean } | number, callback: (...args: unknown[]) => void) =>
+                (typeof lookupOptions === 'object' && lookupOptions?.all)
+                  ? callback(null, [{ address: selected.address, family: selected.family }])
+                  : callback(null, selected.address, selected.family)) as unknown as LookupFunction,
             }),
         timeout: options.socketTimeoutMs ?? 15000,
         maxHeaderSize: 16384,

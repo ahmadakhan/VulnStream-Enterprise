@@ -12,7 +12,9 @@ import type { CorrelationRuntime } from './correlation/runtime.ts';
 import { advisoryRecords } from './correlation/stream.ts';
 import { describeAdvisoryError } from './correlation/validation.ts';
 import { Readable } from 'node:stream';
+import { randomInt } from 'node:crypto';
 import express from 'express';
+import nodemailer from 'nodemailer';
 import { WorkCapacityError } from './workLimiter.ts';
 import compression from 'compression';
 import helmet from 'helmet';
@@ -39,7 +41,7 @@ import { runCpeSimulation } from '../src/utils/cpeSimulation.ts';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine.ts';
 import { HttpError } from './validation';
 import { applyCommand } from './commands';
-import { checkPassword, passwordHash, decrypt, secureEqual } from './secrets';
+import { checkPassword, passwordHash, decrypt, secureEqual, tokenHash } from './secrets';
 import { createRequester, resolvePublic } from './network';
 import type { Requester, ResponseData } from './network';
 import { queueRun, stopRun, renderAdvisory } from './pipeline';
@@ -322,6 +324,134 @@ export function createApp(
     }),
   );
   app.post('/api/login', loginHandler(pool, config));
+  // Password reset OTP flow (no authentication required — endpoints are outside
+  // the requireAuth guard above). Rate-limited by login_attempts key space.
+  app.post(
+    '/api/password-reset/request',
+    asyncRoute(async (req, res) => {
+      const { username } = z
+        .object({
+          username: z
+            .string()
+            .min(1)
+            .max(100)
+            .transform((s) => s.toLowerCase()),
+        })
+        .parse(req.body);
+      const user = (await pool.query('SELECT id FROM users WHERE username=$1 AND disabled=false', [username]))
+        .rows[0];
+      if (!user) return res.json({ success: true });
+      const code = String(randomInt(100000, 999999));
+      const codeHash = tokenHash(code);
+      const expiresAt = new Date(Date.now() + 10 * 60_000);
+      await transaction(pool, async (db) => {
+        await db.query('DELETE FROM password_reset_tokens WHERE username=$1', [username]);
+        await db.query('INSERT INTO password_reset_tokens(username,code_hash,expires_at) VALUES($1,$2,$3)', [
+          username,
+          codeHash,
+          expiresAt,
+        ]);
+      });
+      if (config.SMTP_HOST && config.SMTP_FROM) {
+        const transporter = nodemailer.createTransport({
+          host: config.SMTP_HOST,
+          port: config.SMTP_PORT,
+          secure: config.SMTP_PORT === 465,
+          requireTLS: true,
+          auth: config.SMTP_USER ? { user: config.SMTP_USER, pass: config.SMTP_PASSWORD } : undefined,
+          // These limits are the nodemailer defaults but stated explicitly so a
+          // misconfigured transport cannot hang the request indefinitely.
+          connectionTimeout: 10000,
+          greetingTimeout: 10000,
+          socketTimeout: 20000,
+        });
+        const to = username.includes('@') ? username : config.SMTP_FROM;
+        await transporter.sendMail({
+          from: config.SMTP_FROM,
+          to,
+          subject: 'Your password reset code',
+          text: `Your password reset code is: ${code}\n\nThis code expires in 10 minutes.\nIf you did not request this reset, you can safely ignore this email.`,
+          html: `<p>Your password reset code is: <strong>${code}</strong></p><p>This code expires in 10 minutes. If you did not request this reset, you can safely ignore this email.</p>`,
+        });
+      }
+      const response: { success: true; code?: string } = { success: true };
+      if (config.NODE_ENV !== 'production') response.code = code;
+      await appendAudit(
+        pool,
+        'Password reset requested',
+        `OTP request for ${username}`,
+        username,
+        'SECURITY',
+        'INFO',
+        req.ip || '',
+      );
+      res.json(response);
+    }),
+  );
+  app.post(
+    '/api/password-reset/verify',
+    asyncRoute(async (req, res) => {
+      const { username, code } = z
+        .object({
+          username: z
+            .string()
+            .min(1)
+            .max(100)
+            .transform((s) => s.toLowerCase()),
+          code: z.string().min(6).max(6),
+        })
+        .parse(req.body);
+      const result = await pool.query(
+        'SELECT 1 FROM password_reset_tokens WHERE username=$1 AND code_hash=$2 AND expires_at>now()',
+        [username, tokenHash(code)],
+      );
+      if (!result.rowCount) throw new HttpError(400, 'Invalid or expired code');
+      res.json({ success: true });
+    }),
+  );
+  app.post(
+    '/api/password-reset/complete',
+    asyncRoute(async (req, res) => {
+      const { username, code, newPassword } = z
+        .object({
+          username: z
+            .string()
+            .min(1)
+            .max(100)
+            .transform((s) => s.toLowerCase()),
+          code: z.string().min(6).max(6),
+          newPassword: z.string().min(14).max(128),
+        })
+        .parse(req.body);
+      const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
+      if (newPassword.length < settings.securityPolicy.minPasswordLen)
+        throw new HttpError(400, 'Password does not meet configured minimum');
+      const codeHash = tokenHash(code);
+      const hash = await passwordHash(newPassword);
+      await transaction(pool, async (db) => {
+        const user = (
+          await db.query(
+            'SELECT u.id FROM users u JOIN password_reset_tokens t ON t.username=u.username WHERE t.code_hash=$1 AND t.expires_at>now() AND NOT u.disabled',
+            [codeHash],
+          )
+        ).rows[0];
+        if (!user) throw new HttpError(400, 'Invalid or expired code');
+        await db.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, user.id]);
+        await db.query('DELETE FROM sessions WHERE user_id=$1', [user.id]);
+        await db.query('DELETE FROM password_reset_tokens WHERE username=$1', [username]);
+        await appendAudit(
+          db,
+          'Password reset',
+          'Self-service password reset completed',
+          username,
+          'SECURITY',
+          'INFO',
+          req.ip || '',
+        );
+      });
+      res.json({ success: true });
+    }),
+  );
   // Global rate limiting for authenticated mutation endpoints. The bucket is
   // stored in PostgreSQL so every replica shares one quota per operator.
   //
@@ -808,9 +938,7 @@ export function createApp(
     '/api/users/:id/reset-password',
     requireRole('ADMIN'),
     asyncRoute(async (req, res) => {
-      const data = z
-        .object({ password: z.string().min(14).max(128) })
-        .parse(req.body);
+      const data = z.object({ password: z.string().min(14).max(128) }).parse(req.body);
       const userId = z.uuid().safeParse(req.params.id);
       if (!userId.success) throw invalidId();
       const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;

@@ -14,7 +14,7 @@ export async function grantRuntimePrivileges(db: Db, role = 'vulnstream_app'): P
     GRANT SELECT,INSERT,DELETE ON correlation_dead_letters TO ${target};
     GRANT SELECT,INSERT,UPDATE,DELETE ON low_confidence_review_buffer TO ${target};
     GRANT SELECT,INSERT,UPDATE,DELETE ON correlation_pending,correlation_managed_assets,correlation_match_evidence,
-      correlation_review_decisions,correlation_dead_letter_actions,correlation_notifications TO ${target};
+      correlation_review_decisions,correlation_dead_letter_actions,correlation_notifications,password_reset_tokens TO ${target};
     -- Pre-CVE cluster state is written by the ingestion path (membership) and
     -- by the review-decision path (dispositions), and read by the pipeline when
     -- it binds a published CVE. Without these grants every ingest and review

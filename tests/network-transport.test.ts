@@ -152,3 +152,33 @@ test('a cross-host redirect is followed only to another allowlisted host', async
     await close();
   }
 });
+
+// Regression: the validated address must reach the socket through the
+// requester's own lookup hook. An earlier version answered only Node's
+// (host, family, cb) form, so the pinned family was undefined and every
+// request failed with "Invalid IP address: undefined" before a single byte
+// was sent. The connection itself is mapped to the local server, but the
+// lookup hook must still supply a complete address and family.
+test('the production lookup path connects to the validated address', async () => {
+  const { close } = await serve((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"ok":true}');
+  });
+  try {
+    const request = createRequester(config, {
+      resolver: async () => [{ address: '93.184.216.34', family: 4 }],
+      tls: { ca: TLS.cert },
+      allowedPorts: [String(localPort)],
+      // The requester pins the validated public address through its lookup
+      // hook; this maps that socket onto the local server. TLS hostname
+      // verification still runs against feed.example.test.
+      connect: (options: any) =>
+        connect({ ...options, host: '127.0.0.1', port: localPort, ca: TLS.cert, servername: options.host }).setTimeout(2000),
+    });
+    const response = await request(`https://feed.example.test:${localPort}/ok`);
+    assert.equal(response.status, 200);
+    assert.equal(response.body, '{"ok":true}');
+  } finally {
+    await close();
+  }
+});

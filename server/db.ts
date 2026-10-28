@@ -36,7 +36,7 @@ export const schemaLockKey = 'hashtext(COALESCE(current_schema(), current_databa
  * The newest migration this build depends on. Production startup refuses to
  * run against an older schema instead of failing later on a missing column.
  */
-export const REQUIRED_SCHEMA_VERSION = 28;
+export const REQUIRED_SCHEMA_VERSION = 29;
 
 /**
  * Migration files sorted by numeric prefix. Only plain `NNN_name.sql` entries

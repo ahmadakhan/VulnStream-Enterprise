@@ -1,5 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { emptyState, type AppState, type SessionInfo, type CollectionKind, type CollectionPage } from '../../shared/state';
+import {
+  emptyState,
+  type AppState,
+  type SessionInfo,
+  type CollectionKind,
+  type CollectionPage,
+} from '../../shared/state';
 import type {
   ThreatFeed,
   WatchListItem,
@@ -15,14 +21,14 @@ import type {
   EmailConfiguration,
   SystemHealth,
   EmailQueueItem,
-   AliasEntry,
+  AliasEntry,
   RetentionRunResult,
   RetentionPreview,
   CorrelationSimulation,
-   NvdCpeSearchResponse,
-   ThreatSearchResponse,
-   ThreatAnalytics,
-   CpeMatchSimulation,
+  NvdCpeSearchResponse,
+  ThreatSearchResponse,
+  ThreatAnalytics,
+  CpeMatchSimulation,
 } from '../types';
 import { compileCustomizedTemplate } from '../utils/templateCompiler';
 function useApplication() {
@@ -185,8 +191,7 @@ function useApplication() {
     const poll = () => {
       // Idle background tabs do not need the full snapshot every ten seconds.
       // Refresh immediately when the tab becomes visible again.
-      if (active && document.visibilityState !== 'hidden')
-        void refresh().catch((e) => setError(e.message));
+      if (active && document.visibilityState !== 'hidden') void refresh().catch((e) => setError(e.message));
     };
     const timer = setInterval(poll, 10000);
     const onVisibility = () => {
@@ -222,6 +227,17 @@ function useApplication() {
       setSnapshot(emptyState());
       setDraft(null);
     });
+  const requestPasswordReset = (username: string) =>
+    safely(
+      async () => await request<{ success: boolean; code?: string }>('/password-reset/request', { username }),
+    );
+  const verifyPasswordReset = (username: string, code: string) =>
+    safely(async () => await request<{ success: boolean }>('/password-reset/verify', { username, code }));
+  const completePasswordReset = (username: string, code: string, newPassword: string) =>
+    safely(
+      async () =>
+        await request<{ success: boolean }>('/password-reset/complete', { username, code, newPassword }),
+    );
   const command = async (action: string, data?: unknown, id?: string) =>
     safely(async () => {
       const result = await request<any>('/commands', { action, data, id });
@@ -268,6 +284,9 @@ function useApplication() {
     pending,
     login,
     logout,
+    requestPasswordReset,
+    verifyPasswordReset,
+    completePasswordReset,
     refresh,
     refreshVersion,
     fetchCollection,
@@ -342,33 +361,33 @@ function useApplication() {
       targetHw?: string;
       assetTag?: string;
     }) => safely(() => request<CorrelationSimulation>('/correlation/simulate', asset)),
-     addWatchlistItem: (item: Omit<WatchListItem, 'id' | 'createdAt'>) => save('asset.save', item),
+    addWatchlistItem: (item: Omit<WatchListItem, 'id' | 'createdAt'>) => save('asset.save', item),
     updateWatchlistItem: (item: WatchListItem) => save('asset.save', item, item.id),
-     searchNvdCpes: async (vendor: string, product: string, limit = 50) => {
-       const params = new URLSearchParams({ vendor, product, limit: String(limit) });
-       return request<NvdCpeSearchResponse>(`/cpes/search?${params}`);
-     },
-     searchThreatIntelligence: async (vendor: string, product: string, limit = 50) => {
-       const params = new URLSearchParams({ vendor, product, limit: String(limit) });
-       return request<ThreatSearchResponse>(`/threat/intelligence/search?${params}`);
-     },
-     fetchThreatAnalytics: async (range: string, limit = 10) => {
-       const params = new URLSearchParams({ range, limit: String(limit) });
-       return request<ThreatAnalytics>(`/threat/analytics?${params}`);
-     },
-     simulateCpeMatch: async (payload: {
-       assetCpe: string;
-       vulnerabilityCpe: string;
-       assetVendor: string;
-       assetProduct: string;
-       versionRange?: {
-         versionStartIncluding?: string;
-         versionStartExcluding?: string;
-         versionEndIncluding?: string;
-         versionEndExcluding?: string;
-       };
-       assetVersion?: string;
-     }) => request<CpeMatchSimulation>('/threat/cpe-simulate', payload, 'POST'),
+    searchNvdCpes: async (vendor: string, product: string, limit = 50) => {
+      const params = new URLSearchParams({ vendor, product, limit: String(limit) });
+      return request<NvdCpeSearchResponse>(`/cpes/search?${params}`);
+    },
+    searchThreatIntelligence: async (vendor: string, product: string, limit = 50) => {
+      const params = new URLSearchParams({ vendor, product, limit: String(limit) });
+      return request<ThreatSearchResponse>(`/threat/intelligence/search?${params}`);
+    },
+    fetchThreatAnalytics: async (range: string, limit = 10) => {
+      const params = new URLSearchParams({ range, limit: String(limit) });
+      return request<ThreatAnalytics>(`/threat/analytics?${params}`);
+    },
+    simulateCpeMatch: async (payload: {
+      assetCpe: string;
+      vulnerabilityCpe: string;
+      assetVendor: string;
+      assetProduct: string;
+      versionRange?: {
+        versionStartIncluding?: string;
+        versionStartExcluding?: string;
+        versionEndIncluding?: string;
+        versionEndExcluding?: string;
+      };
+      assetVersion?: string;
+    }) => request<CpeMatchSimulation>('/threat/cpe-simulate', payload, 'POST'),
     toggleWatchlistItemActive: async (id: string) => {
       const updated = !!(await command('asset.toggle', undefined, id));
       if (updated) await refreshAfterMutation();

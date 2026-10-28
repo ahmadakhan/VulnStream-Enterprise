@@ -360,9 +360,7 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
         2,
         'VIEWER pagination must not be silently reset to the first page',
       );
-      const viewerSearch = await viewer.get(
-        '/api/collections/auditLogs?search=no-such-audit-entry-zz',
-      );
+      const viewerSearch = await viewer.get('/api/collections/auditLogs?search=no-such-audit-entry-zz');
       assert.equal(viewerSearch.status, 200);
       assert.equal(viewerSearch.body.total, 0, 'VIEWER collection search must be applied');
       const simulated = await viewer
@@ -438,11 +436,7 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       const second = await mutate(agentB, csrfB);
       assert.equal(second.status, 200, JSON.stringify(second.body));
       const denied = await mutate(agentA, csrfA);
-      assert.equal(
-        denied.status,
-        429,
-        'the second replica must observe the first replica\'s consumption',
-      );
+      assert.equal(denied.status, 429, "the second replica must observe the first replica's consumption");
       assert.ok(Number(denied.headers['retry-after']) >= 1);
       // A read-only simulation is not a mutation: it must still work after the
       // write quota is exhausted, otherwise exploring the matcher burns the
@@ -566,10 +560,9 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       assert.equal(run.body.byKind.emailLogs, 1);
 
       const remaining = (
-        await pool.query(
-          "SELECT id FROM records WHERE id = ANY($1::text[]) ORDER BY id",
-          [['retention-old-cve', 'retention-recent-cve', 'retention-old-email', 'retention-protected-finding']],
-        )
+        await pool.query('SELECT id FROM records WHERE id = ANY($1::text[]) ORDER BY id', [
+          ['retention-old-cve', 'retention-recent-cve', 'retention-old-email', 'retention-protected-finding'],
+        ])
       ).rows.map((row) => row.id);
       assert.deepEqual(remaining, ['retention-protected-finding', 'retention-recent-cve']);
       const audit = (await pool.query("SELECT data FROM audit WHERE data->>'event'='Retention cleanup'"))
@@ -810,6 +803,49 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       assert.equal((await admin.get('/api/state')).status, 401);
       await pool.query("UPDATE sessions SET expires_at=now()-interval '1 second'");
       assert.equal((await viewer.get('/api/state')).status, 401);
+    });
+    await t.test('self-service password reset via OTP', async () => {
+      const resetUser = 'resetter';
+      await createUser(pool, resetUser, password, 'OPERATOR');
+      const request = (path: string, data: any) =>
+        supertest(app).post(path).set('Origin', config.APP_ORIGIN).send(data);
+      const requested = await request('/api/password-reset/request', { username: resetUser });
+      assert.equal(requested.status, 200);
+      assert.equal(requested.body.success, true);
+      const devOtp = requested.body.code;
+      assert.ok(devOtp, 'OTP should be returned in test/dev mode');
+      const nonexistent = await request('/api/password-reset/request', { username: 'does-not-exist' });
+      assert.equal(nonexistent.status, 200);
+      assert.equal(nonexistent.body.success, true);
+      assert.equal(nonexistent.body.code, undefined);
+      const verified = await request('/api/password-reset/verify', { username: resetUser, code: devOtp });
+      assert.equal(verified.status, 200);
+      const badVerify = await request('/api/password-reset/verify', { username: resetUser, code: '000000' });
+      assert.equal(badVerify.status, 400);
+      const newPassword = 'New-reset-password-2026!';
+      const completed = await request('/api/password-reset/complete', {
+        username: resetUser,
+        code: devOtp,
+        newPassword,
+      });
+      assert.equal(completed.status, 200);
+      const stale = await request('/api/password-reset/complete', {
+        username: resetUser,
+        code: devOtp,
+        newPassword,
+      });
+      assert.equal(stale.status, 400);
+      const loginAttempt = await supertest(app)
+        .post('/api/login')
+        .set('Origin', config.APP_ORIGIN)
+        .send({ username: resetUser, password: newPassword });
+      assert.equal(loginAttempt.status, 200);
+      const expiredOtp = await request('/api/password-reset/verify', { username: resetUser, code: devOtp });
+      assert.equal(expiredOtp.status, 400);
+      assert.equal(
+        (await pool.query('SELECT 1 FROM password_reset_tokens WHERE username=$1', [resetUser])).rows.length,
+        0,
+      );
     });
     await t.test('login throttling is stored in PostgreSQL', async () => {
       for (let i = 0; i < 5; i++)
