@@ -473,3 +473,194 @@
 .settings-section-nav:has(> button:only-child) {
   grid-template-columns: minmax(0, 1fr);
 }
+
+/* Configuration workspace: stronger navigation, grouped forms, persistent draft state. */
+.settings-sidebar {
+  padding: 16px 10px;
+  border: 1px solid var(--ui-divider);
+  border-radius: 16px;
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow);
+}
+.settings-section-nav button {
+  min-height: 76px;
+}
+.settings-section-nav strong {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 550;
+}
+.settings-section-nav small {
+  font-size: 11px;
+}
+.settings-section-nav button[aria-pressed='true'] {
+  background: var(--ui-focus);
+  border-color: color-mix(in srgb, var(--ui-accent) 30%, transparent);
+  box-shadow: none;
+}
+.settings-page .settings-section-heading .ui-card-title {
+  font-size: 17px;
+  letter-spacing: -0.02em;
+}
+.settings-page .settings-section-heading .ui-description {
+  font-size: 13px;
+}
+.settings-content .ui-description {
+  font-size: 12px;
+  line-height: 1.75;
+}
+.settings-content .settings-toggle-card {
+  border-radius: 12px;
+  padding: 18px;
+  background: var(--ui-subtle);
+}
+.settings-content .settings-toggle-card .ui-description {
+  font-size: 12px;
+}
+.settings-content .settings-toggle-card input[type='checkbox'] {
+  width: 34px;
+  flex-basis: 34px;
+  height: 20px;
+}
+.settings-content .settings-toggle-card input[type='checkbox']::before {
+  top: 3px;
+  height: 12px;
+  width: 12px;
+}
+.settings-content .settings-toggle-card input[type='checkbox']:checked::before {
+  transform: translateX(14px);
+}
+.settings-configuration-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding-bottom: 4px;
+}
+.settings-configuration-summary > div {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid var(--ui-divider);
+  border-radius: 11px;
+  background: var(--ui-subtle);
+}
+.settings-configuration-summary span {
+  display: block;
+  margin-bottom: 9px;
+  color: var(--ui-muted);
+  font-size: 11px;
+}
+.settings-configuration-summary strong {
+  display: block;
+  color: var(--ui-text);
+  font-size: 13px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.settings-group-heading {
+  padding-block: 10px 0;
+}
+.settings-group-heading h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ui-text);
+}
+.settings-group-heading p {
+  margin-top: 5px;
+  color: var(--ui-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.settings-dirty-indicator {
+  display: inline-block;
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d2a253;
+}
+.settings-unsaved-bar {
+  position: sticky;
+  top: 94px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 15px 18px;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 40%, var(--ui-divider));
+  border-radius: 12px;
+  background: var(--ui-surface);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
+}
+.settings-unsaved-bar > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.settings-unsaved-bar strong {
+  color: var(--ui-text);
+  font-size: 12px;
+  font-weight: 550;
+}
+.settings-unsaved-bar p {
+  margin-top: 4px;
+  color: var(--ui-muted);
+  font-size: 11px;
+}
+.settings-unsaved-bar button {
+  flex-shrink: 0;
+}
+.settings-dialog {
+  outline: none;
+}
+.settings-dialog > :first-child {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@media (max-width: 1100px) {
+  .settings-sidebar {
+    padding: 8px;
+  }
+  .settings-section-nav button {
+    min-height: 60px;
+  }
+}
+@media (max-width: 639px) {
+  .settings-configuration-summary {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .settings-configuration-summary > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 12px;
+  }
+  .settings-configuration-summary span {
+    margin: 0;
+  }
+  .settings-unsaved-bar {
+    top: 84px;
+    padding: 12px;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .settings-unsaved-bar button {
+    width: 100%;
+    justify-content: center;
+  }
+  .settings-unsaved-bar p {
+    display: none;
+  }
+  .settings-page .settings-section-heading .ui-card-title {
+    font-size: 16px;
+  }
+  .settings-section-nav button {
+    min-height: 46px;
+  }
+}

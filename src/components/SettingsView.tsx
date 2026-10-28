@@ -11,18 +11,19 @@ import {
   KeyRound,
   LockKeyhole,
   Pencil,
-   Plus,
-   Settings2,
-   ShieldCheck,
-   SlidersHorizontal,
-   Users,
-   Clock,
-   Trash2,
- } from 'lucide-react';
+  Plus,
+  Settings2,
+  ShieldCheck,
+  SlidersHorizontal,
+  Users,
+  Clock,
+  Trash2,
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { EmailProviderSettings } from './EmailProviderSettings';
 import type { AppSettings } from '../types';
 import './settings.css';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 
 const field = 'ui-field';
 
@@ -86,9 +87,46 @@ function SectionHeading({
   );
 }
 
+function SettingsDialog({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const ref = useDialogFocus(onClose);
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      tabIndex={-1}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      className="settings-dialog fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+    >
+      {children}
+    </div>
+  );
+}
+
 export function SettingsView() {
-  const { settings, updateSettings, changePassword, session, listUsers, createUser, updateUser, deleteUser, resetUserPassword, pending } =
-    useApp();
+  const {
+    settings,
+    updateSettings,
+    changePassword,
+    session,
+    listUsers,
+    createUser,
+    updateUser,
+    deleteUser,
+    resetUserPassword,
+    pending,
+  } = useApp();
   const [form, setForm] = useState<AppSettings>(() => withEmailRetryDefaults(settings));
   const [securityForm, setSecurityForm] = useState<AppSettings['securityPolicy']>(settings.securityPolicy);
   const [message, setMessage] = useState('');
@@ -119,21 +157,18 @@ export function SettingsView() {
     form.advisoryPrefix !== settings.advisoryPrefix ||
     (form.logVerbosity ?? 'standard') !== (settings.logVerbosity ?? 'standard') ||
     form.schedulerEnabled !== settings.schedulerEnabled ||
-     form.autoDispatchEnabled !== settings.autoDispatchEnabled ||
-     (form.autoDispatchConfidenceThreshold ?? 90) !==
-       (settings.autoDispatchConfidenceThreshold ?? 90) ||
-     (form.digestBatchingEnabled ?? false) !== (settings.digestBatchingEnabled ?? false) ||
-     (form.digestWindowMinutes ?? 5) !== (settings.digestWindowMinutes ?? 5) ||
-     (form.emailRetryEnabled ?? true) !== (settings.emailRetryEnabled ?? true) ||
-     (form.emailRetryMaxAttempts ?? 6) !== (settings.emailRetryMaxAttempts ?? 6) ||
-     (form.emailRetryInitialDelayMinutes ?? 1) !==
-       (settings.emailRetryInitialDelayMinutes ?? 1) ||
-      (form.emailRetryMaxDelayMinutes ?? 60) !== (settings.emailRetryMaxDelayMinutes ?? 60) ||
+    form.autoDispatchEnabled !== settings.autoDispatchEnabled ||
+    (form.autoDispatchConfidenceThreshold ?? 90) !== (settings.autoDispatchConfidenceThreshold ?? 90) ||
+    (form.digestBatchingEnabled ?? false) !== (settings.digestBatchingEnabled ?? false) ||
+    (form.digestWindowMinutes ?? 5) !== (settings.digestWindowMinutes ?? 5) ||
+    (form.emailRetryEnabled ?? true) !== (settings.emailRetryEnabled ?? true) ||
+    (form.emailRetryMaxAttempts ?? 6) !== (settings.emailRetryMaxAttempts ?? 6) ||
+    (form.emailRetryInitialDelayMinutes ?? 1) !== (settings.emailRetryInitialDelayMinutes ?? 1) ||
+    (form.emailRetryMaxDelayMinutes ?? 60) !== (settings.emailRetryMaxDelayMinutes ?? 60) ||
     form.timezone !== settings.timezone ||
     (form.dailyDigest?.enabled ?? false) !== (settings.dailyDigest?.enabled ?? false) ||
     (form.dailyDigest?.time ?? '09:00') !== (settings.dailyDigest?.time ?? '09:00') ||
-    (form.dailyDigest?.includeHealthReport ?? true) !==
-      (settings.dailyDigest?.includeHealthReport ?? true);
+    (form.dailyDigest?.includeHealthReport ?? true) !== (settings.dailyDigest?.includeHealthReport ?? true);
   const securityDirty =
     securityForm.sessionTimeoutMins !== settings.securityPolicy.sessionTimeoutMins ||
     securityForm.minPasswordLen !== settings.securityPolicy.minPasswordLen ||
@@ -199,7 +234,16 @@ export function SettingsView() {
               >
                 <Icon size={17} aria-hidden="true" />
                 <span>
-                  <strong>{title}</strong>
+                  <strong>
+                    {title}
+                    {((id === 'processing' && processingDirty) || (id === 'security' && securityDirty)) && (
+                      <span
+                        className="settings-dirty-indicator"
+                        title="Unsaved changes"
+                        aria-label="Unsaved changes"
+                      />
+                    )}
+                  </strong>
                   <small>{description}</small>
                 </span>
                 <ChevronRight size={13} aria-hidden="true" />
@@ -215,6 +259,28 @@ export function SettingsView() {
           </div>
         </aside>
         <div className="settings-content">
+          {admin &&
+            ((activeSection === 'processing' && processingDirty) ||
+              (activeSection === 'security' && securityDirty)) && (
+              <div className="settings-unsaved-bar" role="status">
+                <div>
+                  <span className="settings-dirty-indicator" />
+                  <div>
+                    <strong>You have unsaved changes</strong>
+                    <p>Review your changes, then save to apply them.</p>
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  form={activeSection === 'processing' ? 'processing-settings-form' : 'security-policy-form'}
+                  disabled={pending > 0}
+                  className="ui-primary"
+                >
+                  <Save size={14} aria-hidden="true" />
+                  {pending > 0 ? 'Saving…' : 'Save changes'}
+                </button>
+              </div>
+            )}
           {admin && (
             <div id="settings-email" hidden={activeSection !== 'email'}>
               <EmailProviderSettings />
@@ -224,14 +290,15 @@ export function SettingsView() {
           {admin && (
             <div id="settings-processing" hidden={activeSection !== 'processing'}>
               <form
+                id="processing-settings-form"
                 className="ui-card space-y-5"
                 aria-labelledby="processing-settings-title"
                 onChangeCapture={() => setMessage('')}
                 onSubmit={async (e) => {
                   e.preventDefault();
                   setMessage('');
-                   if (await updateSettings({ ...form, securityPolicy: settings.securityPolicy }))
-                     setMessage('Settings saved successfully.');
+                  if (await updateSettings({ ...form, securityPolicy: settings.securityPolicy }))
+                    setMessage('Settings saved successfully.');
                 }}
               >
                 <SectionHeading
@@ -241,6 +308,24 @@ export function SettingsView() {
                   description="Control ingestion windows, scheduled processing, and automatic notifications."
                 />
 
+                <div className="settings-configuration-summary" aria-label="Processing configuration summary">
+                  <div>
+                    <span>Scheduled processing</span>
+                    <strong>{form.schedulerEnabled ? 'Enabled' : 'Manual runs'}</strong>
+                  </div>
+                  <div>
+                    <span>Automatic dispatch</span>
+                    <strong>{form.autoDispatchEnabled ? 'Enabled' : 'Review first'}</strong>
+                  </div>
+                  <div>
+                    <span>Workspace timezone</span>
+                    <strong>{form.timezone || 'UTC'}</strong>
+                  </div>
+                </div>
+                <div className="settings-group-heading">
+                  <h3>Pipeline defaults</h3>
+                  <p>Set the scope, cadence, and context for each processing run.</p>
+                </div>
                 <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
                   <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
                     Scope window
@@ -302,30 +387,34 @@ export function SettingsView() {
                     <span className="ui-description mt-1.5 block">
                       Standard records pipeline, feed, matching, delivery and security events, plus every
                       warning and error. Verbose additionally persists per-advisory correlation telemetry
-                      (extraction and database timings). Warnings and errors are never suppressed. Applied
-                      to the next advisory without a restart.
+                      (extraction and database timings). Warnings and errors are never suppressed. Applied to
+                      the next advisory without a restart.
                     </span>
                   </label>
                 </div>
 
                 <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                    Timezone
-                    <select
-                      className={field}
-                      value={form.timezone || 'UTC'}
-                      onChange={(e) => setForm({ ...form, timezone: e.target.value })}
-                    >
-                      {TIMEZONES.map((tz) => (
-                        <option key={tz} value={tz}>
-                          {tz}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="ui-description mt-1.5 block">
-                      Timezone used to schedule the daily digest and to render human-readable dates.
-                    </span>
-                  </label>
+                  Timezone
+                  <select
+                    className={field}
+                    value={form.timezone || 'UTC'}
+                    onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+                  >
+                    {TIMEZONES.map((tz) => (
+                      <option key={tz} value={tz}>
+                        {tz}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="ui-description mt-1.5 block">
+                    Timezone used to schedule the daily digest and to render human-readable dates.
+                  </span>
+                </label>
 
+                <div className="settings-group-heading">
+                  <h3>Notifications & delivery</h3>
+                  <p>Choose how confirmed findings reach your recipients.</p>
+                </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
                     <input
@@ -352,7 +441,7 @@ export function SettingsView() {
                       <span className="block font-medium text-zinc-200 light:text-zinc-800">
                         Automatic dispatch
                       </span>
-                       <span className="ui-description mt-0.5 block">
+                      <span className="ui-description mt-0.5 block">
                         Send confirmed findings to security teams automatically; everyone recipients wait in
                         Email Queue for security review.
                       </span>
@@ -388,17 +477,15 @@ export function SettingsView() {
                     <input
                       type="checkbox"
                       checked={form.digestBatchingEnabled ?? false}
-                      onChange={(e) =>
-                        setForm({ ...form, digestBatchingEnabled: e.target.checked })
-                      }
+                      onChange={(e) => setForm({ ...form, digestBatchingEnabled: e.target.checked })}
                     />
                     <span>
                       <span className="block font-medium text-zinc-200 light:text-zinc-800">
                         Combine threats into one email
                       </span>
                       <span className="ui-description mt-0.5 block">
-                        Buffer detections for the window and send one combined email per recipient.
-                        Each recipient only receives the findings permitted by its subscription tier.
+                        Buffer detections for the window and send one combined email per recipient. Each
+                        recipient only receives the findings permitted by its subscription tier.
                       </span>
                     </span>
                   </label>
@@ -429,9 +516,7 @@ export function SettingsView() {
                   </label>
 
                   <div className="sm:col-span-2 mt-1 border-t border-zinc-800/70 pt-4 light:border-zinc-200">
-                    <h3 className="text-xs font-semibold text-zinc-200 light:text-zinc-800">
-                      Daily digest
-                    </h3>
+                    <h3 className="text-xs font-semibold text-zinc-200 light:text-zinc-800">Daily digest</h3>
                     <p className="ui-description mt-1">
                       A calendar subscription that delivers a daily summary of findings plus an operational
                       health-check report to recipients that opt in, at a fixed local time in the configured
@@ -534,8 +619,8 @@ export function SettingsView() {
                         Enable automatic email retry
                       </span>
                       <span className="ui-description mt-0.5 block">
-                        Keep failed deliveries queued with exponential backoff instead of marking them
-                        failed after the first transport error.
+                        Keep failed deliveries queued with exponential backoff instead of marking them failed
+                        after the first transport error.
                       </span>
                     </span>
                   </label>
@@ -550,10 +635,7 @@ export function SettingsView() {
                         onChange={(e) =>
                           setForm({
                             ...form,
-                            emailRetryMaxAttempts: Math.min(
-                              20,
-                              Math.max(1, parseInt(e.target.value) || 1),
-                            ),
+                            emailRetryMaxAttempts: Math.min(20, Math.max(1, parseInt(e.target.value) || 1)),
                           })
                         }
                         className="mt-1 w-16 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-50 light:border-zinc-300 light:bg-white light:text-zinc-900"
@@ -563,8 +645,8 @@ export function SettingsView() {
                           Maximum attempts
                         </span>
                         <span className="ui-description mt-0.5 block">
-                          Total sends per email, including the first attempt. A value of 1 disables
-                          automatic retries while keeping the initial delivery.
+                          Total sends per email, including the first attempt. A value of 1 disables automatic
+                          retries while keeping the initial delivery.
                         </span>
                       </span>
                     </div>
@@ -578,10 +660,7 @@ export function SettingsView() {
                         disabled={!form.emailRetryEnabled}
                         value={form.emailRetryInitialDelayMinutes ?? 1}
                         onChange={(e) => {
-                          const initial = Math.min(
-                            1440,
-                            Math.max(1, parseInt(e.target.value) || 1),
-                          );
+                          const initial = Math.min(1440, Math.max(1, parseInt(e.target.value) || 1));
                           setForm({
                             ...form,
                             emailRetryInitialDelayMinutes: initial,
@@ -676,228 +755,229 @@ export function SettingsView() {
             </div>
           )}
 
-           <div id="settings-security" hidden={activeSection !== 'security'} className="space-y-6">
-              {admin && (
-                <form
-                  className="ui-card space-y-5"
-                  aria-labelledby="account-security-policy-title"
-                  onChangeCapture={() => setSecurityMessage('')}
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    setSecurityMessage('');
-                    if (await updateSettings({ securityPolicy: securityForm }))
-                      setSecurityMessage('Security policy saved successfully.');
-                  }}
-                >
-                  <SectionHeading
-                    icon={Clock}
-                    id="account-security-policy-title"
-                    title="Login timeout & password policy"
-                    description="Session expiry, password strength, and brute-force lockout for operator accounts."
-                  />
-
-                  <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-                    <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                      Session timeout
-                      <span className="ml-1 font-normal text-zinc-500">(minutes)</span>
-                      <input
-                        type="number"
-                        min={5}
-                        max={60}
-                        required
-                        className={field}
-                        value={securityForm.sessionTimeoutMins}
-                        onChange={(e) =>
-                          setSecurityForm({
-                            ...securityForm,
-                            sessionTimeoutMins: Math.min(60, Math.max(5, Number(e.target.value) || 5)),
-                          })
-                        }
-                      />
-                      <span className="ui-description mt-1.5 block">
-                        Inactive authenticated sessions are signed out after this period. Applied on the
-                        next login.
-                      </span>
-                    </label>
-                    <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                      Minimum password length
-                      <span className="ml-1 font-normal text-zinc-500">(characters)</span>
-                      <input
-                        type="number"
-                        min={14}
-                        max={128}
-                        required
-                        className={field}
-                        value={securityForm.minPasswordLen}
-                        onChange={(e) =>
-                          setSecurityForm({
-                            ...securityForm,
-                            minPasswordLen: Math.min(128, Math.max(14, Number(e.target.value) || 14)),
-                          })
-                        }
-                      />
-                      <span className="ui-description mt-1.5 block">
-                        Length enforced for new and changed passwords. Existing passwords are unaffected
-                        until the operator updates them.
-                      </span>
-                    </label>
-                  </div>
-
-                  <div className="sm:col-span-2 mt-1 border-t border-zinc-800/70 pt-4 light:border-zinc-200">
-                    <h3 className="text-xs font-semibold text-zinc-200 light:text-zinc-800">
-                      Login attempt limits
-                    </h3>
-                    <p className="ui-description mt-1">
-                      Repeated failed sign-ins are blocked for a cooling-off period. The threshold is
-                      tracked per account and per source IP to resist distributed guessing.
-                    </p>
-                  </div>
-                  <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-                    <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                      Failed attempts before lockout
-                      <input
-                        type="number"
-                        min={1}
-                        max={20}
-                        required
-                        className={field}
-                        value={securityForm.maxLoginAttempts}
-                        onChange={(e) =>
-                          setSecurityForm({
-                            ...securityForm,
-                            maxLoginAttempts: Math.min(20, Math.max(1, Number(e.target.value) || 1)),
-                          })
-                        }
-                      />
-                      <span className="ui-description mt-1.5 block">
-                        Consecutive failed sign-ins against a single account before it is temporarily locked.
-                      </span>
-                    </label>
-                    <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                      Lockout duration
-                      <span className="ml-1 font-normal text-zinc-500">(minutes)</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={60}
-                        required
-                        className={field}
-                        value={securityForm.lockoutMins}
-                        onChange={(e) =>
-                          setSecurityForm({
-                            ...securityForm,
-                            lockoutMins: Math.min(60, Math.max(1, Number(e.target.value) || 1)),
-                          })
-                        }
-                      />
-                      <span className="ui-description mt-1.5 block">
-                        How long a locked account stays locked before another sign-in can be attempted.
-                      </span>
-                    </label>
-                  </div>
-
-                  <p className="rounded-xl border border-zinc-800 bg-zinc-950/30 px-4 py-3 text-xs leading-relaxed text-zinc-400 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-600">
-                    CSRF protection, secure cookie attributes, and HTTP security headers are enforced at
-                    runtime and cannot be relaxed from the application.
-                  </p>
-
-                  <div className="ui-actions justify-between">
-                    {securityMessage ? (
-                      <p role="status" className="ui-success inline-flex items-center gap-2">
-                        <Check className="h-3.5 w-3.5" aria-hidden="true" /> {securityMessage}
-                      </p>
-                    ) : (
-                      <span className="settings-save-state">
-                        <span className={securityDirty ? 'is-dirty' : ''} />
-                        {securityDirty ? 'Unsaved changes' : 'Settings are up to date'}
-                      </span>
-                    )}
-                    <div className="settings-action-buttons">
-                      {securityDirty && (
-                        <button
-                          type="button"
-                          className="ui-secondary"
-                          disabled={pending > 0}
-                          onClick={() => {
-                            setSecurityForm(settings.securityPolicy);
-                            setSecurityMessage('');
-                          }}
-                        >
-                          <RotateCcw size={14} />
-                          Reset changes
-                        </button>
-                      )}
-                      <button type="submit" disabled={pending > 0 || !securityDirty} className="ui-primary">
-                        {pending > 0 ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
-                        {pending > 0 ? 'Saving…' : 'Save policy'}
-                      </button>
-                    </div>
-                  </div>
-                </form>
-              )}
-
+          <div id="settings-security" hidden={activeSection !== 'security'} className="space-y-6">
+            {admin && (
               <form
+                id="security-policy-form"
                 className="ui-card space-y-5"
-                aria-labelledby="account-security-title"
+                aria-labelledby="account-security-policy-title"
+                onChangeCapture={() => setSecurityMessage('')}
                 onSubmit={async (e) => {
                   e.preventDefault();
-                  const changed = await changePassword(currentPassword, newPassword);
-                  // Keep the fields intact when the change failed so the operator can
-                  // correct the current password instead of retyping both values.
-                  if (changed) {
-                    setCurrentPassword('');
-                    setNewPassword('');
-                  }
+                  setSecurityMessage('');
+                  if (await updateSettings({ securityPolicy: securityForm }))
+                    setSecurityMessage('Security policy saved successfully.');
                 }}
               >
                 <SectionHeading
-                  icon={ShieldCheck}
-                  id="account-security-title"
-                  title="Change password"
-                  description="Update the password used to sign in to this account."
+                  icon={Clock}
+                  id="account-security-policy-title"
+                  title="Login timeout & password policy"
+                  description="Session expiry, password strength, and brute-force lockout for operator accounts."
                 />
-                <div className="grid gap-4 sm:grid-cols-2">
+
+                <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
                   <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                    Current password
+                    Session timeout
+                    <span className="ml-1 font-normal text-zinc-500">(minutes)</span>
                     <input
-                      type="password"
-                      autoComplete="current-password"
+                      type="number"
+                      min={5}
+                      max={60}
                       required
-                      maxLength={128}
                       className={field}
-                      value={currentPassword}
-                      onChange={(e) => setCurrentPassword(e.target.value)}
-                    />
-                  </label>
-                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                    New password
-                    <input
-                      type="password"
-                      autoComplete="new-password"
-                      required
-                      minLength={settings.securityPolicy.minPasswordLen}
-                      maxLength={128}
-                      className={field}
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
+                      value={securityForm.sessionTimeoutMins}
+                      onChange={(e) =>
+                        setSecurityForm({
+                          ...securityForm,
+                          sessionTimeoutMins: Math.min(60, Math.max(5, Number(e.target.value) || 5)),
+                        })
+                      }
                     />
                     <span className="ui-description mt-1.5 block">
-                      Use at least {settings.securityPolicy.minPasswordLen} characters.
+                      Inactive authenticated sessions are signed out after this period. Applied on the next
+                      login.
+                    </span>
+                  </label>
+                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                    Minimum password length
+                    <span className="ml-1 font-normal text-zinc-500">(characters)</span>
+                    <input
+                      type="number"
+                      min={14}
+                      max={128}
+                      required
+                      className={field}
+                      value={securityForm.minPasswordLen}
+                      onChange={(e) =>
+                        setSecurityForm({
+                          ...securityForm,
+                          minPasswordLen: Math.min(128, Math.max(14, Number(e.target.value) || 14)),
+                        })
+                      }
+                    />
+                    <span className="ui-description mt-1.5 block">
+                      Length enforced for new and changed passwords. Existing passwords are unaffected until
+                      the operator updates them.
                     </span>
                   </label>
                 </div>
-                <div className="ui-actions justify-between">
-                  <p className="inline-flex items-center gap-2 text-xs text-zinc-400 light:text-zinc-600">
-                    <LockKeyhole className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    Changing your password signs out all active sessions.
+
+                <div className="sm:col-span-2 mt-1 border-t border-zinc-800/70 pt-4 light:border-zinc-200">
+                  <h3 className="text-xs font-semibold text-zinc-200 light:text-zinc-800">
+                    Login attempt limits
+                  </h3>
+                  <p className="ui-description mt-1">
+                    Repeated failed sign-ins are blocked for a cooling-off period. The threshold is tracked
+                    per account and per source IP to resist distributed guessing.
                   </p>
-                  <button type="submit" disabled={pending > 0} className="ui-primary">
-                    <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
-                    Change password
-                  </button>
+                </div>
+                <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                    Failed attempts before lockout
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      required
+                      className={field}
+                      value={securityForm.maxLoginAttempts}
+                      onChange={(e) =>
+                        setSecurityForm({
+                          ...securityForm,
+                          maxLoginAttempts: Math.min(20, Math.max(1, Number(e.target.value) || 1)),
+                        })
+                      }
+                    />
+                    <span className="ui-description mt-1.5 block">
+                      Consecutive failed sign-ins against a single account before it is temporarily locked.
+                    </span>
+                  </label>
+                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                    Lockout duration
+                    <span className="ml-1 font-normal text-zinc-500">(minutes)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      required
+                      className={field}
+                      value={securityForm.lockoutMins}
+                      onChange={(e) =>
+                        setSecurityForm({
+                          ...securityForm,
+                          lockoutMins: Math.min(60, Math.max(1, Number(e.target.value) || 1)),
+                        })
+                      }
+                    />
+                    <span className="ui-description mt-1.5 block">
+                      How long a locked account stays locked before another sign-in can be attempted.
+                    </span>
+                  </label>
+                </div>
+
+                <p className="rounded-xl border border-zinc-800 bg-zinc-950/30 px-4 py-3 text-xs leading-relaxed text-zinc-400 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-600">
+                  CSRF protection, secure cookie attributes, and HTTP security headers are enforced at runtime
+                  and cannot be relaxed from the application.
+                </p>
+
+                <div className="ui-actions justify-between">
+                  {securityMessage ? (
+                    <p role="status" className="ui-success inline-flex items-center gap-2">
+                      <Check className="h-3.5 w-3.5" aria-hidden="true" /> {securityMessage}
+                    </p>
+                  ) : (
+                    <span className="settings-save-state">
+                      <span className={securityDirty ? 'is-dirty' : ''} />
+                      {securityDirty ? 'Unsaved changes' : 'Settings are up to date'}
+                    </span>
+                  )}
+                  <div className="settings-action-buttons">
+                    {securityDirty && (
+                      <button
+                        type="button"
+                        className="ui-secondary"
+                        disabled={pending > 0}
+                        onClick={() => {
+                          setSecurityForm(settings.securityPolicy);
+                          setSecurityMessage('');
+                        }}
+                      >
+                        <RotateCcw size={14} />
+                        Reset changes
+                      </button>
+                    )}
+                    <button type="submit" disabled={pending > 0 || !securityDirty} className="ui-primary">
+                      {pending > 0 ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
+                      {pending > 0 ? 'Saving…' : 'Save policy'}
+                    </button>
+                  </div>
                 </div>
               </form>
-            </div>
+            )}
+
+            <form
+              className="ui-card space-y-5"
+              aria-labelledby="account-security-title"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const changed = await changePassword(currentPassword, newPassword);
+                // Keep the fields intact when the change failed so the operator can
+                // correct the current password instead of retyping both values.
+                if (changed) {
+                  setCurrentPassword('');
+                  setNewPassword('');
+                }
+              }}
+            >
+              <SectionHeading
+                icon={ShieldCheck}
+                id="account-security-title"
+                title="Change password"
+                description="Update the password used to sign in to this account."
+              />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                  Current password
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                    maxLength={128}
+                    className={field}
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                  />
+                </label>
+                <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                  New password
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    required
+                    minLength={settings.securityPolicy.minPasswordLen}
+                    maxLength={128}
+                    className={field}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                  />
+                  <span className="ui-description mt-1.5 block">
+                    Use at least {settings.securityPolicy.minPasswordLen} characters.
+                  </span>
+                </label>
+              </div>
+              <div className="ui-actions justify-between">
+                <p className="inline-flex items-center gap-2 text-xs text-zinc-400 light:text-zinc-600">
+                  <LockKeyhole className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  Changing your password signs out all active sessions.
+                </p>
+                <button type="submit" disabled={pending > 0} className="ui-primary">
+                  <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
+                  Change password
+                </button>
+              </div>
+            </form>
+          </div>
 
           {admin && (
             <section
@@ -1151,69 +1231,69 @@ export function SettingsView() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            className="min-h-8 rounded-lg border border-zinc-700 px-3 py-1.5 text-[11px] font-medium text-zinc-300 hover:bg-zinc-800 transition light:border-zinc-300 light:text-zinc-700 light:hover:bg-zinc-100"
-                            onClick={() => {
-                              setEditingUser(user);
-                              setEditForm({
-                                username: user.username,
-                                role: user.role,
-                                email: user.email || '',
-                                disabled: !!user.disabled,
-                              });
-                              setEditMessage('');
-                            }}
-                          >
-                            <Pencil className="h-3 w-3 inline mr-1" />
-                            Edit
-                          </button>
-                          {user.username !== session?.username && !user.disabled && (
                             <button
                               type="button"
                               className="min-h-8 rounded-lg border border-zinc-700 px-3 py-1.5 text-[11px] font-medium text-zinc-300 hover:bg-zinc-800 transition light:border-zinc-300 light:text-zinc-700 light:hover:bg-zinc-100"
                               onClick={() => {
-                                setResetUserId(user.id);
-                                setResetPassword('');
+                                setEditingUser(user);
+                                setEditForm({
+                                  username: user.username,
+                                  role: user.role,
+                                  email: user.email || '',
+                                  disabled: !!user.disabled,
+                                });
+                                setEditMessage('');
                               }}
                             >
-                              <KeyRound className="h-3 w-3 inline mr-1" />
-                              Reset password
+                              <Pencil className="h-3 w-3 inline mr-1" />
+                              Edit
                             </button>
-                          )}
-                          {user.username !== session?.username && (
-                            <button
-                              type="button"
-                              className={`min-h-8 rounded-lg border px-3 py-1.5 text-[11px] font-medium transition ${
-                                user.disabled
-                                  ? 'border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/10 light:text-emerald-700'
-                                  : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800 light:border-zinc-300 light:text-zinc-700 light:hover:bg-zinc-100'
-                              }`}
-                              disabled={pending > 0}
-                              onClick={async () => {
-                                if (!user.disabled) {
-                                  setDisablingUserId(user.id);
-                                  return;
-                                }
-                                await updateUser(user.id, { role: user.role, disabled: !user.disabled });
-                                await reloadUsers();
-                              }}
-                            >
-                               {user.disabled ? 'Enable account' : 'Disable account'}
-                             </button>
-                           )}
-                           {user.username !== session?.username && (
-                             <button
-                               type="button"
-                               className="min-h-8 rounded-lg border border-rose-500/25 px-3 py-1.5 text-[11px] font-medium text-rose-300 hover:bg-rose-500/10 transition light:border-rose-200 light:text-rose-700 light:hover:bg-rose-100"
-                               disabled={pending > 0}
-                               onClick={() => setDeleteUserId(user.id)}
-                             >
-                               <Trash2 className="h-3 w-3 inline mr-1" />
-                               Delete account
-                             </button>
-                           )}
-                         </div>
+                            {user.username !== session?.username && !user.disabled && (
+                              <button
+                                type="button"
+                                className="min-h-8 rounded-lg border border-zinc-700 px-3 py-1.5 text-[11px] font-medium text-zinc-300 hover:bg-zinc-800 transition light:border-zinc-300 light:text-zinc-700 light:hover:bg-zinc-100"
+                                onClick={() => {
+                                  setResetUserId(user.id);
+                                  setResetPassword('');
+                                }}
+                              >
+                                <KeyRound className="h-3 w-3 inline mr-1" />
+                                Reset password
+                              </button>
+                            )}
+                            {user.username !== session?.username && (
+                              <button
+                                type="button"
+                                className={`min-h-8 rounded-lg border px-3 py-1.5 text-[11px] font-medium transition ${
+                                  user.disabled
+                                    ? 'border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/10 light:text-emerald-700'
+                                    : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800 light:border-zinc-300 light:text-zinc-700 light:hover:bg-zinc-100'
+                                }`}
+                                disabled={pending > 0}
+                                onClick={async () => {
+                                  if (!user.disabled) {
+                                    setDisablingUserId(user.id);
+                                    return;
+                                  }
+                                  await updateUser(user.id, { role: user.role, disabled: !user.disabled });
+                                  await reloadUsers();
+                                }}
+                              >
+                                {user.disabled ? 'Enable account' : 'Disable account'}
+                              </button>
+                            )}
+                            {user.username !== session?.username && (
+                              <button
+                                type="button"
+                                className="min-h-8 rounded-lg border border-rose-500/25 px-3 py-1.5 text-[11px] font-medium text-rose-300 hover:bg-rose-500/10 transition light:border-rose-200 light:text-rose-700 light:hover:bg-rose-100"
+                                disabled={pending > 0}
+                                onClick={() => setDeleteUserId(user.id)}
+                              >
+                                <Trash2 className="h-3 w-3 inline mr-1" />
+                                Delete account
+                              </button>
+                            )}
+                          </div>
                         </li>
                       ))}
                   </ul>
@@ -1229,7 +1309,7 @@ export function SettingsView() {
       </div>
 
       {resetUserId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+        <SettingsDialog title="Reset operator password" onClose={() => setResetUserId(null)}>
           <div className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
             <button
               aria-label="Close"
@@ -1280,12 +1360,12 @@ export function SettingsView() {
               </button>
             </div>
           </div>
-        </div>
+        </SettingsDialog>
       )}
 
       {/* Edit Account Modal */}
       {editingUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+        <SettingsDialog title="Edit workspace account" onClose={() => setEditingUser(null)}>
           <form
             className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative space-y-4"
             aria-labelledby="edit-account-title"
@@ -1396,12 +1476,12 @@ export function SettingsView() {
               </button>
             </div>
           </form>
-        </div>
+        </SettingsDialog>
       )}
 
       {/* Disable Account Confirmation Modal */}
       {disablingUserId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+        <SettingsDialog title="Disable operator account" onClose={() => setDisablingUserId(null)}>
           <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
             <h3 className="text-sm font-bold text-rose-300 dark:text-rose-300 light:text-rose-700 mb-2">
               Disable Operator Account?
@@ -1437,12 +1517,12 @@ export function SettingsView() {
               </button>
             </div>
           </div>
-        </div>
+        </SettingsDialog>
       )}
 
       {/* Delete Account Confirmation Modal */}
       {deleteUserId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+        <SettingsDialog title="Delete operator account" onClose={() => setDeleteUserId(null)}>
           <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
             <h3 className="text-sm font-bold text-rose-300 dark:text-rose-300 light:text-rose-700 mb-2">
               Delete Operator Account?
@@ -1478,7 +1558,7 @@ export function SettingsView() {
               </button>
             </div>
           </div>
-        </div>
+        </SettingsDialog>
       )}
     </div>
   );

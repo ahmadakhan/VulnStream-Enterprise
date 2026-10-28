@@ -21,7 +21,8 @@ import { LogDetailModal } from './LogDetailModal';
 import { EventDetailPanel } from './EventDetailPanel';
 import { formatEventContext } from '../utils/eventText';
 import { SecondaryButton } from './SecondaryButton';
-import { formatDateTime as fmtDateTime } from '../utils/dateTime';
+import { formatDateTime as fmtDateTime, formatDate } from '../utils/dateTime';
+import './investigation-pages.css';
 
 const AuditTrailView: React.FC = () => {
   const { fetchCollection, refreshVersion, verifyAuditChainRemote } = useApp();
@@ -30,6 +31,7 @@ const AuditTrailView: React.FC = () => {
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
 
   // Cryptographic Chain Verification State
   const [verifyingChain, setVerifyingChain] = useState(false);
@@ -54,7 +56,12 @@ const AuditTrailView: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
 
   const filters = { category: categoryFilter, level: levelFilter };
-  const { items: paginatedLogs, total } = useCollection<AuditLog>('auditLogs', {
+  const {
+    items: paginatedLogs,
+    total,
+    loading: logsLoading,
+    reload,
+  } = useCollection<AuditLog>('auditLogs', {
     page: currentPage,
     pageSize,
     search: searchTerm,
@@ -91,6 +98,7 @@ const AuditTrailView: React.FC = () => {
 
   const handleExportJson = async () => {
     setExporting(true);
+    setExportError('');
     try {
       const logs = await loadAllLogs();
       const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(logs, null, 2));
@@ -101,7 +109,7 @@ const AuditTrailView: React.FC = () => {
       downloadAnchor.click();
       downloadAnchor.remove();
     } catch {
-      // The request layer surfaces transport failures through the global banner.
+      setExportError('Could not export the audit trail. Please retry.');
     } finally {
       setExporting(false);
     }
@@ -109,6 +117,7 @@ const AuditTrailView: React.FC = () => {
 
   const handleExportCsv = async () => {
     setExporting(true);
+    setExportError('');
     try {
       const logs = await loadAllLogs();
       const headers = ['ID', 'Timestamp', 'Category', 'Level', 'Event', 'Details', 'Actor', 'IP'];
@@ -130,21 +139,32 @@ const AuditTrailView: React.FC = () => {
       downloadAnchor.click();
       downloadAnchor.remove();
     } catch {
-      // The request layer surfaces transport failures through the global banner.
+      setExportError('Could not export the audit trail. Please retry.');
     } finally {
       setExporting(false);
     }
   };
 
   return (
-    <div className="space-y-6">
+    <div
+      id="logs-audit-panel"
+      role="tabpanel"
+      aria-labelledby="logs-audit-tab"
+      className="audit-trail-panel space-y-6"
+    >
       {/* Header */}
       <div className="ui-page-header">
-        <PageHeading page="logs">
-          Review administrative actions and verify the retained server-side record chain.
-        </PageHeading>
+        <div>
+          <h2 className="investigation-section-title">Administrative actions</h2>
+          <p className="investigation-section-description">
+            Review who changed your workspace, when it happened, and where the request originated.
+          </p>
+        </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <SecondaryButton icon={<RotateCw size={14} />} loading={logsLoading} onClick={reload}>
+            Refresh
+          </SecondaryButton>
           <SecondaryButton
             icon={
               verifyingChain ? (
@@ -179,25 +199,43 @@ const AuditTrailView: React.FC = () => {
         </div>
       </div>
 
-      {chainVerified !== null && !verifyingChain && (
-        <div
-          role="status"
-          className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 text-xs ${chainVerified ? 'border-emerald-500/20 bg-emerald-500/[0.06] text-emerald-300 light:text-emerald-800' : 'border-rose-500/25 bg-rose-500/[0.06] text-rose-300 light:text-rose-800'}`}
-        >
-          {chainVerified ? (
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-          ) : (
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          )}
-          <div>
-            <p className="font-semibold">
-              {chainVerified ? 'Retained chain verified' : 'Audit chain verification failed'}
-            </p>
-            <p className="mt-0.5 opacity-80">
-              The check covers the retained audit window of up to 500 entries.
-            </p>
-          </div>
+      <div
+        className={`audit-integrity ${chainVerified === true ? 'is-verified' : chainVerified === false ? 'is-failed' : ''}`}
+        role="status"
+      >
+        <span className="investigation-icon">
+          <ShieldCheck size={23} aria-hidden="true" />
+        </span>
+        <div>
+          <h3>
+            {verifyingChain
+              ? 'Checking audit integrity…'
+              : chainVerified === true
+                ? 'Retained audit chain verified'
+                : chainVerified === false
+                  ? 'Audit chain verification failed'
+                  : 'Verify the integrity of your audit trail'}
+          </h3>
+          <p>
+            {chainVerified === false
+              ? 'The retained records did not pass verification. Review the audit chain before relying on this export.'
+              : 'Verification checks every entry in the retained server-side chain, including records outside this page.'}
+          </p>
         </div>
+        <span className="audit-integrity-state">
+          {verifyingChain
+            ? 'Checking'
+            : chainVerified === true
+              ? 'Verified'
+              : chainVerified === false
+                ? 'Review required'
+                : 'Not checked'}
+        </span>
+      </div>
+      {exportError && (
+        <p role="alert" className="investigation-error">
+          {exportError}
+        </p>
       )}
 
       {/* Filter Bar */}
@@ -206,11 +244,18 @@ const AuditTrailView: React.FC = () => {
           <Filter className="h-3.5 w-3.5" />
           Filter retained entries
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_220px_180px]">
-          <div className="relative min-w-0">
+        <div className="audit-filter-grid grid gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_220px_180px]">
+          <div className="audit-query-field relative min-w-0">
+            <label
+              htmlFor="audit-query"
+              className="mb-1.5 block text-xs font-medium text-zinc-400 light:text-zinc-600"
+            >
+              Search entries
+            </label>
             <Search className="absolute left-3 top-3 h-4 w-4 text-zinc-500" />
             <input
               type="text"
+              id="audit-query"
               aria-label="Search audit trail"
               placeholder="Search event, details, IP, or actor"
               value={searchTerm}
@@ -258,6 +303,23 @@ const AuditTrailView: React.FC = () => {
             </select>
           </label>
         </div>
+        {(searchTerm || categoryFilter !== 'ALL' || levelFilter !== 'ALL') && (
+          <div className="audit-filter-summary">
+            <p>Filters apply to all retained entries and exports.</p>
+            <button
+              type="button"
+              className="ui-secondary"
+              onClick={() => {
+                setSearchTerm('');
+                setCategoryFilter('ALL');
+                setLevelFilter('ALL');
+                setCurrentPage(1);
+              }}
+            >
+              Clear filters
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Logs Table */}
@@ -271,8 +333,11 @@ const AuditTrailView: React.FC = () => {
             {total.toLocaleString()} matches
           </span>
         </div>
-        <div className="overflow-x-auto">
+        <div className="audit-desktop-table overflow-x-auto" aria-busy={logsLoading}>
           <table className="w-full min-w-[900px] text-left text-xs">
+            <caption className="sr-only">
+              Retained audit entries, newest first. All timestamps are UTC.
+            </caption>
             <thead className="border-b border-zinc-800/80 bg-zinc-950/80 font-mono text-[10px] uppercase tracking-wider text-zinc-500 light:border-zinc-200 light:bg-zinc-100 light:text-zinc-600">
               <tr>
                 <th className="py-3 px-4">Timestamp (UTC)</th>
@@ -290,8 +355,8 @@ const AuditTrailView: React.FC = () => {
                     <span className="mx-auto grid h-10 w-10 place-items-center rounded-full border border-zinc-800 bg-zinc-950 text-zinc-500 light:border-zinc-200 light:bg-zinc-50">
                       <Search className="h-4 w-4" />
                     </span>
-                    <p className="mt-3 text-sm font-medium text-zinc-300 light:text-zinc-700">
-                      No audit entries found
+                    <p role="status" className="mt-3 text-sm font-medium text-zinc-300 light:text-zinc-700">
+                      {logsLoading ? 'Loading audit entries…' : 'No audit entries found'}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">Try changing the search or filters.</p>
                   </td>
@@ -346,6 +411,34 @@ const AuditTrailView: React.FC = () => {
           </table>
         </div>
 
+        <div className="audit-mobile-list" aria-busy={logsLoading}>
+          {paginatedLogs.length ? (
+            paginatedLogs.map((log) => (
+              <article key={log.id} className="audit-mobile-entry">
+                <div>
+                  <span className={`audit-level level-${log.level.toLowerCase()}`}>{log.level}</span>
+                  <span>{log.category}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedLog(log)}
+                  aria-label={`View audit details: ${log.event}`}
+                >
+                  {log.event}
+                </button>
+                <p>{log.details}</p>
+                <footer>
+                  <span>{log.actor || 'System'}</span>
+                  <time dateTime={log.timestamp}>{fmtDateTime(log.timestamp, 'UTC')} UTC</time>
+                </footer>
+              </article>
+            ))
+          ) : (
+            <p className="investigation-empty" role="status">
+              {logsLoading ? 'Loading audit entries…' : 'No entries match your filters.'}
+            </p>
+          )}
+        </div>
         <div className="border-t border-zinc-800/70 light:border-zinc-200">
           <Pagination
             currentPage={currentPage}
@@ -384,7 +477,7 @@ const AuditTrailView: React.FC = () => {
 
 export const OperationalLogsView: React.FC = () => {
   const { fetchEvents } = useApp();
-  const [tab, setTab] = useState<'events' | 'audit'>('events');
+  const [tab, setTab] = useState<'events' | 'audit'>('audit');
   const [category, setCategory] = useState('');
   const [level, setLevel] = useState('');
   const [query, setQuery] = useState('');
@@ -443,38 +536,64 @@ export const OperationalLogsView: React.FC = () => {
     };
   }, [tab, category, level, query, runId, cursor, refresh]);
   return (
-    <div className="space-y-6">
+    <div className="logs-workspace space-y-6">
+      <PageHeading page="logs">
+        Trace workspace activity, investigate operational events, and verify your retained audit records.
+      </PageHeading>
       <div
-        className="inline-flex rounded-xl border border-zinc-800 bg-zinc-950/70 p-1 light:border-zinc-200 light:bg-white"
+        onKeyDown={(event) => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault();
+          const nextTab =
+            event.key === 'Home'
+              ? 'events'
+              : event.key === 'End'
+                ? 'audit'
+                : tab === 'events'
+                  ? 'audit'
+                  : 'events';
+          setTab(nextTab);
+          document.getElementById(`logs-${nextTab}-tab`)?.focus();
+        }}
+        className="investigation-tabs inline-flex rounded-xl border border-zinc-800 bg-zinc-950/70 p-1 light:border-zinc-200 light:bg-white"
         role="tablist"
         aria-label="System logs views"
       >
         <button
           role="tab"
+          id="logs-events-tab"
+          aria-controls="logs-events-panel"
+          tabIndex={tab === 'events' ? 0 : -1}
           aria-selected={tab === 'events'}
           onClick={() => setTab('events')}
           className={`rounded-lg px-3.5 py-2 text-xs font-medium transition ${tab === 'events' ? 'bg-zinc-800 text-zinc-100 shadow-sm light:bg-blue-50 light:text-blue-800' : 'text-zinc-400 hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'}`}
         >
-          Operational events
+          <Cpu size={16} aria-hidden="true" /> Operational events
         </button>
         <button
           role="tab"
+          id="logs-audit-tab"
+          aria-controls="logs-audit-panel"
+          tabIndex={tab === 'audit' ? 0 : -1}
           aria-selected={tab === 'audit'}
           onClick={() => setTab('audit')}
           className={`rounded-lg px-3.5 py-2 text-xs font-medium transition ${tab === 'audit' ? 'bg-zinc-800 text-zinc-100 shadow-sm light:bg-blue-50 light:text-blue-800' : 'text-zinc-400 hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'}`}
         >
-          Audit trail
+          <ShieldCheck size={16} aria-hidden="true" /> Audit trail
         </button>
       </div>
       {tab === 'audit' ? (
         <AuditTrailView />
       ) : (
-        <>
+        <div id="logs-events-panel" role="tabpanel" aria-labelledby="logs-events-tab" className="space-y-6">
           <div className="ui-page-header">
-            <PageHeading page="logs" title="Operational events">
-              Pipeline, feeds, matching, delivery, system health, and issues. Search includes structured event
-              context.
-            </PageHeading>
+            <div>
+              <h2 className="investigation-section-title">Operational events</h2>
+              <p className="investigation-section-description">
+                Inspect pipeline, feed, matching, and delivery activity. Latest events refresh every 10
+                seconds.
+              </p>
+            </div>
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               {loading && <RotateCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
               {events.length > 0 && !loading && error === '' && (
@@ -603,6 +722,12 @@ export const OperationalLogsView: React.FC = () => {
             </div>
           )}
           <div aria-busy={loading} className="space-y-3">
+            {loading && events.length === 0 && (
+              <div className="ui-panel investigation-empty" role="status">
+                <RotateCw className="animate-spin" size={22} />
+                <p>Loading operational events…</p>
+              </div>
+            )}
             {events.length === 0 && !loading && !error && (
               <div className="p-8 text-center text-zinc-500">
                 <LogOut className="mx-auto h-6 w-6" />
@@ -653,7 +778,7 @@ export const OperationalLogsView: React.FC = () => {
                                 column width the single-line form clipped the
                                 value ("Oct 25, 2026, 9:"). */}
                             <div className="whitespace-nowrap tabular-nums">
-                              {fmtDateTime(event.timestamp, 'UTC')}
+                              {formatDate(event.timestamp, 'UTC')}
                             </div>
                             <div className="mt-0.5 whitespace-nowrap font-mono text-[10px] tabular-nums text-zinc-500">
                               {fmtDateTime(event.timestamp, 'UTC')} UTC
@@ -770,7 +895,7 @@ export const OperationalLogsView: React.FC = () => {
               </button>
             </div>
           </div>
-        </>
+        </div>
       )}
 
       {selectedEvent && (

@@ -54,7 +54,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
       }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
     >
-      <div className="ui-panel relative w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl light:border-zinc-200 light:bg-white">
+      <div className="ui-panel relative max-h-[calc(100dvh-2rem)] overflow-y-auto w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl light:border-zinc-200 light:bg-white">
         <button
           onClick={onClose}
           aria-label="Close"

@@ -1,5 +1,5 @@
 import { PageHeading } from './PageHeading';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   CpeMatchSimulation,
@@ -26,20 +26,14 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { copyText } from '../utils/clipboard';
-
-const CPE_REGEX = /^cpe:2\.3:[aoh]:[^:]+:[^:]+:(?:[^:*:-]+|\*|-):(?:\*|-|:[^:]*)/;
+import { parseCPE23 } from '../utils/cpeMatcher';
+import './investigation-pages.css';
 
 function validateCpeInput(cpe: string): { valid: boolean; message?: string } {
-  if (!cpe) return { valid: false, message: 'CPE string is required' };
-  if (!cpe.startsWith('cpe:2.3:')) return { valid: false, message: 'Must start with cpe:2.3:' };
-  const parts = cpe.split(':');
-  if (parts.length < 13)
-    return { valid: false, message: `Expected ≥13 colon-separated parts, got ${parts.length}` };
-  if (parts.length > 13) return { valid: false, message: `Expected at most 13 parts, got ${parts.length}` };
-  const part = parts[2];
-  if (!['a', 'o', 'h', '*'].includes(part))
-    return { valid: false, message: `Invalid part "${part}" — expected a, o, h, or *` };
-  return { valid: true };
+  if (!cpe.trim()) return { valid: false, message: 'Enter a CPE 2.3 name.' };
+  return parseCPE23(cpe.trim()).isValid
+    ? { valid: true }
+    : { valid: false, message: 'Enter a valid CPE 2.3 name with all 11 components.' };
 }
 
 const SEVERITY_TONES: Record<string, { border: string; bg: string; text: string; light: string }> = {
@@ -91,7 +85,7 @@ const CPE_PRESETS: CpePreset[] = [
     label: 'Log4Shell (Log4j 2)',
     description: 'Classic RCE via JNDI in Apache Log4j 2 < 2.15.0',
     assetCpe: 'cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*',
-    vulnerabilityCpe: 'cpe:2.3:a:apache:log4j:2:*:*:*:*:*:*:*',
+    vulnerabilityCpe: 'cpe:2.3:a:apache:log4j:*:*:*:*:*:*:*:*',
     assetVendor: 'apache',
     assetProduct: 'log4j',
     assetVersion: '2.14.1',
@@ -121,8 +115,8 @@ const CPE_PRESETS: CpePreset[] = [
 
 export const CpeMatcherView: React.FC = () => {
   const { simulateCpeMatch, searchNvdCpes } = useApp();
-  const [assetCpe, setAssetCpe] = useState('cpe:2.3:a:microsoft:windows_10:10.0.19041:*:*:*:*:*:*:*');
-  const [vulnerabilityCpe, setVulnerabilityCpe] = useState('cpe:2.3:a:microsoft:windows_10:*:*:*:*:*:*:*:*');
+  const [assetCpe, setAssetCpe] = useState('cpe:2.3:o:microsoft:windows_10:10.0.19041:*:*:*:*:*:*:*');
+  const [vulnerabilityCpe, setVulnerabilityCpe] = useState('cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*');
   const [assetVendor, setAssetVendor] = useState('microsoft');
   const [assetProduct, setAssetProduct] = useState('windows_10');
   const [assetVersion, setAssetVersion] = useState('10.0.19041');
@@ -134,6 +128,8 @@ export const CpeMatcherView: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const simulationSequence = useRef(0);
+  const [copiedCpe, setCopiedCpe] = useState('');
 
   const [activeTab, setActiveTab] = useState<'match' | 'lookup'>('match');
   const [lookupVendor, setLookupVendor] = useState('microsoft');
@@ -146,6 +142,11 @@ export const CpeMatcherView: React.FC = () => {
   const vulnCpeValid = useMemo(() => validateCpeInput(vulnerabilityCpe), [vulnerabilityCpe]);
 
   const handlePreset = (preset: CpePreset) => {
+    simulationSequence.current++;
+    setLoading(false);
+    setResult(null);
+    setError(null);
+    setVersionStartIncluding('');
     setAssetCpe(preset.assetCpe);
     setVulnerabilityCpe(preset.vulnerabilityCpe);
     setAssetVendor(preset.assetVendor);
@@ -156,6 +157,8 @@ export const CpeMatcherView: React.FC = () => {
   };
 
   const handleClear = () => {
+    simulationSequence.current++;
+    setLoading(false);
     setAssetCpe('');
     setVulnerabilityCpe('');
     setAssetVendor('');
@@ -181,7 +184,10 @@ export const CpeMatcherView: React.FC = () => {
   };
 
   const handleSimulate = async () => {
-    if (!assetCpe || !vulnerabilityCpe || !assetVendor || !assetProduct) return;
+    if (loading || !assetCpeValid.valid || !vulnCpeValid.valid || !assetVendor.trim() || !assetProduct.trim())
+      return;
+    const sequence = ++simulationSequence.current;
+    setResult(null);
     setLoading(true);
     setError(null);
     try {
@@ -199,11 +205,12 @@ export const CpeMatcherView: React.FC = () => {
               }
             : undefined,
       });
-      setResult(resp);
+      if (sequence === simulationSequence.current) setResult(resp);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Simulation failed');
+      if (sequence === simulationSequence.current)
+        setError(err instanceof Error ? err.message : 'Simulation failed');
     } finally {
-      setLoading(false);
+      if (sequence === simulationSequence.current) setLoading(false);
     }
   };
 
@@ -230,21 +237,15 @@ export const CpeMatcherView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <PageHeading
-        page="cpe-matcher"
-        children={
-          <span className="text-sm text-zinc-400 light:text-zinc-600">
-            Simulate CPE 2.3 matching between an asset and a vulnerability. The simulator parses both CPEs,
-            expands aliases, checks version ranges, and runs false-positive elimination rules before producing
-            a severity classification.
-          </span>
-        }
-      />
+    <div className="cpe-workspace space-y-6">
+      <PageHeading page="cpe-matcher">
+        Compare product identifiers, validate version applicability, and inspect the evidence behind a match.
+      </PageHeading>
 
-      <div className="flex gap-1 p-1 bg-zinc-800/50 dark:bg-zinc-800/50 light:bg-zinc-200 rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-300 mb-3">
+      <div className="investigation-tabs" aria-label="CPE tools">
         <button
           type="button"
+          aria-pressed={activeTab === 'match'}
           onClick={() => setActiveTab('match')}
           className={`flex-1 text-center text-xs font-medium py-1.5 rounded-md transition ${
             activeTab === 'match'
@@ -252,10 +253,11 @@ export const CpeMatcherView: React.FC = () => {
               : 'text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-900'
           }`}
         >
-          CPE Match &amp; Classifier
+          <ScanLine size={16} aria-hidden="true" /> Match &amp; classify
         </button>
         <button
           type="button"
+          aria-pressed={activeTab === 'lookup'}
           onClick={() => setActiveTab('lookup')}
           className={`flex-1 text-center text-xs font-medium py-1.5 rounded-md transition ${
             activeTab === 'lookup'
@@ -263,16 +265,25 @@ export const CpeMatcherView: React.FC = () => {
               : 'text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-900'
           }`}
         >
-          CPE Lookup
+          <Database size={16} aria-hidden="true" /> NVD dictionary
         </button>
       </div>
 
       <div
-        className={`ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4 ${activeTab === 'lookup' ? 'hidden' : ''}`}
+        className={`ui-panel cpe-input-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4 ${activeTab === 'lookup' ? 'hidden' : ''}`}
       >
-        <div className="flex flex-wrap gap-1.5 pb-2 -mx-4 border-b border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200">
+        <div className="investigation-panel-heading">
+          <span className="investigation-icon">
+            <ScanLine size={20} aria-hidden="true" />
+          </span>
+          <div>
+            <h2>Compare an asset with an affected product</h2>
+            <p>Enter both CPE names, then refine the asset identity and version range.</p>
+          </div>
+        </div>
+        <div className="cpe-presets">
           <span className="px-4 text-xs font-semibold uppercase tracking-wider text-zinc-500 light:text-zinc-600">
-            Presets
+            Examples
           </span>
           {CPE_PRESETS.map((preset) => (
             <button
@@ -288,49 +299,75 @@ export const CpeMatcherView: React.FC = () => {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+            <label
+              htmlFor="asset-cpe"
+              className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1"
+            >
               Asset CPE 2.3
             </label>
             <input
+              id="asset-cpe"
+              aria-invalid={!!assetCpe && !assetCpeValid.valid}
+              aria-describedby={assetCpe && !assetCpeValid.valid ? 'asset-cpe-help' : undefined}
               type="text"
               value={assetCpe}
               onChange={(e) => setAssetCpe(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="cpe:2.3:a:vendor:product:version:*:*:*:*:*:*:*:*"
+              placeholder="cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*"
               className={`w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:border-zinc-600 placeholder-zinc-500 ${
                 !assetCpeValid.valid ? 'border-rose-500/50 focus:ring-rose-500/50' : 'border-zinc-600'
               }`}
             />
             {!assetCpeValid.valid && assetCpe && (
-              <p className="mt-1 text-[10px] text-rose-400 light:text-rose-700">{assetCpeValid.message}</p>
+              <p id="asset-cpe-help" role="status" className="mt-1 text-xs text-rose-400 light:text-rose-700">
+                {assetCpeValid.message}
+              </p>
             )}
           </div>
           <div>
-            <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+            <label
+              htmlFor="vulnerability-cpe"
+              className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1"
+            >
               Vulnerability CPE 2.3
             </label>
             <input
+              id="vulnerability-cpe"
+              aria-invalid={!!vulnerabilityCpe && !vulnCpeValid.valid}
+              aria-describedby={
+                vulnerabilityCpe && !vulnCpeValid.valid ? 'vulnerability-cpe-help' : undefined
+              }
               type="text"
               value={vulnerabilityCpe}
               onChange={(e) => setVulnerabilityCpe(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="cpe:2.3:a:vendor:product:version:*:*:*:*:*:*:*:*"
+              placeholder="cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*"
               className={`w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md font-mono focus:outline-none focus:ring-1 focus:border-zinc-600 placeholder-zinc-500 ${
                 !vulnCpeValid.valid ? 'border-rose-500/50 focus:ring-rose-500/50' : 'border-zinc-600'
               }`}
             />
             {!vulnCpeValid.valid && vulnerabilityCpe && (
-              <p className="mt-1 text-[10px] text-rose-400 light:text-rose-700">{vulnCpeValid.message}</p>
+              <p
+                id="vulnerability-cpe-help"
+                role="status"
+                className="mt-1 text-xs text-rose-400 light:text-rose-700"
+              >
+                {vulnCpeValid.message}
+              </p>
             )}
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+            <label
+              htmlFor="asset-vendor"
+              className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1"
+            >
               Asset vendor
             </label>
             <input
+              id="asset-vendor"
               type="text"
               value={assetVendor}
               onChange={(e) => setAssetVendor(e.target.value)}
@@ -338,10 +375,14 @@ export const CpeMatcherView: React.FC = () => {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+            <label
+              htmlFor="asset-product"
+              className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1"
+            >
               Asset product
             </label>
             <input
+              id="asset-product"
               type="text"
               value={assetProduct}
               onChange={(e) => setAssetProduct(e.target.value)}
@@ -351,10 +392,14 @@ export const CpeMatcherView: React.FC = () => {
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+          <label
+            htmlFor="asset-version"
+            className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1"
+          >
             Asset version (for range checking)
           </label>
           <input
+            id="asset-version"
             type="text"
             value={assetVersion}
             onChange={(e) => setAssetVersion(e.target.value)}
@@ -367,21 +412,30 @@ export const CpeMatcherView: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
+            aria-expanded={showAdvanced}
+            aria-controls="cpe-version-range"
             onClick={() => setShowAdvanced(!showAdvanced)}
             className="flex items-center gap-1 text-xs text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-900 transition-colors"
           >
             {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            Advanced: version range
+            Refine version range
           </button>
         </div>
 
         {showAdvanced && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200">
+          <div
+            id="cpe-version-range"
+            className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200"
+          >
             <div>
-              <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+              <label
+                htmlFor="range-start"
+                className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1"
+              >
                 Version start (inclusive)
               </label>
               <input
+                id="range-start"
                 type="text"
                 value={versionStartIncluding}
                 onChange={(e) => setVersionStartIncluding(e.target.value)}
@@ -390,10 +444,14 @@ export const CpeMatcherView: React.FC = () => {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+              <label
+                htmlFor="range-end"
+                className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1"
+              >
                 Version end (exclusive)
               </label>
               <input
+                id="range-end"
                 type="text"
                 value={versionEndExcluding}
                 onChange={(e) => setVersionEndExcluding(e.target.value)}
@@ -404,13 +462,14 @@ export const CpeMatcherView: React.FC = () => {
           </div>
         )}
 
-        <div className="flex justify-end gap-3 pt-2">
+        <div className="cpe-form-actions">
           <button
             type="button"
             onClick={handleCopy}
             disabled={!result}
             className="p-1.5 text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-900 disabled:opacity-50 rounded transition-colors"
             title="Copy simulation result"
+            aria-label="Copy simulation result"
           >
             {copied ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
           </button>
@@ -425,8 +484,14 @@ export const CpeMatcherView: React.FC = () => {
           <button
             type="button"
             onClick={() => void handleSimulate()}
-            disabled={loading || !assetCpe || !vulnerabilityCpe}
-            className="px-4 py-2 bg-blue-500/15 border border-blue-400/30 text-blue-300 light:text-blue-800 rounded-md font-medium hover:bg-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            disabled={
+              loading ||
+              !assetCpeValid.valid ||
+              !vulnCpeValid.valid ||
+              !assetVendor.trim() ||
+              !assetProduct.trim()
+            }
+            className="ui-primary"
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
             Simulate CPE match
@@ -437,14 +502,17 @@ export const CpeMatcherView: React.FC = () => {
         </div>
       </div>
 
-      {error && (
-        <div className="rounded-md border border-rose-500/30 bg-rose-500/10 p-3 flex items-center gap-2">
+      {activeTab === 'match' && error && (
+        <div
+          role="alert"
+          className="rounded-md border border-rose-500/30 bg-rose-500/10 p-3 flex items-center gap-2"
+        >
           <AlertCircle className="h-4 w-4 text-rose-400 light:text-rose-800" />
           <span className="text-sm text-rose-300 light:text-rose-800">{error}</span>
         </div>
       )}
 
-      {result && (
+      {activeTab === 'match' && result && !loading && (
         <div className="space-y-6">
           <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 overflow-hidden">
             <div className="p-4 border-b border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 flex items-center justify-between">
@@ -593,72 +661,100 @@ export const CpeMatcherView: React.FC = () => {
           </div>
 
           {result.severity && <SeverityCard severity={result.severity} />}
-
-          {loading && (
-            <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
-              <Loader2 className="mx-auto h-6 w-6 text-blue-400 animate-spin mb-2" />
-              <p className="text-sm text-zinc-400 light:text-zinc-600">Simulating CPE match...</p>
-            </div>
-          )}
         </div>
       )}
 
-      {!result && !loading && !error && (
+      {activeTab === 'match' && loading && (
+        <div className="ui-panel investigation-empty" role="status" aria-busy="true">
+          <Loader2 className="animate-spin" size={24} />
+          <h2>Evaluating product applicability</h2>
+          <p>Checking identifiers, aliases, and version constraints.</p>
+        </div>
+      )}
+      {activeTab === 'match' && !result && !loading && !error && (
         <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-8 text-center">
           <ScanLine className="mx-auto h-10 w-10 text-zinc-600 light:text-zinc-400 mb-3" />
           <p className="text-sm text-zinc-400 light:text-zinc-600">
-            Enter CPE 2.3 strings and click "Simulate CPE match" to start.
+            Run a comparison to see match confidence, parsed components, and version evidence.
           </p>
         </div>
       )}
       {activeTab === 'lookup' && (
         <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-300 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="investigation-panel-heading">
+            <span className="investigation-icon">
+              <Database size={20} aria-hidden="true" />
+            </span>
             <div>
-              <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
-                Vendor
-              </label>
-              <input
-                type="text"
-                value={lookupVendor}
-                onChange={(e) => setLookupVendor(e.target.value)}
-                placeholder="e.g. microsoft, cisco, paloaltonetworks"
-                className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md focus:outline-none focus:ring-1 focus:border-zinc-600 placeholder-zinc-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
-                Product (optional)
-              </label>
-              <input
-                type="text"
-                value={lookupProduct}
-                onChange={(e) => setLookupProduct(e.target.value)}
-                placeholder="e.g. windows_10, ios, pan-os"
-                className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md focus:outline-none focus:ring-1 focus:border-zinc-600 placeholder-zinc-500"
-              />
+              <h2>Find a verified CPE name</h2>
+              <p>Search the official NVD dictionary, then use a result in your comparison.</p>
             </div>
           </div>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!lookupLoading) void handleLookup();
+            }}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label
+                  htmlFor="lookup-vendor"
+                  className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1"
+                >
+                  Vendor
+                </label>
+                <input
+                  id="lookup-vendor"
+                  type="text"
+                  value={lookupVendor}
+                  onChange={(e) => setLookupVendor(e.target.value)}
+                  placeholder="e.g. microsoft, cisco, paloaltonetworks"
+                  className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md focus:outline-none focus:ring-1 focus:border-zinc-600 placeholder-zinc-500"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="lookup-product"
+                  className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1"
+                >
+                  Product (optional)
+                </label>
+                <input
+                  id="lookup-product"
+                  type="text"
+                  value={lookupProduct}
+                  onChange={(e) => setLookupProduct(e.target.value)}
+                  placeholder="e.g. windows_10, ios, pan-os"
+                  className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md focus:outline-none focus:ring-1 focus:border-zinc-600 placeholder-zinc-500"
+                />
+              </div>
+            </div>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={handleLookup}
-              disabled={lookupLoading || !lookupVendor.trim()}
-              className="px-4 py-2 bg-blue-500/15 border border-blue-400/30 text-blue-300 light:text-blue-800 rounded-md font-medium hover:bg-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 text-xs"
-            >
-              {lookupLoading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-              Search NVD
-            </button>
-          </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="submit" disabled={lookupLoading || !lookupVendor.trim()} className="ui-primary">
+                {lookupLoading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+                Search NVD
+              </button>
+            </div>
+          </form>
 
           {lookupError && (
-            <div className="rounded-md border border-rose-500/30 bg-rose-500/10 p-3 flex items-center gap-2">
+            <div
+              role="alert"
+              className="rounded-md border border-rose-500/30 bg-rose-500/10 p-3 flex items-center gap-2"
+            >
               <AlertCircle className="h-4 w-4 text-rose-400 light:text-rose-800" />
               <span className="text-sm text-rose-300 light:text-rose-800">{lookupError}</span>
             </div>
           )}
 
+          {lookupLoading && (
+            <div className="investigation-empty" role="status">
+              <Loader2 className="animate-spin" size={22} />
+              <p>Searching the NVD dictionary…</p>
+            </div>
+          )}
           {lookupResults && (
             <div className="space-y-2">
               <div className="text-xs text-zinc-500 light:text-zinc-600">
@@ -669,7 +765,7 @@ export const CpeMatcherView: React.FC = () => {
                   No verified CPEs found in the NVD dictionary for this vendor/product.
                 </p>
               ) : (
-                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                <div className="cpe-lookup-results">
                   {(lookupResults.results as NvdCpeSearchResult[]).map((cpe) => (
                     <div
                       key={cpe.cpeNameId || cpe.cpeName}
@@ -687,11 +783,36 @@ export const CpeMatcherView: React.FC = () => {
                       </div>
                       <button
                         type="button"
-                        onClick={() => void copyText(cpe.cpeName)}
+                        className="ui-secondary cpe-use-result"
+                        onClick={() => {
+                          simulationSequence.current++;
+                          setLoading(false);
+                          setResult(null);
+                          setError(null);
+                          setAssetCpe(cpe.cpeName);
+                          setAssetVendor(cpe.vendor);
+                          setAssetProduct(cpe.product);
+                          setAssetVersion(['*', '-'].includes(cpe.version) ? '' : cpe.version);
+                          setVersionStartIncluding('');
+                          setVersionEndExcluding('');
+                          setActiveTab('match');
+                        }}
+                      >
+                        Use as asset
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (await copyText(cpe.cpeName)) {
+                            setCopiedCpe(cpe.cpeName);
+                            setTimeout(() => setCopiedCpe(''), 2000);
+                          }
+                        }}
                         className="ml-2 p-1.5 rounded text-zinc-400 hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900 hover:bg-zinc-800 light:hover:bg-zinc-200 transition"
+                        aria-label={`Copy ${cpe.cpeName}`}
                         title="Copy CPE 2.3 name"
                       >
-                        <Copy size={12} />
+                        {copiedCpe === cpe.cpeName ? <Check size={15} /> : <Copy size={15} />}
                       </button>
                     </div>
                   ))}
