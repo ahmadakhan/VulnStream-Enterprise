@@ -11,6 +11,9 @@ import type { IntelligenceArticle } from '../src/types/index.ts';
 export const RSS_MAX_BYTES = 16 * 1024 * 1024;
 export const RSS_MAX_ENTRIES = 10000;
 
+export const RSS_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
 export function canonicalArticleUrl(value: string): string | null {
   try {
     const url = new URL(value);

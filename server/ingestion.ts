@@ -1,7 +1,7 @@
 import type { ThreatFeed, NormalizedCVE, IntelligenceArticle } from '../src/types/index.ts';
 import { ingestMitre } from './mitre';
 import { ingestionWindow, recentRevisions, type IngestionState } from './ingestionState';
-import { parseSyndication, RSS_MAX_BYTES } from './rss';
+import { parseSyndication, RSS_MAX_BYTES, RSS_USER_AGENT } from './rss';
 import type { Requester, RequestOptions, ResponseData } from './network';
 import { cveSchema } from './validation';
 import { decrypt } from './secrets';
@@ -258,7 +258,7 @@ export async function ingestFeed(
   };
   if (feed.type === 'MITRE_CVE') return ingestMitre(feed, scopeHours, request, sleep, context);
   if (feed.type === 'RSS_ATOM') {
-    const response = await request(feed.url, { headers: { ...headers, accept:'application/rss+xml, application/atom+xml, application/xml, text/xml',
+    const response = await request(feed.url, { headers: { ...headers, 'user-agent': RSS_USER_AGENT, accept:'application/rss+xml, application/atom+xml, application/xml, text/xml',
       ...(feed.etag ? { 'If-None-Match':feed.etag } : {}) }, timeoutMs:25000, maxResponseBytes:RSS_MAX_BYTES });
     if (response.status === 304 && feed.etag) return { cves:[], count:0, notModified:true, etag:feed.etag };
     if (response.status !== 200) throw new Error(`RSS/Atom source returned HTTP ${response.status}`);

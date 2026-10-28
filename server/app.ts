@@ -53,7 +53,7 @@ import { enqueue, queueAdvisory } from './delivery';
 import { advisoryEmail } from './advisoryEmail';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG, isCollectionKind } from '../shared/state.ts';
 import { emailIsConfigured } from './emailProviders';
-import { parseSyndication, RSS_MAX_BYTES } from './rss';
+import { parseSyndication, RSS_MAX_BYTES, RSS_USER_AGENT } from './rss';
 import {
   describeError,
   describeFailureSummary,
@@ -1313,7 +1313,7 @@ export function createApp(
       const start = performance.now();
       const headers: Record<string, string> =
         feed.type === 'RSS_ATOM'
-          ? { Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' }
+          ? { 'User-Agent': RSS_USER_AGENT, Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' }
           : {};
       let secret: string;
       try {
