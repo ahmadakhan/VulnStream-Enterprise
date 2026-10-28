@@ -28,6 +28,7 @@ import { createApp } from './app';
 import { createRequester } from './network';
 import { createMailSender, deliverNext } from './delivery';
 import { flushDueDigest } from './digest';
+import { closePdfRenderer } from './pdf';
 import { processPipeline } from './pipeline';
 import { runRetention } from './retention';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
@@ -287,6 +288,7 @@ async function shutdown() {
     [pipeline, outbox, digest, retentionRunning].filter(Boolean) as Promise<unknown>[],
   );
   await correlation.stop();
+  await closePdfRenderer();
   await pool.end();
   clearTimeout(deadline);
 }

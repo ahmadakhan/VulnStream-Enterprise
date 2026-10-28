@@ -112,7 +112,12 @@ const schema = z.object({
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(465),
   SMTP_USER: z.string().default(''),
   SMTP_PASSWORD: z.string().default(''),
-  SMTP_FROM: z.union([z.email(), z.literal('')]).default(''),
+   SMTP_FROM: z.union([z.email(), z.literal('')]).default(''),
+  // A PDF copy of each advisory is attached to outbound emails when enabled.
+  // Rendering is performed with a headless browser; set ATTACH_ADVISORY_PDF=false
+  // (or omit a usable Chrome executable) to fall back to HTML-only delivery.
+  ATTACH_ADVISORY_PDF: z.enum(['true', 'false']).default('true'),
+  CHROME_EXECUTABLE_PATH: z.string().default(''),
   FEED_MAX_DURATION_SECONDS: z.coerce.number().int().min(1).max(7200).default(1800),
   WORKER_ENABLED: z.enum(['true', 'false']).default('true'),
   // Seed the recommended-threat-feed catalog on first bootstrap. Off by default:

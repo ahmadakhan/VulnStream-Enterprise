@@ -90,6 +90,52 @@ test('provider requests preserve recipients and body and validate native accepta
   }
 });
 
+test('advisory PDF attachment is encoded per provider', async () => {
+  const attachment = {
+    filename: 'Security-Advisory-TEST.pdf',
+    content: Buffer.from('%PDF-1.4\n%fake advisory pdf bytes for encoding coverage\n'),
+    contentType: 'application/pdf',
+  };
+  const base64 = attachment.content.toString('base64');
+  for (const provider of ['MAILGUN', 'SENDGRID', 'POSTMARK', 'MAILJET_API', 'MAILTRAP'] as const) {
+    const config = {
+      ...configuration(provider),
+      ...(provider === 'MAILJET_API' ? { mailjetApiSecret: 'secret' } : {}),
+    };
+    let capturedBody: string | undefined;
+    const result = await sendProviderEmail(
+      config,
+      token,
+      job,
+      async (_url, options) => {
+        capturedBody = options?.body;
+        if (provider === 'SENDGRID')
+          return { status: 202, headers: { 'x-message-id': 'id' }, body: '' };
+        if (provider === 'POSTMARK')
+          return { status: 200, headers: {}, body: JSON.stringify({ ErrorCode: 0, MessageID: 'id' }) };
+        if (provider === 'MAILJET_API')
+          return {
+            status: 200,
+            headers: {},
+            body: JSON.stringify({ Messages: [{ To: [{ MessageID: 'id' }], ID: 'fallback' }] }),
+          };
+        if (provider === 'MAILGUN')
+          return { status: 200, headers: {}, body: JSON.stringify({ id: 'id' }) };
+        return { status: 200, headers: {}, body: JSON.stringify({ success: true, message_ids: ['id'] }) };
+      },
+      false,
+      attachment,
+    );
+    assert.equal(result, 'id');
+    assert.ok(capturedBody, `body should be captured for ${provider}`);
+    assert.ok(capturedBody!.includes(base64), `${provider} body must contain the PDF base64`);
+    assert.ok(
+      capturedBody!.includes('Security-Advisory-TEST.pdf'),
+      `${provider} body must contain the attachment filename`,
+    );
+  }
+});
+
 test('MAILJET_API uses Basic auth with decrypted token and secret', async () => {
   const mailjetSecret = 'test-mailjet-secret';
   const config = { ...configuration('MAILJET_API'), mailjetApiSecret: mailjetSecret };
@@ -173,6 +219,7 @@ test(
       APP_ORIGIN: 'http://localhost',
       ENCRYPTION_KEY: randomBytes(32).toString('base64'),
       WORKER_ENABLED: 'false',
+      ATTACH_ADVISORY_PDF: 'false',
     });
     const pool = createPool(url.href);
     try {

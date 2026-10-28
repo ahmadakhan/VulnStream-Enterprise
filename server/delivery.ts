@@ -1,6 +1,7 @@
 import { validateNativeDelivery, type NativeDelivery } from './correlation/notificationEvidence.ts';
 import { describeError, writeEvent } from './events';
 import { advisoryEmail } from './advisoryEmail';
+import { advisoryFilename, renderAdvisoryPdf } from './pdf';
 import type pg from 'pg';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
@@ -64,6 +65,11 @@ export interface Job {
 export type MailSender = (
   job: Job,
 ) => Promise<string | { id: string; provider: EmailDeliveryLog['provider'] }>;
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+};
 export interface EmailRetryPolicy {
   /** When false, a transient failure becomes terminal after the first attempt. */
   enabled: boolean;
@@ -250,6 +256,35 @@ export function webhookAllows(hook: WebhookEndpoint, finding: Finding): boolean 
     (hook.events.includes('CISA_KEV') && finding.cve.cisaKev?.isKev)
   );
 }
+/** Renders the advisory HTML to a PDF attachment for the job, or undefined when
+ *  PDF delivery is disabled, the job carries no HTML body, or rendering fails.
+ *  Failures degrade to HTML-only delivery instead of blocking the send. */
+async function buildPdfAttachment(job: Job, config: Config, db?: Db): Promise<EmailAttachment | undefined> {
+  if (config.ATTACH_ADVISORY_PDF !== 'true' || !job.payload.html) return undefined;
+  try {
+    const pdf = await renderAdvisoryPdf(job.payload.html, config);
+    return {
+      filename: advisoryFilename(job.advisory_id),
+      content: Buffer.from(pdf),
+      contentType: 'application/pdf',
+    };
+  } catch (error) {
+    if (db)
+      await writeEvent(db, {
+        category: 'EMAIL',
+        level: 'WARNING',
+        code: 'delivery.pdf_attachment_failed',
+        message: 'Advisory PDF attachment could not be generated; delivering HTML only',
+        context: {
+          jobId: job.id,
+          channel: job.channel,
+          advisoryId: job.advisory_id,
+          error: String((error as Error)?.message || error),
+        },
+      }).catch(() => undefined);
+    return undefined;
+  }
+}
 export function createMailSender(
   config: Config,
   db?: Db,
@@ -268,10 +303,11 @@ export function createMailSender(
         disableFileAccess: true,
         disableUrlAccess: true,
       })
-    : null;
+     : null;
   return async (job) => {
     const saved = (db && (await get<EmailConfiguration>(db, 'emailConfig', 'main'))) || DEFAULT_EMAIL_CONFIG;
     if (!emailIsConfigured(saved, config)) throw new Error('Email provider is not configured');
+    const attachment = await buildPdfAttachment(job, config, db);
     if (!isSmtpEmailProvider(saved.provider)) {
       const token = decrypt(saved.apiKey, config.ENCRYPTION_KEY, `email-provider:${saved.provider}`);
       if (!token) throw new Error('Email provider token is missing');
@@ -287,6 +323,7 @@ export function createMailSender(
           job,
           request,
           config.MAILJET_SANDBOX_MODE === 'true',
+          attachment,
         );
         return { id, provider };
       } catch (error) {
@@ -325,9 +362,10 @@ export function createMailSender(
       subject: job.payload.subject,
       text: job.payload.text,
       html: job.payload.html,
-      messageId: `<${job.id}@${fromEmail.split('@').pop()}>`,
-      headers: { 'X-BA-Threat-Intel-Delivery-ID': job.id },
-    });
+       messageId: `<${job.id}@${fromEmail.split('@').pop()}>`,
+       headers: { 'X-BA-Threat-Intel-Delivery-ID': job.id },
+       ...(attachment ? { attachments: [attachment] } : {}),
+     });
     if (
       !result.accepted?.some(
         (address) => String(address).toLowerCase() === job.payload.recipientEmail?.toLowerCase(),

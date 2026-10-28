@@ -13,8 +13,9 @@ import {
   WebhookDeliveryLog,
 } from '../../src/types/index.ts';
 import { quickHash } from '../../src/utils/cryptoChain.ts';
+import { RECOMMENDED_FEEDS } from '../../server/recommendedFeeds.ts';
 
-export const INITIAL_FEEDS: ThreatFeed[] = [
+const SEEDED_FEEDS: ThreatFeed[] = [
   {
     id: 'feed-msrc',
     name: 'Microsoft Security Response Center (MSRC)',
@@ -105,6 +106,29 @@ export const INITIAL_FEEDS: ThreatFeed[] = [
     itemCountLastRun: 7,
     ssrfValidated: true,
   },
+];
+
+/**
+ * Fixture feeds plus the recommended catalog, exactly as `scripts/seed.ts`
+ * receives it. Spreading RECOMMENDED_FEEDS here keeps the fixture from
+ * carrying a second, silently stale copy of the default feed URLs: when a
+ * publisher moves its feed, only recommendedFeeds.ts changes.
+ *
+ * The runtime catalog is deliberately not imported by any server module (the
+ * seed imports it at build time), and the production build does not resolve a
+ * file imported only through a type re-export in seedData.ts. So the fixture
+ * cannot be the thing that keeps this list out of the shipped image.
+ */
+export const INITIAL_FEEDS: ThreatFeed[] = [
+  ...SEEDED_FEEDS,
+  ...RECOMMENDED_FEEDS.map((feed): ThreatFeed => ({
+    ...feed,
+    healthStatus: 'UNTESTED',
+    lastSync: null,
+    latencyMs: 0,
+    itemCountLastRun: 0,
+    ssrfValidated: false,
+  })),
 ];
 
 export const INITIAL_WATCHLIST: WatchListItem[] = [

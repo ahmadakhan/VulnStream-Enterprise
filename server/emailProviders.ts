@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isSmtpEmailProvider, type EmailConfiguration, type EmailDeliveryLog } from '../src/types/index.ts';
-import type { Job } from './delivery';
+import type { EmailAttachment, Job } from './delivery';
 import type { Requester } from './network';
 
 export const EMAIL_PROVIDER_LABELS: Record<EmailConfiguration['provider'], EmailDeliveryLog['provider']> = {
@@ -81,6 +81,7 @@ export async function sendProviderEmail(
   job: Job,
   request: Requester,
   sandboxMode = false,
+  attachment?: EmailAttachment,
 ): Promise<string> {
   const endpoint = emailEndpoint(config);
   if (!endpoint) throw new Error('Select an API email provider');
@@ -95,6 +96,9 @@ export async function sendProviderEmail(
   };
   const { subject, text, html, recipientEmail } = job.payload;
   const deliveryHeader = { 'X-BA-Threat-Intel-Delivery-ID': job.id };
+  const pdfBase64 = attachment ? attachment.content.toString('base64') : undefined;
+  const pdfFilename = attachment?.filename;
+  const pdfContentType = attachment?.contentType ?? 'application/pdf';
   let body: string;
   if (config.provider === 'API') {
     body = JSON.stringify({
@@ -103,6 +107,7 @@ export async function sendProviderEmail(
       subject,
       text,
       ...(html ? { html } : {}),
+      ...(attachment ? { attachments: [{ content: pdfBase64, type: pdfContentType, filename: pdfFilename }] } : {}),
       headers: deliveryHeader,
     });
   } else if (config.provider === 'MAILGUN') {
@@ -119,13 +124,16 @@ export async function sendProviderEmail(
       'o:require-tls': 'yes',
       ...(html ? { html } : {}),
     };
-    body =
-      Object.entries(fields)
-        .map(
-          ([name, value]) =>
-            `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
-        )
-        .join('') + `--${boundary}--\r\n`;
+    let fieldsBody = Object.entries(fields)
+      .map(
+        ([name, value]) =>
+          `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+      )
+      .join('');
+    if (attachment) {
+      fieldsBody += `--${boundary}\r\nContent-Disposition: form-data; name="attachment"; filename="${pdfFilename}"\r\nContent-Type: ${pdfContentType}\r\nContent-Transfer-Encoding: base64\r\n\r\n${pdfBase64}\r\n`;
+    }
+    body = fieldsBody + `--${boundary}--\r\n`;
   } else if (config.provider === 'SENDGRID') {
     body = JSON.stringify({
       personalizations: [{ to: [{ email: recipientEmail }], custom_args: { delivery_id: job.id } }],
@@ -133,6 +141,9 @@ export async function sendProviderEmail(
       subject,
       headers: deliveryHeader,
       content: [{ type: 'text/plain', value: text }, ...(html ? [{ type: 'text/html', value: html }] : [])],
+      ...(attachment
+        ? { attachments: [{ content: pdfBase64, type: pdfContentType, filename: pdfFilename, disposition: 'attachment' }] }
+        : {}),
     });
   } else if (config.provider === 'POSTMARK') {
     delete headers.Authorization;
@@ -143,6 +154,7 @@ export async function sendProviderEmail(
       Subject: subject,
       TextBody: text,
       ...(html ? { HtmlBody: html } : {}),
+      ...(attachment ? { Attachments: [{ Name: pdfFilename, Content: pdfBase64, ContentType: pdfContentType }] } : {}),
       MessageStream: config.postmarkMessageStream,
       Metadata: { delivery_id: job.id },
       Headers: [{ Name: 'X-BA-Threat-Intel-Delivery-ID', Value: job.id }],
@@ -159,6 +171,13 @@ export async function sendProviderEmail(
           Subject: subject,
           TextPart: text,
           HTMLPart: html,
+          ...(attachment
+            ? {
+                Attachments: [
+                  { FileName: pdfFilename, ContentType: pdfContentType, Base64Content: pdfBase64 },
+                ],
+              }
+            : {}),
           Headers: [{ Name: 'X-BA-Threat-Intel-Delivery-ID', Value: job.id }],
         },
       ],
@@ -170,6 +189,7 @@ export async function sendProviderEmail(
       subject,
       text,
       ...(html ? { html } : {}),
+      ...(attachment ? { attachments: [{ content: pdfBase64, type: pdfContentType, name: pdfFilename }] } : {}),
       headers: deliveryHeader,
     });
   }
