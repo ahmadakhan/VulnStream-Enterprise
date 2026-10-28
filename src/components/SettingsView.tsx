@@ -10,13 +10,14 @@ import {
   LoaderCircle,
   KeyRound,
   LockKeyhole,
-  Plus,
-  Settings2,
-  ShieldCheck,
-  SlidersHorizontal,
-  Users,
-  Clock,
-} from 'lucide-react';
+   Plus,
+   Settings2,
+   ShieldCheck,
+   SlidersHorizontal,
+   Users,
+   Clock,
+   Trash2,
+ } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { EmailProviderSettings } from './EmailProviderSettings';
 import type { AppSettings } from '../types';
@@ -60,7 +61,7 @@ function SectionHeading({
 }
 
 export function SettingsView() {
-  const { settings, updateSettings, changePassword, session, listUsers, createUser, updateUser, resetUserPassword, pending } =
+  const { settings, updateSettings, changePassword, session, listUsers, createUser, updateUser, deleteUser, resetUserPassword, pending } =
     useApp();
   const [form, setForm] = useState<AppSettings>(() => withEmailRetryDefaults(settings));
   const [securityForm, setSecurityForm] = useState<AppSettings['securityPolicy']>(settings.securityPolicy);
@@ -76,6 +77,8 @@ export function SettingsView() {
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState('');
   const [resetUserId, setResetUserId] = useState<string | null>(null);
+  const [disablingUserId, setDisablingUserId] = useState<string | null>(null);
+  const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState('');
   const admin = session?.role === 'ADMIN';
   const [activeSection, setActiveSection] = useState(admin ? 'processing' : 'security');
@@ -1001,14 +1004,29 @@ export function SettingsView() {
                               }`}
                               disabled={pending > 0}
                               onClick={async () => {
+                                if (!user.disabled) {
+                                  setDisablingUserId(user.id);
+                                  return;
+                                }
                                 await updateUser(user.id, { role: user.role, disabled: !user.disabled });
                                 await reloadUsers();
                               }}
                             >
-                              {user.disabled ? 'Enable account' : 'Disable account'}
-                            </button>
-                          )}
-                        </div>
+                               {user.disabled ? 'Enable account' : 'Disable account'}
+                             </button>
+                           )}
+                           {user.username !== session?.username && (
+                             <button
+                               type="button"
+                               className="min-h-8 rounded-lg border border-rose-500/25 px-3 py-1.5 text-[11px] font-medium text-rose-300 hover:bg-rose-500/10 transition light:border-rose-200 light:text-rose-700 light:hover:bg-rose-100"
+                               disabled={pending > 0}
+                               onClick={() => setDeleteUserId(user.id)}
+                             >
+                               <Trash2 className="h-3 w-3 inline mr-1" />
+                               Delete account
+                             </button>
+                           )}
+                         </div>
                         </li>
                       ))}
                   </ul>
@@ -1072,6 +1090,88 @@ export function SettingsView() {
                 }}
               >
                 Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Disable Account Confirmation Modal */}
+      {disablingUserId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+            <h3 className="text-sm font-bold text-rose-300 dark:text-rose-300 light:text-rose-700 mb-2">
+              Disable Operator Account?
+            </h3>
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 leading-relaxed mb-6">
+              Are you sure you want to disable this account? The operator will be unable to sign in until the
+              account is re-enabled, and any active sessions are revoked.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDisablingUserId(null)}
+                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 text-xs font-medium transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const target = users.find((u) => u.id === disablingUserId);
+                  if (!target) {
+                    setDisablingUserId(null);
+                    return;
+                  }
+                  await updateUser(target.id, { role: target.role, disabled: true });
+                  await reloadUsers();
+                  setDisablingUserId(null);
+                }}
+                disabled={pending > 0}
+                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold disabled:opacity-50 transition"
+              >
+                {pending > 0 ? 'Disabling…' : 'Disable Account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Account Confirmation Modal */}
+      {deleteUserId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+            <h3 className="text-sm font-bold text-rose-300 dark:text-rose-300 light:text-rose-700 mb-2">
+              Delete Operator Account?
+            </h3>
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 leading-relaxed mb-6">
+              This action is permanent. The operator will be removed from the workspace and all active
+              sessions will be revoked. This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteUserId(null)}
+                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 text-xs font-medium transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const target = users.find((u) => u.id === deleteUserId);
+                  if (!target) {
+                    setDeleteUserId(null);
+                    return;
+                  }
+                  await deleteUser(target.id);
+                  await reloadUsers();
+                  setDeleteUserId(null);
+                }}
+                disabled={pending > 0}
+                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold disabled:opacity-50 transition"
+              >
+                {pending > 0 ? 'Deleting…' : 'Delete Account'}
               </button>
             </div>
           </div>

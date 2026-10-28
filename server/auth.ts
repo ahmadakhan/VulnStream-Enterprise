@@ -118,6 +118,21 @@ export async function createUser(pool: pg.Pool, username: string, password: stri
     await appendAudit(db, 'Operator created', `Role ${role}`, username.toLowerCase(), 'SECURITY', 'INFO', ipAddress);
   });
 }
+export async function deleteUser(pool: pg.Pool, userId: string, actor: string, ipAddress = '') {
+  await transaction(pool, async (db) => {
+    const removed = await db.query('DELETE FROM users WHERE id=$1 RETURNING username,role', [userId]);
+    if (!removed.rowCount) throw new HttpError(404, 'Operator not found');
+    await appendAudit(
+      db,
+      'Operator deleted',
+      `Operator ${removed.rows[0].username} (${removed.rows[0].role})`,
+      actor,
+      'SECURITY',
+      'INFO',
+      ipAddress,
+    );
+  });
+}
 export function loginHandler(pool: pg.Pool, config: Config) {
   return asyncRoute(async (req, res) => {
     const { username, password } = z

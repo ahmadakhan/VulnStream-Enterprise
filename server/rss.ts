@@ -2,7 +2,13 @@ import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { createHash } from 'node:crypto';
 import type { IntelligenceArticle } from '../src/types/index.ts';
 
-export const RSS_MAX_BYTES = 8 * 1024 * 1024;
+// A syndication document is a list of headlines, not an article store. The
+// largest default feed (Google Project Zero: ten full posts of long technical
+// prose) decodes to ~10.8 MiB, and the decompressed size is not something the
+// publisher controls per request, so the ceiling has to be above the biggest
+// real feed rather than just above the average. 16 MiB holds it with headroom
+// while still bounding a decompression bomb at a fixed, modest size.
+export const RSS_MAX_BYTES = 16 * 1024 * 1024;
 export const RSS_MAX_ENTRIES = 10000;
 
 export function canonicalArticleUrl(value: string): string | null {
@@ -19,6 +25,45 @@ export function canonicalArticleUrl(value: string): string | null {
   }
 }
 const array = (value: any): any[] => (value == null ? [] : Array.isArray(value) ? value : [value]);
+/**
+ * Remove every character reference so `&lt;!DOCTYPE html&gt;` no longer
+ * contains the literal sequence `<!DOCTYPE`.
+ *
+ * RSS bodies routinely embed rendered HTML as escaped text. Sites built on
+ * Squarespace (the Zero Day Initiative blog, for example) put a complete
+ * `<html>` document with its own `<!DOCTYPE html>` inside `<description>` as
+ * `&lt;!DOCTYPE html&gt;`. That is data: no parser acts on it, so it cannot
+ * expand entities. The replacement is a single pass, so `&amp;lt;` becomes the
+ * literal text `&lt;` and is not decoded a second time, exactly as a parser
+ * treats it.
+ */
+const stripCharacterReferences = (xml: string): string =>
+  xml.replace(/&(?:#[0-9]{1,7}|#x[0-9a-f]{1,6}|[a-z][a-z0-9]{0,30});/gi, ' ');
+/**
+ * Blank CDATA sections so their contents are read as text.
+ *
+ * Squarespace feeds wrap the article body in `<![CDATA[...]]>` and the body
+ * itself can contain `<!DOCTYPE html>` for an embedded table. A CDATA section
+ * has no markup at all: `<!DOCTYPE` inside it is literal characters, which is
+ * why a parser does not treat it as a declaration and it cannot expand
+ * anything. This is intentionally not applied to comments: a declaration in a
+ * comment is still refused (see hasDeclaration).
+ */
+const stripCdata = (xml: string): string => xml.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, ' ');
+/**
+ * Whether a declaration that a parser could act on survives outside escaped
+ * text and CDATA. Escaped declarations are data, as they are to any parser.
+ */
+const hasDeclaration = (xml: string): boolean =>
+  /<!\s*(DOCTYPE|ENTITY)/i.test(stripCharacterReferences(stripCdata(xml)));
+/**
+ * Entries whose body lists more distinct CVEs than this are monthly round-up
+ * posts ("The October 2026 Security Update Review") whose embedded tables
+ * enumerate every vendor fix. They are real, useful articles, but they are not
+ * evidence about any one product, and a single entry can carry thousands of
+ * IDs. The list is dropped from such an entry; the article is kept.
+ */
+export const MAX_ENTRY_CVE_IDS = 100;
 const string = (value: any): string =>
   typeof value === 'string'
     ? value
@@ -51,9 +96,9 @@ export function parseSyndication(
   articles: IntelligenceArticle[];
   warnings: string[];
 } {
-  if (Buffer.byteLength(xml) > RSS_MAX_BYTES) throw new Error('RSS/Atom feed exceeds 8 MiB');
-  if (/<!\s*(DOCTYPE|ENTITY)/i.test(xml))
-    throw new Error('RSS/Atom document type and entity declarations are not permitted');
+  if (Buffer.byteLength(xml) > RSS_MAX_BYTES)
+    throw new Error(`RSS/Atom feed exceeds ${RSS_MAX_BYTES / (1024 * 1024)} MiB`);
+  if (hasDeclaration(xml)) throw new Error('RSS/Atom document type and entity declarations are not permitted');
   if (XMLValidator.validate(xml) !== true) throw new Error('Feed is not valid XML');
   const parsed = new XMLParser({
     ignoreAttributes: false,
@@ -73,7 +118,8 @@ export function parseSyndication(
   if (rows.length > RSS_MAX_ENTRIES) throw new Error('RSS/Atom feed exceeds 10,000 entries');
   const records = new Map<string, IntelligenceArticle>(),
     warnings: string[] = [];
-  let invalid = 0;
+  let invalid = 0,
+    bulkCveArticles = 0;
   for (const row of rows) {
     const link =
       typeof row.link === 'string'
@@ -95,17 +141,21 @@ export function parseSyndication(
       continue;
     }
     if (scopeHours > 0 && Math.max(published, modified) < now.getTime() - scopeHours * 3600000) continue;
+    // The summary is stored truncated and only the title and this excerpt are
+    // scanned for CVEs, so a full post body is flattened and then thrown away.
+    // Doing it after the scope filter above bounds the cost of an archive feed
+    // that ships every entry's complete HTML.
     const full = plain(string(row['content:encoded'] || row.content || row.summary || row.description));
     // Summaries are context only; never infer that every CVE in a multi-product article affects every product.
-    const cveIds = [
+    const mentioned = [
       ...new Set(
         (`${title} ${full} ${url}`.match(/\bCVE-\d{4}-\d{4,}\b/gi) || []).map((id) => id.toUpperCase()),
       ),
     ].sort();
-    if (cveIds.length > 100) {
-      invalid++;
-      continue;
-    }
+    // Dropping the article lost the whole post; dropping only the list keeps the
+    // post as evidence (title, summary, link) without a claim about any product.
+    const cveIds = mentioned.length > MAX_ENTRY_CVE_IDS ? [] : mentioned;
+    if (mentioned.length > MAX_ENTRY_CVE_IDS) bulkCveArticles++;
     // Zero-day heuristic: articles without a CVE ID that mention exploitation,
     // zero-day, or in-the-wild activity are flagged for priority review.
     const zeroDay =
@@ -133,9 +183,13 @@ export function parseSyndication(
     )
       records.set(id, article);
   }
+  if (bulkCveArticles)
+    warnings.push(
+      `${bulkCveArticles} entries listed more than ${MAX_ENTRY_CVE_IDS} CVEs; kept the article and dropped its CVE list`,
+    );
   if (invalid)
     warnings.push(
-      `${invalid} entries quarantined for missing/invalid URL, title, date, or excessive CVE references`,
+      `${invalid} entries quarantined for missing/invalid URL, title, or date`,
     );
   return { articles: [...records.values()], warnings };
 }

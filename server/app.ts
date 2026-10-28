@@ -30,6 +30,7 @@ import {
   loginHandler,
   cookieName,
   createUser,
+  deleteUser,
   sessionCookieOptions,
 } from './auth';
 import { transaction, state, get, getForUpdate, put, appendAudit, list } from './db';
@@ -962,6 +963,18 @@ export function createApp(
           req.ip || '',
         );
       });
+      res.json({ success: true });
+    }),
+  );
+  app.delete(
+    '/api/users/:id',
+    requireRole('ADMIN'),
+    asyncRoute(async (req, res) => {
+      const userId = z.uuid().safeParse(req.params.id);
+      if (!userId.success) throw invalidId();
+      if (req.params.id === req.operator!.id)
+        throw new HttpError(400, 'You cannot delete your own account');
+      await deleteUser(pool, userId.data, req.operator!.username, req.ip || '');
       res.json({ success: true });
     }),
   );

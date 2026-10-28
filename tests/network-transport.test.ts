@@ -179,6 +179,22 @@ test('same-site redirects may add or drop a www label but never leave the site',
   }
 });
 
+test('a redirect to a URL with credentials is refused and the secret is not echoed', async () => {
+  const { close } = await serve((_req, res) => {
+    res.writeHead(302, { location: 'https://user:hunter2@cdn.example.test/feed.xml' });
+    res.end();
+  });
+  try {
+    const request = createRequester(config, hooks);
+    const error = await request('https://feed.example.test/feed.xml').catch((e: Error) => e);
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /redirect to a URL with credentials is not permitted/);
+    assert.doesNotMatch(error.message, /hunter2/, 'the password must not appear in the error');
+  } finally {
+    await close();
+  }
+});
+
 test('a same-site redirect option cannot widen egress to a look-alike host', async () => {
   const { close } = await serve((_req, res) => {
     res.writeHead(302, { location: 'https://www.feed.example.test.evil.test/feed.xml' });
@@ -190,6 +206,19 @@ test('a same-site redirect option cannot widen egress to a look-alike host', asy
       request('https://feed.example.test/feed.xml', { sameSiteRedirects: true }),
       /not in EGRESS_ALLOWED_HOSTS/,
     );
+  } finally {
+    await close();
+  }
+});
+
+test('a redirect loop returns a bounded error instead of hanging', async () => {
+  const { close } = await serve((_req, res) => {
+    res.writeHead(302, { location: 'https://feed.example.test/loop' });
+    res.end();
+  });
+  try {
+    const request = createRequester(config, hooks);
+    await assert.rejects(request('https://feed.example.test/loop', { maxRedirects: 3 }), /Too many redirects/);
   } finally {
     await close();
   }

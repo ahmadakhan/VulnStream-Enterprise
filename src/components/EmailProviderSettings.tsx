@@ -201,21 +201,6 @@ export function EmailProviderSettings() {
                   Leave blank to use deployment settings. Custom hosts require outbound permission.
                 </span>
               </label>
-              <div className="flex items-end">
-                <button
-                  type="button"
-                  className="ui-secondary"
-                  onClick={() =>
-                    update({
-                      smtpHost: 'smtp.gmail.com',
-                      smtpPort: 587,
-                      smtpSecurity: 'STARTTLS',
-                    })
-                  }
-                >
-                  Use Gmail SMTP settings
-                </button>
-              </div>
               {form.smtpHost && (
                 <>
                   <label htmlFor="smtp-port">

@@ -122,7 +122,52 @@ test(
         .set('Origin', origin)
         .set('x-csrf-token', csrf)
         .send({ role: 'OPERATOR', disabled: false });
-      assert.equal(updated.status, 200);
+       assert.equal(updated.status, 200);
+     });
+     assert.notEqual(outcome, null);
+   },
+);
+
+test(
+  'an operator id that is not a uuid is a 400, and a valid one is deleted from the workspace',
+  { skip: !process.env.TEST_DATABASE_URL },
+  async () => {
+    const outcome = await withDatabase(async (pool) => {
+      const { agent, csrf, origin } = await adminAgent(pool);
+      const malformed = await agent
+        .delete('/api/users/not-a-uuid')
+        .set('Origin', origin)
+        .set('x-csrf-token', csrf)
+        .send({});
+      assert.equal(malformed.status, 400);
+
+      const created = await agent
+        .post('/api/users')
+        .set('Origin', origin)
+        .set('x-csrf-token', csrf)
+        .send({ username: 'viewer-two', password: 'Disposable-viewer-password-2026!', role: 'VIEWER' });
+      assert.equal(created.status, 201);
+      const viewer = (await pool.query("SELECT id FROM users WHERE username='viewer-two'")).rows[0];
+      const deleted = await agent
+        .delete(`/api/users/${viewer.id}`)
+        .set('Origin', origin)
+        .set('x-csrf-token', csrf)
+        .send({});
+      assert.equal(deleted.status, 200);
+      const remaining = await pool.query("SELECT id FROM users WHERE username='viewer-two'");
+      assert.equal(remaining.rowCount, 0);
+
+      // An administrator cannot delete their own account.
+      const adminRow = (await pool.query("SELECT id FROM users WHERE username='delivery-admin'")).rows[0];
+      const selfDelete = await agent
+        .delete(`/api/users/${adminRow.id}`)
+        .set('Origin', origin)
+        .set('x-csrf-token', csrf)
+        .send({});
+      assert.equal(selfDelete.status, 400);
+      // The actor account must still exist.
+      const stillThere = await pool.query("SELECT id FROM users WHERE username='delivery-admin'");
+      assert.equal(stillThere.rowCount, 1);
     });
     assert.notEqual(outcome, null);
   },

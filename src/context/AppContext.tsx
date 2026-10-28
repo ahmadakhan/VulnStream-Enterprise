@@ -313,8 +313,9 @@ function useApplication() {
     listUsers: () => safely(() => request<any[]>('/users')),
     createUser: (data: { username: string; password: string; role: string }) =>
       safely(() => request('/users', data)),
-    updateUser: (id: string, data: { role: string; disabled: boolean }) =>
+     updateUser: (id: string, data: { role: string; disabled: boolean }) =>
       safely(() => request(`/users/${encodeURIComponent(id)}`, data, 'PATCH')),
+    deleteUser: (id: string) => safely(() => request(`/users/${encodeURIComponent(id)}`, {}, 'DELETE')),
     resetUserPassword: (id: string, password: string) =>
       safely(() => request(`/users/${encodeURIComponent(id)}/reset-password`, { password })),
     fetchEvents: (query: string) =>

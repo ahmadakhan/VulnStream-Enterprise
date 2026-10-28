@@ -28,6 +28,8 @@ export const ThreatFeedsView: React.FC = () => {
   const [editingFeed, setEditingFeed] = useState<ThreatFeed | null>(null);
   const [deletingFeed, setDeletingFeed] = useState<ThreatFeed | null>(null);
   const [deletePending, setDeletePending] = useState(false);
+  const [disablePending, setDisablePending] = useState(false);
+  const [disablingFeed, setDisablingFeed] = useState<ThreatFeed | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -393,7 +395,10 @@ export const ThreatFeedsView: React.FC = () => {
                     {/* Active toggle */}
                     <td className="py-3 px-4">
                       <button
-                        onClick={() => toggleFeedEnabled(feed.id)}
+                         onClick={() => {
+                           if (feed.enabled) setDisablingFeed(feed);
+                           else void toggleFeedEnabled(feed.id);
+                         }}
                         className={`w-8 h-4 flex items-center rounded-full p-0.5 transition ${
                           feed.enabled
                             ? 'bg-zinc-200 dark:bg-zinc-200 light:bg-zinc-900 justify-end'
@@ -667,6 +672,46 @@ export const ThreatFeedsView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Disable Feed Confirmation Modal */}
+      {disablingFeed && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+            <h3 className="text-sm font-bold text-amber-300 dark:text-amber-300 light:text-amber-700 mb-2">
+              Disable Threat Feed Source?
+            </h3>
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 leading-relaxed mb-6">
+              Are you sure you want to disable <strong>{disablingFeed.name}</strong>? Polling for this endpoint will
+              pause immediately and stop ingesting new findings until re-enabled.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDisablingFeed(null)}
+                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 text-xs font-medium transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setDisablePending(true);
+                  try {
+                    await toggleFeedEnabled(disablingFeed.id);
+                  } finally {
+                    setDisablePending(false);
+                    setDisablingFeed(null);
+                  }
+                }}
+                disabled={disablePending}
+                className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold disabled:opacity-50 transition"
+              >
+                {disablePending ? 'Disabling…' : 'Disable Feed'}
+              </button>
+            </div>
           </div>
         </div>
       )}

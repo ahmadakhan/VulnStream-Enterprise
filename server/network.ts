@@ -261,6 +261,14 @@ async function redirectTarget(
   } catch {
     throw new Error(`HTTP ${status} redirect has an invalid Location header`);
   }
+  // A Location carrying credentials (https://user:pass@host/) would put them in
+  // the hop's URL. `resolvePublic` rejects such a URL, but refusing here names
+  // the redirect instead of failing later as a generic SSRF refusal.
+  if (next.username || next.password) {
+    next.username = '';
+    next.password = '';
+    throw new Error(`HTTP ${status} redirect to a URL with credentials is not permitted (${next.href})`);
+  }
   if (opts.sameHostRedirects && next.hostname.toLowerCase() !== current.hostname.toLowerCase())
     throw new Error(
       `Redirect to a different hostname is not permitted (${current.hostname} -> ${next.hostname}); add ${next.hostname} to EGRESS_ALLOWED_HOSTS and allow cross-host redirects for this feed`,

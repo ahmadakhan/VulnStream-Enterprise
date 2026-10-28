@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 import type { Browser, Page } from 'puppeteer-core';
 import type { Config } from './config';
@@ -21,8 +21,21 @@ const browserCache = new Map<string, Promise<Browser>>();
 
 export function resolveChromeExecutablePath(config?: Config): string | undefined {
   const configured = config?.CHROME_EXECUTABLE_PATH || process.env.CHROME_EXECUTABLE_PATH;
-  if (configured && existsSync(configured)) return configured;
-  return COMMON_CHROME_PATHS.find((path) => existsSync(path));
+  // The value becomes a spawned process, so it is accepted only as an absolute
+  // path to an existing executable file; a directory, a relative name resolved
+  // through PATH, or an empty string is treated as "no Chrome configured".
+  const executable = (candidate: string | undefined) => {
+    if (!candidate || !candidate.startsWith('/')) return undefined;
+    try {
+      // realpathSync throws for a missing path and resolves a symlink to its
+      // target, so a directory can be rejected by asking for its stats here.
+      const resolved = realpathSync(candidate);
+      return statSync(resolved).isFile() ? resolved : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  return executable(configured) ?? COMMON_CHROME_PATHS.map(executable).find(Boolean);
 }
 
 export interface PdfAttachment {

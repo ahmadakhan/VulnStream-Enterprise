@@ -65,6 +65,55 @@ test('Atom handles alternate links and rejects HTML, entities and future timesta
     parseSyndication('<rss>' + '<nested>'.repeat(100) + '</nested>'.repeat(100) + '</rss>', 'x', 24),
   );
 });
+test('escaped and CDATA-wrapped HTML documents are content, not declarations', () => {
+  // Squarespace (the Zero Day Initiative blog) escapes a whole <html> document
+  // into <description>; other feeds wrap the body in CDATA. Neither is a
+  // declaration to a parser, so neither may fail the feed.
+  const escaped = parseSyndication(
+    rss(item('https://example.com/zd', '&lt;!DOCTYPE html&gt;&lt;html&gt;&lt;body&gt;CVE-2026-12345&lt;/body&gt;&lt;/html&gt;')),
+    'zdi',
+    24,
+    now,
+  );
+  assert.equal(escaped.articles.length, 1);
+  assert.deepEqual(escaped.articles[0].cveIds, ['CVE-2026-12345']);
+  const cdata = parseSyndication(
+    rss(item('https://example.com/cdata', '<![CDATA[<p>Intro</p><!DOCTYPE html><html><body>CVE-2026-12345</body></html>]]>')),
+    'cdata',
+    24,
+    now,
+  );
+  assert.equal(cdata.articles.length, 1);
+  assert.deepEqual(cdata.articles[0].cveIds, ['CVE-2026-12345']);
+  // Double-escaped text stays text: it is not decoded a second time into a declaration.
+  assert.equal(parseSyndication(rss(item('https://example.com/dbl', '&amp;lt;!DOCTYPE html&amp;gt;')), 'dbl', 24, now).articles.length, 1);
+});
+
+test('real entity declarations are still refused wherever they appear', () => {
+  const payloads = [
+    '<?xml version="1.0"?><!DOCTYPE rss [<!ENTITY x "y">]>' + rss(''),
+    '<?xml version="1.0"?><!DOCTYPE rss SYSTEM "http://example.com/x.dtd">' + rss(''),
+    rss(item('https://example.com/bomb', '<!-- <!ENTITY lol "lol"> -->')),
+    rss(item('https://example.com/lol', '&lol;')).replace('<rss version="2.0">', '<!DOCTYPE rss [<!ENTITY lol "lol">]><rss version="2.0">'),
+  ];
+  for (const xml of payloads) assert.throws(() => parseSyndication(xml, 'x', 24, now), /declarations/);
+});
+
+test('a round-up post keeps its article but not its thousands of CVE IDs', () => {
+  const ids = Array.from({ length: 150 }, (_, i) => `CVE-2026-${10000 + i}`).join(' ');
+  const result = parseSyndication(
+    rss(item('https://example.com/roundup', `Microsoft October 2026 updates: ${ids}`)),
+    'zdi',
+    24,
+    now,
+  );
+  assert.equal(result.articles.length, 1, 'the post is still usable evidence');
+  assert.deepEqual(result.articles[0].cveIds, [], 'no per-product claim is inferred from a bulk list');
+  assert.match(result.warnings.join(' '), /more than 100 CVEs/);
+  const small = parseSyndication(rss(item('https://example.com/small', ids.split(' ').slice(0, 100).join(' '))), 'zdi', 24, now);
+  assert.equal(small.articles[0].cveIds.length, 100, 'exactly the limit is still kept');
+});
+
 test('numeric entities cannot emit lone UTF-16 surrogates', () => {
   const xml = rss(
     '<item><title>Acme &#xD800; Widget &#x1F600;</title><link>https://example.com/story</link><pubDate>Wed, 21 Oct 2026 10:00:00 GMT</pubDate><description>CVE-2026-12345</description></item>',
@@ -273,8 +322,26 @@ test('large legitimate RSS archives are bounded but filtered by scope instead of
   const parsed = parseSyndication(xml, 'msrc-sized', 24, now);
   assert.equal(parsed.articles.length, 1);
   assert.equal(parsed.articles[0].url, 'https://example.com/current');
-  assert.throws(() => parseSyndication('x'.repeat(8 * 1024 * 1024 + 1), 'oversized', 24), /8 MiB/);
+  assert.throws(() => parseSyndication('x'.repeat(16 * 1024 * 1024 + 1), 'oversized', 24), /16 MiB/);
   assert.throws(() => parseSyndication(rss('<item/>'.repeat(10001)), 'too-many', 24), /10,000 entries/);
+});
+test('a feed larger than a full archive but under the ceiling parses, and scope still filters it', () => {
+  // Google Project Zero ships ten complete posts (~10.8 MiB decoded). The limit
+  // must sit above real archives that big and still refuse anything beyond it.
+  const oldItem = item('https://example.com/old', 'Historical advisory '.repeat(60)).replace('21 Oct', '01 Oct');
+  const xml = rss(oldItem.repeat(9000) + item('https://example.com/current'));
+  assert.ok(Buffer.byteLength(xml) > 10 * 1024 * 1024, 'the fixture must exceed the old 8 MiB ceiling');
+  const parsed = parseSyndication(xml, 'archive', 24, now);
+  assert.equal(parsed.articles.length, 1);
+  assert.equal(parsed.articles[0].url, 'https://example.com/current');
+});
+test('entries outside the scope window are skipped before their bodies are flattened', () => {
+  // Only the in-scope entry may reach the expensive text processing, so an
+  // archive of huge out-of-scope bodies costs nothing beyond parsing.
+  const oldItem = item('https://example.com/old', 'Historical advisory '.repeat(60)).replace('21 Oct', '01 Oct');
+  const parsed = parseSyndication(rss(oldItem.repeat(3) + item('https://example.com/current')), 'scope', 24, now);
+  assert.equal(parsed.articles.length, 1);
+  assert.equal(parsed.warnings.length, 0, 'out-of-scope entries are not counted as invalid');
 });
 
 test('custom vendor aliases from the Alias Thesaurus reach news matching', () => {
