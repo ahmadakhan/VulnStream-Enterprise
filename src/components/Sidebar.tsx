@@ -2,7 +2,7 @@ import { pages, type PageId } from '../design/pages';
 import { DashboardIcon } from '../design/icons';
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Shield, LogOut } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
   const [isMobileView, setIsMobileView] = useState(
@@ -81,11 +81,6 @@ export const Sidebar: React.FC = () => {
       inert={isMobileView && !mobileNavOpen}
       className={`ui-sidebar fixed inset-y-0 left-0 z-40 w-64 bg-zinc-950 dark:bg-zinc-950 light:bg-white border-r border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 flex flex-col shrink-0 select-none transition-transform duration-200 md:sticky md:top-0 md:h-screen md:translate-x-0 md:z-30 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}
     >
-      {/* Dashboard icon at the very top, before the brand */}
-      <div className="px-4 pt-3 pb-1 flex justify-start">
-        <DashboardIcon className="w-6 h-6" />
-      </div>
-
       {/* Brand Header */}
       <div className="p-4 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
         <button
@@ -94,9 +89,7 @@ export const Sidebar: React.FC = () => {
           className="flex items-center space-x-3 text-left cursor-pointer group"
           aria-label="BA Threat Intel dashboard"
         >
-          <div className="w-9 h-9 rounded-2xl bg-blue-500/15 border border-blue-400/25 flex items-center justify-center text-blue-200 shadow-sm transition group-hover:border-blue-400/50">
-            <Shield className="w-4 h-4 text-blue-300" />
-          </div>
+          <DashboardIcon className="w-5 h-5" />
           <div>
             <div className="flex items-center space-x-1.5">
               <span className="text-sm font-bold tracking-tight text-zinc-100 dark:text-zinc-100 light:text-zinc-900">

@@ -1,4 +1,5 @@
 import {
+  LayoutDashboard,
   Server,
   ShieldAlert,
   Database,
@@ -21,11 +22,9 @@ import {
   ScanLine,
 } from 'lucide-react';
 
-import { DashboardIcon } from './icons';
-
 /** One source of truth for page identity, headings, and workspace breadcrumbs. */
 export const pages = {
-  dashboard: { section: 'Operations', title: 'Intelligence overview', icon: DashboardIcon },
+  dashboard: { section: 'Operations', title: 'Intelligence overview', icon: LayoutDashboard },
   watchlist: { section: 'Operations', title: 'Monitored products', icon: Server },
   findings: { section: 'Operations', title: 'Vulnerabilities', icon: ShieldAlert },
   'threat-intelligence-search': { section: 'Operations', title: 'Threat intelligence search', icon: Search },
