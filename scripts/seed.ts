@@ -35,18 +35,10 @@ const pool = createPool(config.DATABASE_URL);
 // automatically in dev or prod.
 const shouldSeed = config.BOOTSTRAP_RECOMMENDED_FEEDS === 'true';
 
-/** Only seed adapters whose response contracts are implemented and verified. */
+/* Contract-verified primary feeds plus legacy rows that must be disabled.
+ * NVD and the canonical CVE sources now come from RECOMMENDED_FEEDS (spread
+ * below) so the threat-feed catalog has a single source of truth. */
 const feedPayload = [
-  {
-    id: 'feed-nvd',
-    name: 'NVD CVE API 2.0',
-    type: 'NVD_API' as const,
-    url: 'https://services.nvd.nist.gov/rest/json/cves/2.0',
-    authType: 'NONE' as const,
-    rateLimitPerMin: 10,
-    enabled: true,
-    vendorSeed: true,
-  },
   {
     id: 'feed-cisa-kev',
     name: 'CISA Known Exploited Vulnerabilities Catalog',

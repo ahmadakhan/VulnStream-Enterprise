@@ -1,5 +1,8 @@
 /** Provider integrations shown on fresh and existing deployments. */
 export const RECOMMENDED_FEEDS = [
+  { id: 'feed-nvd', name: 'NVD CVE API 2.0', type: 'NVD_API' as const,
+    url: 'https://services.nvd.nist.gov/rest/json/cves/2.0',
+    authType: 'NONE' as const, rateLimitPerMin: 10, enabled: true, vendorSeed: true },
   { id: 'feed-mitre-cve', name: 'MITRE CVE — Official CVE List', type: 'MITRE_CVE' as const,
     url: 'https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/deltaLog.json',
     authType: 'NONE' as const, rateLimitPerMin: 120, enabled: true, vendorSeed: true },
