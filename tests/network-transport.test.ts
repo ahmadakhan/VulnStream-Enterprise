@@ -182,3 +182,25 @@ test('the production lookup path connects to the validated address', async () =>
     await close();
   }
 });
+
+// Regression: "Invalid IP address: undefined" was caused by a lookup hook that
+// answered only one of Node's two call shapes. Both are asserted directly here
+// so the contract is pinned regardless of which shape a given Node release uses.
+test('the pinned lookup answers both of Node\'s lookup call shapes', async () => {
+  const { pinnedLookup } = await import('../server/network.ts');
+  const lookup = pinnedLookup('93.184.216.34', 4);
+
+  const all = await new Promise<unknown>((resolve, reject) =>
+    (lookup as any)('feed.example.test', { all: true, verbatim: true }, (error: Error | null, addresses: unknown) =>
+      error ? reject(error) : resolve(addresses),
+    ),
+  );
+  assert.deepEqual(all, [{ address: '93.184.216.34', family: 4 }]);
+
+  const scalar = await new Promise<unknown>((resolve, reject) =>
+    (lookup as any)('feed.example.test', 4, (error: Error | null, address: string, family: number) =>
+      error ? reject(error) : resolve([address, family]),
+    ),
+  );
+  assert.deepEqual(scalar, ['93.184.216.34', 4]);
+});

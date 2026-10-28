@@ -31,7 +31,14 @@ export async function resolvePublic(
   let timer: ReturnType<typeof setTimeout> | undefined;
   const resolveAddresses = () =>
     Promise.race([
-      resolver(host, { all: true, verbatim: true }),
+      // The resolver is typed as returning Promise<unknown> so a custom or
+      // callback-style resolver cannot masquerade as an array. A rejection is
+      // reported as a resolution failure rather than a raw socket error.
+      Promise.resolve(resolver(host, { all: true, verbatim: true })).catch((error: unknown) => {
+        throw new Error(
+          `DNS lookup for ${host} failed${error instanceof Error && error.code ? ` (${error.code})` : ''}`,
+        );
+      }),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('DNS lookup timed out')), 5000);
       }),
@@ -57,6 +64,22 @@ export async function resolvePublic(
   if (records.some((record) => !publicAddress(record.address)))
     throw new Error('Destination resolves to a non-public address');
   return records[0];
+}
+
+/**
+ * DNS lookup that returns only addresses which passed the SSRF check.
+ *
+ * The requester hands this to the connection layer so the socket is pinned to
+ * a validated address. It must implement Node's full lookup contract:
+ * `all: true` expects an array of { address, family }, the scalar form expects
+ * (error, address, family).
+ */
+export function pinnedLookup(address: string, family: number): LookupFunction {
+  return ((_host: string, lookupOptions: { all?: boolean } | number, callback: (...args: unknown[]) => void) => {
+    const wantsAll = typeof lookupOptions === 'object' && lookupOptions?.all === true;
+    if (wantsAll) callback(null, [{ address, family }]);
+    else callback(null, address, family);
+  }) as unknown as LookupFunction;
 }
 export interface ResponseData {
   status: number;
@@ -272,15 +295,11 @@ async function doRequest(
         ...(hooks.connect
           ? { createConnection: hooks.connect }
           : {
-              // Pin the connection to the address that passed validation. Node's
-              // lookup contract has two shapes: `all: true` expects an address
-              // array, otherwise (host, family, callback). Always answering the
-              // scalar form left the family undefined and the array absent, so
-              // every request failed with "Invalid IP address: undefined".
-              lookup: ((_hostname: string, lookupOptions: { all?: boolean } | number, callback: (...args: unknown[]) => void) =>
-                (typeof lookupOptions === 'object' && lookupOptions?.all)
-                  ? callback(null, [{ address: selected.address, family: selected.family }])
-                  : callback(null, selected.address, selected.family)) as unknown as LookupFunction,
+              // The socket always dials the address that passed the SSRF check,
+              // never a fresh resolution of the hostname. Both lookup call
+              // shapes are answered; the earlier scalar-only version left the
+              // address undefined and failed with "Invalid IP address".
+              lookup: pinnedLookup(selected.address, selected.family),
             }),
         timeout: options.socketTimeoutMs ?? 15000,
         maxHeaderSize: 16384,

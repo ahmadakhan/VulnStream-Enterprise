@@ -130,22 +130,27 @@ export function loginHandler(pool: pg.Pool, config: Config) {
         password: z.string().min(1).max(128),
       })
       .parse(req.body);
+    const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
+    const { maxLoginAttempts, lockoutMins } = settings.securityPolicy;
     const keys = ['ip:' + tokenHash(req.ip || ''), 'user:' + tokenHash(username)];
     // Increment before doing expensive password work, atomically across workers.
     const allowed = await transaction(pool, async (db) => {
       let okay = true;
       for (const key of keys) {
         const result = await db.query(
-          `INSERT INTO login_attempts(key,attempts,window_start) VALUES($1,1,now()) ON CONFLICT(key) DO UPDATE SET attempts=CASE WHEN login_attempts.window_start<now()-interval '15 minutes' THEN 1 ELSE login_attempts.attempts+1 END,window_start=CASE WHEN login_attempts.window_start<now()-interval '15 minutes' THEN now() ELSE login_attempts.window_start END RETURNING attempts`,
-          [key],
+          `INSERT INTO login_attempts(key,attempts,window_start) VALUES($1,1,now()) ON CONFLICT(key) DO UPDATE SET attempts=CASE WHEN login_attempts.window_start<now()-($2::int * interval '1 minute') THEN 1 ELSE login_attempts.attempts+1 END,window_start=CASE WHEN login_attempts.window_start<now()-($2::int * interval '1 minute') THEN now() ELSE login_attempts.window_start END RETURNING attempts`,
+          [key, lockoutMins],
         );
-        if (result.rows[0].attempts > (key.startsWith('ip:') ? 25 : 5)) okay = false;
+        // Per-account threshold uses the configured limit; the IP-scope threshold
+        // is scaled up to keep absorbing distributed credential-stuffing attacks.
+        const threshold = key.startsWith('ip:') ? maxLoginAttempts * 5 : maxLoginAttempts;
+        if (result.rows[0].attempts > threshold) okay = false;
       }
       return okay;
     });
     if (!allowed) {
-      res.setHeader('Retry-After', '900');
-      throw new HttpError(429, 'Too many login attempts; retry in 15 minutes');
+      res.setHeader('Retry-After', String(lockoutMins * 60));
+      throw new HttpError(429, `Too many login attempts; retry in ${lockoutMins} minutes`);
     }
     const user = (await pool.query('SELECT * FROM users WHERE username=$1', [username])).rows[0];
     // A fixed valid dummy hash keeps nonexistent accounts on the same password KDF path.
@@ -164,7 +169,6 @@ export function loginHandler(pool: pg.Pool, config: Config) {
       }
     })();
     if (!user || user.disabled || !valid) throw new HttpError(401, 'Invalid username or password');
-    const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
     const token = randomToken(),
       csrf = randomToken(),
       expires = new Date(Date.now() + settings.securityPolicy.sessionTimeoutMins * 60000);

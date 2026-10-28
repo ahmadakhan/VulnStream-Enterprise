@@ -241,31 +241,7 @@ export function SettingsView() {
                     </span>
                   </label>
                   <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                    Session timeout
-                    <span className="ml-1 font-normal text-zinc-500">(minutes)</span>
-                    <input
-                      type="number"
-                      min={5}
-                      max={60}
-                      required
-                      className={field}
-                      value={form.securityPolicy.sessionTimeoutMins}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          securityPolicy: {
-                            ...form.securityPolicy,
-                            sessionTimeoutMins: Number(e.target.value),
-                          },
-                        })
-                      }
-                    />
-                    <span className="ui-description mt-1.5 block">
-                      Inactive sessions expire after this period.
-                    </span>
-                  </label>
-                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                    Operational log detail
+                    Advisory prefix
                     <select
                       className={field}
                       value={form.logVerbosity ?? 'standard'}

@@ -308,11 +308,11 @@ export const settingsSchema = z.object({
     allowRedirects: z.boolean().default(true),
   }),
   securityPolicy: z.object({
-    sessionTimeoutMins: z.number().int().min(5).max(60),
+    sessionTimeoutMins: z.number().int().min(5).max(60).default(30),
     csrfProtection: z.literal(true),
-    minPasswordLen: z.number().int().min(14).max(128),
-    maxLoginAttempts: z.literal(5),
-    lockoutMins: z.literal(15),
+    minPasswordLen: z.number().int().min(14).max(128).default(14),
+    maxLoginAttempts: z.number().int().min(1).max(20).default(5),
+    lockoutMins: z.number().int().min(1).max(60).default(15),
   }),
   // Defaults to 'standard' so an older client that omits the field cannot
   // silently switch an installation into high-volume forensic logging.
