@@ -44,15 +44,20 @@ export class CorrelationRuntime {
     private readonly pool: Pool,
     key: string,
     directory: string,
-    heartbeat: { url: string; intervalSeconds: number } = { url: '', intervalSeconds: 60 },
+    options: {
+      url: string;
+      intervalSeconds: number;
+      logLevel?: 'standard' | 'verbose';
+    } = { url: '', intervalSeconds: 60 },
   ) {
     const telemetry = new CorrelationTelemetry();
+    telemetry.verbosity = options.logLevel ?? 'standard';
     const queue = new DeadLetterQueue(directory, key, telemetry);
     this.supervisor = new PipelineSupervisor(pool, new AdvisoryIngestor(telemetry, queue));
     this.processor = new AdvisoryStreamProcessor(this.supervisor);
     this.heartbeat = new Heartbeat({
-      url: heartbeat.url,
-      intervalMs: heartbeat.intervalSeconds * 1000,
+      url: options.url,
+      intervalMs: options.intervalSeconds * 1000,
       suppressOnUnhealthy: true,
     });
     this.workerEnabled = process.env.WORKER_ENABLED !== 'false';

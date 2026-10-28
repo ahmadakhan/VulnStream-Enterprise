@@ -162,12 +162,30 @@ export const FindingsView: React.FC = () => {
             </select>
           </div>
 
+          {/* Sort Filter */}
+          <div className="flex items-center space-x-1.5 text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+            <span>Sort by:</span>
+            <select
+              value={sortFilter}
+              onChange={(e) => {
+                setSortFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-2.5 py-1.5 text-xs text-zinc-200 dark:text-zinc-200 light:text-zinc-800 focus:outline-none focus:border-zinc-600"
+            >
+              <option value="latest">Latest</option>
+              <option value="published">Published</option>
+              <option value="modified">Last Modified</option>
+            </select>
+          </div>
+
           {/* Clear Filters */}
-          {(severityFilter !== 'ALL' || statusFilter !== 'ALL' || searchTerm) && (
+          {(severityFilter !== 'ALL' || statusFilter !== 'ALL' || sortFilter !== 'latest' || searchTerm) && (
             <button
               onClick={() => {
                 setSeverityFilter('ALL');
                 setStatusFilter('ALL');
+                setSortFilter('latest');
                 setSearchTerm('');
                 setCurrentPage(1);
               }}

@@ -36,6 +36,10 @@ import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import type { AppSettings } from '../src/types/index.ts';
 const config = loadConfig(),
   pool = createPool(config.DATABASE_URL);
+const VERBOSE = config.LOG_LEVEL === 'verbose';
+const verboseLog = (event: string, context: Record<string, unknown> = {}) => {
+  if (VERBOSE) console.log(JSON.stringify({ level: 'info', event, ...context }));
+};
 pool.on('error', (error) =>
   console.error(JSON.stringify({ level: 'error', event: 'database-connection', code: (error as any).code })),
 );
@@ -76,7 +80,11 @@ const correlation = new CorrelationRuntime(
   pool,
   config.ENCRYPTION_KEY,
   config.CORRELATION_DLQ_DIRECTORY,
-  { url: config.HEARTBEAT_URL, intervalSeconds: config.HEARTBEAT_INTERVAL_SECONDS },
+  {
+    url: config.HEARTBEAT_URL,
+    intervalSeconds: config.HEARTBEAT_INTERVAL_SECONDS,
+    logLevel: config.LOG_LEVEL === 'verbose' ? 'verbose' : 'standard',
+  },
 );
 if (config.WORKER_ENABLED === 'true') correlation.start();
 else correlation.supervisor.start();
@@ -160,16 +168,24 @@ const report = (event: string) => (error: unknown) => {
 };
 const tick = () => {
   if (stopping || config.WORKER_ENABLED !== 'true') return;
+  verboseLog('worker.tick');
   if (!pipeline)
     pipeline = processPipeline(pool, config, request)
+      .then((result) => {
+        verboseLog('pipeline.completed', { processed: result });
+        return result;
+      })
       .catch(report('pipeline'))
       .finally(() => {
         pipeline = null;
       });
   if (!outbox)
     outbox = (async () => {
-      for (let i = 0; i < 20 && !stopping; i++)
-        if (!(await deliverNext(pool, config, request, sendMail))) break;
+      for (let i = 0; i < 20 && !stopping; i++) {
+        const delivered = await deliverNext(pool, config, request, sendMail);
+        if (!delivered) break;
+        verboseLog('outbox.delivered');
+      }
     })()
       .catch(report('outbox'))
       .finally(() => {
@@ -177,6 +193,10 @@ const tick = () => {
       });
   if (!digest)
     digest = flushDueDigest(pool)
+      .then((count) => {
+        verboseLog('digest.flushed', { count });
+        return count;
+      })
       .catch(report('digest'))
       .finally(() => {
         digest = null;
@@ -250,9 +270,11 @@ const retentionTick = () => {
     // Honor nextRetryAt for failed runs to enable immediate retry.
     if (typeof data.nextRetryAt === 'string' && Date.parse(data.nextRetryAt) > now) return;
     if (!(await claimRetention(policy))) return;
+    verboseLog('retention.start');
     try {
       await runRetention(pool, 'system-retention');
       await releaseRetention(true);
+      verboseLog('retention.completed');
     } catch (error) {
       await releaseRetention(false).catch(() => {});
       throw error;
@@ -272,7 +294,9 @@ let dailyDigestRunning: Promise<unknown> | null = null;
 const dailyDigestTick = () => {
   if (stopping || config.WORKER_ENABLED !== 'true' || dailyDigestRunning) return;
   dailyDigestRunning = (async () => {
+    verboseLog('dailyDigest.start');
     await runDailyDigest(pool);
+    verboseLog('dailyDigest.completed');
   })()
     .catch(report('dailyDigest'))
     .finally(() => {
@@ -291,6 +315,9 @@ const cleanup = setInterval(() => {
        DELETE FROM login_attempts WHERE window_start<now()-interval '1 day';
        DELETE FROM password_reset_tokens WHERE expires_at<now();`,
     )
+    .then((result) => {
+      verboseLog('session.cleanup', { removed: result?.rowCount ?? 0 });
+    })
     .catch(report('session-cleanup'));
 }, 60000);
 async function shutdown() {
