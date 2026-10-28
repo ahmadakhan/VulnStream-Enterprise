@@ -441,6 +441,7 @@ function useApplication() {
       return result?.success || false;
     },
     addWebhook: (hook: Omit<WebhookEndpoint, 'id' | 'deliveryCount'>) => save('webhook.save', hook),
+    updateWebhook: (hook: WebhookEndpoint) => save('webhook.save', hook, hook.id),
     toggleWebhookEnabled: async (id: string) => {
       const updated = !!(await command('webhook.toggle', undefined, id));
       if (updated) await refreshAfterMutation();

@@ -2,7 +2,7 @@ import { PageHeading } from './PageHeading';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { EmailRecipient, WebhookEndpoint } from '../types';
-import { Plus, Trash2, Mail, AlertCircle, X, Search, Webhook, Send, CheckCircle2 } from 'lucide-react';
+import { Plus, Trash2, Mail, AlertCircle, X, Search, Webhook, Send, CheckCircle2, Edit2 } from 'lucide-react';
 
 export const RecipientsView: React.FC = () => {
   const {
@@ -13,6 +13,7 @@ export const RecipientsView: React.FC = () => {
     deleteRecipient,
     webhooks,
     addWebhook,
+    updateWebhook,
     toggleWebhookEnabled,
     deleteWebhook,
     testWebhook,
@@ -26,6 +27,9 @@ export const RecipientsView: React.FC = () => {
 
   const [deletingRecipientId, setDeletingRecipientId] = useState<string | null>(null);
   const [deletingWebhookId, setDeletingWebhookId] = useState<string | null>(null);
+
+  const [editingRecipient, setEditingRecipient] = useState<EmailRecipient | null>(null);
+  const [editingWebhook, setEditingWebhook] = useState<WebhookEndpoint | null>(null);
 
   // Email form state
   const [emailForm, setEmailForm] = useState({
@@ -69,10 +73,24 @@ export const RecipientsView: React.FC = () => {
       w.provider.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
+  const handleOpenEmailEdit = (r: EmailRecipient) => {
+    setEditingRecipient(r);
+    setEmailForm({
+      name: r.name,
+      email: r.email,
+      role: r.role,
+      deliveryGroup: r.deliveryGroup ?? 'SECURITY_TEAM',
+      subscriptionTier: r.subscriptionTier,
+      enabled: r.enabled,
+      dailyDigest: !!r.dailyDigest,
+    });
+    setShowAddEmailModal(true);
+  };
+
   const handleAddEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
-    const ok = await addRecipient({
+    const payload = {
       name: emailForm.name.trim(),
       email: emailForm.email.trim(),
       role: emailForm.role.trim() || 'Security Engineer',
@@ -80,10 +98,18 @@ export const RecipientsView: React.FC = () => {
       subscriptionTier: emailForm.subscriptionTier,
       enabled: emailForm.enabled,
       dailyDigest: emailForm.dailyDigest,
-    });
+    };
+    const ok = editingRecipient
+      ? await updateRecipient({
+          ...payload,
+          id: editingRecipient.id,
+          deliverySuccessRate: editingRecipient.deliverySuccessRate,
+        })
+      : await addRecipient(payload);
 
     if (ok) {
       setShowAddEmailModal(false);
+      setEditingRecipient(null);
       setEmailForm({
         name: '',
         email: '',
@@ -98,6 +124,19 @@ export const RecipientsView: React.FC = () => {
     }
   };
 
+  const handleOpenWebhookEdit = (w: WebhookEndpoint) => {
+    setEditingWebhook(w);
+    setWebhookForm({
+      name: w.name,
+      url: w.url,
+      provider: w.provider,
+      secretToken: '',
+      events: w.events,
+      enabled: w.enabled,
+    });
+    setShowAddWebhookModal(true);
+  };
+
   const handleAddWebhookSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -106,17 +145,28 @@ export const RecipientsView: React.FC = () => {
       return;
     }
 
-    const ok = await addWebhook({
+    const payload = {
       name: webhookForm.name.trim(),
       url: webhookForm.url.trim(),
       provider: webhookForm.provider,
       secretToken: webhookForm.secretToken.trim(),
       events: webhookForm.events,
       enabled: webhookForm.enabled,
-    });
+    };
+    let ok: boolean;
+    if (editingWebhook) {
+      ok = await updateWebhook({
+        ...payload,
+        id: editingWebhook.id,
+        deliveryCount: editingWebhook.deliveryCount,
+      });
+    } else {
+      ok = await addWebhook(payload);
+    }
 
     if (!ok) return;
     setShowAddWebhookModal(false);
+    setEditingWebhook(null);
     setWebhookForm({
       name: '',
       url: '',
@@ -157,6 +207,16 @@ export const RecipientsView: React.FC = () => {
             <button
               onClick={() => {
                 setErrorMsg(null);
+                setEditingRecipient(null);
+                setEmailForm({
+                  name: '',
+                  email: '',
+                  role: '',
+                  deliveryGroup: 'SECURITY_TEAM',
+                  subscriptionTier: 'CRITICAL_HIGH_ONLY',
+                  enabled: true,
+                  dailyDigest: false,
+                });
                 setShowAddEmailModal(true);
               }}
               className="text-xs px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold transition flex items-center space-x-1.5 shadow-sm"
@@ -168,6 +228,15 @@ export const RecipientsView: React.FC = () => {
             <button
               onClick={() => {
                 setErrorMsg(null);
+                setEditingWebhook(null);
+                setWebhookForm({
+                  name: '',
+                  url: '',
+                  provider: 'SLACK',
+                  secretToken: '',
+                  events: ['CRITICAL', 'CISA_KEV'],
+                  enabled: true,
+                });
                 setShowAddWebhookModal(true);
               }}
               className="text-xs px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold transition flex items-center space-x-1.5 shadow-sm"
@@ -239,11 +308,14 @@ export const RecipientsView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
-                    {filteredRecipients.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="py-8 text-center text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
-                          No recipients match the filter.
-                        </td>
+                  {filteredRecipients.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={8}
+                        className="py-8 text-center text-zinc-500 dark:text-zinc-500 light:text-zinc-600"
+                      >
+                        No recipients match the filter.
+                      </td>
                     </tr>
                   ) : (
                     filteredRecipients.map((r) => (
@@ -297,31 +369,40 @@ export const RecipientsView: React.FC = () => {
                                 : 'bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-100 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 border-zinc-800 dark:border-zinc-800 light:border-zinc-300'
                             }`}
                           >
-                          {r.enabled ? 'ACTIVE' : 'MUTED'}
-                            </button>
-                          </td>
-                          <td className="py-3 px-4">
-                            <button
-                              type="button"
-                              onClick={() => updateRecipient({ ...r, dailyDigest: !r.dailyDigest })}
-                              className={`inline-flex items-center justify-center w-5 h-5 rounded border transition ${
-                                r.dailyDigest
-                                  ? 'bg-amber-500 border-amber-500 text-white'
-                                  : 'bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-100 border-zinc-700 dark:border-zinc-700 light:border-zinc-300 text-zinc-500 dark:text-zinc-500 light:text-zinc-600'
-                              }`}
-                              title={r.dailyDigest ? 'Opted out of daily digest' : 'Opt in to daily digest'}
-                            >
-                              <Send className="w-3 h-3" />
-                            </button>
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                          <button
-                            onClick={() => setDeletingRecipientId(r.id)}
-                            className="p-1 rounded hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            {r.enabled ? 'ACTIVE' : 'MUTED'}
                           </button>
+                        </td>
+                        <td className="py-3 px-4">
+                          <button
+                            type="button"
+                            onClick={() => updateRecipient({ ...r, dailyDigest: !r.dailyDigest })}
+                            className={`inline-flex items-center justify-center w-5 h-5 rounded border transition ${
+                              r.dailyDigest
+                                ? 'bg-amber-500 border-amber-500 text-white'
+                                : 'bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-100 border-zinc-700 dark:border-zinc-700 light:border-zinc-300 text-zinc-500 dark:text-zinc-500 light:text-zinc-600'
+                            }`}
+                            title={r.dailyDigest ? 'Opted out of daily digest' : 'Opt in to daily digest'}
+                          >
+                            <Send className="w-3 h-3" />
+                          </button>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end space-x-1">
+                            <button
+                              onClick={() => handleOpenEmailEdit(r)}
+                              className="p-1 rounded hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setDeletingRecipientId(r.id)}
+                              className="p-1 rounded hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -400,7 +481,14 @@ export const RecipientsView: React.FC = () => {
                           </button>
                         </td>
                         <td className="py-3 px-4 text-right">
-                          <div className="flex items-center justify-end space-x-2">
+                          <div className="flex items-center justify-end space-x-1">
+                            <button
+                              onClick={() => handleOpenWebhookEdit(w)}
+                              className="p-1 rounded hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
                             <button
                               onClick={() => handleRunWebhookTest(w)}
                               className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-200 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 text-[11px] font-medium transition flex items-center space-x-1"
@@ -441,11 +529,16 @@ export const RecipientsView: React.FC = () => {
 
             <div className="flex items-center gap-2 text-emerald-400 mb-2">
               <CheckCircle2 className="w-5 h-5" />
-              <h2 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900">Webhook Test Queued</h2>
+              <h2 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900">
+                Webhook Test Queued
+              </h2>
             </div>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
               A test notification was queued for{' '}
-              <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-800">{testResult.endpointName}</strong>.
+              <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-800">
+                {testResult.endpointName}
+              </strong>
+              .
             </p>
 
             <div className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-3 font-mono text-[11px] space-y-2 text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
@@ -455,10 +548,14 @@ export const RecipientsView: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600">Delivery:</span>
-                <span className="text-zinc-200 dark:text-zinc-200 light:text-zinc-800">Pending worker acceptance</span>
+                <span className="text-zinc-200 dark:text-zinc-200 light:text-zinc-800">
+                  Pending worker acceptance
+                </span>
               </div>
               <div>
-                <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 block mb-1">Signature:</span>
+                <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 block mb-1">
+                  Signature:
+                </span>
                 <span className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[10px] break-all bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-200 p-1.5 rounded block">
                   {testResult.signature || 'Generated when the worker sends the request'}
                 </span>
@@ -490,7 +587,7 @@ export const RecipientsView: React.FC = () => {
 
             <h2 className="text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-1 flex items-center gap-2">
               <Mail className="w-4 h-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-600" />
-              Add Email Recipient
+              {editingRecipient ? 'Edit Email Recipient' : 'Add Email Recipient'}
             </h2>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
               Security team recipients are sent alerts automatically. Everyone recipients are held for
@@ -506,7 +603,9 @@ export const RecipientsView: React.FC = () => {
 
             <form onSubmit={handleAddEmailSubmit} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Recipient Name *</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                  Recipient Name *
+                </label>
                 <input
                   type="text"
                   required
@@ -518,7 +617,9 @@ export const RecipientsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Email Address *</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                  Email Address *
+                </label>
                 <input
                   type="email"
                   required
@@ -530,7 +631,9 @@ export const RecipientsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Role / Designation</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                  Role / Designation
+                </label>
                 <input
                   type="text"
                   placeholder="e.g. SOC Tier 3 Responder"
@@ -541,7 +644,9 @@ export const RecipientsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Notification group</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                  Notification group
+                </label>
                 <select
                   value={emailForm.deliveryGroup}
                   onChange={(e) =>
@@ -561,7 +666,9 @@ export const RecipientsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Subscription Filter Tier</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                  Subscription Filter Tier
+                </label>
                 <select
                   value={emailForm.subscriptionTier}
                   onChange={(e) =>
@@ -591,8 +698,8 @@ export const RecipientsView: React.FC = () => {
                       Subscribe to daily digest
                     </span>
                     <span className="ui-description mt-0.5 block">
-                      Receive a daily summary of findings plus an operational health-check report at the
-                      time configured in Settings.
+                      Receive a daily summary of findings plus an operational health-check report at the time
+                      configured in Settings.
                     </span>
                   </span>
                 </div>
@@ -631,7 +738,7 @@ export const RecipientsView: React.FC = () => {
 
             <h2 className="text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-1 flex items-center gap-2">
               <Webhook className="w-4 h-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-600" />
-              Register Autonomous Webhook Channel
+              {editingWebhook ? 'Edit Webhook Endpoint' : 'Register Autonomous Webhook Channel'}
             </h2>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
               Dispatches JSON payloads with HMAC-SHA256 signature immediately upon vulnerability correlation.
@@ -646,7 +753,9 @@ export const RecipientsView: React.FC = () => {
 
             <form onSubmit={handleAddWebhookSubmit} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Channel Name *</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                  Channel Name *
+                </label>
                 <input
                   type="text"
                   required
@@ -658,7 +767,9 @@ export const RecipientsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Provider Format</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                  Provider Format
+                </label>
                 <select
                   value={webhookForm.provider}
                   onChange={(e) =>
@@ -676,7 +787,9 @@ export const RecipientsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Webhook URL *</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                  Webhook URL *
+                </label>
                 <input
                   type="url"
                   required
@@ -712,7 +825,7 @@ export const RecipientsView: React.FC = () => {
                   type="submit"
                   className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold text-xs transition"
                 >
-                  Register Webhook
+                  {editingWebhook ? 'Save Webhook' : 'Register Webhook'}
                 </button>
               </div>
             </form>
@@ -724,7 +837,9 @@ export const RecipientsView: React.FC = () => {
       {deletingRecipientId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
           <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
-            <h3 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-2">Remove Recipient?</h3>
+            <h3 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-2">
+              Remove Recipient?
+            </h3>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 leading-relaxed mb-6">
               This recipient will stop receiving automated vulnerability notifications.
             </p>
@@ -752,7 +867,9 @@ export const RecipientsView: React.FC = () => {
       {deletingWebhookId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
           <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
-            <h3 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-2">Remove Webhook Endpoint?</h3>
+            <h3 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-2">
+              Remove Webhook Endpoint?
+            </h3>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 leading-relaxed mb-6">
               Automated payload delivery to this endpoint will be terminated.
             </p>
