@@ -13,7 +13,6 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  Building2,
   Check,
   ChevronDown,
   ChevronRight,
@@ -37,6 +36,8 @@ import {
 import { copyText } from '../utils/clipboard';
 import { CveLink } from './CveLink';
 import { Pagination } from './Pagination';
+import { useDialogFocus } from '../hooks/useDialogFocus';
+import './threat-search.css';
 
 type SeverityFilter = 'ALL' | NormalizedCVE['cvss']['severity'];
 type SortKey = 'cve' | 'score' | 'published';
@@ -49,19 +50,19 @@ interface ExecutedSearch {
   vendorName: string;
   productName: string;
   at: string;
+  limit: number;
 }
 
 const panel =
   'ui-panel rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white';
 const inputClass =
-  'w-full rounded-[10px] border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-9 text-xs text-zinc-100 placeholder-zinc-500 transition focus:border-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900';
+  'w-full rounded-[10px] border border-zinc-800 bg-zinc-950 min-h-11 py-2.5 px-3 text-sm text-zinc-100 placeholder-zinc-500 transition focus:border-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900';
 const labelClass =
-  'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:text-zinc-600';
+  'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400 light:text-zinc-600';
 const smallButton =
   'inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[10px] border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50';
 const smallButtonIdle =
   'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200 light:border-zinc-300 light:bg-white light:text-zinc-600 light:hover:bg-zinc-100 light:hover:text-zinc-900';
-
 
 import { formatDate as fmtDate, formatDateTime as fmtDateTime } from '../utils/dateTime';
 
@@ -193,21 +194,37 @@ function MetricCard({
   tone: string;
 }) {
   return (
-    <div className={`${panel} p-4`}>
+    <div className={`${panel} threat-metric p-4`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
             {label}
           </p>
-          <p className="mt-1 text-xl font-semibold tabular-nums text-zinc-100 light:text-zinc-900">
-            {value}
+          <p className="mt-1 text-xl font-semibold tabular-nums text-zinc-100 light:text-zinc-900">{value}</p>
+          <p className="mt-0.5 truncate text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+            {hint}
           </p>
-          <p className="mt-0.5 truncate text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">{hint}</p>
         </div>
         <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${tone}`}>
           <Icon className="h-4 w-4" aria-hidden={true} />
         </span>
       </div>
+    </div>
+  );
+}
+
+function ThreatDetailDialog({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  const ref = useDialogFocus(onClose);
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="threat-detail-title"
+      tabIndex={-1}
+      className="threat-detail-dialog flex max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl light:border-zinc-200 light:bg-white"
+    >
+      {children}
     </div>
   );
 }
@@ -248,7 +265,13 @@ export const ThreatIntelligenceSearch: React.FC = () => {
   const [inspect, setInspect] = useState<ThreatSearchHit | null>(null);
   const [copiedIds, setCopiedIds] = useState(false);
   const [copiedDetail, setCopiedDetail] = useState(false);
-  const closeDetailRef = useRef<HTMLButtonElement>(null);
+  const searchSequence = useRef(0);
+  useEffect(
+    () => () => {
+      searchSequence.current++;
+    },
+    [],
+  );
 
   const selectedVendor = useMemo(
     () => ENTERPRISE_VENDOR_CATALOG.find((vendor) => vendor.normalizedId === vendorSelected),
@@ -282,26 +305,30 @@ export const ThreatIntelligenceSearch: React.FC = () => {
   );
   const showCustomVendor = trimmedVendorQuery.length > 0 && !exactVendorMatch;
   const vendorOptionCount = vendorMatches.length + (showCustomVendor ? 1 : 0);
-  const activeVendorOption =
-    vendorOptionCount > 0 ? Math.min(activeVendorIndex, vendorOptionCount - 1) : 0;
+  const activeVendorOption = vendorOptionCount > 0 ? Math.min(activeVendorIndex, vendorOptionCount - 1) : 0;
 
   const useCatalog = productMode === 'catalog' && catalogProducts.length > 0;
   const selectedCatalogProduct = useCatalog
     ? catalogProducts.find((product) => product.normalizedId === productSelected)
     : undefined;
   const effectiveProduct = useCatalog ? productSelected : customProduct.trim();
-  const effectiveProductName = useCatalog
-    ? selectedCatalogProduct?.name ?? ''
-    : customProduct.trim();
+  const effectiveProductName = useCatalog ? (selectedCatalogProduct?.name ?? '') : customProduct.trim();
   const canSearch = Boolean(vendorSelected && effectiveProduct) && !loading;
 
   const draftChanged =
     !!executedSearch &&
-    (executedSearch.vendor !== vendorSelected || executedSearch.product !== effectiveProduct);
+    (executedSearch.vendor !== vendorSelected ||
+      executedSearch.product !== effectiveProduct ||
+      executedSearch.limit !== resultLimit);
 
   useEffect(() => {
     setActiveVendorIndex(0);
   }, [vendorQuery]);
+
+  useEffect(() => {
+    if (vendorOpen)
+      document.getElementById(`vendor-option-${activeVendorOption}`)?.scrollIntoView({ block: 'nearest' });
+  }, [vendorOpen, activeVendorOption]);
 
   useEffect(() => {
     if (!vendorOpen) return;
@@ -311,21 +338,6 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
   }, [vendorOpen]);
-
-  useEffect(() => {
-    if (!inspect) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    closeDetailRef.current?.focus();
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setInspect(null);
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [inspect]);
 
   useEffect(() => {
     setPage(1);
@@ -385,21 +397,20 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setVendorOpen(true);
-      setActiveVendorIndex(0);
-      if (vendorOptionCount > 0) {
-        setActiveVendorIndex((index) => (index + 1) % vendorOptionCount);
-      }
+      if (vendorOptionCount > 0)
+        setActiveVendorIndex((index) => (vendorOpen ? (index + 1) % vendorOptionCount : 0));
       return;
     }
     if (event.key === 'ArrowUp') {
       event.preventDefault();
       setVendorOpen(true);
-      setActiveVendorIndex(0);
-      if (vendorOptionCount > 0) {
-        setActiveVendorIndex((index) => (index - 1 + vendorOptionCount) % vendorOptionCount);
-      }
+      if (vendorOptionCount > 0)
+        setActiveVendorIndex((index) =>
+          vendorOpen ? (index - 1 + vendorOptionCount) % vendorOptionCount : vendorOptionCount - 1,
+        );
       return;
     }
+    if (event.key === 'Tab') setVendorOpen(false);
     if (event.key === 'Escape') {
       setVendorOpen(false);
       setActiveVendorIndex(0);
@@ -415,13 +426,11 @@ export const ThreatIntelligenceSearch: React.FC = () => {
       }
       return;
     }
-    if (event.key === 'Escape') {
-      setVendorOpen(false);
-    }
   };
 
   const handleSearch = async () => {
     if (!canSearch) return;
+    const sequence = ++searchSequence.current;
     const vendor = vendorSelected;
     const product = effectiveProduct;
     const vendorName = selectedVendorName || vendor;
@@ -436,6 +445,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
 
     try {
       const response = await searchThreatIntelligence(vendor, product, resultLimit);
+      if (sequence !== searchSequence.current) return;
       setResults(response.hits);
       setTotalResults(response.totalResults);
       setExecutedSearch({
@@ -444,6 +454,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
         vendorName,
         productName,
         at: new Date().toISOString(),
+        limit: resultLimit,
       });
       if (response.rateLimited) {
         setError(
@@ -451,6 +462,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
         );
       }
     } catch (caught) {
+      if (sequence !== searchSequence.current) return;
       const message = caught instanceof Error ? caught.message : 'Search failed.';
       setError(
         /rate limit/i.test(message)
@@ -458,11 +470,14 @@ export const ThreatIntelligenceSearch: React.FC = () => {
           : message,
       );
     } finally {
-      setLoading(false);
+      if (sequence === searchSequence.current) setLoading(false);
     }
   };
 
   const resetSearch = () => {
+    searchSequence.current++;
+    setLoading(false);
+    setInspect(null);
     setVendorSelected('');
     setVendorQuery('');
     setVendorOpen(false);
@@ -509,8 +524,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
         const rightDate = new Date(right.cve.publishedDate).getTime() || 0;
         return direction * (leftDate - rightDate);
       }
-      const severityDelta =
-        SEVERITY_RANK[left.cve.cvss.severity] - SEVERITY_RANK[right.cve.cvss.severity];
+      const severityDelta = SEVERITY_RANK[left.cve.cvss.severity] - SEVERITY_RANK[right.cve.cvss.severity];
       if (severityDelta !== 0) return direction * severityDelta;
       return direction * (left.cve.cvss.score - right.cve.cvss.score);
     });
@@ -541,8 +555,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
   const pageCount = Math.max(1, Math.ceil(filteredResults.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const pageResults = filteredResults.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const hasResultFilters =
-    resultQuery.trim().length > 0 || severityFilter !== 'ALL' || kevOnly;
+  const hasResultFilters = resultQuery.trim().length > 0 || severityFilter !== 'ALL' || kevOnly;
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -671,368 +684,389 @@ export const ThreatIntelligenceSearch: React.FC = () => {
   };
 
   const vendorOptionId = (index: number) => `vendor-option-${index}`;
-  const activeOptionId =
-    vendorOpen && vendorOptionCount > 0 ? vendorOptionId(activeVendorOption) : undefined;
+  const activeOptionId = vendorOpen && vendorOptionCount > 0 ? vendorOptionId(activeVendorOption) : undefined;
 
   return (
-    <div className="space-y-6">
+    <div className="threat-search-page space-y-6">
       <PageHeading page="threat-intelligence-search">
-        Query the NVD CVE API by vendor and product. Exact CPE 2.3 matches are returned first, with
-        keyword correlation as a fallback. Every result can be filtered, inspected, and exported for
-        remediation planning.
+        Investigate product vulnerabilities, assess exploit risk, and export the evidence for your team.
       </PageHeading>
 
       {/* Search parameters */}
-      <section className={`${panel} p-4 sm:p-5`} aria-labelledby="threat-search-heading">
+      <section className={`${panel} threat-search-form p-5 sm:p-6`} aria-labelledby="threat-search-heading">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2
               id="threat-search-heading"
               className="text-sm font-semibold text-zinc-100 light:text-zinc-900"
             >
-              Search parameters
+              Investigate a product
             </h2>
             <p className="mt-0.5 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-              Catalog vendors resolve to normalized CPE identifiers before the query is sent.
+              Select a vendor and product to search the National Vulnerability Database.
             </p>
           </div>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-[10px] font-medium text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-300 light:bg-zinc-100">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
-            Live NVD lookup
+            <Database className="h-3.5 w-3.5" aria-hidden="true" />
+            NVD CVE API
           </span>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-12">
-          {/* Vendor */}
-          <div className="lg:col-span-4">
-            <label htmlFor="threat-vendor" className={labelClass}>
-              Vendor
-            </label>
-            {vendorSelected ? (
-              <div className="flex min-h-[42px] items-center justify-between gap-2 rounded-[10px] border border-zinc-800 bg-zinc-950 px-3 light:border-zinc-300 light:bg-zinc-50">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-zinc-100 light:text-zinc-900">
-                    {selectedVendorName}
-                  </p>
-                  <p className="truncate font-mono text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                    {vendorSelected}
-                    {isCustomVendor ? ' · custom vendor' : ' · catalog vendor'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={clearVendor}
-                   aria-label="Clear vendor"
-                   className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-zinc-400 dark:text-zinc-500 light:text-zinc-600 transition hover:bg-zinc-800 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 light:hover:bg-zinc-200 light:hover:text-zinc-900 light:focus-visible:ring-blue-500/30"
-                >
-                  <X className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-              </div>
-            ) : (
-              <div ref={vendorBoxRef} className="relative">
-                <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
-                  aria-hidden="true"
-                />
-                <input
-                  id="threat-vendor"
-                  ref={vendorInputRef}
-                  type="text"
-                  role="combobox"
-                  aria-expanded={vendorOpen}
-                  aria-controls={vendorOpen ? 'vendor-listbox' : undefined}
-                  aria-autocomplete="list"
-                  aria-activedescendant={activeOptionId}
-                  autoComplete="off"
-                  value={vendorQuery}
-                  onChange={(event) => {
-                    setVendorQuery(event.target.value);
-                    setVendorOpen(true);
-                  }}
-                  onFocus={() => setVendorOpen(true)}
-                  onKeyDown={handleVendorKeyDown}
-                  placeholder="Search the vendor catalog…"
-                  className={`${inputClass} pl-9 pr-9`}
-                />
-                 <ChevronDown
-                   className={`pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600 transition-transform ${vendorOpen ? 'rotate-180' : ''}`}
-                   aria-hidden="true"
-                 />
-                {vendorOpen && (
-                  <div className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl light:border-zinc-200 light:bg-white">
-                    {vendorOptionCount > 0 ? (
-                      <div
-                        id="vendor-listbox"
-                        role="listbox"
-                        aria-label="Vendor catalog"
-                        className="max-h-72 overflow-y-auto py-1"
-                      >
-                        {vendorMatches.map((vendor, index) => (
-                          <button
-                            key={vendor.normalizedId}
-                            id={vendorOptionId(index)}
-                            type="button"
-                            role="option"
-                            aria-selected={index === activeVendorOption}
-                            onMouseEnter={() => setActiveVendorIndex(index)}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => chooseCatalogVendor(vendor)}
-                            className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition ${
-                              index === activeVendorOption
-                                ? 'bg-blue-500/10 text-zinc-100 light:bg-blue-50 light:text-zinc-900'
-                                : 'text-zinc-300 hover:bg-zinc-800/70 light:text-zinc-700 light:hover:bg-zinc-100'
-                            }`}
-                          >
-                            <span className="min-w-0">
-                              <span className="block truncate text-sm font-medium">
-                                {vendor.name}
-                              </span>
-                              <span className="mt-0.5 block truncate font-mono text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                                {vendor.normalizedId}
-                                {vendor.aliases.length > 0
-                                  ? ` · ${vendor.aliases.join(', ')}`
-                                  : ''}
-                              </span>
-                            </span>
-                            <span className="shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                              {vendor.products.length} products
-                            </span>
-                          </button>
-                        ))}
-                        {showCustomVendor && (
-                          <button
-                            id={vendorOptionId(vendorMatches.length)}
-                            type="button"
-                            role="option"
-                            aria-selected={activeVendorOption === vendorMatches.length}
-                            onMouseEnter={() => setActiveVendorIndex(vendorMatches.length)}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => chooseCustomVendor(trimmedVendorQuery)}
-                            className={`flex w-full flex-col items-start gap-0.5 border-t border-zinc-800/80 px-3 py-2 text-left transition light:border-zinc-200 ${
-                              activeVendorOption === vendorMatches.length
-                                ? 'bg-blue-500/10 text-zinc-100 light:bg-blue-50 light:text-zinc-900'
-                                : 'text-zinc-300 hover:bg-zinc-800/70 light:text-zinc-700 light:hover:bg-zinc-100'
-                            }`}
-                          >
-                            <span className="text-sm font-medium">
-                              Use “{trimmedVendorQuery}” as a custom vendor
-                            </span>
-                            <span className="text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                              Query NVD with this free-text vendor name
-                            </span>
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="px-3 py-3 text-xs text-zinc-400 dark:text-zinc-500 light:text-zinc-600" role="status">
-                        No catalog vendor matches. Type a name and press Enter to search it as a
-                        custom vendor.
-                      </p>
-                    )}
-                    <div className="border-t border-zinc-800/80 px-3 py-2 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-200">
-                      Use arrow keys to navigate · Enter to select
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Product */}
-          <div className="lg:col-span-4">
-            <div className="flex flex-wrap items-end justify-between gap-2">
-              <label htmlFor="threat-product" className={labelClass}>
-                Product
+        <form
+          role="search"
+          aria-label="Search vulnerability intelligence"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleSearch();
+          }}
+        >
+          <div className="threat-search-fields grid gap-5 lg:grid-cols-12">
+            {/* Vendor */}
+            <div className="lg:col-span-4">
+              <label htmlFor="threat-vendor" className={labelClass}>
+                Vendor
               </label>
-              {selectedVendor && catalogProducts.length > 0 && (
-                <div className="mb-1.5 inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5 light:border-zinc-300 light:bg-zinc-100">
+              {vendorSelected ? (
+                <div className="threat-selected-vendor flex min-h-[42px] items-center justify-between gap-2 rounded-[10px] border border-zinc-800 bg-zinc-950 px-3 light:border-zinc-300 light:bg-zinc-50">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-zinc-100 light:text-zinc-900">
+                      {selectedVendorName}
+                    </p>
+                    <p className="truncate font-mono text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                      {vendorSelected}
+                      {isCustomVendor ? ' · custom vendor' : ' · catalog vendor'}
+                    </p>
+                  </div>
                   <button
                     type="button"
-                    aria-pressed={productMode === 'catalog'}
-                    onClick={() => setProductMode('catalog')}
-                    className={`rounded-md px-2 py-0.5 text-[10px] font-medium transition ${
-                      productMode === 'catalog'
-                        ? 'bg-zinc-800 text-zinc-100 shadow-sm light:bg-white light:text-zinc-900'
-                        : 'text-zinc-400 dark:text-zinc-500 light:text-zinc-600 hover:text-zinc-300 light:hover:text-zinc-700'
-                    }`}
+                    onClick={clearVendor}
+                    aria-label="Clear vendor"
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-zinc-400 dark:text-zinc-500 light:text-zinc-600 transition hover:bg-zinc-800 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 light:hover:bg-zinc-200 light:hover:text-zinc-900 light:focus-visible:ring-blue-500/30"
                   >
-                    Catalog
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
-                  <button
-                    type="button"
-                    aria-pressed={productMode === 'custom'}
-                    onClick={() => setProductMode('custom')}
-                    className={`rounded-md px-2 py-0.5 text-[10px] font-medium transition ${
-                      productMode === 'custom'
-                        ? 'bg-zinc-800 text-zinc-100 shadow-sm light:bg-white light:text-zinc-900'
-                        : 'text-zinc-400 dark:text-zinc-500 light:text-zinc-600 hover:text-zinc-300 light:hover:text-zinc-700'
-                    }`}
-                  >
-                    Custom
-                  </button>
+                </div>
+              ) : (
+                <div ref={vendorBoxRef} className="relative">
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
+                    aria-hidden="true"
+                  />
+                  <input
+                    id="threat-vendor"
+                    ref={vendorInputRef}
+                    type="text"
+                    role="combobox"
+                    aria-expanded={vendorOpen}
+                    aria-controls={vendorOpen ? 'vendor-listbox' : undefined}
+                    aria-autocomplete="list"
+                    aria-activedescendant={activeOptionId}
+                    autoComplete="off"
+                    value={vendorQuery}
+                    onChange={(event) => {
+                      setVendorQuery(event.target.value);
+                      setVendorOpen(true);
+                    }}
+                    onFocus={() => setVendorOpen(true)}
+                    onKeyDown={handleVendorKeyDown}
+                    placeholder="Search the vendor catalog…"
+                    className={`${inputClass} pl-9 pr-9`}
+                  />
+                  <ChevronDown
+                    className={`pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600 transition-transform ${vendorOpen ? 'rotate-180' : ''}`}
+                    aria-hidden="true"
+                  />
+                  {vendorOpen && (
+                    <div className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl light:border-zinc-200 light:bg-white">
+                      {vendorOptionCount > 0 ? (
+                        <div
+                          id="vendor-listbox"
+                          role="listbox"
+                          aria-label="Vendor catalog"
+                          className="max-h-72 overflow-y-auto py-1"
+                        >
+                          {vendorMatches.map((vendor, index) => (
+                            <button
+                              key={vendor.normalizedId}
+                              id={vendorOptionId(index)}
+                              type="button"
+                              role="option"
+                              tabIndex={-1}
+                              aria-selected={index === activeVendorOption}
+                              onMouseEnter={() => setActiveVendorIndex(index)}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => chooseCatalogVendor(vendor)}
+                              className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition ${
+                                index === activeVendorOption
+                                  ? 'bg-blue-500/10 text-zinc-100 light:bg-blue-50 light:text-zinc-900'
+                                  : 'text-zinc-300 hover:bg-zinc-800/70 light:text-zinc-700 light:hover:bg-zinc-100'
+                              }`}
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-medium">{vendor.name}</span>
+                                <span className="mt-0.5 block truncate font-mono text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                                  {vendor.normalizedId}
+                                  {vendor.aliases.length > 0 ? ` · ${vendor.aliases.join(', ')}` : ''}
+                                </span>
+                              </span>
+                              <span className="shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                                {vendor.products.length} products
+                              </span>
+                            </button>
+                          ))}
+                          {showCustomVendor && (
+                            <button
+                              id={vendorOptionId(vendorMatches.length)}
+                              type="button"
+                              role="option"
+                              tabIndex={-1}
+                              aria-selected={activeVendorOption === vendorMatches.length}
+                              onMouseEnter={() => setActiveVendorIndex(vendorMatches.length)}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => chooseCustomVendor(trimmedVendorQuery)}
+                              className={`flex w-full flex-col items-start gap-0.5 border-t border-zinc-800/80 px-3 py-2 text-left transition light:border-zinc-200 ${
+                                activeVendorOption === vendorMatches.length
+                                  ? 'bg-blue-500/10 text-zinc-100 light:bg-blue-50 light:text-zinc-900'
+                                  : 'text-zinc-300 hover:bg-zinc-800/70 light:text-zinc-700 light:hover:bg-zinc-100'
+                              }`}
+                            >
+                              <span className="text-sm font-medium">
+                                Use “{trimmedVendorQuery}” as a custom vendor
+                              </span>
+                              <span className="text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                                Query NVD with this free-text vendor name
+                              </span>
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <p
+                          className="px-3 py-3 text-xs text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
+                          role="status"
+                        >
+                          No catalog vendor matches. Type a name and press Enter to search it as a custom
+                          vendor.
+                        </p>
+                      )}
+                      <div className="border-t border-zinc-800/80 px-3 py-2 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-200">
+                        Use arrow keys to navigate · Enter to select
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
-            {!vendorSelected ? (
-              <div className="flex min-h-[42px] items-center rounded-[10px] border border-dashed border-zinc-800 px-3 text-xs text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-300">
-                Select a vendor first
+            {/* Product */}
+            <div className="lg:col-span-6">
+              <div className="threat-product-heading flex flex-wrap items-center justify-between gap-2">
+                <label htmlFor="threat-product" className={labelClass}>
+                  Product
+                </label>
+                {selectedVendor && catalogProducts.length > 0 && (
+                  <div className="mb-1.5 inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5 light:border-zinc-300 light:bg-zinc-100">
+                    <button
+                      type="button"
+                      aria-pressed={productMode === 'catalog'}
+                      onClick={() => setProductMode('catalog')}
+                      className={`rounded-md px-2 py-0.5 text-[10px] font-medium transition ${
+                        productMode === 'catalog'
+                          ? 'bg-zinc-800 text-zinc-100 shadow-sm light:bg-white light:text-zinc-900'
+                          : 'text-zinc-400 dark:text-zinc-500 light:text-zinc-600 hover:text-zinc-300 light:hover:text-zinc-700'
+                      }`}
+                    >
+                      Catalog
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={productMode === 'custom'}
+                      onClick={() => setProductMode('custom')}
+                      className={`rounded-md px-2 py-0.5 text-[10px] font-medium transition ${
+                        productMode === 'custom'
+                          ? 'bg-zinc-800 text-zinc-100 shadow-sm light:bg-white light:text-zinc-900'
+                          : 'text-zinc-400 dark:text-zinc-500 light:text-zinc-600 hover:text-zinc-300 light:hover:text-zinc-700'
+                      }`}
+                    >
+                      Custom
+                    </button>
+                  </div>
+                )}
               </div>
-            ) : useCatalog ? (
-              <>
-                <select
-                  id="threat-product"
-                  value={productSelected}
-                  onChange={(event) => setProductSelected(event.target.value)}
-                  className={`${inputClass} px-3`}
-                >
-                  <option value="">Select a catalog product</option>
-                  {(['a', 'o', 'h'] as const).map((part) => {
-                    const group = catalogProducts.filter((product) => product.part === part);
-                    if (group.length === 0) return null;
-                    return (
-                      <optgroup key={part} label={productPartLabel[part]}>
-                        {group.map((product) => (
-                          <option key={product.normalizedId} value={product.normalizedId}>
-                            {product.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    );
-                  })}
-                </select>
-                <p className="mt-1 truncate text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                  {selectedCatalogProduct?.description ||
-                    'Choose the product that matches the affected asset.'}
-                </p>
-              </>
-            ) : (
-              <>
-                <input
-                  id="threat-product"
-                  type="text"
-                  value={customProduct}
-                  onChange={(event) => setCustomProduct(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      void handleSearch();
-                    }
-                  }}
-                  placeholder="Enter a product name, e.g. http_server"
-                  className={`${inputClass} px-3`}
-                />
-                <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                  {isCustomVendor
-                    ? 'Custom vendors have no catalog products; enter the NVD product name.'
-                    : 'Use a custom product when it is not listed in the catalog.'}
-                </p>
-              </>
-            )}
-          </div>
 
-          {/* Limit */}
-          <div className="lg:col-span-2">
-            <label htmlFor="threat-limit" className={labelClass}>
-              Max results
-            </label>
-            <select
-              id="threat-limit"
-              value={resultLimit}
-              onChange={(event) => setResultLimit(Number(event.target.value))}
-              className={`${inputClass} px-3`}
-            >
-              {[25, 50, 100, 200].map((limit) => (
-                <option key={limit} value={limit}>
-                  {limit}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">NVD request cap: 200</p>
-          </div>
-
-          {/* Submit */}
-          <div className="flex items-end lg:col-span-2">
-            <button
-              type="button"
-              onClick={() => void handleSearch()}
-              disabled={!canSearch}
-              className="ui-primary w-full"
-            >
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              {!vendorSelected ? (
+                <div className="flex min-h-[42px] items-center rounded-[10px] border border-dashed border-zinc-800 px-3 text-xs text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-300">
+                  Select a vendor first
+                </div>
+              ) : useCatalog ? (
+                <>
+                  <select
+                    id="threat-product"
+                    value={productSelected}
+                    onChange={(event) => setProductSelected(event.target.value)}
+                    className={`${inputClass} px-3`}
+                  >
+                    <option value="">Select a catalog product</option>
+                    {(['a', 'o', 'h'] as const).map((part) => {
+                      const group = catalogProducts.filter((product) => product.part === part);
+                      if (group.length === 0) return null;
+                      return (
+                        <optgroup key={part} label={productPartLabel[part]}>
+                          {group.map((product) => (
+                            <option key={product.normalizedId} value={product.normalizedId}>
+                              {product.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+                  </select>
+                  <p className="mt-1 truncate text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                    {selectedCatalogProduct?.description ||
+                      'Choose the product that matches the affected asset.'}
+                  </p>
+                </>
               ) : (
-                <Search className="h-4 w-4" aria-hidden="true" />
+                <>
+                  <input
+                    id="threat-product"
+                    type="text"
+                    value={customProduct}
+                    onChange={(event) => setCustomProduct(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void handleSearch();
+                      }
+                    }}
+                    placeholder="Enter a product name, e.g. Apache HTTP Server"
+                    className={`${inputClass} px-3`}
+                  />
+                  <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                    {isCustomVendor
+                      ? 'Custom vendors have no catalog products; enter the NVD product name.'
+                      : 'Use a custom product when it is not listed in the catalog.'}
+                  </p>
+                </>
               )}
-              {loading ? 'Searching…' : 'Search NVD'}
-            </button>
-          </div>
-        </div>
+            </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800/80 pt-3 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-200">
-          <p>
-            Exact CPE 2.3 matching runs first. Keyword correlation is used only when no exact
-            matches are found.
-          </p>
-          <div className="flex items-center gap-3">
-            {draftChanged && (
-              <span className="inline-flex items-center gap-1 text-amber-400 light:text-amber-700">
-                <RotateCcw className="h-3 w-3" aria-hidden="true" />
-                Parameters changed — search again
-              </span>
-            )}
-            {(vendorSelected || results || error) && (
-              <button
-                type="button"
-                onClick={resetSearch}
-                className="inline-flex items-center gap-1 rounded text-zinc-400 underline-offset-4 transition hover:text-zinc-200 hover:underline light:text-zinc-600 light:hover:text-zinc-900"
+            {/* Limit */}
+            <div className="lg:col-span-2">
+              <label htmlFor="threat-limit" className={labelClass}>
+                Max results
+              </label>
+              <select
+                id="threat-limit"
+                value={resultLimit}
+                onChange={(event) => setResultLimit(Number(event.target.value))}
+                className={`${inputClass} px-3`}
               >
-                <X className="h-3 w-3" aria-hidden="true" />
-                Reset search
-              </button>
-            )}
+                {[25, 50, 100, 200].map((limit) => (
+                  <option key={limit} value={limit}>
+                    {limit}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                Per search
+              </p>
+            </div>
           </div>
-        </div>
+
+          <div className="threat-search-actions">
+            <div className="threat-search-context">
+              <Crosshair className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <p>
+                {draftChanged
+                  ? 'Selection changed. Run a new search to update your results.'
+                  : 'Matches product identifiers first, then broadens to keyword search.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              {(vendorSelected || results || error || loading) && (
+                <button type="button" onClick={resetSearch} className={`${smallButton} ${smallButtonIdle}`}>
+                  <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Reset
+                </button>
+              )}
+              <button type="submit" disabled={!canSearch} className="ui-primary threat-search-submit">
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Search className="h-4 w-4" aria-hidden="true" />
+                )}
+                {loading ? 'Searching NVD…' : 'Search intelligence'}
+              </button>
+            </div>
+          </div>
+        </form>
       </section>
 
       {/* Guidance before the first search */}
       {!results && !loading && !error && (
-        <section className={`${panel} p-5`} aria-label="How threat intelligence search works">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <section className={`${panel} threat-search-welcome`} aria-label="Start an investigation">
+          <div className="threat-welcome-heading">
+            <span className="threat-welcome-icon">
+              <PackageSearch size={26} strokeWidth={1.5} aria-hidden="true" />
+            </span>
+            <div>
+              <h2>Start with the product you want to investigate</h2>
+              <p>
+                Choose from the catalog or enter a custom vendor and product. Your results will appear here.
+              </p>
+            </div>
+          </div>
+          <div className="threat-examples">
+            <span>Quick start</span>
+            {[
+              { vendor: 'microsoft', product: 'windows_server_2022', label: 'Windows Server' },
+              { vendor: 'fortinet', product: 'fortios', label: 'Fortinet FortiOS' },
+              { vendor: 'apache', product: 'http_server', label: 'Apache HTTP Server' },
+            ].map((example) => (
+              <button
+                type="button"
+                key={example.product}
+                onClick={() => {
+                  const vendor = ENTERPRISE_VENDOR_CATALOG.find(
+                    (item) => item.normalizedId === example.vendor,
+                  );
+                  if (vendor) {
+                    chooseCatalogVendor(vendor);
+                    setProductSelected(example.product);
+                  }
+                }}
+              >
+                {example.label}
+                <ChevronRight size={13} aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+          <div className="threat-capabilities">
             {[
               {
-                icon: Building2,
-                title: 'Choose a vendor',
-                body: 'Pick a catalog vendor for normalized CPE matching, or enter a custom vendor name.',
+                icon: ShieldAlert,
+                title: 'Understand severity',
+                body: 'Compare CVSS scores and vulnerability details.',
               },
               {
-                icon: PackageSearch,
-                title: 'Choose a product',
-                body: 'Select a catalog product or provide the NVD product identifier directly.',
+                icon: Flame,
+                title: 'Prioritize exploit risk',
+                body: 'Review known exploitation and available EPSS data.',
               },
               {
-                icon: Database,
-                title: 'Review the evidence',
-                body: 'Inspect CVSS, EPSS, CISA KEV status, and matched CPEs, then export the result set.',
+                icon: Download,
+                title: 'Share the evidence',
+                body: 'Inspect matched products and export CSV or JSON.',
               },
-            ].map((step) => (
-              <div key={step.title} className="flex items-start gap-3">
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-zinc-800/60 text-zinc-400 light:bg-zinc-100 light:text-zinc-600">
-                  <step.icon className="h-4 w-4" aria-hidden="true" />
-                </span>
+            ].map(({ icon: Icon, title, body }) => (
+              <div key={title}>
+                <Icon size={18} strokeWidth={1.6} aria-hidden="true" />
                 <div>
-                  <p className="text-xs font-semibold text-zinc-200 light:text-zinc-800">
-                    {step.title}
-                  </p>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-400 dark:text-zinc-500 light:text-zinc-600">{step.body}</p>
+                  <h3>{title}</h3>
+                  <p>{body}</p>
                 </div>
               </div>
             ))}
           </div>
-          <p className="mt-4 border-t border-zinc-800/80 pt-3 text-[11px] leading-relaxed text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-200">
-            Searches are executed server-side against NVD. Anonymous requests share a limited rate
-            budget; configure an NVD API key in Settings for higher throughput.
-          </p>
         </section>
       )}
 
@@ -1048,11 +1082,9 @@ export const ThreatIntelligenceSearch: React.FC = () => {
           />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-rose-200 light:text-rose-800">
-              Search failed
+              {results?.length ? 'Some intelligence is unavailable' : 'Unable to complete the search'}
             </p>
-            <p className="mt-0.5 text-xs leading-relaxed text-rose-300 light:text-rose-700">
-              {error}
-            </p>
+            <p className="mt-0.5 text-xs leading-relaxed text-rose-300 light:text-rose-700">{error}</p>
           </div>
           <button
             type="button"
@@ -1100,12 +1132,11 @@ export const ThreatIntelligenceSearch: React.FC = () => {
           </p>
           <p className="mx-auto mt-1 max-w-lg text-xs leading-relaxed text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
             NVD returned no CVEs for the selected vendor and product. Check the spelling, try the
-            vendor&apos;s canonical product identifier, or widen the result limit.
+            vendor&apos;s canonical product identifier, or try a broader product name.
           </p>
           {executedSearch && (
             <p className="mt-3 font-mono text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-              {executedSearch.vendorName} / {executedSearch.productName} ·{' '}
-              {formatDateTime(executedSearch.at)}
+              {executedSearch.vendorName} / {executedSearch.productName} · {formatDateTime(executedSearch.at)}
             </p>
           )}
         </section>
@@ -1118,11 +1149,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             <MetricCard
               label="Matches"
               value={String(summary.total)}
-              hint={
-                totalResults > summary.total
-                  ? `${totalResults} reported by NVD`
-                  : 'Returned by NVD'
-              }
+              hint={totalResults > summary.total ? `${totalResults} reported by NVD` : 'Returned by NVD'}
               icon={Database}
               tone="bg-blue-500/10 text-blue-400 light:bg-blue-50 light:text-blue-700"
             />
@@ -1153,9 +1180,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             <div className="border-b border-zinc-800/80 p-4 light:border-zinc-200">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="text-sm font-semibold text-zinc-100 light:text-zinc-900">
-                    Search results
-                  </h2>
+                  <h2 className="text-sm font-semibold text-zinc-100 light:text-zinc-900">Search results</h2>
                   <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                     {executedSearch && (
                       <>
@@ -1229,8 +1254,8 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     placeholder="Filter by CVE, title, CWE, or CPE…"
                     value={resultQuery}
                     onChange={(event) => setResultQuery(event.target.value)}
-                     className={`${inputClass} pl-9 pr-9`}
-                   />
+                    className={`${inputClass} pl-9 pr-9`}
+                  />
                   {resultQuery && (
                     <button
                       type="button"
@@ -1274,6 +1299,24 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   CISA KEV only
                 </button>
 
+                <select
+                  aria-label="Sort search results"
+                  className={`${inputClass} threat-mobile-sort`}
+                  value={`${sortKey}:${sortOrder}`}
+                  onChange={(event) => {
+                    const [key, order] = event.target.value.split(':');
+                    setSortKey(key as SortKey);
+                    setSortOrder(order as SortOrder);
+                  }}
+                >
+                  <option value="score:desc">Highest risk first</option>
+                  <option value="score:asc">Lowest risk first</option>
+                  <option value="published:desc">Newest published first</option>
+                  <option value="published:asc">Oldest published first</option>
+                  <option value="cve:asc">CVE ID: A–Z</option>
+                  <option value="cve:desc">CVE ID: Z–A</option>
+                </select>
+
                 {hasResultFilters && (
                   <button
                     type="button"
@@ -1285,7 +1328,10 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   </button>
                 )}
 
-                <span className="ml-auto text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600" aria-live="polite">
+                <span
+                  className="ml-auto text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
+                  aria-live="polite"
+                >
                   {filteredResults.length === results.length
                     ? `${results.length} results`
                     : `${filteredResults.length} of ${results.length} results`}
@@ -1293,16 +1339,12 @@ export const ThreatIntelligenceSearch: React.FC = () => {
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1080px] text-left text-xs">
+            <div className="threat-desktop-results overflow-x-auto">
+              <table className="threat-results-table w-full min-w-[920px] text-left text-xs">
                 <caption className="sr-only">NVD vulnerability search results</caption>
                 <thead className="border-b border-zinc-800/80 bg-zinc-950/60 text-[10px] uppercase tracking-[0.06em] text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-200 light:bg-zinc-50">
                   <tr>
-                    <th
-                      scope="col"
-                      aria-sort={ariaSort('cve')}
-                      className="min-w-[240px] px-4 py-3"
-                    >
+                    <th scope="col" aria-sort={ariaSort('cve')} className="min-w-[240px] px-4 py-3">
                       <button
                         type="button"
                         onClick={() => toggleSort('cve')}
@@ -1312,16 +1354,13 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                         {sortIcon('cve')}
                       </button>
                     </th>
-                    <th scope="col" className="px-4 py-3">
-                      Severity
-                    </th>
                     <th scope="col" aria-sort={ariaSort('score')} className="px-4 py-3">
                       <button
                         type="button"
                         onClick={() => toggleSort('score')}
                         className="-mx-1 flex items-center gap-1 rounded px-1 py-0.5 transition hover:text-zinc-200 light:hover:text-zinc-900"
                       >
-                        CVSS
+                        Risk / CVSS
                         {sortIcon('score')}
                       </button>
                     </th>
@@ -1329,16 +1368,9 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                       Exploit intelligence
                     </th>
                     <th scope="col" className="px-4 py-3">
-                      Matched CPE
+                      Match evidence
                     </th>
-                    <th scope="col" className="px-4 py-3">
-                      Source
-                    </th>
-                    <th
-                      scope="col"
-                      aria-sort={ariaSort('published')}
-                      className="px-4 py-3"
-                    >
+                    <th scope="col" aria-sort={ariaSort('published')} className="px-4 py-3">
                       <button
                         type="button"
                         onClick={() => toggleSort('published')}
@@ -1356,7 +1388,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                 <tbody className="divide-y divide-zinc-800/60 light:divide-zinc-200">
                   {pageResults.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-14 text-center">
+                      <td colSpan={6} className="px-4 py-14 text-center">
                         <div className="mx-auto flex max-w-sm flex-col items-center">
                           <span className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-300 light:bg-zinc-100">
                             <Inbox className="h-5 w-5" aria-hidden="true" />
@@ -1405,10 +1437,10 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                               </p>
                             )}
                           </td>
-                          <td className="px-4 py-3">
-                            <SeverityBadge severity={cve.cvss.severity} />
-                          </td>
                           <td className="whitespace-nowrap px-4 py-3">
+                            <div className="mb-1.5">
+                              <SeverityBadge severity={cve.cvss.severity} />
+                            </div>
                             <span className="font-mono text-sm font-semibold tabular-nums text-zinc-200 light:text-zinc-800">
                               {scored ? cve.cvss.score.toFixed(1) : '—'}
                             </span>
@@ -1435,6 +1467,9 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                             </div>
                           </td>
                           <td className="px-4 py-3">
+                            <div className="mb-1.5">
+                              <SourceBadge source={hit.source} />
+                            </div>
                             {hit.matchingCpes.length > 0 ? (
                               <div className="space-y-0.5">
                                 <code
@@ -1450,11 +1485,10 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                                 )}
                               </div>
                             ) : (
-                              <span className="text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">—</span>
+                              <span className="text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                                —
+                              </span>
                             )}
-                          </td>
-                          <td className="px-4 py-3">
-                            <SourceBadge source={hit.source} />
                           </td>
                           <td className="whitespace-nowrap px-4 py-3 text-[11px] text-zinc-400 light:text-zinc-600">
                             {formatDate(cve.publishedDate)}
@@ -1481,6 +1515,55 @@ export const ThreatIntelligenceSearch: React.FC = () => {
               </table>
             </div>
 
+            <div className="threat-mobile-results">
+              {pageResults.length === 0 ? (
+                <div className="threat-mobile-empty">
+                  <p>No results match these filters.</p>
+                  <button type="button" onClick={resetResultControls} className="ui-secondary">
+                    Clear filters
+                  </button>
+                </div>
+              ) : (
+                pageResults.map((hit) => (
+                  <article key={hit.cve.cveId} className="threat-result-card">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <CveLink cveId={hit.cve.cveId} />
+                      <SeverityBadge severity={hit.cve.cvss.severity} />
+                    </div>
+                    <h3>{hit.cve.title || 'No title provided'}</h3>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <SourceBadge source={hit.source} />
+                      {hit.cve.cisaKev?.isKev && <KevBadge />}
+                    </div>
+                    <dl>
+                      <div>
+                        <dt>CVSS</dt>
+                        <dd>
+                          {hit.cve.cvss.version === 'UNKNOWN' ? 'Unscored' : hit.cve.cvss.score.toFixed(1)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Published</dt>
+                        <dd>{formatDate(hit.cve.publishedDate)}</dd>
+                      </div>
+                    </dl>
+                    <button
+                      type="button"
+                      aria-label={`Inspect ${hit.cve.cveId}`}
+                      onClick={() => {
+                        setCopiedDetail(false);
+                        setInspect(hit);
+                      }}
+                      className="ui-secondary"
+                    >
+                      Inspect vulnerability
+                      <ChevronRight size={14} aria-hidden="true" />
+                    </button>
+                  </article>
+                ))
+              )}
+            </div>
+
             <Pagination
               currentPage={currentPage}
               totalItems={filteredResults.length}
@@ -1501,12 +1584,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             if (event.target === event.currentTarget) setInspect(null);
           }}
         >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="threat-detail-title"
-            className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl light:border-zinc-200 light:bg-white"
-          >
+          <ThreatDetailDialog onClose={() => setInspect(null)}>
             <div className="flex items-start justify-between gap-3 border-b border-zinc-800/80 px-4 py-4 light:border-zinc-200 sm:px-5">
               <div className="min-w-0">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
@@ -1542,7 +1620,6 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   {copiedDetail ? 'Copied' : 'Copy JSON'}
                 </button>
                 <button
-                  ref={closeDetailRef}
                   type="button"
                   onClick={() => setInspect(null)}
                   aria-label="Close vulnerability details"
@@ -1590,7 +1667,9 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   </dd>
                 </div>
                 <div className="col-span-2">
-                  <dt className="text-zinc-400 dark:text-zinc-500 light:text-zinc-600">Exploit intelligence</dt>
+                  <dt className="text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                    Exploit intelligence
+                  </dt>
                   <dd className={`mt-0.5 font-medium ${exploitTone(inspect.cve.exploitStatus)}`}>
                     {inspect.cve.exploitStatus === 'None'
                       ? 'No known exploitation'
@@ -1652,7 +1731,10 @@ export const ThreatIntelligenceSearch: React.FC = () => {
 
               <section className="mt-5">
                 <h3 className="flex items-center gap-2 text-xs font-semibold text-zinc-200 light:text-zinc-800">
-                  <Tag className="h-3.5 w-3.5 text-zinc-400 dark:text-zinc-500 light:text-zinc-600" aria-hidden="true" />
+                  <Tag
+                    className="h-3.5 w-3.5 text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
+                    aria-hidden="true"
+                  />
                   Weaknesses
                 </h3>
                 {inspect.cve.cwe.length > 0 ? (
@@ -1667,7 +1749,9 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     ))}
                   </div>
                 ) : (
-                  <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">No CWE assigned.</p>
+                  <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                    No CWE assigned.
+                  </p>
                 )}
               </section>
 
@@ -1717,9 +1801,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
               )}
 
               <section className="mt-5">
-                <h3 className="text-xs font-semibold text-zinc-200 light:text-zinc-800">
-                  Sources
-                </h3>
+                <h3 className="text-xs font-semibold text-zinc-200 light:text-zinc-800">Sources</h3>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   <span className="rounded border border-zinc-800 bg-zinc-950 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-600">
                     {inspect.source === 'NVD_API' ? 'NVD exact CPE' : 'NVD keyword fallback'}
@@ -1754,7 +1836,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                 Close
               </button>
             </div>
-          </div>
+          </ThreatDetailDialog>
         </div>
       )}
     </div>
