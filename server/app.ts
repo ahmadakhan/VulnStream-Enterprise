@@ -233,7 +233,9 @@ export function createApp(
         },
       },
       strictTransportSecurity:
-        config.NODE_ENV === 'production' ? { maxAge: 31536000, includeSubDomains: true } : false,
+        config.NODE_ENV === 'production'
+          ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+          : false,
     }),
   );
   app.use(express.json({ limit: '2mb', strict: true }));

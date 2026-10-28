@@ -73,7 +73,7 @@ const request = createRequester(config),
 const correlation = new CorrelationRuntime(
   pool,
   config.ENCRYPTION_KEY,
-  process.env.CORRELATION_DLQ_DIRECTORY || '/tmp/vulnstream-correlation-dlq',
+  config.CORRELATION_DLQ_DIRECTORY,
   { url: config.HEARTBEAT_URL, intervalSeconds: config.HEARTBEAT_INTERVAL_SECONDS },
 );
 if (config.WORKER_ENABLED === 'true') correlation.start();

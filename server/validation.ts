@@ -305,7 +305,7 @@ export const settingsSchema = z.object({
   ssrfProtection: z.object({
     blockPrivateIps: z.literal(true),
     blockLoopback: z.literal(true),
-    allowRedirects: z.literal(false),
+    allowRedirects: z.boolean().default(true),
   }),
   securityPolicy: z.object({
     sessionTimeoutMins: z.number().int().min(5).max(60),

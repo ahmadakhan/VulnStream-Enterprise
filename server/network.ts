@@ -47,6 +47,14 @@ export interface RequestOptions {
   socketTimeoutMs?: number;
   /** Maximum accepted response body size. */
   maxResponseBytes?: number;
+  /**
+   * When true (default), redirects to allowlisted HTTPS hosts are followed
+   * with full SSRF re-validation on each hop (public IP, port 443, no URL
+   * credentials). Set to false to reject redirects like the previous behavior.
+   */
+  allowRedirects?: boolean;
+  /** Maximum number of redirect hops to follow. Defaults to 5. */
+  maxRedirects?: number;
 }
 /** Read a response stream with independent wire and decompressed size limits. */
 export async function readResponseBody(
@@ -94,57 +102,84 @@ export function createRequester(config: Config): Requester {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   return async (value, options = {}) => {
-    const url = new URL(value),
-      selected = await resolvePublic(url, allowlist);
-    return new Promise((resolve, reject) => {
-      let deadline: ReturnType<typeof setTimeout>;
-      const clearDeadline = () => clearTimeout(deadline);
-      // Connect to the validated IP while preserving TLS hostname verification and SNI.
-      const request = https.request(
-        url,
-        {
-          method: options.method || 'GET',
-          headers: { 'user-agent': 'BA-Threat-Intel/1.0', accept: 'application/json', 'accept-encoding': 'gzip', ...options.headers },
-          lookup: ((_host: string, opts: any, cb: any) =>
-            opts?.all ? cb(null, [selected]) : cb(null, selected.address, selected.family)) as any,
-          agent: false,
-          timeout: options.socketTimeoutMs ?? 15000,
-          maxHeaderSize: 16384,
-        },
-        (response) => {
-          const maxResponseBytes = options.maxResponseBytes ?? 8 * 1024 * 1024;
-          void readResponseBody(response, response.headers['content-encoding'], maxResponseBytes).then((body) => {
-            const status = response.statusCode || 0;
-            if (status >= 300 && status < 400 && status !== 304) {
+    const opts: Required<Pick<RequestOptions, 'allowRedirects' | 'maxRedirects'>> = {
+      allowRedirects: options.allowRedirects ?? true,
+      maxRedirects: options.maxRedirects ?? 5,
+    };
+    return doRequest(value, options, opts, allowlist);
+  };
+}
+
+async function doRequest(
+  value: string,
+  options: RequestOptions,
+  opts: { allowRedirects: boolean; maxRedirects: number },
+  allowlist: string[],
+): Promise<ResponseData> {
+  const url = new URL(value),
+    selected = await resolvePublic(url, allowlist);
+  return new Promise((resolve, reject) => {
+    let deadline: ReturnType<typeof setTimeout>;
+    const clearDeadline = () => clearTimeout(deadline);
+    // Connect to the validated IP while preserving TLS hostname verification and SNI.
+    const request = https.request(
+      url,
+      {
+        method: options.method || 'GET',
+        headers: { 'user-agent': 'BA-Threat-Intel/1.0', accept: 'application/json', 'accept-encoding': 'gzip', ...options.headers },
+        lookup: ((_host: string, opts: any, cb: any) =>
+          opts?.all ? cb(null, [selected]) : cb(null, selected.address, selected.family)) as any,
+        agent: false,
+        timeout: options.socketTimeoutMs ?? 15000,
+        maxHeaderSize: 16384,
+      },
+      (response) => {
+        const maxResponseBytes = options.maxResponseBytes ?? 8 * 1024 * 1024;
+        void readResponseBody(response, response.headers['content-encoding'], maxResponseBytes).then((body) => {
+          const status = response.statusCode || 0;
+          if (status >= 300 && status < 400 && status !== 304) {
+            if (!opts.allowRedirects || opts.maxRedirects <= 0) {
               reject(new Error('Redirects are not permitted'));
               return;
             }
-            resolve({ status, body, headers: response.headers });
-          }, reject).finally(clearDeadline);
-        },
-      );
-      // Callers bound their timeout by a remaining-time budget (see the feed
-      // duration limit), which can be at or below zero once the budget is spent.
-      // A negative delay makes Node clamp the timer to 1ms and warn; reject
-      // immediately instead, so the caller sees a normal timeout rather than an
-      // attempt that was never going to be allowed to finish.
-      const timeoutMs = options.timeoutMs ?? 20000;
-      if (timeoutMs <= 0) {
-        reject(new Error('Outbound request timed out'));
-        request.destroy();
-        return;
-      }
-      deadline = setTimeout(
-        () => request.destroy(new Error('Outbound request timed out')),
-        timeoutMs,
-      );
-      request.on('timeout', () => request.destroy(new Error('Outbound request timed out')));
-      request.on('error', (error) => {
-        clearDeadline();
-        reject(error);
-      });
-      if (options.body) request.write(options.body);
-      request.end();
+            const location = response.headers.location;
+            if (!location) {
+              reject(new Error(`HTTP ${status} redirect without Location header`));
+              return;
+            }
+            const next = new URL(location, value);
+            // Re-validate the redirect target through the full SSRF gauntlet:
+            // HTTPS, port 443, no credentials, allowlisted host, public IP.
+            void resolvePublic(next, allowlist)
+              .then(() => doRequest(next.href, options, { ...opts, maxRedirects: opts.maxRedirects - 1 }, allowlist))
+              .then(resolve, reject);
+            return;
+          }
+          resolve({ status, body, headers: response.headers });
+        }, reject).finally(clearDeadline);
+      },
+    );
+    // Callers bound their timeout by a remaining-time budget (see the feed
+    // duration limit), which can be at or below zero once the budget is spent.
+    // A negative delay makes Node clamp the timer to 1ms and warn; reject
+    // immediately instead, so the caller sees a normal timeout rather than an
+    // attempt that was never going to be allowed to finish.
+    const timeoutMs = options.timeoutMs ?? 20000;
+    if (timeoutMs <= 0) {
+      reject(new Error('Outbound request timed out'));
+      request.destroy();
+      return;
+    }
+    deadline = setTimeout(
+      () => request.destroy(new Error('Outbound request timed out')),
+      timeoutMs,
+    );
+    request.on('timeout', () => request.destroy(new Error('Outbound request timed out')));
+    request.on('error', (error) => {
+      clearDeadline();
+      reject(error);
     });
-  };
+    if (options.body) request.write(options.body);
+    request.end();
+  });
 }

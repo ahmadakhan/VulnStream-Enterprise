@@ -41,7 +41,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   emailRetryMaxDelayMinutes: 60,
   webhookSigningSecret: '',
   authorityPrecedence: ['VENDOR_PSIRT', 'CISA_KEV', 'FIRST_EPSS', 'NVD_BATCH'],
-  ssrfProtection: { blockPrivateIps: true, blockLoopback: true, allowRedirects: false },
+  ssrfProtection: { blockPrivateIps: true, blockLoopback: true, allowRedirects: true },
   securityPolicy: {
     sessionTimeoutMins: 30,
     csrfProtection: true,

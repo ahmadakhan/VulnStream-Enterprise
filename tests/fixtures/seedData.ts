@@ -771,7 +771,7 @@ export const INITIAL_SETTINGS: AppSettings = {
   ssrfProtection: {
     blockPrivateIps: true,
     blockLoopback: true,
-    allowRedirects: false,
+    allowRedirects: true,
   },
   securityPolicy: {
     sessionTimeoutMins: 30,

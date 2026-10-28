@@ -72,6 +72,11 @@ const schema = z.object({
   HEARTBEAT_URL: z.string().max(2048).default(''),
   HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().min(15).max(3600).default(60),
   HANG_DETECTION_ENABLED: z.enum(['true', 'false']).default('false'),
+  // Dead-letter queue for correlation pipeline. Defaults to an app-local
+  // directory instead of /tmp because /tmp is subject to OS cleanup and may be
+  // world-readable on shared hosts. The DeadLetterQueue creates this directory
+  // with mode 0o700 at startup.
+  CORRELATION_DLQ_DIRECTORY: z.string().default('data/correlation-dlq'),
 });
 export type Config = z.infer<typeof schema>;
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {

@@ -18,7 +18,7 @@ export type Db = pg.Pool | PoolClient;
 export const createPool = (url: string) =>
   new pg.Pool({
     connectionString: url,
-    max: 12,
+    max: 25,
     connectionTimeoutMillis: 5000,
     idleTimeoutMillis: 30000,
     statement_timeout: 15000,
