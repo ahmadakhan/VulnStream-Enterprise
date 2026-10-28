@@ -1418,7 +1418,7 @@ export function createApp(
             req.ip || '',
           );
         });
-        res.json({ success: false, latency, error: message });
+        res.json({ success: false, latency, error: 'Connection failed; see feed test log for details' });
       }
     }),
   );

@@ -132,7 +132,57 @@ export const emailRetrySchedule = (policy: EmailRetryPolicy) =>
         `${Math.round(emailRetryDelayMs(index + 1, policy) / 60_000)}m`,
       )
     : [];
-const revision = (cve: NormalizedCVE) => createHash('sha256').update(stableJson(cve)).digest('hex');
+/**
+ * Content-relevant CVE fingerprint used for delivery staleness checks.
+ *
+ * Only fields that affect advisory content (severity, remediation links,
+ * CISA KEV status in the finding-detail line) or matching applicability are
+ * included. Enrichment and metadata fields — EPSS scores, exploit status,
+ * exploitation sources, source-feed attribution, publication/modification
+ * timestamps, CPE weakness IDs — are excluded because feed refreshes update
+ * them independently of the matching engine without altering the advisory a
+ * recipient receives.
+ *
+ * This deliberately mirrors the field set of `matchingCveSignature` in
+ * pipeline.ts (the signature the pipeline uses for its reusable-match
+ * optimisation) plus `cvss`, `remediation` and `cisaKev.isKev`, all of which
+ * surface in delivered content. Aligning these two signatures prevents a
+ * benign enrichment refresh from triggering a false "CVE intelligence
+ * changed" failure when the pipeline correctly treats the refresh as a
+ * no-op.
+ */
+const revision = (cve: NormalizedCVE) =>
+  createHash('sha256')
+    .update(
+      stableJson({
+        cveId: cve.cveId,
+        title: cve.title,
+        description: cve.description,
+        cvss: cve.cvss,
+        cpeMatches: cve.cpeMatches,
+        cpeMatchDetails: cve.cpeMatchDetails,
+        versionRange: cve.versionRange,
+        purls: cve.purls,
+        applicabilityRequiresReview: cve.applicabilityRequiresReview,
+        remediation: cve.remediation,
+        isKev: cve.cisaKev?.isKev ?? false,
+      }),
+    )
+    .digest('hex');
+/**
+ * Finding fingerprint for delivery staleness checks and advisory content
+ * revision (dedupe key).
+ *
+ * `exploitRisk` is intentionally excluded: it is derived from enrichment
+ * data (EPSS, KEV, exploit status) that the pipeline refreshes independently
+ * of matching. Including it would make the content-revision change whenever
+ * a feed refresh updated a score, which in turn prevents the ON-CONFLICT
+ * resurrection of a failed job from matching (different dedupe key) and
+ * forces a new advisory even though the delivered email content — severity,
+ * remediation links, affected systems — is unchanged. The revalidation
+ * already catches genuine applicability changes via the `!match` and
+ * `notificationStatus` checks below.
+ */
 const findingRevision = (finding: Finding) =>
   createHash('sha256')
     .update(
@@ -142,7 +192,6 @@ const findingRevision = (finding: Finding) =>
         assetName: finding.matchedAssetName,
         matchingMethod: finding.matchingMethod,
         matchingEvidence: finding.matchingEvidence,
-        exploitRisk: finding.exploitRisk,
       }),
     )
     .digest('hex');
@@ -877,19 +926,19 @@ export async function deliverNext(
         const rawDelay = response.headers['retry-after'];
         const delay = (Array.isArray(rawDelay) ? rawDelay[0] : rawDelay)?.trim();
         if (delay) {
-          const timestamp = /^\d+$/.test(delay)
+          const retryAt = /^\d+$/.test(delay)
             ? Date.now() + Number(delay) * 1000
             : /[a-z]/i.test(delay)
               ? Date.parse(delay)
               : NaN;
-          if (timestamp > Date.now()) {
-            if (!Number.isFinite(timestamp) || timestamp > 8640000000000000) {
+          if (retryAt > Date.now()) {
+            if (!Number.isFinite(retryAt) || retryAt > 8640000000000000) {
               permanent = true;
               throw new Error(
                 'Webhook Retry-After exceeds supported scheduling range; operator review required',
               );
             }
-            retryNotBefore = timestamp;
+            retryNotBefore = retryAt;
           }
         }
         permanent = statusCode >= 400 && statusCode < 500 && ![408, 429].includes(statusCode);
