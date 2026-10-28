@@ -151,6 +151,10 @@ const schema = z.object({
   // world-readable on shared hosts. The DeadLetterQueue creates this directory
   // with mode 0o700 at startup.
   CORRELATION_DLQ_DIRECTORY: z.string().default('data/correlation-dlq'),
+  // Controls stdout verbosity for structured operational logs. 'standard' keeps
+  // output to lifecycle and error events; 'verbose' adds per-tick detail for
+  // pipeline, ingestion, delivery, and retention steps to aid troubleshooting.
+  LOG_LEVEL: z.enum(['standard', 'verbose']).default('standard'),
 });
 export type Config = z.infer<typeof schema>;
 /**
