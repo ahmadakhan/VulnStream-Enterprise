@@ -1,7 +1,8 @@
 import { pages, type PageId } from '../design/pages';
+import { DashboardIcon } from '../design/icons';
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Shield } from 'lucide-react';
+import { Shield, LogOut } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
   const [isMobileView, setIsMobileView] = useState(
@@ -15,6 +16,7 @@ export const Sidebar: React.FC = () => {
     summary,
     watchlist,
     feeds,
+    logout,
   } = useApp();
 
   const activeFindingsCount = summary.activeFindings;
@@ -79,6 +81,11 @@ export const Sidebar: React.FC = () => {
       inert={isMobileView && !mobileNavOpen}
       className={`ui-sidebar fixed inset-y-0 left-0 z-40 w-64 bg-zinc-950 dark:bg-zinc-950 light:bg-white border-r border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 flex flex-col shrink-0 select-none transition-transform duration-200 md:sticky md:top-0 md:h-screen md:translate-x-0 md:z-30 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}
     >
+      {/* Dashboard icon at the very top, before the brand */}
+      <div className="px-4 pt-3 pb-1 flex justify-start">
+        <DashboardIcon className="w-6 h-6" />
+      </div>
+
       {/* Brand Header */}
       <div className="p-4 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200">
         <button
@@ -158,6 +165,18 @@ export const Sidebar: React.FC = () => {
           </div>
         ))}
       </nav>
+
+      {/* Sign out, below the left nav */}
+      <div className="border-t border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 p-3">
+        <button
+          type="button"
+          onClick={() => void logout()}
+          className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 dark:hover:bg-zinc-800/60 light:text-zinc-600 light:hover:text-zinc-900 light:hover:bg-zinc-100"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          <span>Sign out</span>
+        </button>
+      </div>
     </aside>
   );
 };

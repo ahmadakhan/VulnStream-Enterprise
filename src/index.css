@@ -742,7 +742,7 @@ button[class~='bg-blue-600']:hover:not(:disabled) {
   margin-top: 38px;
 }
 .login-eyebrow {
-  color: #8fa8ff;
+  color: var(--login-blue);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.15em;
@@ -784,7 +784,7 @@ button[class~='bg-blue-600']:hover:not(:disabled) {
 }
 
 .login-field input::placeholder {
-  color: #71809a;
+  color: var(--login-muted);
   font-weight: 400;
 }
 .login-field input:focus {
@@ -832,7 +832,7 @@ button[class~='bg-blue-600']:hover:not(:disabled) {
   font-size: 13px;
 }
 .login-connecting svg {
-  color: #8fa8ff;
+  color: var(--login-blue);
 }
 .login-error {
   padding: 11px 12px;
@@ -842,6 +842,14 @@ button[class~='bg-blue-600']:hover:not(:disabled) {
   background: rgb(127 29 29 / 18%);
   font-size: 12px;
   line-height: 1.5;
+}
+.light .login-submit {
+  border: 1px solid rgb(66 102 213 / 28%);
+  background: linear-gradient(110deg, #4266d5, #3b5acc);
+  box-shadow: 0 8px 22px rgb(66 102 213 / 18%);
+}
+.light .login-submit:hover:not(:disabled) {
+  box-shadow: 0 11px 25px rgb(66 102 213 / 25%);
 }
 .light .login-error {
   color: #a32936;
@@ -866,7 +874,7 @@ button[class~='bg-blue-600']:hover:not(:disabled) {
   gap: 6px;
 }
 .login-status {
-  color: #62c79a;
+  color: var(--login-blue);
 }
 .login-status i {
   width: 6px;
