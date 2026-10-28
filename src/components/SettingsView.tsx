@@ -427,6 +427,92 @@ export function SettingsView() {
                       </span>
                     </div>
                   </label>
+
+                  <div className="sm:col-span-2 mt-1 border-t border-zinc-800/70 pt-4 light:border-zinc-200">
+                    <h3 className="text-xs font-semibold text-zinc-200 light:text-zinc-800">
+                      Daily digest
+                    </h3>
+                    <p className="ui-description mt-1">
+                      A calendar subscription that delivers a daily summary of findings plus an operational
+                      health-check report to recipients that opt in, at a fixed local time in the configured
+                      timezone.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2 sm:items-start pt-2">
+                      <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={form.dailyDigest?.enabled ?? false}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                dailyDigest: {
+                                  ...(form.dailyDigest ?? { time: '09:00', includeHealthReport: true }),
+                                  enabled: e.target.checked,
+                                },
+                              })
+                            }
+                            disabled={pending > 0}
+                          />
+                          <span>
+                            <span className="block font-medium text-zinc-200 light:text-zinc-800">
+                              Enable daily digest
+                            </span>
+                            <span className="ui-description mt-0.5 block">
+                              Send the daily summary and health report on schedule.
+                            </span>
+                          </span>
+                        </div>
+                      </label>
+                      <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                        Delivery time
+                        <input
+                          type="time"
+                          className={field}
+                          value={form.dailyDigest?.time ?? '09:00'}
+                          onChange={(e) =>
+                            setForm({
+                              ...form,
+                              dailyDigest: {
+                                ...(form.dailyDigest ?? { enabled: false, includeHealthReport: true }),
+                                time: e.target.value,
+                              },
+                            })
+                          }
+                        />
+                        <span className="ui-description mt-1.5 block">
+                          Local time (in the selected timezone) the digest is delivered.
+                        </span>
+                      </label>
+                      <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={form.dailyDigest?.includeHealthReport ?? true}
+                            onChange={(e) =>
+                              setForm({
+                                ...form,
+                                dailyDigest: {
+                                  ...(form.dailyDigest ?? { enabled: false, time: '09:00' }),
+                                  includeHealthReport: e.target.checked,
+                                },
+                              })
+                            }
+                            disabled={pending > 0}
+                          />
+                          <span>
+                            <span className="block font-medium text-zinc-200 light:text-zinc-800">
+                              Include health-check report
+                            </span>
+                            <span className="ui-description mt-0.5 block">
+                              Append an operational health snapshot to each daily digest.
+                            </span>
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
                   <div className="sm:col-span-2 mt-1 border-t border-zinc-800/70 pt-4 light:border-zinc-200">
                     <h3 className="text-xs font-semibold text-zinc-200 light:text-zinc-800">
                       Email retry policy
