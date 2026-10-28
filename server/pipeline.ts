@@ -875,14 +875,20 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         changedCves.map((cve) => ({ id: cve.cveId, data: cve })),
       );
       const keys = await db.query("SELECT id FROM records WHERE kind='cveData'");
-      for (const { id } of keys.rows) {
-        const canonical = normalizeCveId(id);
-        if (
-          canonical &&
-          ((canonical !== id && byId.has(canonical)) || (withdrawals.has(canonical) && !byId.has(canonical)))
-        )
-          await db.query("DELETE FROM records WHERE kind='cveData' AND id=$1", [id]);
-      }
+      // Batch deletion of superseded/withdrawn CVE aliases into a single query
+      // instead of one DELETE per row, reducing O(N) round-trips to O(1).
+      const staleIds = keys.rows
+        .map((row) => {
+          const canonical = normalizeCveId(row.id);
+          return canonical &&
+            ((canonical !== row.id && byId.has(canonical)) ||
+              (withdrawals.has(canonical) && !byId.has(canonical)))
+            ? row.id
+            : null;
+        })
+        .filter((id): id is string => id !== null);
+      if (staleIds.length)
+        await db.query("DELETE FROM records WHERE kind='cveData' AND id = ANY($1::text[])", [staleIds]);
       // The run window limits network ingestion, not applicability of already cached CVEs.
       const settings = { ...snapshot.settings, scopeHours: 0 };
       const finalCves = [...byId.values()];
