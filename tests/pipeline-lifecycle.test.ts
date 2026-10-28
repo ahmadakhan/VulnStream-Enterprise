@@ -1208,6 +1208,49 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       },
     );
     await t.test(
+      'queued delivery survives enrichment-only CVE updates without a rebuild',
+      async () => {
+        await reset();
+        await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
+        await save('watchlist', 'asset', asset());
+        const cve = vulnerability();
+        await save('cveData', cve.cveId, cve);
+        await save('recipients', 'rec', {
+          id: 'rec',
+          name: 'Test',
+          email: 'test@example.invalid',
+          enabled: true,
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        await run();
+
+        // Only enrichment and metadata fields that do NOT affect advisory
+        // content or matching applicability are updated. EPSS score, exploit
+        // status, source-feed attribution and modification timestamps all
+        // refresh independently of matching, so the queued advisory should
+        // remain current and deliverable without a rebuild.
+        await save('cveData', cve.cveId, {
+          ...cve,
+          epss: { score: 0.85, percentile: 0.97 },
+          exploitStatus: 'Code',
+          sourceFeeds: [{ id: 'refresh', name: 'Feed', type: 'JSON_SEARCH_API', url: 'https://8.8.8.8/cves' }],
+          modifiedDate: new Date().toISOString(),
+        });
+
+        let transports = 0;
+        const delivered = await deliverNext(pool, config, request, async () => {
+          transports++;
+          return 'must-not-send';
+        });
+        assert.equal(transports, 1);
+        assert.equal(delivered, true);
+        assert.equal(
+          (await pool.query('SELECT status FROM outbox')).rows[0].status,
+          'ACCEPTED',
+        );
+      },
+    );
+    await t.test(
       'legacy queued payloads without revision evidence are rebuilt before transport',
       async () => {
         await reset();
