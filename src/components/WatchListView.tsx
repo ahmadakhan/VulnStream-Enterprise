@@ -74,6 +74,8 @@ export const WatchListView: React.FC = () => {
   const [customAddedCpes, setCustomAddedCpes] = useState<string[]>([]);
   const [customCpeInput, setCustomCpeInput] = useState('');
 
+  const [nvdSearchProduct, setNvdSearchProduct] = useState('');
+
   // NVD Verified CPE search
   const [nvdResults, setNvdResults] = useState<NvdCpeSearchResult[]>([]);
   const [nvdLoading, setNvdLoading] = useState(false);
@@ -265,17 +267,18 @@ export const WatchListView: React.FC = () => {
      setAssetTagInput('');
      setOwnerGroupInput('SecOps-Core');
      setNotesInput('');
-     setPurlInput('');
-     setCpeExpressionInput('');
-     setNvdResults([]);
-     setNvdLoading(false);
-     setNvdError(null);
-     setSelectedNvdCpes([]);
-     setRemovedAutoCpes(new Set());
-     setCustomAddedCpes([]);
-     setCustomCpeInput('');
-     setEditingItem(null);
-     setShowAddModal(true);
+      setPurlInput('');
+      setCpeExpressionInput('');
+      setNvdSearchProduct('');
+      setNvdResults([]);
+      setNvdLoading(false);
+      setNvdError(null);
+      setSelectedNvdCpes([]);
+      setRemovedAutoCpes(new Set());
+      setCustomAddedCpes([]);
+      setCustomCpeInput('');
+      setEditingItem(null);
+      setShowAddModal(true);
   };
 
   const handleOpenEdit = (item: WatchListItem) => {
@@ -293,16 +296,17 @@ export const WatchListView: React.FC = () => {
     setOwnerGroupInput(item.ownerGroup);
     setNotesInput(item.notes || '');
     setPurlInput((item.purls || []).join('\n'));
-    setCpeExpressionInput(item.cpes[0] || '');
-    setNvdResults([]);
-    setNvdLoading(false);
-    setNvdError(null);
-     setSelectedNvdCpes([]);
-     setRemovedAutoCpes(new Set());
-     setCustomAddedCpes([]);
-     setCustomCpeInput('');
-     setEditingItem(item);
-     setShowAddModal(true);
+setCpeExpressionInput(item.cpes[0] || '');
+   setNvdSearchProduct('');
+   setNvdResults([]);
+   setNvdLoading(false);
+   setNvdError(null);
+   setSelectedNvdCpes([]);
+   setRemovedAutoCpes(new Set());
+   setCustomAddedCpes([]);
+   setCustomCpeInput('');
+   setEditingItem(item);
+   setShowAddModal(true);
   };
 
   const toggleSelectProduct = (prod: CatalogProduct) => {
@@ -321,6 +325,8 @@ export const WatchListView: React.FC = () => {
   };
 
   const nvdSearchProductTerm = useMemo(() => {
+    const nvdSearch = nvdSearchProduct.trim();
+       if (nvdSearch) return nvdSearch;
     const custom = customProductInput.trim();
     if (custom) return custom;
     if (selectedProductIds.length === 1) {
@@ -328,7 +334,7 @@ export const WatchListView: React.FC = () => {
       return catProd ? catProd.name : '';
     }
     return '';
-  }, [customProductInput, selectedProductIds, catalogProducts]);
+  }, [nvdSearchProduct, customProductInput, selectedProductIds, catalogProducts]);
 
   const dedupeCpes = (cpes: string[]): string[] => {
     const seen = new Set<string>();
@@ -1080,11 +1086,12 @@ export const WatchListView: React.FC = () => {
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   <span className="text-[10px] text-zinc-500 font-mono self-center mr-1">Quick Select:</span>
                   {[
-                    'Microsoft',
-                    'Cisco',
-                    'Fortinet',
-                    'VMware',
-                    'Palo Alto Networks',
+                     'Microsoft',
+                     'Cisco',
+                     'Fortinet',
+                     'VMware',
+                     'Veeam',
+                     'Palo Alto Networks',
                     'Apache',
                     'Red Hat',
                     'Oracle',

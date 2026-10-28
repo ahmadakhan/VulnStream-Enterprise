@@ -11,7 +11,10 @@ if (existsSync(_envPath) && !process.env.DATABASE_URL) {
     const _eq = _trimmed.indexOf('=');
     if (_eq === -1) continue;
     const _key = _trimmed.slice(0, _eq).trim();
-    const _value = _trimmed.slice(_eq + 1).trim().replace(/^['"]|['"]$/g, '');
+    const _value = _trimmed
+      .slice(_eq + 1)
+      .trim()
+      .replace(/^['"]|['"]$/g, '');
     if (!(_key in process.env)) process.env[_key] = _value;
   }
 }
@@ -21,8 +24,6 @@ import { CorrelationRuntime } from './correlation/runtime.ts';
 import { describeError, writeEvent } from './events';
 import { loadConfig } from './config';
 import { createPool, migrate, transaction, get, put, REQUIRED_SCHEMA_VERSION } from './db';
-import { applyCommand } from './commands';
-import { RECOMMENDED_FEEDS } from './recommendedFeeds';
 import { createApp } from './app';
 import { createRequester } from './network';
 import { createMailSender, deliverNext } from './delivery';
@@ -47,35 +48,26 @@ if (config.NODE_ENV === 'production') {
       `Database schema version ${version} is older than required version ${REQUIRED_SCHEMA_VERSION}; run migrations before starting`,
     );
 } else await migrate(pool);
-await transaction(pool,async db => {
-  if (await get(db,'systemState','native-inventory-v1')) return;
-  await backfillCorrelationInventory(db);
-  await put(db,'systemState','native-inventory-v1',{completedAt:new Date().toISOString()});
-},undefined,{locks:['native-inventory-bootstrap']});
-// Upgrade existing installations once; the marker makes later operator deletions persist.
-await transaction(pool, async (db) => {
-  if (await get(db, 'systemState', 'recommended-feeds-v2')) return;
-  const missing = [];
-  const previousBootstrap = await get(db, 'systemState', 'recommended-feeds-v1');
-  for (const feed of RECOMMENDED_FEEDS.filter((feed) => !previousBootstrap || feed.type === 'RSS_ATOM'))
-    if (!(await get(db, 'feeds', feed.id))) missing.push(feed);
-  if (missing.length)
-    await applyCommand(db, config, {
-      action: 'feed.import',
-      data: missing,
-      actor: 'system-bootstrap',
-    });
-  await put(db, 'systemState', 'recommended-feeds-v2', { completedAt: new Date().toISOString() });
+await transaction(
+  pool,
+  async (db) => {
+    if (await get(db, 'systemState', 'native-inventory-v1')) return;
+    await backfillCorrelationInventory(db);
+    await put(db, 'systemState', 'native-inventory-v1', { completedAt: new Date().toISOString() });
+  },
+  undefined,
+  { locks: ['native-inventory-bootstrap'] },
+);
+// Recommended threat-feed seeding is intentionally NOT run on startup: it must be
+// triggered explicitly via `npm run seed` with BOOTSTRAP_RECOMMENDED_FEEDS=true
+// (see .env.example), so the server never opens egress to external feeds in
+// dev or prod without an operator's deliberate action.
+await writeEvent(pool, {
+  category: 'SYSTEM',
+  code: 'system.started',
+  message: 'Application initialized',
+  context: { workerEnabled: config.WORKER_ENABLED === 'true' },
 });
-// Add the official CVE List once, without restoring sources an operator later deletes.
-await transaction(pool, async (db) => {
-  if (await get(db, 'systemState', 'recommended-feeds-v3')) return;
-  const feed = RECOMMENDED_FEEDS.find(feed => feed.type === 'MITRE_CVE')!;
-  if (!(await get(db, 'feeds', feed.id)))
-    await applyCommand(db, config, { action: 'feed.import', data: [feed], actor: 'system-bootstrap' });
-  await put(db, 'systemState', 'recommended-feeds-v3', { completedAt: new Date().toISOString() });
-});
-await writeEvent(pool, {category:'SYSTEM', code:'system.started', message:'Application initialized', context:{workerEnabled:config.WORKER_ENABLED === 'true'}});
 const request = createRequester(config),
   sendMail = createMailSender(config, pool, request);
 const correlation = new CorrelationRuntime(
@@ -120,12 +112,16 @@ async function listenWithRetry(port: number, host: string, maxAttempts = 5): Pro
       if (attempt === maxAttempts) throw error;
       let pids = '';
       try {
-        pids = execSync(`lsof -ti:${port}`, { stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+        pids = execSync(`lsof -ti:${port}`, { stdio: ['pipe', 'pipe', 'pipe'] })
+          .toString()
+          .trim();
       } catch {}
       if (pids) {
         console.log(JSON.stringify({ event: 'port_conflict.resolve', port, attempt, pids }));
         for (const pid of pids.split('\n').filter(Boolean)) {
-          try { process.kill(Number(pid), 'SIGKILL'); } catch {}
+          try {
+            process.kill(Number(pid), 'SIGKILL');
+          } catch {}
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
@@ -142,12 +138,23 @@ let stopping = false,
   digest: Promise<unknown> | null = null;
 const report = (event: string) => (error: unknown) => {
   const detail = describeError(error);
-  void writeEvent(pool, {category:'ISSUE', level:'ERROR', code:'worker.failed', message:'Background worker failed', context:{component:event, ...detail}}).catch((writeError: unknown) => {
-    console.error(JSON.stringify({ level: 'error', event: 'event.write_failed', component: event, message: writeError instanceof Error ? writeError.message : String(writeError) }));
+  void writeEvent(pool, {
+    category: 'ISSUE',
+    level: 'ERROR',
+    code: 'worker.failed',
+    message: 'Background worker failed',
+    context: { component: event, ...detail },
+  }).catch((writeError: unknown) => {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        event: 'event.write_failed',
+        component: event,
+        message: writeError instanceof Error ? writeError.message : String(writeError),
+      }),
+    );
   });
-  console.error(
-    JSON.stringify({ level: 'error', event, ...detail }),
-  );
+  console.error(JSON.stringify({ level: 'error', event, ...detail }));
 };
 const tick = () => {
   if (stopping || config.WORKER_ENABLED !== 'true') return;
@@ -185,16 +192,14 @@ async function claimRetention(policy: AppSettings['retentionConfig']): Promise<b
   return transaction(
     pool,
     async (db) => {
-      const row = await db.query(
-        "SELECT data FROM records WHERE kind='systemState' AND id=$1 FOR UPDATE",
-        [RETENTION_SCHEDULE_ID],
-      );
+      const row = await db.query("SELECT data FROM records WHERE kind='systemState' AND id=$1 FOR UPDATE", [
+        RETENTION_SCHEDULE_ID,
+      ]);
       const data = row.rows[0]?.data ?? {};
       const now = Date.now();
       const lastRun = typeof data.lastRun === 'string' ? Date.parse(data.lastRun) : NaN;
       const claimedAt = typeof data.claimedAt === 'string' ? Date.parse(data.claimedAt) : NaN;
-      if (Number.isFinite(lastRun) && now - lastRun < policy.cleanupIntervalMinutes * 60_000)
-        return false;
+      if (Number.isFinite(lastRun) && now - lastRun < policy.cleanupIntervalMinutes * 60_000) return false;
       if (Number.isFinite(claimedAt) && now - claimedAt < RETENTION_CLAIM_TTL_MS) return false;
       await put(db, 'systemState', RETENTION_SCHEDULE_ID, {
         ...data,
@@ -212,17 +217,16 @@ async function releaseRetention(success: boolean, nextRetryAt?: string) {
   await transaction(
     pool,
     async (db) => {
-      const row = await db.query(
-        "SELECT data FROM records WHERE kind='systemState' AND id=$1 FOR UPDATE",
-        [RETENTION_SCHEDULE_ID],
-      );
+      const row = await db.query("SELECT data FROM records WHERE kind='systemState' AND id=$1 FOR UPDATE", [
+        RETENTION_SCHEDULE_ID,
+      ]);
       const data = row.rows[0]?.data ?? {};
       await put(db, 'systemState', RETENTION_SCHEDULE_ID, {
         ...data,
         claimedAt: null,
         lastRun: success ? new Date().toISOString() : (data.lastRun ?? null),
         lastFailedAt: success ? null : new Date().toISOString(),
-        nextRetryAt: success ? null : (nextRetryAt || new Date(Date.now() + 60_000).toISOString()),
+        nextRetryAt: success ? null : nextRetryAt || new Date(Date.now() + 60_000).toISOString(),
       });
     },
     undefined,
@@ -236,10 +240,9 @@ const retentionTick = () => {
     const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
     const policy = settings.retentionConfig;
     if (!policy?.enabled || !policy.autoCleanup) return;
-    const row = await pool.query(
-      "SELECT data FROM records WHERE kind='systemState' AND id=$1",
-      [RETENTION_SCHEDULE_ID],
-    );
+    const row = await pool.query("SELECT data FROM records WHERE kind='systemState' AND id=$1", [
+      RETENTION_SCHEDULE_ID,
+    ]);
     const data = row.rows[0]?.data ?? {};
     const now = Date.now();
     // Honor nextRetryAt for failed runs to enable immediate retry.
@@ -280,7 +283,9 @@ async function shutdown() {
   const deadline = setTimeout(() => process.exit(1), 30000);
   deadline.unref();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  await Promise.allSettled([pipeline, outbox, digest, retentionRunning].filter(Boolean) as Promise<unknown>[]);
+  await Promise.allSettled(
+    [pipeline, outbox, digest, retentionRunning].filter(Boolean) as Promise<unknown>[],
+  );
   await correlation.stop();
   await pool.end();
   clearTimeout(deadline);

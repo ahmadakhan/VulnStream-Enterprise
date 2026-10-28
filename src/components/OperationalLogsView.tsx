@@ -510,8 +510,8 @@ export const OperationalLogsView: React.FC = () => {
                     setQuery(e.target.value);
                     setCursor('');
                   }}
-                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900"
-                  placeholder="Code, message or context"
+                   className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900"
+                   placeholder="Code, message or context"
                 />
               </label>
               <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
@@ -534,7 +534,7 @@ export const OperationalLogsView: React.FC = () => {
                 Level
                 <select
                   value={level}
-                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-xs text-zinc-200 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-800"
+                  className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-200 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-800"
                   onChange={(e) => {
                     setLevel(e.target.value);
                     setCursor('');

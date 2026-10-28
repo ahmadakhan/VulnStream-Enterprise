@@ -496,6 +496,73 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     ],
   },
   {
+    name: 'Veeam Software',
+    normalizedId: 'veeam',
+    aliases: ['veeam_software', 'veeam_backup'],
+    products: [
+      {
+        name: 'Backup & Replication',
+        normalizedId: 'backup_and_replication',
+        part: 'a',
+        description: 'Enterprise Data Backup & Recovery Platform',
+      },
+      {
+        name: 'Backup for Microsoft 365',
+        normalizedId: 'backup_for_microsoft_365',
+        part: 'a',
+        description: 'SaaS Backup & Recovery for Microsoft 365',
+      },
+      {
+        name: 'Backup for AWS',
+        normalizedId: 'backup_for_aws',
+        part: 'a',
+        description: 'Cloud-Native Backup for AWS',
+      },
+      {
+        name: 'Backup for Microsoft Azure',
+        normalizedId: 'backup_for_azure',
+        part: 'a',
+        description: 'Cloud-Native Backup for Azure',
+      },
+      {
+        name: 'Backup for Google Cloud',
+        normalizedId: 'backup_for_google_cloud',
+        part: 'a',
+        description: 'Cloud-Native Backup for Google Cloud',
+      },
+      {
+        name: 'Veeam ONE',
+        normalizedId: 'veeam_one',
+        part: 'a',
+        description: 'Virtualization Management & Monitoring',
+      },
+      {
+        name: 'Agent for Microsoft Windows',
+        normalizedId: 'agent_for_windows',
+        part: 'a',
+        description: 'Endpoint Backup Agent for Windows',
+      },
+      {
+        name: 'Agent for Linux',
+        normalizedId: 'agent_for_linux',
+        part: 'a',
+        description: 'Endpoint Backup Agent for Linux',
+      },
+      {
+        name: 'Backup for Salesforce',
+        normalizedId: 'backup_for_salesforce',
+        part: 'a',
+        description: 'SaaS Backup & Recovery for Salesforce',
+      },
+      {
+        name: 'Backup & Replication Community Edition',
+        normalizedId: 'community_edition',
+        part: 'a',
+        description: 'Free Backup & Recovery for SMB',
+      },
+    ],
+  },
+  {
     name: 'Linux Foundation',
     normalizedId: 'linux',
     aliases: ['kernel.org', 'linux_foundation'],

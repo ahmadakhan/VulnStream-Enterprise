@@ -155,7 +155,7 @@ export const RecipientsView: React.FC = () => {
                 setErrorMsg(null);
                 setShowAddEmailModal(true);
               }}
-              className="text-xs px-3.5 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition flex items-center space-x-1.5 shadow-sm"
+              className="text-xs px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold transition flex items-center space-x-1.5 shadow-sm"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add Email Recipient</span>
@@ -166,7 +166,7 @@ export const RecipientsView: React.FC = () => {
                 setErrorMsg(null);
                 setShowAddWebhookModal(true);
               }}
-              className="text-xs px-3.5 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition flex items-center space-x-1.5 shadow-sm"
+              className="text-xs px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold transition flex items-center space-x-1.5 shadow-sm"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Register Webhook</span>

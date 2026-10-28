@@ -18,7 +18,10 @@ if (existsSync(envPath)) {
     const eqIdx = trimmed.indexOf('=');
     if (eqIdx === -1) continue;
     const key = trimmed.slice(0, eqIdx).trim();
-    const value = trimmed.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+    const value = trimmed
+      .slice(eqIdx + 1)
+      .trim()
+      .replace(/^['"]|['"]$/g, '');
     if (!(key in process.env)) process.env[key] = value;
   }
 }
@@ -26,7 +29,11 @@ if (existsSync(envPath)) {
 const config = loadConfig();
 const pool = createPool(config.DATABASE_URL);
 
-const shouldSeed = process.env.SEED === '1' || process.env.SEED === 'true';
+// Seeding is two-gated: an operator must BOTH set BOOTSTRAP_RECOMMENDED_FEEDS=true
+// in the environment AND invoke the command (`npm run seed`). Neither alone
+// seeds external feeds, so the server never opens egress to threat sources
+// automatically in dev or prod.
+const shouldSeed = config.BOOTSTRAP_RECOMMENDED_FEEDS === 'true';
 
 /** Only seed adapters whose response contracts are implemented and verified. */
 const feedPayload = [
@@ -84,13 +91,14 @@ const feedPayload = [
 ];
 
 if (!shouldSeed) {
-  // No SEED env variable — report current database contents and exit.
-  // Seeding only happens when explicitly requested via SEED=1 npm run seed.
+  // No BOOTSTRAP_RECOMMENDED_FEEDS=true — report current database contents and exit.
+  // Seeding only happens when explicitly requested:
+  //   BOOTSTRAP_RECOMMENDED_FEEDS=true npm run seed
   const feeds = await get<any[]>(pool, 'feeds', '*');
   const feedRows = (await pool.query('SELECT id FROM records WHERE kind=$1', ['feeds'])).rows;
   const watchlistRows = (await pool.query('SELECT id FROM records WHERE kind=$1', ['watchlist'])).rows;
   console.log(`Database has ${feedRows.length} feeds and ${watchlistRows.length} monitored products.`);
-  console.log('Set SEED=1 to apply seed fixtures.');
+  console.log('Set BOOTSTRAP_RECOMMENDED_FEEDS=true and re-run `npm run seed` to apply seed fixtures.');
   await pool.end();
   process.exit(0);
 }

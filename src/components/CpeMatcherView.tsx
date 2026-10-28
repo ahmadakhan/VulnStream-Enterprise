@@ -216,7 +216,7 @@ export const CpeMatcherView: React.FC = () => {
 
       <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4">
         <div className="flex flex-wrap gap-1.5 pb-2 -mx-4 border-b border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200">
-          <span className="px-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <span className="px-4 text-xs font-semibold uppercase tracking-wider text-zinc-500 light:text-zinc-600">
             Presets
           </span>
           {CPE_PRESETS.map((preset) => (
@@ -224,7 +224,7 @@ export const CpeMatcherView: React.FC = () => {
               key={preset.label}
               type="button"
               onClick={() => handlePreset(preset)}
-              className="text-[11px] px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-700 hover:border-zinc-600 light:border-zinc-300 light:bg-zinc-100 light:text-zinc-800 light:hover:bg-zinc-200 transition-colors"
+              className="text-xs px-3.5 py-1.5 rounded-md border border-zinc-700 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-700 hover:border-zinc-600 light:border-zinc-300 light:bg-zinc-100 light:text-zinc-800 light:hover:bg-zinc-200 transition-colors"
               title={preset.description}
             >
               {preset.label}

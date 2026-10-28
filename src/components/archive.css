@@ -61,9 +61,9 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 12px;
+  padding: 8px 14px;
   color: var(--ui-muted);
-  border-radius: 8px;
+  border-radius: 12px;
   font-size: 12px;
   font-weight: 500;
 }
