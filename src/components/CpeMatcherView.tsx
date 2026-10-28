@@ -1,7 +1,13 @@
 import { PageHeading } from './PageHeading';
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { CpeMatchSimulation, CpeParseResult, NvdCpeSearchResponse, SeverityClassification } from '../types';
+import {
+  CpeMatchSimulation,
+  CpeParseResult,
+  NvdCpeSearchResponse,
+  NvdCpeSearchResult,
+  SeverityClassification,
+} from '../types';
 import {
   ScanLine,
   Check,
@@ -115,7 +121,6 @@ const CPE_PRESETS: CpePreset[] = [
 
 export const CpeMatcherView: React.FC = () => {
   const { simulateCpeMatch, searchNvdCpes } = useApp();
-  const [activeTab, setActiveTab] = useState<'match' | 'lookup'>('match');
   const [assetCpe, setAssetCpe] = useState('cpe:2.3:a:microsoft:windows_10:10.0.19041:*:*:*:*:*:*:*');
   const [vulnerabilityCpe, setVulnerabilityCpe] = useState('cpe:2.3:a:microsoft:windows_10:*:*:*:*:*:*:*:*');
   const [assetVendor, setAssetVendor] = useState('microsoft');
@@ -130,6 +135,7 @@ export const CpeMatcherView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const [activeTab, setActiveTab] = useState<'match' | 'lookup'>('match');
   const [lookupVendor, setLookupVendor] = useState('microsoft');
   const [lookupProduct, setLookupProduct] = useState('windows_10');
   const [lookupResults, setLookupResults] = useState<NvdCpeSearchResponse | null>(null);
@@ -229,19 +235,21 @@ export const CpeMatcherView: React.FC = () => {
         page="cpe-matcher"
         children={
           <span className="text-sm text-zinc-400 light:text-zinc-600">
-            Simulate CPE 2.3 matching between an asset and a vulnerability, or look up verified CPE 2.3 names from the NVD dictionary by vendor and product.
+            Simulate CPE 2.3 matching between an asset and a vulnerability. The simulator parses both CPEs,
+            expands aliases, checks version ranges, and runs false-positive elimination rules before producing
+            a severity classification.
           </span>
         }
       />
 
-      <div className="flex gap-1 p-1 bg-zinc-800/50 dark:bg-zinc-800/50 light:bg-zinc-200 rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-300">
+      <div className="flex gap-1 p-1 bg-zinc-800/50 dark:bg-zinc-800/50 light:bg-zinc-200 rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-300 mb-3">
         <button
           type="button"
           onClick={() => setActiveTab('match')}
           className={`flex-1 text-center text-xs font-medium py-1.5 rounded-md transition ${
             activeTab === 'match'
               ? 'bg-zinc-900 dark:bg-zinc-900 light:bg-white text-zinc-100 light:text-zinc-900 shadow'
-              : 'text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-800'
+              : 'text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-900'
           }`}
         >
           CPE Match &amp; Classifier
@@ -252,16 +260,17 @@ export const CpeMatcherView: React.FC = () => {
           className={`flex-1 text-center text-xs font-medium py-1.5 rounded-md transition ${
             activeTab === 'lookup'
               ? 'bg-zinc-900 dark:bg-zinc-900 light:bg-white text-zinc-100 light:text-zinc-900 shadow'
-              : 'text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-800'
+              : 'text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-900'
           }`}
         >
           CPE Lookup
         </button>
       </div>
 
-      {activeTab === 'match' && (
-        <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4">
-          <div className="flex flex-wrap gap-1.5 pb-2 -mx-4 border-b border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200">
+      <div
+        className={`ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4 ${activeTab === 'lookup' ? 'hidden' : ''}`}
+      >
+        <div className="flex flex-wrap gap-1.5 pb-2 -mx-4 border-b border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200">
           <span className="px-4 text-xs font-semibold uppercase tracking-wider text-zinc-500 light:text-zinc-600">
             Presets
           </span>
@@ -602,11 +611,8 @@ export const CpeMatcherView: React.FC = () => {
           </p>
         </div>
       )}
-    </div>
-    )}
-
       {activeTab === 'lookup' && (
-        <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4">
+        <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-300 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
@@ -659,7 +665,9 @@ export const CpeMatcherView: React.FC = () => {
                 {lookupResults.totalResults} result{lookupResults.totalResults !== 1 ? 's' : ''} found
               </div>
               {lookupResults.results.length === 0 ? (
-                <p className="text-xs text-zinc-500 light:text-zinc-600">No verified CPEs found in the NVD dictionary for this vendor/product.</p>
+                <p className="text-xs text-zinc-500 light:text-zinc-600">
+                  No verified CPEs found in the NVD dictionary for this vendor/product.
+                </p>
               ) : (
                 <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
                   {(lookupResults.results as NvdCpeSearchResult[]).map((cpe) => (
@@ -679,11 +687,9 @@ export const CpeMatcherView: React.FC = () => {
                       </div>
                       <button
                         type="button"
-                        onClick={() => {
-                          void copyText(cpe.cpeName);
-                        }}
-                        className="ml-2 text-xs px-1.5 py-0.5 rounded text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-800"
-                        title="Copy CPE 2.3"
+                        onClick={() => void copyText(cpe.cpeName)}
+                        className="ml-2 p-1.5 rounded text-zinc-400 hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900 hover:bg-zinc-800 light:hover:bg-zinc-200 transition"
+                        title="Copy CPE 2.3 name"
                       >
                         <Copy size={12} />
                       </button>

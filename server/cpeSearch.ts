@@ -8,11 +8,7 @@ import type { ThreatFeed, NvdCpeSearchResult, NvdCpeSearchResponse } from '../sr
 
 const NVD_CPE_ENDPOINT = 'https://services.nvd.nist.gov/rest/json/cpes/2.0';
 
-export function buildCpeUrl(
-  keyword: string,
-  resultsPerPage: number,
-  apiKey: string,
-): URL {
+export function buildCpeUrl(keyword: string, resultsPerPage: number, apiKey: string): URL {
   const url = new URL(NVD_CPE_ENDPOINT);
   url.searchParams.set('keywordSearch', keyword);
   url.searchParams.set('resultsPerPage', String(resultsPerPage));
@@ -97,8 +93,7 @@ export async function searchNvdCpes(
     return { results: [], totalResults: 0 };
   }
 
-  if (response.status !== 200)
-    throw new Error(`NVD CPE search returned HTTP ${response.status}`);
+  if (response.status !== 200) throw new Error(`NVD CPE search returned HTTP ${response.status}`);
 
   let data: any;
   try {
@@ -115,7 +110,10 @@ export async function searchNvdCpes(
     if (!name) continue;
     const parsed = parseCPE23(name);
     if (!parsed.isValid) continue;
-    const title = Array.isArray(cpe?.titles) && typeof cpe.titles[0]?.title === 'string' ? cpe.titles[0].title : undefined;
+    const title =
+      Array.isArray(cpe?.titles) && typeof cpe.titles[0]?.title === 'string'
+        ? cpe.titles[0].title
+        : undefined;
     results.push({
       cpeName: name,
       cpeNameId: typeof cpe?.cpeNameId === 'string' ? cpe.cpeNameId : '',
@@ -142,11 +140,7 @@ export interface NvdRateLimitError {
 }
 
 export function isNvdRateLimitError(error: unknown): error is NvdRateLimitError {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    (error as NvdRateLimitError).__nvdRateLimit === true
-  );
+  return typeof error === 'object' && error !== null && (error as NvdRateLimitError).__nvdRateLimit === true;
 }
 
 export function nvdRetryAfterSeconds(error: NvdRateLimitError): number | null {
