@@ -964,6 +964,51 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       assert.equal((await pool.query('SELECT count(*)::int AS n FROM outbox')).rows[0].n, 4);
     });
     await t.test(
+      'security team ALL_SEVERITIES recipient receives any threat notification',
+      async () => {
+        await reset();
+        await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
+        await save('watchlist', 'asset', asset());
+        // Threats across every severity level, all matching the same inventory.
+        for (const [i, severity] of (['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const).entries()) {
+          await save('cveData', `CVE-2026-820${i + 1}`, {
+            ...vulnerability(),
+            cveId: `CVE-2026-820${i + 1}`,
+            cvss: { ...vulnerability().cvss, severity, score: i + 2 },
+          });
+        }
+        // Notification group Security Team, Subscription Filter Tier all severity.
+        await save('recipients', 'sec-team', {
+          id: 'sec-team',
+          name: 'Security Team',
+          email: 'sec-team@example.invalid',
+          role: 'security',
+          enabled: true,
+          deliveryGroup: 'SECURITY_TEAM',
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        await run();
+        const jobs = (await pool.query('SELECT target_id,payload,status FROM outbox')).rows;
+        // ALL_SEVERITIES must receive every severity group — one job per severity.
+        assert.equal(jobs.length, 4);
+        assert.ok(jobs.every((job) => job.target_id === 'sec-team'));
+        const received = jobs.flatMap((job) => job.payload.cveIds as string[]);
+        for (let i = 0; i < 4; i++)
+          assert.ok(received.includes(`CVE-2026-820${i + 1}`));
+        // Delivery revalidation must accept all severities for ALL_SEVERITIES recipients.
+        let transports = 0;
+        while (await deliverNext(pool, config, request, async () => {
+          transports++;
+          return 'accepted';
+        })) {}
+        assert.equal(transports, 4);
+        assert.equal(
+          (await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='ACCEPTED'")).rows[0].n,
+          4,
+        );
+      },
+    );
+    await t.test(
       'combined digest sends at most one email per recipient without leaking other tiers',
       async () => {
         await reset();
