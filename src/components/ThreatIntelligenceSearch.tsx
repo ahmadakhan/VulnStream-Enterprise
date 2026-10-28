@@ -1,7 +1,7 @@
 import { PageHeading } from './PageHeading';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import type { NormalizedCVE, ThreatSearchHit, ThreatFeed } from '../types';
+import type { NormalizedCVE, ThreatSearchHit } from '../types';
 import {
   ENTERPRISE_VENDOR_CATALOG,
   getCatalogProductsForVendor,
@@ -30,6 +30,7 @@ import {
   RotateCcw,
   Search,
   ShieldAlert,
+  SlidersHorizontal,
   Tag,
   X,
   Calendar,
@@ -232,7 +233,7 @@ function ThreatDetailDialog({ children, onClose }: { children: React.ReactNode; 
 }
 
 export const ThreatIntelligenceSearch: React.FC = () => {
-  const { searchThreatIntelligence, feeds, updateFeed, addFeed } = useApp();
+  const { searchThreatIntelligence } = useApp();
 
   // Search parameters
   const [vendorQuery, setVendorQuery] = useState('');
@@ -324,7 +325,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     (executedSearch.vendor !== vendorSelected ||
       executedSearch.product !== effectiveProduct ||
       executedSearch.limit !== resultLimit ||
-      executedSearch.startDate !== startDate);
+      (executedSearch.startDate || '') !== startDate);
 
   useEffect(() => {
     setActiveVendorIndex(0);
@@ -633,6 +634,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
       filters: {
         text: resultQuery.trim() || null,
         severity: severityFilter === 'ALL' ? null : severityFilter,
+        evidence: evidenceFilter === 'ALL' ? null : evidenceFilter,
         kevOnly,
         sort: `${sortKey}:${sortOrder}`,
       },
@@ -714,21 +716,26 @@ export const ThreatIntelligenceSearch: React.FC = () => {
 
       {/* Search parameters */}
       <section className={`${panel} threat-search-form p-5 sm:p-6`} aria-labelledby="threat-search-heading">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <h2
-              id="threat-search-heading"
-              className="text-sm font-semibold text-zinc-100 light:text-zinc-900"
-            >
-              Investigate a product
-            </h2>
-            <p className="mt-0.5 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-              Select a vendor and product to search the National Vulnerability Database.
-            </p>
+        <div className="threat-search-header">
+          <div className="threat-section-title">
+            <span className="threat-section-icon">
+              <Search size={19} strokeWidth={1.7} aria-hidden="true" />
+            </span>
+            <div>
+              <h2
+                id="threat-search-heading"
+                className="text-sm font-semibold text-zinc-100 light:text-zinc-900"
+              >
+                Investigate a product
+              </h2>
+              <p className="mt-0.5 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                Search the National Vulnerability Database by vendor and product.
+              </p>
+            </div>
           </div>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-[10px] font-medium text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-300 light:bg-zinc-100">
+          <span className="threat-source-label">
             <Database className="h-3.5 w-3.5" aria-hidden="true" />
-            NVD CVE API
+            NVD · On-demand search
           </span>
         </div>
 
@@ -914,7 +921,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
               </div>
 
               {!vendorSelected ? (
-                <div className="flex min-h-[42px] items-center rounded-[10px] border border-dashed border-zinc-800 px-3 text-xs text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-300">
+                <div className="threat-product-placeholder flex min-h-[42px] items-center rounded-[10px] border border-dashed border-zinc-800 px-3 text-xs text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-300">
                   Select a vendor first
                 </div>
               ) : useCatalog ? (
@@ -1025,7 +1032,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
           </div>
 
           <div className="threat-search-actions">
-            <div className="threat-search-context">
+            <div className={`threat-search-context ${draftChanged ? 'is-changed' : ''}`} role="status">
               <Crosshair className="h-4 w-4 shrink-0" aria-hidden="true" />
               <p>
                 {draftChanged
@@ -1151,8 +1158,8 @@ export const ThreatIntelligenceSearch: React.FC = () => {
 
       {/* Loading */}
       {loading && (
-        <section className={`${panel} overflow-hidden`} aria-busy="true" aria-live="polite">
-          <div className="flex items-center gap-2 border-b border-zinc-800/80 px-4 py-3 text-xs text-zinc-400 light:border-zinc-200">
+        <section className={`${panel} threat-loading overflow-hidden`} aria-busy="true" aria-live="polite">
+          <div className="threat-loading-heading flex items-center gap-2 border-b border-zinc-800/80 px-4 py-3 text-xs text-zinc-400 light:border-zinc-200">
             <Loader2 className="h-4 w-4 animate-spin text-blue-400" aria-hidden="true" />
             Querying the NVD CVE API…
             <span className="text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
@@ -1196,7 +1203,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
       {/* Results */}
       {results && results.length > 0 && summary && !loading && (
         <section className="space-y-4" aria-label="Threat intelligence results">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="threat-metrics grid grid-cols-2 gap-3 lg:grid-cols-4">
             <MetricCard
               label="Matches"
               value={String(summary.total)}
@@ -1227,11 +1234,16 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             />
           </div>
 
-          <div className={`${panel} overflow-hidden`}>
-            <div className="border-b border-zinc-800/80 p-4 light:border-zinc-200">
-              <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className={`${panel} threat-results-panel overflow-hidden`}>
+            <div className="threat-results-toolbar border-b border-zinc-800/80 p-4 light:border-zinc-200">
+              <div className="threat-results-heading flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="text-sm font-semibold text-zinc-100 light:text-zinc-900">Search results</h2>
+                  <div className="threat-results-title">
+                    <h2 className="text-sm font-semibold text-zinc-100 light:text-zinc-900">
+                      Search results
+                    </h2>
+                    <span className="threat-results-count">{results.length} returned</span>
+                  </div>
                   <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                     {executedSearch && (
                       <>
@@ -1260,7 +1272,11 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     )}
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div
+                  className="threat-export-actions flex flex-wrap items-center gap-2"
+                  role="group"
+                  aria-label="Export filtered results"
+                >
                   <button
                     type="button"
                     onClick={() => void handleCopyIds()}
@@ -1299,111 +1315,117 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                 </div>
               </div>
 
-              <div className="threat-result-controls mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                <div className="relative w-full sm:max-w-xs">
-                  <Search
-                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
-                    aria-hidden="true"
-                  />
-                  <input
-                    type="text"
-                    aria-label="Filter search results"
-                    placeholder="Filter by CVE, title, CWE, or CPE…"
-                    value={resultQuery}
-                    onChange={(event) => setResultQuery(event.target.value)}
-                    className={`${inputClass} pl-9 pr-9`}
-                  />
-                  {resultQuery && (
-                    <button
-                      type="button"
-                      aria-label="Clear result filter"
-                      onClick={() => setResultQuery('')}
-                      className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md text-zinc-400 dark:text-zinc-500 light:text-zinc-600 transition hover:bg-zinc-800 hover:text-zinc-200 light:hover:bg-zinc-200 light:hover:text-zinc-900"
-                    >
-                      <X className="h-3 w-3" aria-hidden="true" />
-                    </button>
-                  )}
+              <div className="threat-refine-label">
+                <SlidersHorizontal size={14} aria-hidden="true" />
+                Refine results
+              </div>
+              <div className="threat-result-controls">
+                <div className="threat-result-query">
+                  <label htmlFor="threat-result-query">Search within results</label>
+                  <div className="relative">
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 light:text-zinc-600"
+                      aria-hidden="true"
+                    />
+                    <input
+                      id="threat-result-query"
+                      type="search"
+                      aria-label="Filter search results"
+                      placeholder="CVE, title, CWE, or CPE…"
+                      value={resultQuery}
+                      onChange={(event) => setResultQuery(event.target.value)}
+                      className={`${inputClass} pl-9 pr-9`}
+                    />
+                    {resultQuery && (
+                      <button
+                        type="button"
+                        aria-label="Clear result filter"
+                        onClick={() => setResultQuery('')}
+                        className="threat-clear-query"
+                      >
+                        <X size={14} aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-
-                <label className="sr-only" htmlFor="severity-filter">
-                  Filter by severity
-                </label>
-                <select
-                  id="severity-filter"
-                  value={severityFilter}
-                  onChange={(event) => setSeverityFilter(event.target.value as SeverityFilter)}
-                  className={`${inputClass} sm:w-40`}
-                >
-                  <option value="ALL">All severities</option>
-                  <option value="CRITICAL">Critical</option>
-                  <option value="HIGH">High</option>
-                  <option value="MEDIUM">Medium</option>
-                  <option value="LOW">Low</option>
-                  <option value="UNKNOWN">Unknown</option>
-                </select>
-
-                <select
-                  aria-label="Filter by match evidence"
-                  value={evidenceFilter}
-                  onChange={(event) => setEvidenceFilter(event.target.value as typeof evidenceFilter)}
-                  className={`${inputClass} threat-evidence-filter`}
-                >
-                  <option value="ALL">All match evidence</option>
-                  <option value="EXACT">Exact CPE matches</option>
-                  <option value="KEYWORD">Keyword matches</option>
-                </select>
-
-                <button
-                  type="button"
-                  aria-pressed={kevOnly}
-                  onClick={() => setKevOnly((value) => !value)}
-                  className={`${smallButton} ${
-                    kevOnly
-                      ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 light:text-amber-800'
-                      : smallButtonIdle
-                  }`}
-                >
-                  <Flame className="h-3.5 w-3.5" aria-hidden="true" />
-                  CISA KEV only
-                </button>
-
-                <select
-                  aria-label="Sort search results"
-                  className={`${inputClass} threat-mobile-sort`}
-                  value={`${sortKey}:${sortOrder}`}
-                  onChange={(event) => {
-                    const [key, order] = event.target.value.split(':');
-                    setSortKey(key as SortKey);
-                    setSortOrder(order as SortOrder);
-                  }}
-                >
-                  <option value="score:desc">Highest risk first</option>
-                  <option value="score:asc">Lowest risk first</option>
-                  <option value="published:desc">Newest published first</option>
-                  <option value="published:asc">Oldest published first</option>
-                  <option value="cve:asc">CVE ID: A–Z</option>
-                  <option value="cve:desc">CVE ID: Z–A</option>
-                </select>
-
-                {hasResultFilters && (
+                <div>
+                  <label htmlFor="severity-filter">Severity</label>
+                  <select
+                    id="severity-filter"
+                    value={severityFilter}
+                    onChange={(event) => setSeverityFilter(event.target.value as SeverityFilter)}
+                    className={inputClass}
+                  >
+                    <option value="ALL">All severities</option>
+                    <option value="CRITICAL">Critical</option>
+                    <option value="HIGH">High</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="LOW">Low</option>
+                    <option value="UNKNOWN">Unknown</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="threat-evidence-filter">Match evidence</label>
+                  <select
+                    id="threat-evidence-filter"
+                    aria-label="Filter by match evidence"
+                    value={evidenceFilter}
+                    onChange={(event) => setEvidenceFilter(event.target.value as typeof evidenceFilter)}
+                    className={inputClass}
+                  >
+                    <option value="ALL">All evidence</option>
+                    <option value="EXACT">Exact CPE matches</option>
+                    <option value="KEYWORD">Keyword matches</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="threat-result-sort">Sort by</label>
+                  <select
+                    id="threat-result-sort"
+                    aria-label="Sort search results"
+                    className={inputClass}
+                    value={`${sortKey}:${sortOrder}`}
+                    onChange={(event) => {
+                      const [key, order] = event.target.value.split(':');
+                      setSortKey(key as SortKey);
+                      setSortOrder(order as SortOrder);
+                    }}
+                  >
+                    <option value="score:desc">Highest risk first</option>
+                    <option value="score:asc">Lowest risk first</option>
+                    <option value="published:desc">Newest published</option>
+                    <option value="published:asc">Oldest published</option>
+                    <option value="cve:asc">CVE ID: A–Z</option>
+                    <option value="cve:desc">CVE ID: Z–A</option>
+                  </select>
+                </div>
+                <div className="threat-kev-control">
+                  <span className="threat-control-label" id="threat-kev-label">
+                    Exploitation
+                  </span>
                   <button
                     type="button"
-                    onClick={resetResultControls}
-                    className="inline-flex min-h-9 items-center gap-1 rounded px-2 text-[11px] text-zinc-400 underline-offset-4 transition hover:text-zinc-200 hover:underline light:text-zinc-600 light:hover:text-zinc-900"
+                    aria-describedby="threat-kev-label"
+                    aria-pressed={kevOnly}
+                    onClick={() => setKevOnly((value) => !value)}
+                    className={`${smallButton} ${kevOnly ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 light:text-amber-800' : smallButtonIdle}`}
                   >
-                    <RotateCcw className="h-3 w-3" aria-hidden="true" />
-                    Clear filters
+                    <Flame size={14} aria-hidden="true" />
+                    CISA KEV only
+                    {kevOnly && <Check size={13} aria-hidden="true" />}
+                  </button>
+                </div>
+              </div>
+              <div className="threat-view-status">
+                <p role="status">
+                  <strong>{filteredResults.length}</strong> of {results.length} returned results
+                  <span>{hasResultFilters ? 'Filters active' : 'All results shown'}</span>
+                </p>
+                {hasResultFilters && (
+                  <button type="button" onClick={resetResultControls} className="threat-clear-filters">
+                    <RotateCcw size={13} aria-hidden="true" /> Clear filters
                   </button>
                 )}
-
-                <span
-                  className="ml-auto text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
-                  aria-live="polite"
-                >
-                  {filteredResults.length === results.length
-                    ? `${results.length} results`
-                    : `${filteredResults.length} of ${results.length} results`}
-                </span>
               </div>
             </div>
 
@@ -1515,6 +1537,17 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                             <span className="ml-1.5 font-mono text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                               {scored ? `v${cve.cvss.version}` : 'Unscored'}
                             </span>
+                            {scored && (
+                              <span
+                                className="threat-risk-meter"
+                                data-severity={cve.cvss.severity}
+                                aria-hidden="true"
+                              >
+                                <span
+                                  style={{ width: `${Math.min(100, Math.max(0, cve.cvss.score * 10))}%` }}
+                                />
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <div className="space-y-0.5">
@@ -1613,6 +1646,16 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                       <div>
                         <dt>Published</dt>
                         <dd>{formatDate(hit.cve.publishedDate)}</dd>
+                      </div>
+                      <div>
+                        <dt>Exploit intelligence</dt>
+                        <dd className={exploitTone(hit.cve.exploitStatus)}>
+                          {hit.cve.exploitStatus === 'None' ? 'No known exploit' : hit.cve.exploitStatus}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>EPSS probability</dt>
+                        <dd>{hasEpss(hit.cve.epss) ? formatEpss(hit.cve.epss!.score) : 'Not scored'}</dd>
                       </div>
                     </dl>
                     <button
