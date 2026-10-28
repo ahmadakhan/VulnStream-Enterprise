@@ -25,6 +25,7 @@ import {
   FileJson,
   Flame,
   Inbox,
+  Key,
   Loader2,
   PackageSearch,
   RotateCcw,
@@ -233,7 +234,7 @@ function ThreatDetailDialog({ children, onClose }: { children: React.ReactNode; 
 }
 
 export const ThreatIntelligenceSearch: React.FC = () => {
-  const { searchThreatIntelligence } = useApp();
+  const { searchThreatIntelligence, feeds, updateFeed } = useApp();
 
   // Search parameters
   const [vendorQuery, setVendorQuery] = useState('');
@@ -271,12 +272,54 @@ export const ThreatIntelligenceSearch: React.FC = () => {
   const [copiedIds, setCopiedIds] = useState(false);
   const [copiedDetail, setCopiedDetail] = useState(false);
   const searchSequence = useRef(0);
+
+  // NVD API key dialog
+  const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [apiKeyMessage, setApiKeyMessage] = useState('');
+  const [apiKeySaving, setApiKeySaving] = useState(false);
   useEffect(
     () => () => {
       searchSequence.current++;
     },
     [],
   );
+
+  const nvdFeed = feeds.find((f) => f.type === 'NVD_API' && f.enabled);
+  const hasNvdApiKey = nvdFeed && nvdFeed.authType === 'API_KEY' && Boolean(nvdFeed.authSecretKey);
+
+  const openApiKeyDialog = () => {
+    setApiKeyInput('');
+    setApiKeyMessage('');
+    setApiKeyDialogOpen(true);
+  };
+
+  const handleSaveApiKey = async () => {
+    setApiKeySaving(true);
+    setApiKeyMessage('');
+    if (!nvdFeed) {
+      setApiKeyMessage('No NVD feed is configured. Add one under Feeds first.');
+      setApiKeySaving(false);
+      return;
+    }
+    try {
+      const ok = await updateFeed({
+        ...nvdFeed,
+        authType: 'API_KEY',
+        authSecretKey: apiKeyInput.trim(),
+      });
+      if (ok) {
+        setApiKeyMessage('API key saved. Run a new search to pick it up.');
+        setTimeout(() => setApiKeyDialogOpen(false), 1500);
+      } else {
+        setApiKeyMessage('Failed to save API key. Please try again.');
+      }
+    } catch {
+      setApiKeyMessage('Failed to save API key. Please try again.');
+    } finally {
+      setApiKeySaving(false);
+    }
+   };
 
   const selectedVendor = useMemo(
     () => ENTERPRISE_VENDOR_CATALOG.find((vendor) => vendor.normalizedId === vendorSelected),
@@ -1046,6 +1089,15 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" /> Reset
                 </button>
               )}
+              <button
+                type="button"
+                onClick={openApiKeyDialog}
+                className={`${smallButton} ${smallButtonIdle} ${hasNvdApiKey ? 'border-emerald-700 bg-emerald-950/30 text-emerald-300 hover:border-emerald-600 light:border-emerald-300 light:bg-emerald-50 light:text-emerald-700' : ''}`}
+                title={hasNvdApiKey ? 'NVD API key configured · click to change' : 'Add NVD API key'}
+              >
+                <Key className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>{hasNvdApiKey ? 'API key' : 'Add API key'}</span>
+              </button>
               <button type="submit" disabled={!canSearch} className="ui-primary threat-search-submit">
                 {loading ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -1058,6 +1110,55 @@ export const ThreatIntelligenceSearch: React.FC = () => {
           </div>
         </form>
       </section>
+
+      {/* NVD API key configuration dialog */}
+      {apiKeyDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl light:border-zinc-200 light:bg-white">
+            <h3 className="mb-1 flex items-center gap-2 text-sm font-bold text-zinc-100 light:text-zinc-900">
+              <Key className="h-4 w-4" />
+              NVD API Key
+            </h3>
+            <p className="mb-4 text-xs text-zinc-400 light:text-zinc-600">
+              {hasNvdApiKey
+                ? 'An NVD API key is already configured. Enter a new key to replace it.'
+                : 'Without an API key, NVD limits anonymous requests to 5 per 30 seconds. Get a free key from the NVD and enter it here.'}
+            </p>
+            {apiKeyMessage && (
+              <p
+                className={`mb-3 text-xs ${apiKeyMessage.includes('saved') ? 'text-emerald-400' : 'text-rose-400 light:text-rose-700'}`}
+              >
+                {apiKeyMessage}
+              </p>
+            )}
+            <input
+              type="password"
+              value={apiKeyInput}
+              onChange={(e) => setApiKeyInput(e.target.value)}
+              placeholder={hasNvdApiKey ? 'New NVD API key' : 'Enter NVD API key'}
+              maxLength={256}
+              className={`${inputClass} mb-4`}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setApiKeyDialogOpen(false)}
+                className={`${smallButton} ${smallButtonIdle}`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveApiKey}
+                disabled={apiKeySaving || !apiKeyInput}
+                className={`${smallButton} border-blue-700 bg-blue-950/30 text-blue-300 hover:border-blue-600 light:border-blue-300 light:bg-blue-50 light:text-blue-700 disabled:opacity-50`}
+              >
+                {apiKeySaving ? 'Saving…' : 'Save key'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Guidance before the first search */}
       {!results && !loading && !error && (
@@ -1076,7 +1177,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
           <div className="threat-examples">
             <span>Quick start</span>
             {[
-              { vendor: 'microsoft', product: 'windows_server_2022', label: 'Windows Server' },
+              { vendor: 'microsoft', product: 'windows_server_2025', label: 'Windows Server 2025' },
               { vendor: 'fortinet', product: 'fortios', label: 'Fortinet FortiOS' },
               { vendor: 'apache', product: 'http_server', label: 'Apache HTTP Server' },
             ].map((example) => (
