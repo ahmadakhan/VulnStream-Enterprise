@@ -72,9 +72,9 @@ function Metric({ icon: Icon, label, value }: { icon: typeof Clock; label: strin
 /**
  * Full-detail inspector for a single operational event.
  *
- * Rendered as a right-hand drawer rather than a centred card: an operator
- * triaging an incident reads the log list and one event side by side, and on a
- * wide screen a modal hides the context that made the event interesting.
+ * Rendered as a centred modal (matching the audit-trail detail dialog) so a
+ * selected event opens as a popup rather than a side drawer, with the backdrop
+ * keeping focus on the event and dismissing on Escape or click-away.
  *
  * Structured context is rendered as labelled text, not JSON — the raw JSON stays
  * available behind an explicit toggle for anyone who needs to paste it.
@@ -104,12 +104,12 @@ export const EventDetailPanel: React.FC<{
       role="dialog"
       aria-modal="true"
       aria-labelledby="event-detail-title"
-      className="fixed inset-0 z-50 flex justify-end bg-black/60"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <aside className="flex h-full w-full max-w-2xl flex-col border-l border-zinc-800 bg-zinc-900 shadow-2xl light:border-zinc-200 light:bg-white">
+      <aside className="flex w-full max-w-2xl flex-col rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl light:border-zinc-200 light:bg-white max-h-[calc(100dvh-2rem)] overflow-hidden">
         <header className="shrink-0 border-b border-zinc-800/80 px-5 py-4 light:border-zinc-200">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
