@@ -428,32 +428,43 @@ export async function state(db: Db, options: StateOptions = {}): Promise<AppStat
     .map(([kind]) => kind)
     .filter((kind) => kind !== 'auditLogs');
   const limits = options.limits ?? {};
-  const bounded = new Set(
-    Object.entries(limits)
-      .filter(([, limit]) => typeof limit === 'number' && limit >= 0)
-      .map(([kind]) => kind),
-  );
+  const bounded = Object.entries(limits)
+    .filter(([, limit]) => typeof limit === 'number' && limit >= 0)
+    .map(([kind]) => kind)
+    .filter((kind) => kind !== 'auditLogs') as HeavyCollectionKind[];
+  const boundedSet = new Set<string>(bounded);
   const rows: { kind: string; data: unknown }[] = [];
-  const unbounded = arrayKinds.filter((kind) => !bounded.has(kind));
+  const unbounded = arrayKinds.filter((kind) => !boundedSet.has(kind));
   if (unbounded.length)
     rows.push(
       ...(
         await db.query(`SELECT kind,data FROM records WHERE kind=ANY($1::text[]) ${recordOrder}`, [unbounded])
       ).rows,
     );
-  for (const kind of bounded) {
-    const limit = Math.max(0, Math.floor(limits[kind as HeavyCollectionKind]!));
-    if (!limit) continue;
-    if (kind === 'auditLogs') continue;
+  // Batch all bounded heavy-collection fetches into a single query using a
+  // ROW_NUMBER() window. Per-kind limits are applied via a CASE expression so
+  // each collection respects its own bound without a separate query.
+  if (bounded.length) {
+    const kinds = bounded;
+    const limitValues = kinds.map((kind) => Math.max(0, Math.floor(limits[kind]!)));
+    const limitCase = kinds
+      .map((kind, i) => `WHEN '${kind.replace(/'/, "''")}' THEN $${i + 2}::int`)
+      .join(' ');
     rows.push(
       ...(
-        await db.query(`SELECT kind,data FROM records WHERE kind=$1 ${recordOrder} LIMIT $2`, [kind, limit])
+        await db.query<{ kind: string; data: unknown }>(
+          `SELECT kind,data FROM (
+            SELECT kind,data,ROW_NUMBER() OVER (PARTITION BY kind ORDER BY ${recordOrder.slice(9)}) AS rn
+            FROM records WHERE kind=ANY($1::text[])
+          ) ranked WHERE rn <= CASE kind ${limitCase} ELSE 0 END`,
+          [kinds, ...limitValues],
+        )
       ).rows,
     );
   }
   // Audit rows live in their own append-only table. Keep the historical 500-row
   // default for internal snapshots; the browser always supplies an explicit limit.
-  const auditLimit = bounded.has('auditLogs') ? Math.max(0, Math.floor(limits.auditLogs!)) : 500;
+  const auditLimit = boundedSet.has('auditLogs') ? Math.max(0, Math.floor(limits.auditLogs!)) : 500;
   if (auditLimit)
     rows.push(
       ...(await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT $1', [auditLimit])).rows.map(
