@@ -113,7 +113,7 @@ test('redirects are refused when disabled, when the chain loops, or when the hos
     const request = createRequester(config, hooks);
     await assert.rejects(
       request('https://feed.example.test/feed.xml', { allowRedirects: false }),
-      /Redirects are not permitted/,
+      /Redirects are not permitted \(HTTP 302 to https:\/\/elsewhere\.test\/\)/,
     );
     await assert.rejects(request('https://feed.example.test/loop', { maxRedirects: 2 }), /Too many redirects/);
     // An off-allowlist redirect target is refused by the SSRF check.
@@ -143,9 +143,10 @@ test('a cross-host redirect is followed only to another allowlisted host', async
     const request = createRequester(config, crossHostHooks);
     await assert.rejects(
       request('https://feed.example.test/feed.xml', { sameHostRedirects: true }),
-      /different hostname/,
+      /different hostname is not permitted \(feed\.example\.test -> cdn\.example\.test\)/,
     );
-    const response = await request('https://feed.example.test/feed.xml', { sameHostRedirects: false });
+    // Cross-host hops are allowed by default; the target is still allowlisted.
+    const response = await request('https://feed.example.test/feed.xml');
     assert.equal(response.status, 304);
   } finally {
     await close();

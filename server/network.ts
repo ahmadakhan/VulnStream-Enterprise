@@ -151,6 +151,19 @@ type RedirectOptions = Required<
 /** Body-dependent headers are meaningless on a hop that carries no body. */
 const BODY_HEADERS = ['content-type', 'content-length', 'transfer-encoding'];
 
+/** Render a Location header for an error message without URL credentials. */
+function safeTarget(location: string | undefined, current: URL): string {
+  if (!location) return '(no Location header)';
+  try {
+    const target = new URL(location, current);
+    target.username = '';
+    target.password = '';
+    return target.href;
+  } catch {
+    return '(invalid Location header)';
+  }
+}
+
 /** Copy request headers without the named ones (case-insensitive). */
 function withoutHeaders(headers: Record<string, string>, names: string[]): Record<string, string> {
   const dropped = names.map((name) => name.toLowerCase());
@@ -173,12 +186,24 @@ async function redirectTarget(
   hooks: RequesterHooks,
   allowedPorts: readonly string[],
 ): Promise<{ href: string; options: RequestOptions; opts: RedirectOptions }> {
-  if (!opts.allowRedirects) throw new Error('Redirects are not permitted');
-  if (opts.maxRedirects <= 0) throw new Error('Too many redirects');
+  // Every refusal names the redirect and its target. A bare "not permitted"
+  // gave operators no way to tell a disabled policy from a blocked host, and
+  // looked identical to the old unconditional rejection this code replaced.
+  if (!opts.allowRedirects)
+    throw new Error(`Redirects are not permitted (HTTP ${status} to ${safeTarget(location, current)})`);
+  if (opts.maxRedirects <= 0)
+    throw new Error(`Too many redirects (stopped at HTTP ${status} to ${safeTarget(location, current)})`);
   if (!location) throw new Error(`HTTP ${status} redirect without Location header`);
-  const next = new URL(location, current);
+  let next: URL;
+  try {
+    next = new URL(location, current);
+  } catch {
+    throw new Error(`HTTP ${status} redirect has an invalid Location header`);
+  }
   if (opts.sameHostRedirects && next.hostname.toLowerCase() !== current.hostname.toLowerCase())
-    throw new Error('Redirect to a different hostname is not permitted');
+    throw new Error(
+      `Redirect to a different hostname is not permitted (${current.hostname} -> ${next.hostname}); add ${next.hostname} to EGRESS_ALLOWED_HOSTS and allow cross-host redirects for this feed`,
+    );
   await resolvePublic(next, allowlist, hooks.resolver, allowedPorts);
   const method = options.method || 'GET';
   const staysPost = method === 'POST' && (status === 307 || status === 308);
