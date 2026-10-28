@@ -1,7 +1,7 @@
 import { PageHeading } from './PageHeading';
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { CpeMatchSimulation, CpeParseResult, SeverityClassification } from '../types';
+import { CpeMatchSimulation, CpeParseResult, NvdCpeSearchResponse, SeverityClassification } from '../types';
 import {
   ScanLine,
   Check,
@@ -114,7 +114,8 @@ const CPE_PRESETS: CpePreset[] = [
 ];
 
 export const CpeMatcherView: React.FC = () => {
-  const { simulateCpeMatch } = useApp();
+  const { simulateCpeMatch, searchNvdCpes } = useApp();
+  const [activeTab, setActiveTab] = useState<'match' | 'lookup'>('match');
   const [assetCpe, setAssetCpe] = useState('cpe:2.3:a:microsoft:windows_10:10.0.19041:*:*:*:*:*:*:*');
   const [vulnerabilityCpe, setVulnerabilityCpe] = useState('cpe:2.3:a:microsoft:windows_10:*:*:*:*:*:*:*:*');
   const [assetVendor, setAssetVendor] = useState('microsoft');
@@ -128,6 +129,12 @@ export const CpeMatcherView: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const [lookupVendor, setLookupVendor] = useState('microsoft');
+  const [lookupProduct, setLookupProduct] = useState('windows_10');
+  const [lookupResults, setLookupResults] = useState<NvdCpeSearchResponse | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
 
   const assetCpeValid = useMemo(() => validateCpeInput(assetCpe), [assetCpe]);
   const vulnCpeValid = useMemo(() => validateCpeInput(vulnerabilityCpe), [vulnerabilityCpe]);
@@ -201,21 +208,60 @@ export const CpeMatcherView: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleLookup = async () => {
+    if (!lookupVendor.trim()) return;
+    setLookupLoading(true);
+    setLookupError(null);
+    setLookupResults(null);
+    try {
+      const resp = await searchNvdCpes(lookupVendor.trim(), lookupProduct.trim(), 50);
+      setLookupResults(resp);
+    } catch (err) {
+      setLookupError(err instanceof Error ? err.message : 'NVD CPE lookup failed');
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <PageHeading
         page="cpe-matcher"
         children={
           <span className="text-sm text-zinc-400 light:text-zinc-600">
-            Simulate CPE 2.3 matching between an asset and a vulnerability. The simulator parses both CPEs,
-            expands aliases, checks version ranges, and runs false-positive elimination rules before producing
-            a severity classification.
+            Simulate CPE 2.3 matching between an asset and a vulnerability, or look up verified CPE 2.3 names from the NVD dictionary by vendor and product.
           </span>
         }
       />
 
-      <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4">
-        <div className="flex flex-wrap gap-1.5 pb-2 -mx-4 border-b border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200">
+      <div className="flex gap-1 p-1 bg-zinc-800/50 dark:bg-zinc-800/50 light:bg-zinc-200 rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-300">
+        <button
+          type="button"
+          onClick={() => setActiveTab('match')}
+          className={`flex-1 text-center text-xs font-medium py-1.5 rounded-md transition ${
+            activeTab === 'match'
+              ? 'bg-zinc-900 dark:bg-zinc-900 light:bg-white text-zinc-100 light:text-zinc-900 shadow'
+              : 'text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-800'
+          }`}
+        >
+          CPE Match &amp; Classifier
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('lookup')}
+          className={`flex-1 text-center text-xs font-medium py-1.5 rounded-md transition ${
+            activeTab === 'lookup'
+              ? 'bg-zinc-900 dark:bg-zinc-900 light:bg-white text-zinc-100 light:text-zinc-900 shadow'
+              : 'text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-800'
+          }`}
+        >
+          CPE Lookup
+        </button>
+      </div>
+
+      {activeTab === 'match' && (
+        <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4">
+          <div className="flex flex-wrap gap-1.5 pb-2 -mx-4 border-b border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200">
           <span className="px-4 text-xs font-semibold uppercase tracking-wider text-zinc-500 light:text-zinc-600">
             Presets
           </span>
@@ -554,6 +600,99 @@ export const CpeMatcherView: React.FC = () => {
           <p className="text-sm text-zinc-400 light:text-zinc-600">
             Enter CPE 2.3 strings and click "Simulate CPE match" to start.
           </p>
+        </div>
+      )}
+    </div>
+    )}
+
+      {activeTab === 'lookup' && (
+        <div className="ui-panel rounded-lg border border-zinc-800/80 dark:border-zinc-800 light:border-zinc-200 bg-zinc-900/50 dark:bg-zinc-900 light:bg-zinc-50 p-4 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+                Vendor
+              </label>
+              <input
+                type="text"
+                value={lookupVendor}
+                onChange={(e) => setLookupVendor(e.target.value)}
+                placeholder="e.g. microsoft, cisco, paloaltonetworks"
+                className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md focus:outline-none focus:ring-1 focus:border-zinc-600 placeholder-zinc-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 light:text-zinc-600 mb-1">
+                Product (optional)
+              </label>
+              <input
+                type="text"
+                value={lookupProduct}
+                onChange={(e) => setLookupProduct(e.target.value)}
+                placeholder="e.g. windows_10, ios, pan-os"
+                className="w-full px-3 py-2 text-sm bg-zinc-800 dark:bg-zinc-800 light:bg-white light:border light:border-zinc-300 text-zinc-100 light:text-zinc-900 rounded-md focus:outline-none focus:ring-1 focus:border-zinc-600 placeholder-zinc-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={handleLookup}
+              disabled={lookupLoading || !lookupVendor.trim()}
+              className="px-4 py-2 bg-blue-500/15 border border-blue-400/30 text-blue-300 light:text-blue-800 rounded-md font-medium hover:bg-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 text-xs"
+            >
+              {lookupLoading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              Search NVD
+            </button>
+          </div>
+
+          {lookupError && (
+            <div className="rounded-md border border-rose-500/30 bg-rose-500/10 p-3 flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-rose-400 light:text-rose-800" />
+              <span className="text-sm text-rose-300 light:text-rose-800">{lookupError}</span>
+            </div>
+          )}
+
+          {lookupResults && (
+            <div className="space-y-2">
+              <div className="text-xs text-zinc-500 light:text-zinc-600">
+                {lookupResults.totalResults} result{lookupResults.totalResults !== 1 ? 's' : ''} found
+              </div>
+              {lookupResults.results.length === 0 ? (
+                <p className="text-xs text-zinc-500 light:text-zinc-600">No verified CPEs found in the NVD dictionary for this vendor/product.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                  {(lookupResults.results as NvdCpeSearchResult[]).map((cpe) => (
+                    <div
+                      key={cpe.cpeNameId || cpe.cpeName}
+                      className="bg-zinc-950/70 dark:bg-zinc-950/70 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 flex items-center justify-between"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <code className="text-[10px] text-zinc-300 light:text-zinc-800 font-mono break-all block">
+                          {cpe.cpeName}
+                        </code>
+                        {(cpe.vendor || cpe.product || cpe.title) && (
+                          <div className="text-[9px] text-zinc-500 light:text-zinc-600 mt-0.5 truncate">
+                            {[cpe.vendor, cpe.product, cpe.title].filter(Boolean).join(' / ')}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void copyText(cpe.cpeName);
+                        }}
+                        className="ml-2 text-xs px-1.5 py-0.5 rounded text-zinc-400 light:text-zinc-600 hover:text-zinc-200 light:hover:text-zinc-800"
+                        title="Copy CPE 2.3"
+                      >
+                        <Copy size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

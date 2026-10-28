@@ -8,6 +8,18 @@ import type { ThreatFeed, NvdCpeSearchResult, NvdCpeSearchResponse } from '../sr
 
 const NVD_CPE_ENDPOINT = 'https://services.nvd.nist.gov/rest/json/cpes/2.0';
 
+export function buildCpeUrl(
+  keyword: string,
+  resultsPerPage: number,
+  apiKey: string,
+): URL {
+  const url = new URL(NVD_CPE_ENDPOINT);
+  url.searchParams.set('keywordSearch', keyword);
+  url.searchParams.set('resultsPerPage', String(resultsPerPage));
+  if (apiKey) url.searchParams.set('apiKey', apiKey);
+  return url;
+}
+
 /**
  * Reads the API key from the first enabled NVD feed configured with API-key
  * authentication. Returns an empty string when no NVD key is configured, in
@@ -46,17 +58,28 @@ export async function searchNvdCpes(
   product: string,
   limit: number,
 ): Promise<NvdCpeSearchResponse> {
-  const url = new URL(NVD_CPE_ENDPOINT);
   const keyword = `${vendor} ${product}`.trim();
-  url.searchParams.set('keywordSearch', keyword);
-  url.searchParams.set('resultsPerPage', String(Math.min(Math.max(1, limit), 200)));
-  if (apiKey) url.searchParams.set('apiKey', apiKey);
+  const pageSize = Math.min(Math.max(1, limit), 200);
+  const url = buildCpeUrl(keyword, pageSize, apiKey);
 
-  const response = await request(url.href, {
+  let response = await request(url.href, {
     timeoutMs: 20000,
     socketTimeoutMs: 15000,
     maxResponseBytes: 4 * 1024 * 1024,
   });
+
+  // NVD answers HTTP 404 for invalid/expired API keys in addition to unresolvable
+  // keyword searches. When a key was supplied, retry the request without it so the
+  // unauthenticated public rate budget is used instead of failing the operator's
+  // search outright.
+  if (response.status === 404 && apiKey) {
+    const fallback = buildCpeUrl(keyword, pageSize, '');
+    response = await request(fallback.href, {
+      timeoutMs: 20000,
+      socketTimeoutMs: 15000,
+      maxResponseBytes: 4 * 1024 * 1024,
+    });
+  }
 
   if (response.status === 429) {
     throw {
@@ -65,6 +88,13 @@ export async function searchNvdCpes(
       status: 429,
       message: 'NVD rate limit reached; retry later',
     } as NvdRateLimitError;
+  }
+
+  // NVD answers 404 for keyword searches it cannot resolve (e.g. single-
+  // character or otherwise unsupported terms) instead of an empty result set.
+  // Treat that as "no matches" rather than a hard failure.
+  if (response.status === 404) {
+    return { results: [], totalResults: 0 };
   }
 
   if (response.status !== 200)
