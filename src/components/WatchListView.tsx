@@ -463,17 +463,25 @@ setCpeExpressionInput(item.cpes[0] || '');
         }
       }
 
+      const finalCpes = dedupeCpes([
+        ...(removedAutoCpes.has(cpe) ? [] : [cpe]),
+        ...additionalCpes.filter((c) => !removedAutoCpes.has(c)),
+        ...selectedNvdCpes.filter((c) => !removedAutoCpes.has(c)),
+        ...customAddedCpes,
+      ]);
+      if (finalCpes.length === 0) {
+        setSaveFeedback({
+          type: 'error',
+          message: 'All auto-generated CPEs were removed. Add at least one product or CPE before saving.',
+        });
+        return;
+      }
       const saved = await updateWatchlistItem({
         ...editingItem,
         vendor: parsedCpe.vendor,
         product: parsedCpe.product,
         version: parsedCpe.version,
-        cpes: dedupeCpes([
-          cpe,
-          ...additionalCpes.filter((c) => !removedAutoCpes.has(c)),
-          ...selectedNvdCpes.filter((c) => !removedAutoCpes.has(c)),
-          ...customAddedCpes,
-        ]),
+        cpes: finalCpes,
         purls: purlList.length > 0 ? purlList : undefined,
         targetHw: parsedCpe.targetHw !== '*' ? parsedCpe.targetHw : undefined,
         assetTag: assetTagInput.trim() || editingItem.assetTag,
@@ -504,16 +512,32 @@ setCpeExpressionInput(item.cpes[0] || '');
     // Creating new products (supports multi-products!)
     const productsToCreate: Array<{ name: string; normalizedId: string; part: 'a' | 'o' | 'h' }> = [];
 
-     // Add selected catalog products
+    // Add selected catalog products
     for (const prodId of selectedProductIds) {
       const catProd = catalogProducts.find((p) => p.normalizedId === prodId);
       if (catProd) {
-        const generatedCpe = buildStrictCpe23(catProd.part, vendorInput.trim(), catProd.normalizedId, versionInput, targetHwInput);
+        const generatedCpe = buildStrictCpe23(
+          catProd.part,
+          vendorInput.trim(),
+          catProd.normalizedId,
+          versionInput,
+          targetHwInput,
+        );
         if (!removedAutoCpes.has(generatedCpe)) {
-          productsToCreate.push({ name: catProd.name, normalizedId: catProd.normalizedId, part: catProd.part });
+          productsToCreate.push({
+            name: catProd.name,
+            normalizedId: catProd.normalizedId,
+            part: catProd.part,
+          });
         }
       } else {
-        const generatedCpe = buildStrictCpe23(cpePart, vendorInput.trim(), prodId, versionInput, targetHwInput);
+        const generatedCpe = buildStrictCpe23(
+          cpePart,
+          vendorInput.trim(),
+          prodId,
+          versionInput,
+          targetHwInput,
+        );
         if (!removedAutoCpes.has(generatedCpe)) {
           productsToCreate.push({ name: prodId, normalizedId: prodId, part: cpePart });
         }
