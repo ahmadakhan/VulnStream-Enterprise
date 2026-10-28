@@ -1050,20 +1050,22 @@ export async function deliverNext(
       // Acceptance by a transport is not proof of inbox delivery.
       advisory.deliveryStatus = totals.pending ? 'PENDING' : totals.failed ? 'FAILED' : 'ACCEPTED';
       await put(db, 'advisories', advisory.id, advisory);
-      if (!error)
+      if (!error) {
+        const dispatchKey =
+          job.payload.digestKey ??
+          job.dedupe_key.split(':email:')[0].split(':webhook:')[0];
+        const dispatchIds = declaredCveIds.map((cveId) => `${cveId}:${dispatchKey}`);
+        const priorAlerts = await getMany<AlertedCVE>(db, 'alertedCves', declaredCveIds);
+        const priorDispatches = await getMany(db, 'alertDispatches', dispatchIds);
         for (const cveId of declaredCveIds) {
-          const prior = await get<AlertedCVE>(db, 'alertedCves', cveId),
-            now = new Date().toISOString();
+          const prior = priorAlerts.get(cveId);
+          const now = new Date().toISOString();
           // Digest jobs carry one batch key across every recipient, so the same
           // CVE is counted once even when several subscription cohorts receive
           // it. Non-digest jobs retain the original content-revision key.
-          const dispatchKey =
-            job.payload.digestKey ??
-            job.dedupe_key.split(':email:')[0].split(':webhook:')[0];
-          const dispatchId = `${cveId}:${dispatchKey}`;
           const same =
-            prior?.lastDispatchKey === dispatchKey || !!(await get(db, 'alertDispatches', dispatchId));
-          await put(db, 'alertDispatches', dispatchId, { cveId, dispatchKey, acceptedAt: now });
+            prior?.lastDispatchKey === dispatchKey || !!priorDispatches.get(`${cveId}:${dispatchKey}`);
+          await put(db, 'alertDispatches', `${cveId}:${dispatchKey}`, { cveId, dispatchKey, acceptedAt: now });
           await put(db, 'alertedCves', cveId, {
             cveId,
             firstAlertedAt: prior?.firstAlertedAt || now,
@@ -1080,8 +1082,11 @@ export async function deliverNext(
             dispatchCount: (prior?.dispatchCount || 0) + (same ? 0 : 1),
           } satisfies AlertedCVE);
         }
+      }
+      // Batch-fetch all finding rows in a single query instead of per-finding.
+      const findingMap = await getMany<Finding>(db, 'findings', advisory.findingIds);
       for (const findingId of advisory.findingIds) {
-        const f = await get<Finding>(db, 'findings', findingId);
+        const f = findingMap.get(findingId);
         if (f && f.advisoryId === advisory.id)
           await put(db, 'findings', findingId, {
             ...f,
