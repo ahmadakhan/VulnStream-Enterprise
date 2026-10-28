@@ -93,7 +93,6 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
 </style>
 </head>
 <body style="margin:0;padding:0;background:${config.canvasBg};color:${config.fontColor};font-family:${escapeHtml(fontCss)};">
-<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{{severity}} security advisory · {{advisory_title}}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:${config.canvasBg};">
 <tr><td class="outer" align="center" style="padding:36px 16px;">
 <!--[if mso]><table role="presentation" width="680" align="center"><tr><td><![endif]-->
