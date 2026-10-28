@@ -327,8 +327,48 @@ export function createApp(
     }),
   );
   app.post('/api/login', loginHandler(pool, config));
-  // Password reset OTP flow (no authentication required — endpoints are outside
-  // the requireAuth guard above). Rate-limited by login_attempts key space.
+  // Reset endpoints are public: enforce shared IP and account quotas before
+  // account lookup, mail delivery, code verification, or password hashing.
+  const resetRequestIpLimiter = createDatabaseRateLimiter(pool, 15, 15 / 600_000);
+  const resetRequestAccountLimiter = createDatabaseRateLimiter(pool, 3, 3 / 600_000);
+  const resetAttemptIpLimiter = createDatabaseRateLimiter(pool, 50, 50 / 600_000);
+  const resetAttemptAccountLimiter = createDatabaseRateLimiter(pool, 10, 10 / 600_000);
+  app.use(
+    '/api/password-reset',
+    asyncRoute(async (req, res, next) => {
+      if (
+        req.method !== 'POST' ||
+        !['/request', '/verify', '/complete'].includes(req.path.replace(/\/+$/, '').toLowerCase())
+      )
+        return next();
+      const username = z
+        .string()
+        .min(1)
+        .max(100)
+        .transform((s) => s.toLowerCase())
+        .parse(req.body?.username);
+      const requesting = req.path.replace(/\/+$/, '').toLowerCase() === '/request';
+      const scope = requesting ? 'request' : 'attempt';
+      const limits: [MutationLimiter, string][] = [
+        [
+          requesting ? resetRequestIpLimiter : resetAttemptIpLimiter,
+          `reset:${scope}:ip:${tokenHash(req.ip || '')}`,
+        ],
+        [
+          requesting ? resetRequestAccountLimiter : resetAttemptAccountLimiter,
+          `reset:${scope}:user:${tokenHash(username)}`,
+        ],
+      ];
+      for (const [limit, key] of limits) {
+        const decision = await limit(key);
+        if (!decision.allowed) {
+          res.setHeader('Retry-After', String(Math.max(1, Math.ceil(decision.retryAfterMs / 1000))));
+          throw new HttpError(429, 'Too many password reset attempts; retry later');
+        }
+      }
+      next();
+    }),
+  );
   app.post(
     '/api/password-reset/request',
     asyncRoute(async (req, res) => {
@@ -341,6 +381,10 @@ export function createApp(
             .transform((s) => s.toLowerCase()),
         })
         .parse(req.body);
+      // Only automated tests may inspect a reset code without mailbox access.
+      // Check deployment readiness before lookup so this error cannot reveal users.
+      if (config.NODE_ENV !== 'test' && (!config.SMTP_HOST || !config.SMTP_FROM))
+        throw new HttpError(503, 'Password reset email is not configured for this deployment');
       const user = (
         await pool.query('SELECT id,email FROM users WHERE username=$1 AND disabled=false', [username])
       ).rows[0];
@@ -351,10 +395,13 @@ export function createApp(
       // Answering exactly like an unknown user keeps the response free of any
       // signal about which accounts exist.
       if (!user.email) return res.json({ success: true });
-      const code = String(randomInt(100000, 999999));
+      const code = String(randomInt(100000, 1_000_000));
       const codeHash = tokenHash(code);
       const expiresAt = new Date(Date.now() + 10 * 60_000);
       await transaction(pool, async (db) => {
+        // Serialize issuance with completion and account changes across replicas.
+        const current = await db.query('SELECT id FROM users WHERE id=$1 AND email=$2 AND NOT disabled FOR UPDATE', [user.id, user.email]);
+        if (!current.rowCount) throw new HttpError(400, 'Account changed; request a new reset code');
         await db.query('DELETE FROM password_reset_tokens WHERE username=$1', [username]);
         await db.query('INSERT INTO password_reset_tokens(username,code_hash,expires_at) VALUES($1,$2,$3)', [
           username,
@@ -362,23 +409,7 @@ export function createApp(
           expiresAt,
         ]);
       });
-      // Refuse before minting a code that could never reach its owner. In
-      // development the code is still returned in the response (below) so the
-      // flow remains testable without a mail server.
-      if (!config.SMTP_HOST || !config.SMTP_FROM) {
-        if (config.NODE_ENV === 'production') {
-          await appendAudit(
-            pool,
-            'Password reset unavailable',
-            'OTP request refused: outbound mail is not configured',
-            username,
-            'SECURITY',
-            'ERROR',
-            req.ip || '',
-          );
-          throw new HttpError(503, 'Password reset email is not configured for this deployment');
-        }
-      } else {
+      if (config.SMTP_HOST && config.SMTP_FROM) {
         const transporter = nodemailer.createTransport({
           host: config.SMTP_HOST,
           port: config.SMTP_PORT,
@@ -400,7 +431,7 @@ export function createApp(
         });
       }
       const response: { success: true; code?: string } = { success: true };
-      if (config.NODE_ENV !== 'production') response.code = code;
+      if (config.NODE_ENV === 'test') response.code = code;
       await appendAudit(
         pool,
         'Password reset requested',
@@ -423,11 +454,11 @@ export function createApp(
             .min(1)
             .max(100)
             .transform((s) => s.toLowerCase()),
-          code: z.string().min(6).max(6),
+          code: z.string().regex(/^\d{6}$/),
         })
         .parse(req.body);
       const result = await pool.query(
-        'SELECT 1 FROM password_reset_tokens WHERE username=$1 AND code_hash=$2 AND expires_at>now()',
+        'SELECT 1 FROM password_reset_tokens t JOIN users u ON u.username=t.username WHERE t.username=$1 AND t.code_hash=$2 AND t.expires_at>now() AND NOT u.disabled',
         [username, tokenHash(code)],
       );
       if (!result.rowCount) throw new HttpError(400, 'Invalid or expired code');
@@ -444,7 +475,7 @@ export function createApp(
             .min(1)
             .max(100)
             .transform((s) => s.toLowerCase()),
-          code: z.string().min(6).max(6),
+          code: z.string().regex(/^\d{6}$/),
           newPassword: z.string().min(14).max(128),
         })
         .parse(req.body);
@@ -452,15 +483,27 @@ export function createApp(
       if (newPassword.length < settings.securityPolicy.minPasswordLen)
         throw new HttpError(400, 'Password does not meet configured minimum');
       const codeHash = tokenHash(code);
+      // Reject bad codes before admitting expensive password work. Consumption
+      // is rechecked under the account lock below after the hash is ready.
+      const valid = await pool.query(
+        'SELECT 1 FROM password_reset_tokens t JOIN users u ON u.username=t.username WHERE t.username=$1 AND t.code_hash=$2 AND t.expires_at>now() AND NOT u.disabled',
+        [username, codeHash],
+      );
+      if (!valid.rowCount) throw new HttpError(400, 'Invalid or expired code');
       const hash = await passwordHash(newPassword);
       await transaction(pool, async (db) => {
         const user = (
           await db.query(
-            'SELECT u.id FROM users u JOIN password_reset_tokens t ON t.username=u.username WHERE t.code_hash=$1 AND t.expires_at>now() AND NOT u.disabled',
-            [codeHash],
+            'SELECT id FROM users WHERE username=$1 AND NOT disabled FOR UPDATE',
+            [username],
           )
         ).rows[0];
         if (!user) throw new HttpError(400, 'Invalid or expired code');
+        const consumed = await db.query(
+          'DELETE FROM password_reset_tokens WHERE username=$1 AND code_hash=$2 AND expires_at>now() RETURNING username',
+          [username, codeHash],
+        );
+        if (!consumed.rowCount) throw new HttpError(400, 'Invalid or expired code');
         await db.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, user.id]);
         await db.query('DELETE FROM sessions WHERE user_id=$1', [user.id]);
         await db.query('DELETE FROM password_reset_tokens WHERE username=$1', [username]);
@@ -895,6 +938,7 @@ export function createApp(
       await transaction(pool, async (db) => {
         await db.query('UPDATE users SET password_hash=$2 WHERE id=$1', [req.operator!.id, hash]);
         await db.query('DELETE FROM sessions WHERE user_id=$1', [req.operator!.id]);
+        await db.query('DELETE FROM password_reset_tokens WHERE username=$1', [req.operator!.username]);
         await appendAudit(
           db,
           'Password changed',
@@ -966,24 +1010,11 @@ export function createApp(
         ((data.disabled !== undefined && data.disabled) || (data.role !== undefined && data.role !== 'ADMIN'))
       )
         throw new HttpError(400, 'Cannot remove your own administrator access');
-      const changed = await updateUser(
+      await updateUser(
         pool,
         userId.data,
         { role: data.role, disabled: data.disabled, email: data.email },
         req.operator!.username,
-        req.ip || '',
-      );
-      // Sessions are revoked only when the account can no longer be used or its
-      // authority changed. An email-only edit must not sign the operator out.
-      const revokesSessions = data.disabled === true || data.role !== undefined;
-      if (revokesSessions) await pool.query('DELETE FROM sessions WHERE user_id=$1', [userId.data]);
-      await appendAudit(
-        pool,
-        'Operator access changed',
-        `Operator ${changed.username}; role ${changed.role}; disabled ${changed.disabled}; reset email ${changed.email ? 'set' : 'not set'}`,
-        req.operator!.username,
-        'SECURITY',
-        'INFO',
         req.ip || '',
       );
       res.json({ success: true });
@@ -1007,6 +1038,7 @@ export function createApp(
         ]);
         if (!changed.rowCount) throw new HttpError(404, 'Operator not found');
         await db.query('DELETE FROM sessions WHERE user_id=$1', [req.params.id]);
+        await db.query('DELETE FROM password_reset_tokens WHERE username=(SELECT username FROM users WHERE id=$1)', [userId.data]);
         await appendAudit(
           db,
           'Password reset',

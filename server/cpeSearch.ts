@@ -8,11 +8,10 @@ import type { ThreatFeed, NvdCpeSearchResult, NvdCpeSearchResponse } from '../sr
 
 const NVD_CPE_ENDPOINT = 'https://services.nvd.nist.gov/rest/json/cpes/2.0';
 
-export function buildCpeUrl(keyword: string, resultsPerPage: number, apiKey: string): URL {
+export function buildCpeUrl(keyword: string, resultsPerPage: number): URL {
   const url = new URL(NVD_CPE_ENDPOINT);
   url.searchParams.set('keywordSearch', keyword);
   url.searchParams.set('resultsPerPage', String(resultsPerPage));
-  if (apiKey) url.searchParams.set('apiKey', apiKey);
   return url;
 }
 
@@ -54,27 +53,30 @@ export async function searchNvdCpes(
   product: string,
   limit: number,
 ): Promise<NvdCpeSearchResponse> {
-  const keyword = `${vendor} ${product}`.trim();
+  // NVD keywordSearch matches titles/reference text, not CPE component names.
+  const keyword = `${vendor} ${product}`.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
   const pageSize = Math.min(Math.max(1, limit), 200);
-  const url = buildCpeUrl(keyword, pageSize, apiKey);
-
-  let response = await request(url.href, {
-    timeoutMs: 20000,
-    socketTimeoutMs: 15000,
-    maxResponseBytes: 4 * 1024 * 1024,
-  });
-
-  // NVD answers HTTP 404 for invalid/expired API keys in addition to unresolvable
-  // keyword searches. When a key was supplied, retry the request without it so the
-  // unauthenticated public rate budget is used instead of failing the operator's
-  // search outright.
-  if (response.status === 404 && apiKey) {
-    const fallback = buildCpeUrl(keyword, pageSize, '');
-    response = await request(fallback.href, {
+  const url = buildCpeUrl(keyword, pageSize);
+  const fetchPage = (key: string) =>
+    request(url.href, {
+      headers: { Accept: 'application/json', ...(key ? { apiKey: key } : {}) },
       timeoutMs: 20000,
       socketTimeoutMs: 15000,
       maxResponseBytes: 4 * 1024 * 1024,
+      sameHostRedirects: true,
     });
+  let response = await fetchPage(apiKey);
+
+  // NVD reports rejected credentials with 404 and a diagnostic message header.
+  // Only that case can fall back to the public budget: an unrelated 404 is an
+  // upstream failure, never evidence that the dictionary has no matches.
+  const message = response.headers.message;
+  if (
+    response.status === 404 &&
+    apiKey &&
+    /invalid\s+api\s*key/i.test(Array.isArray(message) ? message.join(' ') : message || '')
+  ) {
+    response = await fetchPage('');
   }
 
   if (response.status === 429) {
@@ -86,13 +88,6 @@ export async function searchNvdCpes(
     } as NvdRateLimitError;
   }
 
-  // NVD answers 404 for keyword searches it cannot resolve (e.g. single-
-  // character or otherwise unsupported terms) instead of an empty result set.
-  // Treat that as "no matches" rather than a hard failure.
-  if (response.status === 404) {
-    return { results: [], totalResults: 0 };
-  }
-
   if (response.status !== 200) throw new Error(`NVD CPE search returned HTTP ${response.status}`);
 
   let data: any;
@@ -102,7 +97,10 @@ export async function searchNvdCpes(
     throw new Error('NVD returned a non-JSON CPE search response');
   }
 
-  const configurations: any[] = Array.isArray(data?.products) ? data.products : [];
+  if (!Array.isArray(data?.products) || !Number.isSafeInteger(data?.totalResults) || data.totalResults < 0)
+    throw new Error('NVD returned an invalid CPE search response');
+
+  const configurations: any[] = data.products;
   const results: NvdCpeSearchResult[] = [];
   for (const entry of configurations) {
     const cpe = entry?.cpe || entry;

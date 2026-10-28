@@ -243,11 +243,13 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
   const url = new URL(database!);
   url.searchParams.set('options', `-c search_path=${schema}`);
   const pool = createPool(url.href);
-  let capturedBody = '',
+  let capturedUrl = '',
+    capturedBody = '',
     capturedHeaders: Record<string, string> = {},
     responseStatus = 200,
     responseBody = '[]';
   const requester: Requester = async (_url, options) => {
+    capturedUrl = _url;
     capturedBody = options?.body || '';
     capturedHeaders = options?.headers || {};
     return { status: responseStatus, body: responseBody, headers: {} };
@@ -605,6 +607,33 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       // Later pipeline tests consume every cveData record, so never leave fixtures behind.
       await pool.query("DELETE FROM records WHERE id LIKE 'retention-%'");
     });
+    await t.test('monitored product search requests NVD CPE API 2.0 with header authentication', async () => {
+      const feedId = 'cpe-search-test-key';
+      const cpeName = 'cpe:2.3:o:microsoft:windows_10:22h2:*:*:*:*:*:*:*';
+      await put(pool, 'feeds', feedId, {
+        id: feedId, type: 'NVD_API', authType: 'API_KEY', enabled: true,
+        authSecretKey: encrypt('cpe-test-api-key', key, `feed:${feedId}`),
+      });
+      try {
+        responseBody = JSON.stringify({ totalResults: 1, products: [{ cpe: { cpeName, cpeNameId: 'test-cpe-id' } }] });
+        const result = await operator.get('/api/cpes/search').query({ vendor: 'Microsoft', product: 'windows_10', limit: 50 });
+        assert.equal(result.status, 200, JSON.stringify(result.body));
+        assert.equal(result.body.results[0].cpeName, cpeName);
+        const url = new URL(capturedUrl);
+        assert.equal(url.origin + url.pathname, 'https://services.nvd.nist.gov/rest/json/cpes/2.0');
+        assert.equal(url.searchParams.get('keywordSearch'), 'Microsoft windows 10');
+        assert.equal(url.searchParams.has('apiKey'), false);
+        assert.equal(capturedHeaders.apiKey, 'cpe-test-api-key');
+        responseStatus = 404;
+        responseBody = '';
+        const failed = await operator.get('/api/cpes/search').query({ vendor: 'Microsoft', product: 'Windows' });
+        assert.equal(failed.status, 502, 'upstream failures must not look like empty CPE searches');
+      } finally {
+        responseStatus = 200;
+        responseBody = '[]';
+        await pool.query("DELETE FROM records WHERE kind='feeds' AND id=$1", [feedId]);
+      }
+    });
     await t.test('records persist and feed secrets are encrypted and redacted', async () => {
       assert.equal(
         (
@@ -625,6 +654,16 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       assert.equal(decrypt(saved.authSecretKey, key, `feed:${saved.id}`), 'fixture-secret');
       const snapshot = (await admin.get('/api/state')).body;
       assert.equal(snapshot.feeds[0].authSecretKey, undefined);
+      const page = await viewer.get('/api/collections/feeds');
+      assert.equal(page.status, 200);
+      assert.equal(page.body.items[0].authSecretKey, undefined);
+      const hidden = await viewer.get('/api/collections/feeds').query({ search: saved.authSecretKey });
+      assert.equal(hidden.status, 200);
+      assert.equal(hidden.body.total, 0, 'search counts must not reveal stored secrets');
+      for (const sort of ['constructor', 'toString', '__proto__']) {
+        const sorted = await viewer.get('/api/collections/cveData').query({ sort });
+        assert.equal(sorted.status, 200, `prototype property ${sort} must use default sorting`);
+      }
       const edit = {
         name: saved.name,
         type: saved.type,
@@ -718,6 +757,15 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       );
       const hook = (await list<WebhookEndpoint>(pool, 'webhooks'))[0];
       assert.notEqual(hook.url, 'https://8.8.8.8/hook');
+      const page = await viewer.get('/api/collections/webhooks');
+      assert.equal(page.status, 200);
+      assert.equal(page.body.items[0].url, '[configured on server]');
+      assert.equal(page.body.items[0].secretToken, '');
+      for (const search of [hook.url, hook.secretToken]) {
+        const hidden = await viewer.get('/api/collections/webhooks').query({ search });
+        assert.equal(hidden.status, 200);
+        assert.equal(hidden.body.total, 0, 'search counts must not reveal webhook credentials');
+      }
       assert.equal((await post(`/api/webhooks/${hook.id}/test`)).status, 202);
       await deliverNext(pool, config, requester, async () => 'unused');
       assert.equal(

@@ -288,7 +288,8 @@ const cleanup = setInterval(() => {
   void pool
     .query(
       `DELETE FROM sessions WHERE expires_at<now();
-       DELETE FROM login_attempts WHERE window_start<now()-interval '1 day';`,
+       DELETE FROM login_attempts WHERE window_start<now()-interval '1 day';
+       DELETE FROM password_reset_tokens WHERE expires_at<now();`,
     )
     .catch(report('session-cleanup'));
 }, 60000);

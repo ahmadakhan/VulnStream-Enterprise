@@ -155,7 +155,7 @@ export async function createUser(
   });
 }
 /**
- * Apply an administrative edit to an account in one statement.
+ * Apply an account edit, session revocation, and audit entry atomically.
  *
  * Password is deliberately not part of this: changing it revokes sessions and
  * has its own endpoint, so folding it in here would let an email-only edit log
@@ -176,7 +176,22 @@ export async function updateUser(
       [userId, change.role ?? null, change.disabled ?? null, email !== undefined, email ?? null],
     );
     if (!result.rowCount) throw new HttpError(404, 'Operator not found');
-    return result.rows[0];
+    // A code delivered before a mailbox/access change must not remain usable.
+    if (email !== undefined || change.disabled === true)
+      await db.query('DELETE FROM password_reset_tokens WHERE username=$1', [result.rows[0].username]);
+    if (change.disabled === true || change.role !== undefined)
+      await db.query('DELETE FROM sessions WHERE user_id=$1', [userId]);
+    const account = result.rows[0];
+    await appendAudit(
+      db,
+      'Operator access changed',
+      `Operator ${account.username}; role ${account.role}; disabled ${account.disabled}; reset email ${account.email ? 'set' : 'not set'}`,
+      actor,
+      'SECURITY',
+      'INFO',
+      ipAddress,
+    );
+    return account;
   });
   return changed as { username: string; role: Role; disabled: boolean; email: string | null };
 }
@@ -184,6 +199,7 @@ export async function deleteUser(pool: pg.Pool, userId: string, actor: string, i
   await transaction(pool, async (db) => {
     const removed = await db.query('DELETE FROM users WHERE id=$1 RETURNING username,role', [userId]);
     if (!removed.rowCount) throw new HttpError(404, 'Operator not found');
+    await db.query('DELETE FROM password_reset_tokens WHERE username=$1', [removed.rows[0].username]);
     await appendAudit(
       db,
       'Operator deleted',

@@ -51,7 +51,8 @@ const DEFAULT_ORDER: Partial<Record<CollectionKind, string>> = {
 
 const orderClause = (kind: CollectionKind, query: CollectionQuery): string => {
   if (kind === 'auditLogs') return 'seq DESC';
-  const sort = query.sort && SORTS[kind]?.[query.sort];
+  const sorts = SORTS[kind];
+  const sort = query.sort && sorts && Object.hasOwn(sorts, query.sort) ? sorts[query.sort] : undefined;
   // DESC defaults to NULLS FIRST; a malformed legacy value should fall to the
   // end of the page instead of outranking every valid timestamp.
   if (sort) return `${sort} ${query.order === 'asc' ? 'ASC' : 'DESC'} NULLS LAST, id DESC`;
@@ -62,6 +63,15 @@ const likeValue = (search?: string) =>
   search && search.trim()
     ? `%${search.trim().toLowerCase().replace(/[!%_]/g, (character) => `!${character}`)}%`
     : undefined;
+
+// Match the public snapshot's redaction in both results and search predicates.
+// Searching the stored JSON directly would expose hidden values via match counts.
+function publicRecordData(kind: CollectionKind): string {
+  if (kind === 'feeds') return "(data - 'authSecretKey')";
+  if (kind === 'webhooks')
+    return "((data - 'url' - 'secretToken') || jsonb_build_object('url', '[configured on server]', 'secretToken', ''))";
+  return 'data';
+}
 
 function recordConditions(kind: CollectionKind, query: CollectionQuery) {
   const params: unknown[] = [kind];
@@ -194,7 +204,7 @@ function recordConditions(kind: CollectionKind, query: CollectionQuery) {
     }
     default: {
       // Small configuration collections still get a useful generic search.
-      if (like) clauses.push(`lower(data::text) LIKE ${param(like)} ESCAPE '!'`);
+      if (like) clauses.push(`lower((${publicRecordData(kind)})::text) LIKE ${param(like)} ESCAPE '!'`);
     }
   }
   return { clauses, params };
@@ -255,7 +265,7 @@ export async function queryCollection<T = unknown>(
   ).rows[0].count;
   const items = (
     await pool.query(
-      `SELECT data FROM records ${where} ORDER BY ${orderClause(kind as CollectionKind, query)} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      `SELECT ${publicRecordData(kind)} AS data FROM records ${where} ORDER BY ${orderClause(kind as CollectionKind, query)} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, limit, offset],
     )
   ).rows.map((row) => row.data as T);
