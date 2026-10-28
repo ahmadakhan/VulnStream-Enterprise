@@ -15,6 +15,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 export const ThreatFeedsView: React.FC = () => {
   const { feeds, toggleFeedEnabled, testFeedConnectivity, addFeed, updateFeed, deleteFeed } = useApp();
@@ -379,7 +380,7 @@ export const ThreatFeedsView: React.FC = () => {
                       </div>
                       {feed.enabled && feed.healthStatus === 'DOWN' && feed.circuitOpenUntil && (
                         <div className="text-[10px] text-amber-400 mt-1">
-                          Automatic retry after {new Date(feed.circuitOpenUntil).toLocaleString()}
+                          Automatic retry after {fmtDateTime(feed.circuitOpenUntil)}
                         </div>
                       )}
                       {feed.healthStatus !== 'HEALTHY' && feed.errorLog && (

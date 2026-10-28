@@ -21,6 +21,7 @@ import { LogDetailModal } from './LogDetailModal';
 import { EventDetailPanel } from './EventDetailPanel';
 import { formatEventContext } from '../utils/eventText';
 import { SecondaryButton } from './SecondaryButton';
+import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 const AuditTrailView: React.FC = () => {
   const { fetchCollection, refreshVersion, verifyAuditChainRemote } = useApp();

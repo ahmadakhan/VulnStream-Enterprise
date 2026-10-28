@@ -1,6 +1,7 @@
 import React, { useId } from 'react';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import { X } from 'lucide-react';
+import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 export interface LogDetailField {
   label: string;
@@ -84,12 +85,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             {level}
           </span>
           <span className="text-[11px] text-zinc-500">
-            {new Intl.DateTimeFormat(undefined, {
-              dateStyle: 'medium',
-              timeStyle: 'medium',
-              timeZone: 'UTC',
-            }).format(new Date(timestamp))}{' '}
-            UTC
+            {fmtDateTime(timestamp, 'UTC')} UTC
           </span>
         </div>
 

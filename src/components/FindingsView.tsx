@@ -8,6 +8,7 @@ import { useCollection } from '../hooks/useCollection';
 import { copyText } from '../utils/clipboard';
 import { CveLink } from './CveLink';
 import { formatCveDate } from '../utils/findingSort';
+import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 export const FindingsView: React.FC = () => {
   const { selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification, deleteFinding } = useApp();
@@ -512,7 +513,7 @@ export const FindingsView: React.FC = () => {
                         {event.details}
                       </div>
                       <div className="text-zinc-500 font-mono text-[10px]">
-                        {new Date(event.timestamp).toLocaleString()}
+                        {fmtDateTime(event.timestamp)}
                       </div>
                     </div>
                   </div>

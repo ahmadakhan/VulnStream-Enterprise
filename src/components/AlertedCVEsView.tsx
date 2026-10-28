@@ -6,6 +6,7 @@ import { Search, Send, X, ShieldCheck } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { useCollection } from '../hooks/useCollection';
 import { CveLink } from './CveLink';
+import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 export const AlertedCVEsView: React.FC = () => {
   const { counts, resendNotification } = useApp();

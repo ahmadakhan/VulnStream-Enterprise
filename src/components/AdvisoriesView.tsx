@@ -6,6 +6,7 @@ import { Pagination } from './Pagination';
 import { useCollection } from '../hooks/useCollection';
 import { copyText } from '../utils/clipboard';
 import { CveLink } from './CveLink';
+import { formatDate as fmtDate } from '../utils/dateTime';
 
 export const AdvisoriesView: React.FC = () => {
   const [copied, setCopied] = useState<string | null>(null);
@@ -198,7 +199,7 @@ ${adv.remediationInstructions}
                   ))}
                 </div>
                 <div className="text-[10px] text-zinc-500 font-mono pt-1">
-                  Generated: {new Date(adv.createdDate).toLocaleDateString()}
+                  Generated: {fmtDate(adv.createdDate)}
                 </div>
               </div>
             </div>

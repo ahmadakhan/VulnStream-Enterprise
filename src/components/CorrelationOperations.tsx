@@ -11,6 +11,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import type { CorrelationPolicy, CorrelationWorkflows } from '../../shared/correlation';
+import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 interface InventoryRow {
   id: string;
   vendor: string;
@@ -384,7 +385,7 @@ export function CorrelationOperations() {
               >
                 <span className="block font-mono text-xs">{letter.id}</span>
                 <span className="text-xs text-zinc-500">
-                  {letter.errorCode} · {new Date(letter.createdAt).toLocaleString()}
+                  {letter.errorCode} · {fmtDateTime(letter.createdAt)}
                 </span>
               </button>
             ))}

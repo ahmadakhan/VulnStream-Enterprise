@@ -9,6 +9,7 @@ import {
   matchVendorWithAliases,
   matchProductWithAliases,
 } from '../utils/cpeMatcher';
+import { formatDate as fmtDate } from '../utils/dateTime';
 import {
   ENTERPRISE_VENDOR_CATALOG,
   getCatalogProductsForVendor,
@@ -961,7 +962,7 @@ setNvdSearchProduct('');
                             </span>
                           </div>
                           <div className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono mt-0.5">
-                            Registered: {new Date(asset.createdAt).toLocaleDateString()}
+                            Registered: {fmtDate(asset.createdAt)}
                           </div>
                         </td>
 

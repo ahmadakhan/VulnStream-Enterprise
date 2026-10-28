@@ -25,6 +25,7 @@ import {
 import { useApp } from '../context/AppContext';
 import type { AuditLog, RetentionConfig, RetentionKind, RetentionPreview } from '../types';
 import './archive.css';
+import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 const FALLBACK: RetentionConfig = {
   enabled: false,
@@ -57,13 +58,7 @@ const panel = 'ar-panel';
 const muted = 'text-zinc-400 light:text-zinc-600';
 const badge = 'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium';
 
-const stamp = (value: string | null | undefined) => {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? '—'
-    : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
-};
+const stamp = (value: string | null | undefined) => (value ? fmtDateTime(value) : '—');
 
 const hours = (value: number) => {
   if (value >= 24 && value % 24 === 0) {

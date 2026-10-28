@@ -32,24 +32,16 @@ type SortOrder = 'asc' | 'desc';
 const NEWS_PAGE_SIZE = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
+import { formatDate as fmtDate, formatDateTime as fmtDateTime } from '../utils/dateTime';
+
 const timeFormatter = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
-const dateTimeFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-
-const formatDate = (value: string) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : dateFormatter.format(date);
-};
-
 const formatTime = (value: string) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '—' : timeFormatter.format(date);
 };
 
-const formatDateTime = (value: string) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : dateTimeFormatter.format(date);
-};
+const formatDate = (value: string, timezone?: string) => fmtDate(value, timezone);
+const formatDateTime = (value: string, timezone?: string) => fmtDateTime(value, timezone);
 
 const ordinal = (value: number) => {
   const mod100 = value % 100;

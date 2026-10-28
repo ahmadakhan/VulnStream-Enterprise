@@ -62,20 +62,11 @@ const smallButton =
 const smallButtonIdle =
   'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200 light:border-zinc-300 light:bg-white light:text-zinc-600 light:hover:bg-zinc-100 light:hover:text-zinc-900';
 
-const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
-const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-});
 
-const formatDate = (value: string) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : dateFormatter.format(date);
-};
-const formatDateTime = (value: string) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : dateTimeFormatter.format(date);
-};
+import { formatDate as fmtDate, formatDateTime as fmtDateTime } from '../utils/dateTime';
+
+const formatDate = (value: string, timezone?: string) => fmtDate(value, timezone);
+const formatDateTime = (value: string, timezone?: string) => fmtDateTime(value, timezone);
 
 const SEVERITY_RANK: Record<NormalizedCVE['cvss']['severity'], number> = {
   CRITICAL: 4,

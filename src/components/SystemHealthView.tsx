@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Cpu, Database, Mail, RefreshCw, Server, ShieldCheck } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { SystemHealth } from '../types';
+import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 type Tone = 'good' | 'warning' | 'neutral';
 const tones: Record<Tone, string> = {
@@ -13,10 +14,7 @@ const tones: Record<Tone, string> = {
 const panel =
   'rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white';
 const muted = 'text-zinc-400 light:text-zinc-600';
-const date = (value: string | null) =>
-  value
-    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
-    : 'Not available';
+const date = (value: string | null) => (value ? fmtDateTime(value) : 'Not available');
 const duration = (seconds: number) => {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);

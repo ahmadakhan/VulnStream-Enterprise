@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext';
 import { AliasEntry } from '../types';
 import { DEFAULT_VENDOR_ALIASES, DEFAULT_PRODUCT_ALIASES } from '../utils/cpeMatcher';
 import { Tags, Plus, Trash2, Pencil, X, Search, AlertCircle, Lock, Info, ShieldCheck, Ban, Clock } from 'lucide-react';
+import { formatDate as fmtDate, formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 export const AliasesView: React.FC = () => {
   const { aliases, addAlias, updateAlias, deleteAlias, promoteAlias, revokeAlias, session } = useApp();

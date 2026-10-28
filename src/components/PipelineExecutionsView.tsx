@@ -1,5 +1,6 @@
 import { PageHeading } from './PageHeading';
 import React, { useEffect, useState } from 'react';
+import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 import {
   Activity,
   ArrowDown,
@@ -317,9 +318,9 @@ export const PipelineExecutionsView: React.FC = () => {
                     <p className="text-sm font-semibold text-zinc-100 light:text-zinc-900 break-all">
                       {run.name || formatExecutionName(run.id)}
                     </p>
-                    <p className="mt-1 text-xs text-zinc-400 light:text-zinc-600">
-                      {new Date(run.startTime).toLocaleString()} · {run.stats?.matchedWatchlist ?? 0} matches
-                    </p>
+                      <p className="mt-1 text-xs text-zinc-400 light:text-zinc-600">
+                      {fmtDateTime(run.startTime)} · {run.stats?.matchedWatchlist ?? 0} matches
+                      </p>
                   </div>
                   <span className={`flex items-center gap-2 text-xs font-medium ${tone(run.status)}`}>
                     <StatusIcon status={run.status} />

@@ -17,11 +17,9 @@ import {
 } from 'lucide-react';
 import { copyText } from '../utils/clipboard';
 
-const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
-const formatDate = (value: string) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : DATE_FORMATTER.format(date);
-};
+import { formatDate as fmtDate } from '../utils/dateTime';
+
+const formatDate = (value: string, timezone?: string) => fmtDate(value, timezone);
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: '#ef4444',

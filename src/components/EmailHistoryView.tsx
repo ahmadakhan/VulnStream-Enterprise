@@ -5,6 +5,7 @@ import { useCollection } from '../hooks/useCollection';
 import { RotateCw, CheckCircle2, Search, ShieldCheck, Inbox, RefreshCw } from 'lucide-react';
 import { Pagination } from './Pagination';
 import type { EmailDeliveryLog } from '../types';
+import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 export const EmailHistoryView: React.FC = () => {
   const { retryEmailDelivery, emailConfig, setActiveTab, refresh } = useApp();
@@ -176,7 +177,7 @@ export const EmailHistoryView: React.FC = () => {
 
                       {/* Timestamp */}
                       <td className="py-3 px-4 font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px]">
-                        {log.sentAt ? new Date(log.sentAt).toLocaleString() : 'Not accepted yet'}
+                        {log.sentAt ? fmtDateTime(log.sentAt) : 'Not accepted yet'}
                       </td>
 
                       {/* Actions */}

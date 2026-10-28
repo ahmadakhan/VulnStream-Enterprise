@@ -16,13 +16,14 @@ import { useApp } from '../context/AppContext';
 import type { EmailQueueItem } from '../types';
 import { CveLink } from './CveLink';
 
+import { formatDateTime as fmtDateTime } from '../utils/dateTime';
+
 const panel =
   'rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white';
-const date = (value: string) => {
+const date = (value: string | null | undefined) => {
+  if (!value) return 'Not scheduled';
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime())
-    ? 'Not scheduled'
-    : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(parsed);
+  return Number.isNaN(parsed.getTime()) ? 'Not scheduled' : fmtDateTime(parsed);
 };
 
 export function EmailQueueView() {
