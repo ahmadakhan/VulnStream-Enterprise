@@ -33,6 +33,7 @@ export const FindingsView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [sortFilter, setSortFilter] = useState('latest');
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -55,6 +56,8 @@ export const FindingsView: React.FC = () => {
     page: currentPage,
     pageSize,
     search: searchTerm,
+    sort: sortFilter,
+    order: 'desc',
     filters: { severity: severityFilter, status: statusFilter },
   });
 

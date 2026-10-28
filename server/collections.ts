@@ -16,6 +16,14 @@ export interface CollectionQuery {
   filters?: Record<string, string | string[] | number | boolean | undefined>;
 }
 
+// "Latest" recency for findings: the most recent of a CVE's published and
+// modified dates. COALESCE to a distant past timestamp so a missing/unparseable
+// date on one side cannot drag the whole GREATEST result to NULL (PostgreSQL's
+// greatest() returns NULL when any argument is NULL), which would incorrectly
+// sink an otherwise recent finding to the bottom of the page.
+const FINDINGS_RECENT_ACTIVITY =
+  "GREATEST(COALESCE(safe_timestamptz(data->'cve'->>'publishedDate'), '-infinity'::timestamptz), COALESCE(safe_timestamptz(data->'cve'->>'modifiedDate'), '-infinity'::timestamptz))";
+
 const SORTS: Partial<Record<CollectionKind, Record<string, string>>> = {
   cveData: {
     score: "safe_numeric(data->'cvss'->>'score')",
@@ -24,6 +32,7 @@ const SORTS: Partial<Record<CollectionKind, Record<string, string>>> = {
     updated: 'updated_at',
   },
   findings: {
+    latest: FINDINGS_RECENT_ACTIVITY,
     published: "safe_timestamptz(data->'cve'->>'publishedDate')",
     modified: "safe_timestamptz(data->'cve'->>'modifiedDate')",
     updated: 'updated_at',
@@ -39,8 +48,7 @@ const SORTS: Partial<Record<CollectionKind, Record<string, string>>> = {
 
 const DEFAULT_ORDER: Partial<Record<CollectionKind, string>> = {
   cveData: "safe_timestamptz(data->>'modifiedDate') DESC NULLS LAST, id DESC",
-  findings:
-    "safe_timestamptz(data->'cve'->>'publishedDate') DESC NULLS LAST, safe_timestamptz(data->'cve'->>'modifiedDate') DESC NULLS LAST, id DESC",
+  findings: `${FINDINGS_RECENT_ACTIVITY} DESC NULLS LAST, id DESC`,
   advisories: "safe_timestamptz(data->>'createdDate') DESC NULLS LAST, id DESC",
   alertedCves: "safe_timestamptz(data->>'lastAlertedAt') DESC NULLS LAST, id DESC",
   emailLogs: "safe_timestamptz(data->>'sentAt') DESC NULLS LAST, id DESC",
