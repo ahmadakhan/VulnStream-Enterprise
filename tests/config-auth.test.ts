@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readCookie, requireRole } from '../server/auth.ts';
 import { loadConfig } from '../server/config.ts';
+import { RECOMMENDED_FEEDS } from '../server/recommendedFeeds.ts';
 import type { Request, Response } from 'express';
 
 const baseEnv = {
@@ -67,4 +68,40 @@ test('configuration rejects malformed database URLs and trust-all proxy settings
   }
   assert.equal(loadConfig({ ...baseEnv, TRUST_PROXY: 'loopback,10.0.0.0/8' }).TRUST_PROXY, 'loopback,10.0.0.0/8');
   assert.equal(loadConfig(baseEnv).TRUST_PROXY, '');
+});
+
+test('the default egress allowlist covers every redirect target of the recommended feeds', () => {
+  const hosts = new Set(loadConfig(baseEnv).EGRESS_ALLOWED_HOSTS.split(','));
+  // Probed over the network: each of these answers the feed URL with a
+  // cross-host or same-host redirect. A hop is re-validated against the
+  // allowlist, so a missing target fails the feed with "not in
+  // EGRESS_ALLOWED_HOSTS".
+  for (const host of [
+    'www.cisecurity.org',
+    'cisecurity.org',
+    'feeds.feedburner.com',
+    'projectzero.google',
+    'sec.cloudapps.cisco.com',
+  ]) {
+    assert.ok(hosts.has(host), `${host} must be allowlisted for its feed to follow its redirect`);
+  }
+  assert.ok(hosts.has('www.cisecurity.com'), 'the configured URL host must stay allowlisted');
+});
+
+test('every recommended feed URL host is allowlisted', () => {
+  const hosts = new Set(loadConfig(baseEnv).EGRESS_ALLOWED_HOSTS.split(','));
+  for (const feed of RECOMMENDED_FEEDS) {
+    const host = new URL(feed.url).hostname.toLowerCase();
+    assert.ok(hosts.has(host), `${feed.id} (${host}) must be allowlisted or its first request is blocked`);
+  }
+});
+
+test('EGRESS_ALLOWED_HOSTS_EXTRA appends to the default allowlist instead of replacing it', () => {
+  const merged = loadConfig({
+    ...baseEnv,
+    EGRESS_ALLOWED_HOSTS_EXTRA: ' Example.test , feeds.example.test,EXAMPLE.test ',
+  }).EGRESS_ALLOWED_HOSTS.split(',');
+  assert.ok(merged.includes('feeds.example.test'));
+  assert.deepEqual(merged.filter((host) => host === 'example.test'), ['example.test'], 'duplicates are collapsed');
+  assert.ok(merged.includes('www.cisecurity.org'), 'defaults survive when only extra hosts are configured');
 });

@@ -153,6 +153,48 @@ test('a cross-host redirect is followed only to another allowlisted host', async
   }
 });
 
+test('same-site redirects may add or drop a www label but never leave the site', async () => {
+  let redirects = 0;
+  const { close } = await serve((req, res) => {
+    // Redirect only the first request so the same server can also answer the
+    // follow-up (and the control request that must still be refused).
+    if (req.url === '/feed.xml' && ++redirects % 2 === 1) {
+      res.writeHead(301, { location: 'https://www.feed.example.test/feed.xml' });
+      res.end();
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/rss+xml' });
+    res.end('<rss/>');
+  });
+  const siteHooks = { ...hooks, tls: { ca: TLS.cert, checkServerIdentity: () => undefined } };
+  try {
+    const request = createRequester(config, siteHooks);
+    // The www spelling is not allowlisted; it is the same site, so the hop is allowed.
+    const response = await request('https://feed.example.test/feed.xml', { sameSiteRedirects: true });
+    assert.equal(response.status, 200);
+    // Without the opt-in the missing spelling is still refused.
+    await assert.rejects(request('https://feed.example.test/feed.xml'), /not in EGRESS_ALLOWED_HOSTS/);
+  } finally {
+    await close();
+  }
+});
+
+test('a same-site redirect option cannot widen egress to a look-alike host', async () => {
+  const { close } = await serve((_req, res) => {
+    res.writeHead(302, { location: 'https://www.feed.example.test.evil.test/feed.xml' });
+    res.end();
+  });
+  try {
+    const request = createRequester(config, hooks);
+    await assert.rejects(
+      request('https://feed.example.test/feed.xml', { sameSiteRedirects: true }),
+      /not in EGRESS_ALLOWED_HOSTS/,
+    );
+  } finally {
+    await close();
+  }
+});
+
 // Regression: the validated address must reach the socket through the
 // requester's own lookup hook. An earlier version answered only Node's
 // (host, family, cb) form, so the pinned family was undefined and every

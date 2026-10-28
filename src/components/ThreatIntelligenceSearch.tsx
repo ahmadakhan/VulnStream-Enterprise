@@ -394,6 +394,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setVendorOpen(true);
+      setActiveVendorIndex(0);
       if (vendorOptionCount > 0) {
         setActiveVendorIndex((index) => (index + 1) % vendorOptionCount);
       }
@@ -402,9 +403,15 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     if (event.key === 'ArrowUp') {
       event.preventDefault();
       setVendorOpen(true);
+      setActiveVendorIndex(0);
       if (vendorOptionCount > 0) {
         setActiveVendorIndex((index) => (index - 1 + vendorOptionCount) % vendorOptionCount);
       }
+      return;
+    }
+    if (event.key === 'Escape') {
+      setVendorOpen(false);
+      setActiveVendorIndex(0);
       return;
     }
     if (event.key === 'Enter') {
@@ -724,8 +731,8 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                 <button
                   type="button"
                   onClick={clearVendor}
-                  aria-label="Change vendor"
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-zinc-400 dark:text-zinc-500 light:text-zinc-600 transition hover:bg-zinc-800 hover:text-zinc-200 light:hover:bg-zinc-200 light:hover:text-zinc-900"
+                   aria-label="Clear vendor"
+                   className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-zinc-400 dark:text-zinc-500 light:text-zinc-600 transition hover:bg-zinc-800 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 light:hover:bg-zinc-200 light:hover:text-zinc-900 light:focus-visible:ring-blue-500/30"
                 >
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
@@ -756,10 +763,10 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   placeholder="Search the vendor catalog…"
                   className={`${inputClass} pl-9 pr-9`}
                 />
-                <ChevronDown
-                  className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
-                  aria-hidden="true"
-                />
+                 <ChevronDown
+                   className={`pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600 transition-transform ${vendorOpen ? 'rotate-180' : ''}`}
+                   aria-hidden="true"
+                 />
                 {vendorOpen && (
                   <div className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl light:border-zinc-200 light:bg-white">
                     {vendorOptionCount > 0 ? (

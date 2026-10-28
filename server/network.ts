@@ -112,6 +112,15 @@ export interface RequestOptions {
   redirectMethod?: 'GET' | 'DROP';
   /** Reject redirects whose target is a different hostname. Defaults to false; each hop is still re-validated through the SSRF gauntlet. */
   sameHostRedirects?: boolean;
+  /**
+   * Also allow a hop that only adds or removes a leading `www.` label, even
+   * when that spelling is missing from the allowlist. Publishers routinely
+   * redirect `example.com` to `www.example.com` (or the reverse); requiring
+   * both spellings in EGRESS_ALLOWED_HOSTS broke those feeds. The target still
+   * passes the full SSRF gauntlet, so this never widens the reachable address
+   * space beyond the host the operator already allowlisted.
+   */
+  sameSiteRedirects?: boolean;
 }
 /** Read a response stream with independent wire and decompressed size limits. */
 export async function readResponseBody(
@@ -176,13 +185,14 @@ export function createRequester(config: Config, hooks: RequesterHooks = {}) {
       maxRedirects: options.maxRedirects ?? 5,
       redirectMethod: options.redirectMethod ?? 'DROP',
       sameHostRedirects: options.sameHostRedirects ?? false,
+      sameSiteRedirects: options.sameSiteRedirects ?? false,
     };
     return doRequest(value, options, opts, allowlist, hooks, hooks.allowedPorts ?? ['443']);
   };
 }
 
 type RedirectOptions = Required<
-  Pick<RequestOptions, 'allowRedirects' | 'maxRedirects' | 'redirectMethod' | 'sameHostRedirects'>
+  Pick<RequestOptions, 'allowRedirects' | 'maxRedirects' | 'redirectMethod' | 'sameHostRedirects' | 'sameSiteRedirects'>
 >;
 
 /** Body-dependent headers are meaningless on a hop that carries no body. */
@@ -199,6 +209,20 @@ function safeTarget(location: string | undefined, current: URL): string {
   } catch {
     return '(invalid Location header)';
   }
+}
+
+/**
+ * Allowlist extended with the target's spelling of the current host's site
+ * name, i.e. `example.com` <-> `www.example.com`. Only the exact other
+ * spelling of the host being left is added, never a wildcard or subdomain
+ * match, so a redirect cannot widen egress to any other site.
+ */
+function withSiteSpelling(next: URL, current: URL, allowlist: string[]): string[] {
+  const host = next.hostname.toLowerCase().replace(/\.$/, '');
+  const from = current.hostname.toLowerCase().replace(/\.$/, '');
+  const site = (name: string) => (name.startsWith('www.') ? name.slice(4) : `www.${name}`);
+  if (host !== site(from) || allowlist.includes(host)) return allowlist;
+  return [...allowlist, host];
 }
 
 /** Copy request headers without the named ones (case-insensitive). */
@@ -222,7 +246,7 @@ async function redirectTarget(
   allowlist: string[],
   hooks: RequesterHooks,
   allowedPorts: readonly string[],
-): Promise<{ href: string; options: RequestOptions; opts: RedirectOptions }> {
+): Promise<{ href: string; options: RequestOptions; opts: RedirectOptions; allowlist: string[] }> {
   // Every refusal names the redirect and its target. A bare "not permitted"
   // gave operators no way to tell a disabled policy from a blocked host, and
   // looked identical to the old unconditional rejection this code replaced.
@@ -241,12 +265,16 @@ async function redirectTarget(
     throw new Error(
       `Redirect to a different hostname is not permitted (${current.hostname} -> ${next.hostname}); add ${next.hostname} to EGRESS_ALLOWED_HOSTS and allow cross-host redirects for this feed`,
     );
-  await resolvePublic(next, allowlist, hooks.resolver, allowedPorts);
+  const hopAllowlist = opts.sameSiteRedirects ? withSiteSpelling(next, current, allowlist) : allowlist;
+  await resolvePublic(next, hopAllowlist, hooks.resolver, allowedPorts);
   const method = options.method || 'GET';
   const staysPost = method === 'POST' && (status === 307 || status === 308);
   if (staysPost) {
     return {
       href: next.href,
+      // The hop's spelling exemption applies to this hop only, so it is passed
+      // along rather than added to the requester's allowlist permanently.
+      allowlist: hopAllowlist,
       // A new URL means new path and query: a conditional GET's validator and
       // cached representation belong to the original resource, so drop them.
       options: { ...options, headers: withoutHeaders(options.headers ?? {}, ['if-none-match', 'if-modified-since']) },
@@ -257,6 +285,7 @@ async function redirectTarget(
     throw new Error(`HTTP ${status} redirect would discard the request body`);
   return {
     href: next.href,
+    allowlist: hopAllowlist,
     options: {
       ...options,
       method: 'GET',
@@ -312,7 +341,7 @@ async function doRequest(
         if (status >= 300 && status < 400 && status !== 304) {
           response.resume();
           void redirectTarget(status, response.headers.location, url, options, opts, allowlist, hooks, allowedPorts)
-            .then((hop) => doRequest(hop.href, hop.options, hop.opts, allowlist, hooks, allowedPorts))
+            .then((hop) => doRequest(hop.href, hop.options, hop.opts, hop.allowlist, hooks, allowedPorts))
             .then(resolve, reject);
           return;
         }

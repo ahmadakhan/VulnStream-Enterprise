@@ -35,9 +35,10 @@ export const RECOMMENDED_FEEDS = [
     vendorSeed: true,
   },
   { id: 'feed-cisa-alerts', name: 'CISA Cybersecurity Advisories', type: 'RSS_ATOM' as const,
-    url: 'https://www.cisa.gov/news-events/cybersecurity-advisories/rss.xml', authType: 'NONE' as const, rateLimitPerMin: 5, enabled: true, vendorSeed: true },
+    url: 'https://www.cisa.gov/news-events/cybersecurity-advisories/all.xml', authType: 'NONE' as const, rateLimitPerMin: 5, enabled: true, vendorSeed: true },
   { id: 'feed-certcc-vulns', name: 'CERT/CC Vulnerability Notes', type: 'RSS_ATOM' as const,
-    url: 'https://www.kb.cert.org/vuls/rss', authType: 'NONE' as const, rateLimitPerMin: 5, enabled: true, vendorSeed: true },
+    // Atom is the only syndication endpoint CERT/CC publishes; /vuls/rss 404s.
+    url: 'https://www.kb.cert.org/vuls/atomfeed/', authType: 'NONE' as const, rateLimitPerMin: 5, enabled: true, vendorSeed: true },
   { id: 'feed-hackernews', name: 'The Hacker News', type: 'RSS_ATOM' as const,
     url: 'https://thehackernews.com/feeds/posts/default', authType: 'NONE' as const, rateLimitPerMin: 5, enabled: false, vendorSeed: true },
   { id: 'feed-securityweek', name: 'SecurityWeek', type: 'RSS_ATOM' as const,
@@ -106,7 +107,8 @@ export const RECOMMENDED_FEEDS = [
     id: 'feed-cis-advisories',
     name: 'CIS Security Advisories',
     type: 'RSS_ATOM' as const,
-    url: 'https://www.cisecurity.com/feed/advisories',
+    // cisecurity.com redirects every path to the www spelling on cisecurity.org.
+    url: 'https://www.cisecurity.org/feed/advisories',
     authType: 'NONE' as const,
     rateLimitPerMin: 3,
     enabled: false,

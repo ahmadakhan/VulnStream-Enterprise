@@ -54,6 +54,7 @@ const schema = z.object({
         'services.nvd.nist.gov',
         'raw.githubusercontent.com',
         'www.cisa.gov',
+        'cisa.gov', // cisa.gov redirects to the www spelling
         'api.first.org',
         'app.opencve.io',
         'api.vulncheck.com',
@@ -77,6 +78,7 @@ const schema = z.object({
         'www.fortiguard.com',
         'filestore.fortinet.com',
         'www.kb.cert.org',
+        'kb.cert.org', // kb.cert.org redirects to the www spelling
         'thehackernews.com',
         'feeds.feedburner.com', // thehackernews.com redirects here
         'www.securityweek.com',
@@ -93,6 +95,7 @@ const schema = z.object({
         'www.exploit-db.com',
         'www.debian.org',
         'www.cisecurity.com',
+        'cisecurity.com', // cisecurity.com redirects to the www spelling
         'cisecurity.org', // www.cisecurity.com -> cisecurity.org -> www.cisecurity.org
         'www.cisecurity.org',
         'seclists.org',

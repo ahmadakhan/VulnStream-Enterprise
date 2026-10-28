@@ -784,7 +784,7 @@ export const AdvisoryTemplateView: React.FC = () => {
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block" />
                   </div>
                   <div className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-white text-zinc-400 dark:text-zinc-400 light:text-zinc-600 px-3 py-1 rounded-lg text-[11px] truncate max-w-md border border-zinc-800/60 dark:border-zinc-800/60 light:border-zinc-300">
-                    Security advisory · Email preview
+                    Email preview
                   </div>
                   <div className="text-[10px] text-zinc-500">680px Canvas</div>
                 </div>

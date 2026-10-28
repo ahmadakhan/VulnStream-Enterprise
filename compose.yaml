@@ -44,6 +44,10 @@ services:
       APP_ORIGIN: https://${APP_HOST:?Set public hostname}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set a base64 32-byte encryption key}
       EGRESS_ALLOWED_HOSTS: ${EGRESS_ALLOWED_HOSTS:-raw.githubusercontent.com,services.nvd.nist.gov,www.cisa.gov,api.first.org,app.opencve.io,api.vulncheck.com,www.bleepingcomputer.com,isc.sans.edu,api.msrc.microsoft.com,api.mailgun.net,api.eu.mailgun.net,send.api.mailtrap.io,sandbox.api.mailtrap.io,api.sendgrid.com,smtp.sendgrid.net,api.postmarkapp.com,smtp.maileroo.com,smtp.lettr.com,in-v3.mailjet.com,api.mailjet.com,smtp.gmail.com,www.fortiguard.com,filestore.fortinet.com,www.kb.cert.org,thehackernews.com,www.securityweek.com,www.rapid7.com,googleprojectzero.blogspot.com,krebsonsecurity.com,tools.cisco.com,security.paloaltonetworks.com,labs.watchtowr.com,www.talosintelligence.com,www.thezdi.com,www.exploit-db.com,www.debian.org,www.cisecurity.com,seclists.org,blog.sucuri.net,www.welivesecurity.com,wordpress.org}
+      # Redirect targets of the feeds above (for example www.cisecurity.com ->
+      # cisecurity.org -> www.cisecurity.org). Each hop is re-validated against
+      # the allowlist, so a target missing here fails the feed.
+      EGRESS_ALLOWED_HOSTS_EXTRA: ${EGRESS_ALLOWED_HOSTS_EXTRA:-cisecurity.org,www.cisecurity.org,feeds.feedburner.com,projectzero.google,sec.cloudapps.cisco.com}
       TRUST_PROXY: ${TRUST_PROXY:-loopback,linklocal,uniquelocal}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-465}
