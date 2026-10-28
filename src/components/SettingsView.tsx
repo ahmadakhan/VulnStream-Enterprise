@@ -363,7 +363,7 @@ export function SettingsView() {
                     Advisory prefix
                     <input
                       required
-                      pattern="[A-Za-z0-9_-]{1,30}"
+                      pattern="[A-Za-z0-9_\-]{1,30}"
                       className={field}
                       value={form.advisoryPrefix}
                       onChange={(e) => setForm({ ...form, advisoryPrefix: e.target.value })}
@@ -1091,7 +1091,7 @@ export function SettingsView() {
                     Username
                     <input
                       required
-                      pattern="[a-zA-Z0-9._@-]{3,100}"
+                      pattern="[a-zA-Z0-9._@\-]{3,100}"
                       autoComplete="username"
                       className={field}
                       value={username}

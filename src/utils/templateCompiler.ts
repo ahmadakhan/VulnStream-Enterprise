@@ -11,8 +11,8 @@ export const DEFAULT_TEMPLATE_CUSTOMIZATION: TemplateCustomization = {
   badgeStampText: 'SECURITY OPERATIONS',
   badgeStampColor: '#2563eb',
   showStamp: true,
-  showClassificationBanner: true,
-  classificationText: 'SECURITY ADVISORY · AUTOMATED INVENTORY CORRELATION',
+  showClassificationBanner: false,
+  classificationText: '',
   borderStyle: 'solid',
   borderRadius: '12px',
 };

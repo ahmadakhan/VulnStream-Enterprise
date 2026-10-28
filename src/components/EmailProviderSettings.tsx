@@ -387,7 +387,7 @@ export function EmailProviderSettings() {
                   value={form.apiHeaderKey}
                   maxLength={100}
                   required
-                  pattern="[!#$%&'*+.^_`|~0-9A-Za-z-]+"
+                    pattern="[!#$%&'*+.^_`|~0-9A-Za-z\-]+"
                   placeholder="Authorization"
                   onChange={(event) => update({ apiHeaderKey: event.target.value })}
                 />
