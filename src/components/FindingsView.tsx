@@ -2,7 +2,7 @@ import { PageHeading } from './PageHeading';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Finding, FindingStatus } from '../types';
-import { Flame, ExternalLink, ChevronRight, Filter, Search, Terminal, FileCheck, Copy, Check, X, Send } from 'lucide-react';
+import { Flame, ExternalLink, ChevronRight, Filter, Search, Terminal, FileCheck, Copy, Check, X, Send, Trash2 } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { useCollection } from '../hooks/useCollection';
 import { copyText } from '../utils/clipboard';
@@ -10,7 +10,8 @@ import { CveLink } from './CveLink';
 import { formatCveDate } from '../utils/findingSort';
 
 export const FindingsView: React.FC = () => {
-  const { selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification } = useApp();
+  const { selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification, deleteFinding } = useApp();
+  const [removeFeedback, setRemoveFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState('ALL');
@@ -26,6 +27,8 @@ export const FindingsView: React.FC = () => {
 
   const [resendModalOpen, setResendModalOpen] = useState(false);
   const [resendReason, setResendReason] = useState('');
+
+  const [removeConfirm, setRemoveConfirm] = useState<Finding | null>(null);
 
   const {
     items: findings,
@@ -371,6 +374,14 @@ export const FindingsView: React.FC = () => {
                 <Send className="w-3 h-3 text-zinc-400" />
                 <span>Resend Notification</span>
               </button>
+              <button
+                onClick={() => setRemoveConfirm(selectedFinding)}
+                className="text-xs bg-rose-600/10 hover:bg-rose-600/20 border border-rose-800/50 text-rose-300 hover:text-rose-200 px-2.5 py-1.5 rounded-xl flex items-center space-x-1.5 transition"
+                title="Remove this vulnerability entry from findings"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>Remove</span>
+              </button>
             </div>
 
             {/* Matched Product Details & Matching Evidence */}
@@ -615,6 +626,73 @@ export const FindingsView: React.FC = () => {
                 Dispatch Notification
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove Finding Confirmation Modal */}
+      {removeConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+            <h3 className="text-sm font-bold text-rose-300 dark:text-rose-300 light:text-rose-700 mb-2">
+              Remove Vulnerability Entry?
+            </h3>
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 leading-relaxed mb-6">
+              Are you sure you want to remove <strong>{removeConfirm.cveId}</strong>? This permanently deletes the
+              finding from the database. The correlation pipeline may regenerate it on the next run if the CVE
+              still matches a monitored product.
+            </p>
+            <div className="flex justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setRemoveConfirm(null)}
+                className="px-3 py-1.5 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 dark:hover:bg-zinc-700 light:hover:bg-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 text-xs font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const success = await deleteFinding(removeConfirm.id);
+                  if (success) {
+                    setRemoveFeedback({
+                      type: 'success',
+                      message: `Removed vulnerability ${removeConfirm.cveId} from findings.`,
+                    });
+                    setTimeout(() => setRemoveFeedback(null), 5000);
+                  } else {
+                    setRemoveFeedback({
+                      type: 'error',
+                      message: 'Failed to remove vulnerability. Please try again.',
+                    });
+                  }
+                  setRemoveConfirm(null);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold"
+              >
+                Remove Entry
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove Feedback */}
+      {removeFeedback && (
+        <div className="fixed bottom-4 right-4 z-50 max-w-sm">
+          <div
+            className={`p-3 rounded-xl shadow-lg text-xs flex items-center space-x-2 ${
+              removeFeedback.type === 'success'
+                ? 'bg-emerald-900/90 border border-emerald-800 text-emerald-200'
+                : 'bg-rose-900/90 border border-rose-800 text-rose-200'
+            }`}
+          >
+            {removeFeedback.type === 'success' ? (
+              <Check className="w-4 h-4 shrink-0" />
+            ) : (
+              <X className="w-4 h-4 shrink-0" />
+            )}
+            <span>{removeFeedback.message}</span>
           </div>
         </div>
       )}

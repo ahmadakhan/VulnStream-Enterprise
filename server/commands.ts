@@ -387,6 +387,14 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
         { timestamp: now, action: input.status, system: actor, details: input.note || '' },
       ],
     });
+  } else if (action === 'finding.delete') {
+    if (!id) throw new HttpError(400, 'Record ID required');
+    const old = await getForUpdate<any>(db, 'findings', id);
+    if (!old) throw new HttpError(404, 'Finding not found');
+    await remove(db, 'findings', id);
+    // A deleted finding may have been referenced by an open advisory; clear
+    // the link so the advisory does not resurrect the record on its next write.
+    await db.query('UPDATE records SET data = jsonb_set(data, \'{findingIds}\', (data->\'findingIds\') - $1::text) WHERE kind=\'advisories\' AND data ? \'findingIds\'', [id]);
   } else if (/^(feed|asset|recipient|webhook)\.(delete|toggle)$/.test(action)) {
     const [entity, operation] = action.split('.'),
       kind = (

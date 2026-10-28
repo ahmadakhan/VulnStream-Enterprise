@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Users,
+  Clock,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { EmailProviderSettings } from './EmailProviderSettings';
@@ -190,7 +191,8 @@ export function SettingsView() {
                 onSubmit={async (e) => {
                   e.preventDefault();
                   setMessage('');
-                  if (await updateSettings(form)) setMessage('Settings saved successfully.');
+                   if (await updateSettings({ ...form, securityPolicy: settings.securityPolicy }))
+                     setMessage('Settings saved successfully.');
                 }}
               >
                 <SectionHeading
@@ -531,69 +533,228 @@ export function SettingsView() {
             </div>
           )}
 
-          <div id="settings-security" hidden={activeSection !== 'security'}>
-            <form
-              className="ui-card space-y-5"
-              aria-labelledby="account-security-title"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const changed = await changePassword(currentPassword, newPassword);
-                // Keep the fields intact when the change failed so the operator can
-                // correct the current password instead of retyping both values.
-                if (changed) {
-                  setCurrentPassword('');
-                  setNewPassword('');
-                }
-              }}
-            >
-              <SectionHeading
-                icon={ShieldCheck}
-                id="account-security-title"
-                title="Account security"
-                description="Update the password used to sign in to this account."
-              />
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                  Current password
-                  <input
-                    type="password"
-                    autoComplete="current-password"
-                    required
-                    maxLength={128}
-                    className={field}
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
+           <div id="settings-security" hidden={activeSection !== 'security'} className="space-y-6">
+              {admin && (
+                <form
+                  className="ui-card space-y-5"
+                  aria-labelledby="account-security-policy-title"
+                  onChangeCapture={() => setSecurityMessage('')}
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setSecurityMessage('');
+                    if (await updateSettings({ securityPolicy: securityForm }))
+                      setSecurityMessage('Security policy saved successfully.');
+                  }}
+                >
+                  <SectionHeading
+                    icon={Clock}
+                    id="account-security-policy-title"
+                    title="Login timeout & password policy"
+                    description="Session expiry, password strength, and brute-force lockout for operator accounts."
                   />
-                </label>
-                <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                  New password
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    required
-                    minLength={settings.securityPolicy.minPasswordLen}
-                    maxLength={128}
-                    className={field}
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                  />
-                  <span className="ui-description mt-1.5 block">
-                    Use at least {settings.securityPolicy.minPasswordLen} characters.
-                  </span>
-                </label>
-              </div>
-              <div className="ui-actions justify-between">
-                <p className="inline-flex items-center gap-2 text-xs text-zinc-400 light:text-zinc-600">
-                  <LockKeyhole className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  Changing your password signs out all active sessions.
-                </p>
-                <button type="submit" disabled={pending > 0} className="ui-primary">
-                  <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
-                  Change password
-                </button>
-              </div>
-            </form>
-          </div>
+
+                  <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+                    <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                      Session timeout
+                      <span className="ml-1 font-normal text-zinc-500">(minutes)</span>
+                      <input
+                        type="number"
+                        min={5}
+                        max={60}
+                        required
+                        className={field}
+                        value={securityForm.sessionTimeoutMins}
+                        onChange={(e) =>
+                          setSecurityForm({
+                            ...securityForm,
+                            sessionTimeoutMins: Math.min(60, Math.max(5, Number(e.target.value) || 5)),
+                          })
+                        }
+                      />
+                      <span className="ui-description mt-1.5 block">
+                        Inactive authenticated sessions are signed out after this period. Applied on the
+                        next login.
+                      </span>
+                    </label>
+                    <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                      Minimum password length
+                      <span className="ml-1 font-normal text-zinc-500">(characters)</span>
+                      <input
+                        type="number"
+                        min={14}
+                        max={128}
+                        required
+                        className={field}
+                        value={securityForm.minPasswordLen}
+                        onChange={(e) =>
+                          setSecurityForm({
+                            ...securityForm,
+                            minPasswordLen: Math.min(128, Math.max(14, Number(e.target.value) || 14)),
+                          })
+                        }
+                      />
+                      <span className="ui-description mt-1.5 block">
+                        Length enforced for new and changed passwords. Existing passwords are unaffected
+                        until the operator updates them.
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="sm:col-span-2 mt-1 border-t border-zinc-800/70 pt-4 light:border-zinc-200">
+                    <h3 className="text-xs font-semibold text-zinc-200 light:text-zinc-800">
+                      Login attempt limits
+                    </h3>
+                    <p className="ui-description mt-1">
+                      Repeated failed sign-ins are blocked for a cooling-off period. The threshold is
+                      tracked per account and per source IP to resist distributed guessing.
+                    </p>
+                  </div>
+                  <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+                    <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                      Failed attempts before lockout
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        required
+                        className={field}
+                        value={securityForm.maxLoginAttempts}
+                        onChange={(e) =>
+                          setSecurityForm({
+                            ...securityForm,
+                            maxLoginAttempts: Math.min(20, Math.max(1, Number(e.target.value) || 1)),
+                          })
+                        }
+                      />
+                      <span className="ui-description mt-1.5 block">
+                        Consecutive failed sign-ins against a single account before it is temporarily locked.
+                      </span>
+                    </label>
+                    <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                      Lockout duration
+                      <span className="ml-1 font-normal text-zinc-500">(minutes)</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={60}
+                        required
+                        className={field}
+                        value={securityForm.lockoutMins}
+                        onChange={(e) =>
+                          setSecurityForm({
+                            ...securityForm,
+                            lockoutMins: Math.min(60, Math.max(1, Number(e.target.value) || 1)),
+                          })
+                        }
+                      />
+                      <span className="ui-description mt-1.5 block">
+                        How long a locked account stays locked before another sign-in can be attempted.
+                      </span>
+                    </label>
+                  </div>
+
+                  <p className="rounded-xl border border-zinc-800 bg-zinc-950/30 px-4 py-3 text-xs leading-relaxed text-zinc-400 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-600">
+                    CSRF protection, secure cookie attributes, and HTTP security headers are enforced at
+                    runtime and cannot be relaxed from the application.
+                  </p>
+
+                  <div className="ui-actions justify-between">
+                    {securityMessage ? (
+                      <p role="status" className="ui-success inline-flex items-center gap-2">
+                        <Check className="h-3.5 w-3.5" aria-hidden="true" /> {securityMessage}
+                      </p>
+                    ) : (
+                      <span className="settings-save-state">
+                        <span className={securityDirty ? 'is-dirty' : ''} />
+                        {securityDirty ? 'Unsaved changes' : 'Settings are up to date'}
+                      </span>
+                    )}
+                    <div className="settings-action-buttons">
+                      {securityDirty && (
+                        <button
+                          type="button"
+                          className="ui-secondary"
+                          disabled={pending > 0}
+                          onClick={() => {
+                            setSecurityForm(settings.securityPolicy);
+                            setSecurityMessage('');
+                          }}
+                        >
+                          <RotateCcw size={14} />
+                          Reset changes
+                        </button>
+                      )}
+                      <button type="submit" disabled={pending > 0 || !securityDirty} className="ui-primary">
+                        {pending > 0 ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
+                        {pending > 0 ? 'Saving…' : 'Save policy'}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              )}
+
+              <form
+                className="ui-card space-y-5"
+                aria-labelledby="account-security-title"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const changed = await changePassword(currentPassword, newPassword);
+                  // Keep the fields intact when the change failed so the operator can
+                  // correct the current password instead of retyping both values.
+                  if (changed) {
+                    setCurrentPassword('');
+                    setNewPassword('');
+                  }
+                }}
+              >
+                <SectionHeading
+                  icon={ShieldCheck}
+                  id="account-security-title"
+                  title="Change password"
+                  description="Update the password used to sign in to this account."
+                />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                    Current password
+                    <input
+                      type="password"
+                      autoComplete="current-password"
+                      required
+                      maxLength={128}
+                      className={field}
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                    New password
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                      minLength={settings.securityPolicy.minPasswordLen}
+                      maxLength={128}
+                      className={field}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                    />
+                    <span className="ui-description mt-1.5 block">
+                      Use at least {settings.securityPolicy.minPasswordLen} characters.
+                    </span>
+                  </label>
+                </div>
+                <div className="ui-actions justify-between">
+                  <p className="inline-flex items-center gap-2 text-xs text-zinc-400 light:text-zinc-600">
+                    <LockKeyhole className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    Changing your password signs out all active sessions.
+                  </p>
+                  <button type="submit" disabled={pending > 0} className="ui-primary">
+                    <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
+                    Change password
+                  </button>
+                </div>
+              </form>
+            </div>
 
           {admin && (
             <section

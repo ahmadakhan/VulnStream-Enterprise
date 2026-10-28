@@ -409,6 +409,11 @@ function useApplication() {
       if (result?.success) await refreshAfterMutation();
       return result;
     },
+    deleteFinding: async (id: string) => {
+      const result = await command('finding.delete', undefined, id);
+      if (result?.success) await refreshAfterMutation();
+      return result?.success || false;
+    },
     addRecipient: (rec: Omit<EmailRecipient, 'id' | 'deliverySuccessRate'>) => save('recipient.save', rec),
     toggleRecipientEnabled: async (id: string) => {
       const updated = !!(await command('recipient.toggle', undefined, id));

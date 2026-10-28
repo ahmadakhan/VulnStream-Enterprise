@@ -44,8 +44,66 @@ const schema = z.object({
   EGRESS_ALLOWED_HOSTS: z
     .string()
     .default(
-      'raw.githubusercontent.com,services.nvd.nist.gov,www.cisa.gov,api.first.org,app.opencve.io,api.vulncheck.com,www.bleepingcomputer.com,isc.sans.edu,api.msrc.microsoft.com,api.mailgun.net,api.eu.mailgun.net,send.api.mailtrap.io,sandbox.api.mailtrap.io,api.sendgrid.com,smtp.sendgrid.net,api.postmarkapp.com,smtp.maileroo.com,smtp.lettr.com,in-v3.mailjet.com,api.mailjet.com,smtp.gmail.com,www.fortiguard.com,filestore.fortinet.com,www.kb.cert.org,thehackernews.com,www.securityweek.com,www.rapid7.com,googleprojectzero.blogspot.com,krebsonsecurity.com,tools.cisco.com,security.paloaltonetworks.com,labs.watchtowr.com,www.talosintelligence.com,www.thezdi.com,www.exploit-db.com,www.debian.org,www.cisecurity.com,seclists.org,blog.sucuri.net,www.welivesecurity.com,wordpress.org',
+      // Feed, API and mail hosts. Every redirect target of the recommended
+      // feeds is listed alongside the URL that redirects to it, because the
+      // requester re-validates each hop against this list: a feed whose
+      // publisher moves to another host fails with "not in
+      // EGRESS_ALLOWED_HOSTS" until its final host appears here.
+      [
+        // Vulnerability data and enrichment
+        'services.nvd.nist.gov',
+        'raw.githubusercontent.com',
+        'www.cisa.gov',
+        'api.first.org',
+        'app.opencve.io',
+        'api.vulncheck.com',
+        // Mail providers
+        'api.mailgun.net',
+        'api.eu.mailgun.net',
+        'send.api.mailtrap.io',
+        'sandbox.api.mailtrap.io',
+        'api.sendgrid.com',
+        'smtp.sendgrid.net',
+        'api.postmarkapp.com',
+        'smtp.maileroo.com',
+        'smtp.lettr.com',
+        'in-v3.mailjet.com',
+        'api.mailjet.com',
+        'smtp.gmail.com',
+        // RSS/Atom sources
+        'www.bleepingcomputer.com',
+        'isc.sans.edu',
+        'api.msrc.microsoft.com',
+        'www.fortiguard.com',
+        'filestore.fortinet.com',
+        'www.kb.cert.org',
+        'thehackernews.com',
+        'feeds.feedburner.com', // thehackernews.com redirects here
+        'www.securityweek.com',
+        'www.rapid7.com',
+        'googleprojectzero.blogspot.com',
+        'projectzero.google', // googleprojectzero.blogspot.com redirects here
+        'krebsonsecurity.com',
+        'tools.cisco.com',
+        'sec.cloudapps.cisco.com', // tools.cisco.com redirects here
+        'security.paloaltonetworks.com',
+        'labs.watchtowr.com',
+        'www.talosintelligence.com',
+        'www.thezdi.com',
+        'www.exploit-db.com',
+        'www.debian.org',
+        'www.cisecurity.com',
+        'cisecurity.org', // www.cisecurity.com -> cisecurity.org -> www.cisecurity.org
+        'www.cisecurity.org',
+        'seclists.org',
+        'blog.sucuri.net',
+        'www.welivesecurity.com',
+        'wordpress.org',
+      ].join(','),
     ),
+  // Appended to the default allowlist instead of replacing it, so a deployment
+  // can admit one extra redirect host without having to restate every default.
+  EGRESS_ALLOWED_HOSTS_EXTRA: z.string().default(''),
   TRUST_PROXY: trustProxy,
   SMTP_HOST: z.string().default(''),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(465),
@@ -79,8 +137,21 @@ const schema = z.object({
   CORRELATION_DLQ_DIRECTORY: z.string().default('data/correlation-dlq'),
 });
 export type Config = z.infer<typeof schema>;
+/**
+ * Union the allowlist with operator additions, lowercased and de-duplicated.
+ * Exported so the merge is testable without a full environment.
+ */
+export function mergeAllowedHosts(allowlist: string, extra: string): string {
+  return [...new Set(`${allowlist},${extra}`.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean))].join(
+    ',',
+  );
+}
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const config = schema.parse(env);
+  const parsed = schema.parse(env);
+  const config = {
+    ...parsed,
+    EGRESS_ALLOWED_HOSTS: mergeAllowedHosts(parsed.EGRESS_ALLOWED_HOSTS, parsed.EGRESS_ALLOWED_HOSTS_EXTRA),
+  };
   const origin = new URL(config.APP_ORIGIN);
   if (origin.origin !== config.APP_ORIGIN) throw new Error('APP_ORIGIN must be an origin without a path');
   if (config.NODE_ENV === 'production' && origin.protocol !== 'https:')
