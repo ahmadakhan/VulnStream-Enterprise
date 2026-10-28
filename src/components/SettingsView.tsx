@@ -62,7 +62,9 @@ export function SettingsView() {
   const { settings, updateSettings, changePassword, session, listUsers, createUser, updateUser, resetUserPassword, pending } =
     useApp();
   const [form, setForm] = useState<AppSettings>(() => withEmailRetryDefaults(settings));
+  const [securityForm, setSecurityForm] = useState<AppSettings['securityPolicy']>(settings.securityPolicy);
   const [message, setMessage] = useState('');
+  const [securityMessage, setSecurityMessage] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [users, setUsers] = useState<any[]>([]);
@@ -80,7 +82,6 @@ export function SettingsView() {
     form.scopeHours !== settings.scopeHours ||
     form.schedulerIntervalMinutes !== settings.schedulerIntervalMinutes ||
     form.advisoryPrefix !== settings.advisoryPrefix ||
-    form.securityPolicy.sessionTimeoutMins !== settings.securityPolicy.sessionTimeoutMins ||
     (form.logVerbosity ?? 'standard') !== (settings.logVerbosity ?? 'standard') ||
     form.schedulerEnabled !== settings.schedulerEnabled ||
      form.autoDispatchEnabled !== settings.autoDispatchEnabled ||
@@ -92,7 +93,12 @@ export function SettingsView() {
      (form.emailRetryMaxAttempts ?? 6) !== (settings.emailRetryMaxAttempts ?? 6) ||
      (form.emailRetryInitialDelayMinutes ?? 1) !==
        (settings.emailRetryInitialDelayMinutes ?? 1) ||
-     (form.emailRetryMaxDelayMinutes ?? 60) !== (settings.emailRetryMaxDelayMinutes ?? 60);
+      (form.emailRetryMaxDelayMinutes ?? 60) !== (settings.emailRetryMaxDelayMinutes ?? 60);
+  const securityDirty =
+    securityForm.sessionTimeoutMins !== settings.securityPolicy.sessionTimeoutMins ||
+    securityForm.minPasswordLen !== settings.securityPolicy.minPasswordLen ||
+    securityForm.maxLoginAttempts !== settings.securityPolicy.maxLoginAttempts ||
+    securityForm.lockoutMins !== settings.securityPolicy.lockoutMins;
   const sections = [
     ...(admin
       ? [
@@ -241,7 +247,7 @@ export function SettingsView() {
                     </span>
                   </label>
                   <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                    Advisory prefix
+                    Operational log detail
                     <select
                       className={field}
                       value={form.logVerbosity ?? 'standard'}

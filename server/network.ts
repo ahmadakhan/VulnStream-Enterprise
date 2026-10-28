@@ -35,9 +35,8 @@ export async function resolvePublic(
       // callback-style resolver cannot masquerade as an array. A rejection is
       // reported as a resolution failure rather than a raw socket error.
       Promise.resolve(resolver(host, { all: true, verbatim: true })).catch((error: unknown) => {
-        throw new Error(
-          `DNS lookup for ${host} failed${error instanceof Error && error.code ? ` (${error.code})` : ''}`,
-        );
+        const code = (error as NodeJS.ErrnoException)?.code;
+        throw new Error(`DNS lookup for ${host} failed${code ? ` (${code})` : ''}`);
       }),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('DNS lookup timed out')), 5000);
