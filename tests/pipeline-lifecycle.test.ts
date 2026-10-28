@@ -506,7 +506,18 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         assert.equal(webhooks, tightenPolicy ? 0 : 1);
         const jobs = (await pool.query('SELECT status, error FROM outbox')).rows;
         assert.ok(jobs.every(job => job.status === (tightenPolicy ? 'FAILED' : 'ACCEPTED')));
-        if (tightenPolicy) assert.ok(jobs.every(job => /no longer applicable/.test(job.error)));
+        if (tightenPolicy) {
+          assert.ok(jobs.every(job => /confidence policy requires review/.test(job.error)));
+          await save('settings', 'main', {
+            ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 80,
+          });
+          await run();
+          while (await deliverNext(pool, config, webhookRequest, mail)) { /* Rebuilt, revalidated jobs only. */ }
+          assert.equal(emails, 1);
+          assert.equal(webhooks, 1);
+          await run();
+          assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED'")).rows[0].n, 0);
+        }
       }
     });
     await t.test(

@@ -789,25 +789,31 @@ export async function deliverNext(
               ).newFindings[0]
             : undefined;
         if (match) currentFindings.push(match);
-        if (
-          !finding ||
-          (match && job.payload.findingRevisions?.[id] !== findingRevision(match)) ||
-          (cve && withdrawal && Date.parse(cve.modifiedDate) <= Date.parse(withdrawal.modifiedDate)) ||
-          (cve &&
-            job.payload.cveRevisions?.[cve.cveId] &&
-            job.payload.cveRevisions[cve.cveId] !== revision(cve)) ||
-          ['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(finding.status) ||
-          match?.notificationStatus !== 'QUEUED_FOR_DISPATCH'
-        ) {
-          invalid.push(id);
-        }
+        const reason = !finding
+          ? 'a finding was removed'
+          : ['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(finding.status)
+            ? 'a finding was resolved or dismissed'
+            : cve && withdrawal && Date.parse(cve.modifiedDate) <= Date.parse(withdrawal.modifiedDate)
+              ? 'a CVE was withdrawn'
+              : cve && job.payload.cveRevisions?.[cve.cveId] && job.payload.cveRevisions[cve.cveId] !== revision(cve)
+                ? 'CVE intelligence changed'
+                : !match
+                  ? 'current inventory no longer matches'
+                  : match.notificationStatus !== 'QUEUED_FOR_DISPATCH'
+                    ? 'current applicability or confidence policy requires review'
+                    : job.payload.findingRevisions?.[id] !== findingRevision(match)
+                      ? 'inventory or matching evidence changed'
+                      : undefined;
+        if (reason) invalid.push(reason);
       }
       // The queued payload contains the complete advisory. Sending it after any
       // finding becomes stale would disclose or act on invalidated inventory.
       // Fail the bundle so the next pipeline can rebuild it from current matches.
       if (invalid.length) {
         permanent = true;
-        throw new Error('Some advisory findings are no longer applicable; rebuild from current inventory');
+        throw new Error(
+          `Some advisory findings are no longer applicable; rebuild from current inventory. Reason: ${[...new Set(invalid)].join('; ')}. Run the pipeline to rebuild the advisory before retrying.`,
+        );
       }
     }
     if (job.channel === 'email') {
