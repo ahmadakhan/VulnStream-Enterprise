@@ -15,7 +15,23 @@ import {
   buildStrictCpe23,
   CatalogProduct,
 } from '../data/vendorCatalog';
-import { Server, Plus, Upload, Download, Trash2, Edit2, Search, X, Code, FlaskConical, CheckCircle2, AlertCircle, Check, Package, Loader2 } from 'lucide-react';
+import {
+  Server,
+  Plus,
+  Upload,
+  Download,
+  Trash2,
+  Edit2,
+  Search,
+  X,
+  Code,
+  FlaskConical,
+  CheckCircle2,
+  AlertCircle,
+  Check,
+  Package,
+  Loader2,
+} from 'lucide-react';
 import { Pagination } from './Pagination';
 import { editedWatchlistCpe } from '../utils/watchlist';
 import { CveLink } from './CveLink';
@@ -76,11 +92,12 @@ export const WatchListView: React.FC = () => {
 
   const [nvdSearchProduct, setNvdSearchProduct] = useState('');
 
-  // NVD Verified CPE search
+   // NVD Verified CPE search
   const [nvdResults, setNvdResults] = useState<NvdCpeSearchResult[]>([]);
   const [nvdLoading, setNvdLoading] = useState(false);
   const [nvdError, setNvdError] = useState<string | null>(null);
   const [selectedNvdCpes, setSelectedNvdCpes] = useState<string[]>([]);
+  const [nvdResultsFilter, setNvdResultsFilter] = useState('');
 
   const [bulkJsonText, setBulkJsonText] = useState('');
   const [bulkFeedback, setBulkFeedback] = useState<{ imported: number; errors: string[] } | null>(null);
@@ -180,7 +197,7 @@ export const WatchListView: React.FC = () => {
           cpe,
           part: parseCPE23(cpe).part as 'a' | 'o' | 'h',
         }));
-       return [...current, ...additions, ...customAddition, ...nvdAdditions].filter(
+      return [...current, ...additions, ...customAddition, ...nvdAdditions].filter(
         (item) => !removedAutoCpes.has(item.cpe),
       );
     }
@@ -216,15 +233,19 @@ export const WatchListView: React.FC = () => {
         part: parseCPE23(cpe).part as 'a' | 'o' | 'h',
       }));
 
-     return [...list.filter((item) => !removedAutoCpes.has(item.cpe)), ...nvdAdditions, ...customAddedCpes.map((cpe) => {
-       const parsed = parseCPE23(cpe);
-       return {
-         product: 'Custom',
-         cpe,
-         part: parsed.isValid ? (parsed.part as 'a' | 'o' | 'h') : cpePart,
-       };
-     })];
-   }, [
+    return [
+      ...list.filter((item) => !removedAutoCpes.has(item.cpe)),
+      ...nvdAdditions,
+      ...customAddedCpes.map((cpe) => {
+        const parsed = parseCPE23(cpe);
+        return {
+          product: 'Custom',
+          cpe,
+          part: parsed.isValid ? (parsed.part as 'a' | 'o' | 'h') : cpePart,
+        };
+      }),
+    ];
+  }, [
     vendorInput,
     selectedProductIds,
     customProductInput,
@@ -259,18 +280,19 @@ export const WatchListView: React.FC = () => {
     setVendorInput('');
     setCustomProductInput('');
     setAdditionalProductInput('');
-     setAdditionalCpes([]);
-     setSelectedProductIds([]);
-     setCpePart('a');
-     setVersionInput('*');
-     setTargetHwInput('*');
-     setAssetTagInput('');
-     setOwnerGroupInput('SecOps-Core');
-     setNotesInput('');
-      setPurlInput('');
-      setCpeExpressionInput('');
-      setNvdSearchProduct('');
+    setAdditionalCpes([]);
+    setSelectedProductIds([]);
+    setCpePart('a');
+    setVersionInput('*');
+    setTargetHwInput('*');
+    setAssetTagInput('');
+    setOwnerGroupInput('SecOps-Core');
+    setNotesInput('');
+    setPurlInput('');
+    setCpeExpressionInput('');
+setNvdSearchProduct('');
       setNvdResults([]);
+      setNvdResultsFilter('');
       setNvdLoading(false);
       setNvdError(null);
       setSelectedNvdCpes([]);
@@ -296,17 +318,18 @@ export const WatchListView: React.FC = () => {
     setOwnerGroupInput(item.ownerGroup);
     setNotesInput(item.notes || '');
     setPurlInput((item.purls || []).join('\n'));
-setCpeExpressionInput(item.cpes[0] || '');
-   setNvdSearchProduct('');
-   setNvdResults([]);
-   setNvdLoading(false);
-   setNvdError(null);
-   setSelectedNvdCpes([]);
-   setRemovedAutoCpes(new Set());
-   setCustomAddedCpes([]);
-   setCustomCpeInput('');
-   setEditingItem(item);
-   setShowAddModal(true);
+    setCpeExpressionInput(item.cpes[0] || '');
+    setNvdSearchProduct('');
+    setNvdResults([]);
+    setNvdResultsFilter('');
+    setNvdLoading(false);
+    setNvdError(null);
+    setSelectedNvdCpes([]);
+    setRemovedAutoCpes(new Set());
+    setCustomAddedCpes([]);
+    setCustomCpeInput('');
+    setEditingItem(item);
+    setShowAddModal(true);
   };
 
   const toggleSelectProduct = (prod: CatalogProduct) => {
@@ -326,7 +349,7 @@ setCpeExpressionInput(item.cpes[0] || '');
 
   const nvdSearchProductTerm = useMemo(() => {
     const nvdSearch = nvdSearchProduct.trim();
-       if (nvdSearch) return nvdSearch;
+    if (nvdSearch) return nvdSearch;
     const custom = customProductInput.trim();
     if (custom) return custom;
     if (selectedProductIds.length === 1) {
@@ -351,6 +374,7 @@ setCpeExpressionInput(item.cpes[0] || '');
     setNvdLoading(true);
     setNvdError(null);
     setNvdResults([]);
+    setNvdResultsFilter('');
     try {
       const result = await searchNvdCpes(vendorInput.trim(), nvdSearchProductTerm, 50);
       const found = result?.results || [];
@@ -371,6 +395,18 @@ setCpeExpressionInput(item.cpes[0] || '');
   };
 
   const removeNvdCpe = (cpe: string) => setSelectedNvdCpes((prev) => prev.filter((c) => c !== cpe));
+
+  const filteredNvdResults = useMemo(() => {
+    if (!nvdResultsFilter.trim()) return nvdResults;
+    const q = nvdResultsFilter.toLowerCase().trim();
+    return nvdResults.filter(
+      (r) =>
+        r.cpeName.toLowerCase().includes(q) ||
+        r.vendor.toLowerCase().includes(q) ||
+        r.product.toLowerCase().includes(q) ||
+        (r.title ? r.title.toLowerCase().includes(q) : false),
+    );
+  }, [nvdResults, nvdResultsFilter]);
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -546,7 +582,13 @@ setCpeExpressionInput(item.cpes[0] || '');
 
     // Add custom product if entered
     if (customProductInput.trim()) {
-      const generatedCpe = buildStrictCpe23(cpePart, vendorInput.trim(), customProductInput.trim().toLowerCase().replace(/\s+/g, '_'), versionInput, targetHwInput);
+      const generatedCpe = buildStrictCpe23(
+        cpePart,
+        vendorInput.trim(),
+        customProductInput.trim().toLowerCase().replace(/\s+/g, '_'),
+        versionInput,
+        targetHwInput,
+      );
       if (!removedAutoCpes.has(generatedCpe)) {
         productsToCreate.push({
           name: customProductInput.trim(),
@@ -558,7 +600,13 @@ setCpeExpressionInput(item.cpes[0] || '');
 
     // If none selected, fallback to single entry
     if (productsToCreate.length === 0) {
-      const fallbackCpe = buildStrictCpe23(cpePart, vendorInput.trim(), 'software', versionInput, targetHwInput);
+      const fallbackCpe = buildStrictCpe23(
+        cpePart,
+        vendorInput.trim(),
+        'software',
+        versionInput,
+        targetHwInput,
+      );
       if (!removedAutoCpes.has(fallbackCpe)) {
         productsToCreate.push({
           name: 'Standard Asset',
@@ -566,7 +614,10 @@ setCpeExpressionInput(item.cpes[0] || '');
           part: cpePart,
         });
       } else {
-        setSaveFeedback({ type: 'error', message: 'All auto-generated CPEs were removed. Add at least one product or CPE before saving.' });
+        setSaveFeedback({
+          type: 'error',
+          message: 'All auto-generated CPEs were removed. Add at least one product or CPE before saving.',
+        });
         return;
       }
     }
@@ -583,9 +634,7 @@ setCpeExpressionInput(item.cpes[0] || '');
       return {
         vendor: vendorInput.trim(),
         product: p.name,
-        cpes: isPrimary
-          ? dedupeCpes([cpe, ...selectedNvdCpes, ...customAddedCpes])
-          : [cpe],
+        cpes: isPrimary ? dedupeCpes([cpe, ...selectedNvdCpes, ...customAddedCpes]) : [cpe],
         purls: purlList.length > 0 ? purlList : undefined,
         targetHw: targetHwInput !== '*' ? targetHwInput : undefined,
         assetTag: `${baseTag}${tagSuffix}`,
@@ -738,7 +787,7 @@ setCpeExpressionInput(item.cpes[0] || '');
                 : 'text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'
             }`}
           >
-            <FlaskConical className="w-3.5 h-3.5 text-zinc-300" />
+            <FlaskConical className="w-3.5 h-3.5 text-zinc-300 dark:text-zinc-300 light:text-zinc-600" />
             <span>Matching simulator</span>
           </button>
         </div>
@@ -748,7 +797,7 @@ setCpeExpressionInput(item.cpes[0] || '');
       {viewMode === 'simulator' && (
         <section className="rounded-xl border border-zinc-700 p-5 space-y-4">
           <h2 className="text-lg font-semibold">Matching Simulator</h2>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
             Uses the same correlation engine as the server against the current threat cache, across all dates.
             This preview does not save findings or send notifications.
           </p>
@@ -811,7 +860,7 @@ setCpeExpressionInput(item.cpes[0] || '');
                   <p>
                     {result.autoAction} · {result.method}
                   </p>
-                  <p className="text-sm text-zinc-400">{result.evidence}</p>
+                  <p className="text-sm text-zinc-400 dark:text-zinc-400 light:text-zinc-600">{result.evidence}</p>
                 </article>
               ))}
             </div>
@@ -825,7 +874,7 @@ setCpeExpressionInput(item.cpes[0] || '');
           <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm transition-colors">
             {/* Search Input */}
             <div className="relative w-full sm:w-80">
-              <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
+              <Search className="w-4 h-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 absolute left-3 top-2.5" />
               <input
                 type="text"
                 placeholder="Search products by tag, vendor, product, or CPE..."
@@ -834,7 +883,7 @@ setCpeExpressionInput(item.cpes[0] || '');
                   setSearchTerm(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 placeholder-zinc-500 focus:outline-none focus:border-zinc-600 transition"
+                className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl pl-9 pr-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 dark:placeholder-zinc-500 light:placeholder-zinc-400 focus:outline-none focus:border-zinc-600 transition"
               />
             </div>
 
@@ -883,7 +932,7 @@ setCpeExpressionInput(item.cpes[0] || '');
                 <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
                   {paginatedAssets.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-zinc-500 text-xs">
+                      <td colSpan={7} className="py-8 text-center text-zinc-500 dark:text-zinc-500 light:text-zinc-600 text-xs">
                         No matching monitored products found.
                       </td>
                     </tr>
@@ -911,7 +960,7 @@ setCpeExpressionInput(item.cpes[0] || '');
                               {asset.product}
                             </span>
                           </div>
-                          <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                          <div className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono mt-0.5">
                             Registered: {new Date(asset.createdAt).toLocaleDateString()}
                           </div>
                         </td>
@@ -1047,7 +1096,7 @@ setCpeExpressionInput(item.cpes[0] || '');
           <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative my-8 max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setShowAddModal(false)}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900"
+              className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-800"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1100,7 +1149,7 @@ setCpeExpressionInput(item.cpes[0] || '');
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Microsoft, Cisco, Fortinet, VMware, Palo Alto, Apache, Red Hat..."
+                  placeholder="e.g. Microsoft, Cisco, Fortinet, VMware, Veeam, Palo Alto, Apache, Red Hat..."
                   value={vendorInput}
                   onChange={(e) => setVendorInput(e.target.value)}
                   className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-medium focus:border-zinc-600 focus:outline-none"
@@ -1108,14 +1157,14 @@ setCpeExpressionInput(item.cpes[0] || '');
 
                 {/* Popular Vendor Shortcuts */}
                 <div className="flex flex-wrap gap-1.5 mt-2">
-                  <span className="text-[10px] text-zinc-500 font-mono self-center mr-1">Quick Select:</span>
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono mr-1">Quick Select:</span>
                   {[
-                     'Microsoft',
-                     'Cisco',
-                     'Fortinet',
-                     'VMware',
-                     'Veeam',
-                     'Palo Alto Networks',
+                    'Microsoft',
+                    'Cisco',
+                    'Fortinet',
+                    'VMware',
+                    'Veeam',
+                    'Palo Alto Networks',
                     'Apache',
                     'Red Hat',
                     'Oracle',
@@ -1143,7 +1192,7 @@ setCpeExpressionInput(item.cpes[0] || '');
                       <Package className="w-3.5 h-3.5 text-emerald-400" />
                       Select Catalog Products from {vendorInput} (Multi-Product Selection Supported):
                     </span>
-                    <span className="text-[10px] font-mono text-zinc-500">
+                    <span className="text-[10px] font-mono text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
                       {selectedProductIds.length} Selected
                     </span>
                   </div>
@@ -1165,16 +1214,16 @@ setCpeExpressionInput(item.cpes[0] || '');
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => {}}
-                            className="mt-0.5 rounded border-zinc-700 text-zinc-200 pointer-events-none"
+                            className="mt-0.5 rounded border-zinc-700 dark:border-zinc-700 light:border-zinc-400 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 pointer-events-none"
                           />
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between">
                               <span className="truncate font-semibold">{prod.name}</span>
-                              <span className="text-[9px] font-mono uppercase px-1 rounded bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-400">
+                              <span className="text-[9px] font-mono uppercase px-1 rounded bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
                                 {prod.part === 'o' ? 'OS' : prod.part === 'h' ? 'HW' : 'APP'}
                               </span>
                             </div>
-                            <div className="text-[10px] text-zinc-500 light:text-zinc-600 truncate mt-0.5">
+                            <div className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 truncate mt-0.5">
                               {prod.description}
                             </div>
                           </div>
@@ -1201,7 +1250,7 @@ setCpeExpressionInput(item.cpes[0] || '');
 
               {/* NVD Verified CPE 2.3 Search */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <label className="block text-[11px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
                     NVD Verified CPE 2.3 Expressions
                   </label>
@@ -1219,6 +1268,19 @@ setCpeExpressionInput(item.cpes[0] || '');
                     {nvdLoading ? 'Searching...' : 'Search NVD'}
                   </button>
                 </div>
+
+                {/* NVD Product Search Input */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 dark:text-zinc-500 light:text-zinc-600" />
+                  <input
+                    type="text"
+                    placeholder="e.g. backup_and_replication, one, agent"
+                    value={nvdSearchProduct}
+                    onChange={(e) => setNvdSearchProduct(e.target.value)}
+                    className="w-full pl-8 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2 text-[11px] text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
+                  />
+                </div>
+
                 <p className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
                   Verified against the NIST NVD CPE dictionary for {vendorInput.trim() || 'vendor'}
                   {nvdSearchProductTerm && ` / ${nvdSearchProductTerm}`}. Matching CPEs can be added to this
@@ -1233,60 +1295,100 @@ setCpeExpressionInput(item.cpes[0] || '');
                   </div>
                 )}
                 {nvdResults.length > 0 && (
-                  <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-                    {nvdResults.map((r) => (
-                      <div
-                        key={r.cpeNameId || r.cpeName}
-                        className="bg-zinc-950/70 dark:bg-zinc-950/70 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 flex items-center justify-between"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <code
-                            className="block text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono truncate"
-                            title={r.cpeName}
-                          >
-                            {r.cpeName}
-                          </code>
-                          <div className="text-[9px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
-                            {r.vendor} / {r.product} · part {r.part} · arch {r.targetHw || '*'}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => addNvdCpe(r.cpeName)}
-                          className="shrink-0 ml-2 text-[10px] font-mono px-2 py-0.75 rounded bg-emerald-900/40 dark:bg-emerald-900/40 light:bg-emerald-100 border border-emerald-800 dark:border-emerald-800 light:border-emerald-300 text-emerald-300 dark:text-emerald-300 light:text-emerald-700 hover:bg-emerald-900/60"
-                        >
-                          Add
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {selectedNvdCpes.length > 0 && (
-                  <div className="space-y-1">
-                    <div className="text-[10px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-                      Selected verified CPEs ({selectedNvdCpes.length}):
+                  <>
+                    {/* Results Filter */}
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 dark:text-zinc-500 light:text-zinc-600" />
+                      <input
+                        type="text"
+                        placeholder="Filter results by CPE, vendor, product, or title..."
+                        value={nvdResultsFilter}
+                        onChange={(e) => setNvdResultsFilter(e.target.value)}
+                        className="w-full pl-8 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2 text-[11px] text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
+                      />
                     </div>
-                    {selectedNvdCpes.map((cpe) => (
-                      <div key={cpe} className="flex items-center gap-2">
-                        <code
-                          className="min-w-0 flex-1 truncate text-xs text-zinc-300 dark:text-zinc-300 light:text-zinc-700"
-                          title={cpe}
-                        >
-                          {cpe}
-                        </code>
-                        <button
-                          type="button"
-                          onClick={() => removeNvdCpe(cpe)}
-                          aria-label={`Remove verified CPE ${cpe}`}
-                          className="shrink-0 rounded-lg p-1 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ))}
+                    <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                      {filteredNvdResults.map((r) => {
+                        const parsed = parseCPE23(r.cpeName);
+                        const hasVersionWildcard = parsed.version === '*' || parsed.version === '?';
+                        const hasArchWildcard = parsed.targetHw === '*' || parsed.targetHw === '?';
+                        return (
+                          <div
+                            key={r.cpeNameId || r.cpeName}
+                            className="bg-zinc-950/70 dark:bg-zinc-950/70 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 flex items-center justify-between"
+                          >
+                          <div className="min-w-0 flex-1">
+                            <code
+                              className="block text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono truncate"
+                              title={r.cpeName}
+                            >
+                              {r.cpeName}
+                            </code>
+                            <div className="text-[9px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 flex items-center gap-2 mt-0.5">
+                              <span className="flex items-center gap-1">
+                                {parsed.isValid ? (
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                ) : (
+                                  <AlertCircle className="w-3 h-3 text-rose-400" />
+                                )}
+                                <span>Valid CPE 2.3</span>
+                              </span>
+                              <span className="text-zinc-600 dark:text-zinc-600 light:text-zinc-700">·</span>
+                              <span className="flex items-center gap-1">
+                                <span className="px-1 py-0.25 rounded bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-[8px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                                  ver: {hasVersionWildcard ? `${parsed.version} (wildcard)` : parsed.version}
+                                </span>
+                              </span>
+                              <span className="flex items-center gap-1">
+                                {r.vendor} / {r.product} · part {r.part}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                arch{' '}
+                                {hasArchWildcard
+                                  ? `${parsed.targetHw || '*'} (wildcard)`
+                                  : parsed.targetHw || '*'}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => addNvdCpe(r.cpeName)}
+                            className="shrink-0 ml-2 text-[10px] font-mono px-2 py-0.75 rounded bg-emerald-900/40 dark:bg-emerald-900/40 light:bg-emerald-100 border border-emerald-800 dark:border-emerald-800 light:border-emerald-300 text-emerald-300 dark:text-emerald-300 light:text-emerald-700 hover:bg-emerald-900/60"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
-                )}
-              </div>
+                </>
+              )}
+              {selectedNvdCpes.length > 0 && (
+                <div className="space-y-1">
+                  <div className="text-[10px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                    Selected verified CPEs ({selectedNvdCpes.length}):
+                  </div>
+                  {selectedNvdCpes.map((cpe) => (
+                    <div key={cpe} className="flex items-center gap-2">
+                      <code
+                        className="min-w-0 flex-1 truncate text-xs text-zinc-300 dark:text-zinc-300 light:text-zinc-700"
+                        title={cpe}
+                      >
+                        {cpe}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => removeNvdCpe(cpe)}
+                        aria-label={`Remove verified CPE ${cpe}`}
+                        className="shrink-0 rounded-lg p-1 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 hover:text-rose-400 transition"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
               {editingItem && (
                 <div>
@@ -1304,7 +1406,7 @@ setCpeExpressionInput(item.cpes[0] || '');
                   {!parseCPE23(editedCpe()).isValid && (
                     <p className="mt-1 text-rose-400">Enter a valid CPE 2.3 expression before saving.</p>
                   )}
-                  <p className="mt-1 text-zinc-500">
+                  <p className="mt-1 text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
                     Change the product fields or expression to update this asset. Select catalog products
                     above to add separate monitored products.
                   </p>
@@ -1330,7 +1432,7 @@ setCpeExpressionInput(item.cpes[0] || '');
                           setAdditionalCpes((current) => current.filter((_, cpeIndex) => cpeIndex !== index))
                         }
                         aria-label={`Remove additional CPE ${cpe}`}
-                        className="shrink-0 rounded-lg p-1 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400"
+                        className="shrink-0 rounded-lg p-1 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 hover:text-rose-400 transition"
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -1409,43 +1511,45 @@ setCpeExpressionInput(item.cpes[0] || '');
                 </div>
 
                 <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                   {generatedCpes.map((item, idx) => (
-                     <div
-                       key={item.cpe}
-                       className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 font-mono text-xs flex items-center justify-between text-zinc-200 dark:text-zinc-200 light:text-zinc-800 shadow-sm"
-                     >
-                       <div className="truncate mr-2">
-                         <span className="text-[10px] text-zinc-500 mr-1.5">[{item.product}]</span>
-                         <span className="text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold">
-                           {item.cpe}
-                         </span>
-                       </div>
-                       <div className="flex items-center gap-1 shrink-0">
-                         <button
-                           type="button"
-                           onClick={() => {
-                             if (item.product === 'Custom') {
-                               setCustomAddedCpes((c) => c.filter((c2) => c2 !== item.cpe));
-                             } else {
-                               setRemovedAutoCpes((s) => {
-                                 const next = new Set(s);
-                                 next.add(item.cpe);
-                                 return next;
-                               });
-                             }
-                           }}
-                           aria-label={`Remove CPE ${item.cpe}`}
-                           className="rounded-lg p-0.75 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400 transition"
-                           title={item.product === 'Custom' ? 'Remove custom CPE' : 'Remove auto-generated CPE'}
-                         >
-                           <X className="h-3.5 w-3.5" />
-                         </button>
-                         <span className="text-[9px] font-mono uppercase bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-400 px-1.5 py-0.2 rounded shrink-0">
-                           {item.part}
-                         </span>
-                       </div>
-                     </div>
-                   ))}
+                  {generatedCpes.map((item, idx) => (
+                    <div
+                      key={item.cpe}
+                      className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 font-mono text-xs flex items-center justify-between text-zinc-200 dark:text-zinc-200 light:text-zinc-800 shadow-sm"
+                    >
+                      <div className="truncate mr-2">
+                        <span className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 mr-1.5">[{item.product}]</span>
+                        <span className="text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold">
+                          {item.cpe}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (item.product === 'Custom') {
+                              setCustomAddedCpes((c) => c.filter((c2) => c2 !== item.cpe));
+                            } else {
+                              setRemovedAutoCpes((s) => {
+                                const next = new Set(s);
+                                next.add(item.cpe);
+                                return next;
+                              });
+                            }
+                          }}
+                          aria-label={`Remove CPE ${item.cpe}`}
+                          className="rounded-lg p-0.75 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 hover:text-rose-400 transition"
+                          title={
+                            item.product === 'Custom' ? 'Remove custom CPE' : 'Remove auto-generated CPE'
+                          }
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="text-[9px] font-mono uppercase bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-400 px-1.5 py-0.2 rounded shrink-0">
+                          {item.part}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -1552,7 +1656,7 @@ setCpeExpressionInput(item.cpes[0] || '');
                 setShowBulkModal(false);
                 setBulkFeedback(null);
               }}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900"
+              className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-800"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1571,13 +1675,13 @@ setCpeExpressionInput(item.cpes[0] || '');
                 className={`p-3 rounded-xl text-xs mb-3 flex items-center gap-2 ${
                   bulkFeedback.errors.length === 0
                     ? 'bg-zinc-950 border border-emerald-800 text-emerald-300'
-                    : 'bg-zinc-950 border border-zinc-700 text-zinc-300'
+                    : 'bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700'
                 }`}
               >
                 {bulkFeedback.errors.length === 0 ? (
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                 ) : (
-                  <AlertCircle className="w-4 h-4 text-zinc-400 shrink-0" />
+                  <AlertCircle className="w-4 h-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 shrink-0" />
                 )}
                 <span>
                   Successfully imported {bulkFeedback.imported} monitored products.

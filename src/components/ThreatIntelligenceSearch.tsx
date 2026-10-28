@@ -54,11 +54,11 @@ interface ExecutedSearch {
 const panel =
   'ui-panel rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white';
 const inputClass =
-  'w-full rounded-[10px] border border-zinc-800 bg-zinc-950 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 transition focus:border-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900';
+  'w-full rounded-[10px] border border-zinc-800 bg-zinc-950 py-2 pl-9 pr-9 text-xs text-zinc-100 placeholder-zinc-500 transition focus:border-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900';
 const labelClass =
-  'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500';
+  'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:text-zinc-600';
 const smallButton =
-  'inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[10px] border px-3 text-[11px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[10px] border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50';
 const smallButtonIdle =
   'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200 light:border-zinc-300 light:bg-white light:text-zinc-600 light:hover:bg-zinc-100 light:hover:text-zinc-900';
 
@@ -109,7 +109,7 @@ const exploitTone = (status: NormalizedCVE['exploitStatus']) => {
     case 'POC Available':
       return 'text-amber-300 light:text-amber-700';
     default:
-      return 'text-zinc-500';
+      return 'text-zinc-400 dark:text-zinc-500 light:text-zinc-600';
   }
 };
 
@@ -205,13 +205,13 @@ function MetricCard({
     <div className={`${panel} p-4`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-zinc-500">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
             {label}
           </p>
           <p className="mt-1 text-xl font-semibold tabular-nums text-zinc-100 light:text-zinc-900">
             {value}
           </p>
-          <p className="mt-0.5 truncate text-[11px] text-zinc-500">{hint}</p>
+          <p className="mt-0.5 truncate text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">{hint}</p>
         </div>
         <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${tone}`}>
           <Icon className="h-4 w-4" aria-hidden={true} />
@@ -694,11 +694,11 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             >
               Search parameters
             </h2>
-            <p className="mt-0.5 text-[11px] text-zinc-500">
+            <p className="mt-0.5 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
               Catalog vendors resolve to normalized CPE identifiers before the query is sent.
             </p>
           </div>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-[10px] font-medium text-zinc-500 light:border-zinc-300 light:bg-zinc-100">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-[10px] font-medium text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-300 light:bg-zinc-100">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
             Live NVD lookup
           </span>
@@ -716,7 +716,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   <p className="truncate text-sm font-medium text-zinc-100 light:text-zinc-900">
                     {selectedVendorName}
                   </p>
-                  <p className="truncate font-mono text-[10px] text-zinc-500">
+                  <p className="truncate font-mono text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                     {vendorSelected}
                     {isCustomVendor ? ' · custom vendor' : ' · catalog vendor'}
                   </p>
@@ -725,7 +725,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   type="button"
                   onClick={clearVendor}
                   aria-label="Change vendor"
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 light:hover:bg-zinc-200 light:hover:text-zinc-900"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-zinc-400 dark:text-zinc-500 light:text-zinc-600 transition hover:bg-zinc-800 hover:text-zinc-200 light:hover:bg-zinc-200 light:hover:text-zinc-900"
                 >
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
@@ -733,7 +733,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             ) : (
               <div ref={vendorBoxRef} className="relative">
                 <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500"
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
                   aria-hidden="true"
                 />
                 <input
@@ -757,7 +757,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   className={`${inputClass} pl-9 pr-9`}
                 />
                 <ChevronDown
-                  className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500"
+                  className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
                   aria-hidden="true"
                 />
                 {vendorOpen && (
@@ -789,14 +789,14 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                               <span className="block truncate text-sm font-medium">
                                 {vendor.name}
                               </span>
-                              <span className="mt-0.5 block truncate font-mono text-[10px] text-zinc-500">
+                              <span className="mt-0.5 block truncate font-mono text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                                 {vendor.normalizedId}
                                 {vendor.aliases.length > 0
                                   ? ` · ${vendor.aliases.join(', ')}`
                                   : ''}
                               </span>
                             </span>
-                            <span className="shrink-0 text-[10px] text-zinc-500">
+                            <span className="shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                               {vendor.products.length} products
                             </span>
                           </button>
@@ -819,19 +819,19 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                             <span className="text-sm font-medium">
                               Use “{trimmedVendorQuery}” as a custom vendor
                             </span>
-                            <span className="text-[10px] text-zinc-500">
+                            <span className="text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                               Query NVD with this free-text vendor name
                             </span>
                           </button>
                         )}
                       </div>
                     ) : (
-                      <p className="px-3 py-3 text-xs text-zinc-500" role="status">
+                      <p className="px-3 py-3 text-xs text-zinc-400 dark:text-zinc-500 light:text-zinc-600" role="status">
                         No catalog vendor matches. Type a name and press Enter to search it as a
                         custom vendor.
                       </p>
                     )}
-                    <div className="border-t border-zinc-800/80 px-3 py-2 text-[10px] text-zinc-500 light:border-zinc-200">
+                    <div className="border-t border-zinc-800/80 px-3 py-2 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-200">
                       Use arrow keys to navigate · Enter to select
                     </div>
                   </div>
@@ -855,7 +855,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     className={`rounded-md px-2 py-0.5 text-[10px] font-medium transition ${
                       productMode === 'catalog'
                         ? 'bg-zinc-800 text-zinc-100 shadow-sm light:bg-white light:text-zinc-900'
-                        : 'text-zinc-500 hover:text-zinc-300 light:hover:text-zinc-700'
+                        : 'text-zinc-400 dark:text-zinc-500 light:text-zinc-600 hover:text-zinc-300 light:hover:text-zinc-700'
                     }`}
                   >
                     Catalog
@@ -867,7 +867,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     className={`rounded-md px-2 py-0.5 text-[10px] font-medium transition ${
                       productMode === 'custom'
                         ? 'bg-zinc-800 text-zinc-100 shadow-sm light:bg-white light:text-zinc-900'
-                        : 'text-zinc-500 hover:text-zinc-300 light:hover:text-zinc-700'
+                        : 'text-zinc-400 dark:text-zinc-500 light:text-zinc-600 hover:text-zinc-300 light:hover:text-zinc-700'
                     }`}
                   >
                     Custom
@@ -877,7 +877,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             </div>
 
             {!vendorSelected ? (
-              <div className="flex min-h-[42px] items-center rounded-[10px] border border-dashed border-zinc-800 px-3 text-xs text-zinc-500 light:border-zinc-300">
+              <div className="flex min-h-[42px] items-center rounded-[10px] border border-dashed border-zinc-800 px-3 text-xs text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-300">
                 Select a vendor first
               </div>
             ) : useCatalog ? (
@@ -903,7 +903,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     );
                   })}
                 </select>
-                <p className="mt-1 truncate text-[10px] text-zinc-500">
+                <p className="mt-1 truncate text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                   {selectedCatalogProduct?.description ||
                     'Choose the product that matches the affected asset.'}
                 </p>
@@ -924,7 +924,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   placeholder="Enter a product name, e.g. http_server"
                   className={`${inputClass} px-3`}
                 />
-                <p className="mt-1 text-[10px] text-zinc-500">
+                <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                   {isCustomVendor
                     ? 'Custom vendors have no catalog products; enter the NVD product name.'
                     : 'Use a custom product when it is not listed in the catalog.'}
@@ -950,7 +950,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-[10px] text-zinc-500">NVD request cap: 200</p>
+            <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">NVD request cap: 200</p>
           </div>
 
           {/* Submit */}
@@ -971,7 +971,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800/80 pt-3 text-[11px] text-zinc-500 light:border-zinc-200">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800/80 pt-3 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-200">
           <p>
             Exact CPE 2.3 matching runs first. Keyword correlation is used only when no exact
             matches are found.
@@ -1026,12 +1026,12 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   <p className="text-xs font-semibold text-zinc-200 light:text-zinc-800">
                     {step.title}
                   </p>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">{step.body}</p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-400 dark:text-zinc-500 light:text-zinc-600">{step.body}</p>
                 </div>
               </div>
             ))}
           </div>
-          <p className="mt-4 border-t border-zinc-800/80 pt-3 text-[11px] leading-relaxed text-zinc-500 light:border-zinc-200">
+          <p className="mt-4 border-t border-zinc-800/80 pt-3 text-[11px] leading-relaxed text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-200">
             Searches are executed server-side against NVD. Anonymous requests share a limited rate
             budget; configure an NVD API key in Settings for higher throughput.
           </p>
@@ -1074,7 +1074,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
           <div className="flex items-center gap-2 border-b border-zinc-800/80 px-4 py-3 text-xs text-zinc-400 light:border-zinc-200">
             <Loader2 className="h-4 w-4 animate-spin text-blue-400" aria-hidden="true" />
             Querying the NVD CVE API…
-            <span className="text-zinc-500">
+            <span className="text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
               Exact CPE matching may fall back to keyword correlation.
             </span>
           </div>
@@ -1094,18 +1094,18 @@ export const ThreatIntelligenceSearch: React.FC = () => {
       {/* No matches */}
       {results && results.length === 0 && !loading && !error && (
         <section className={`${panel} p-8 text-center`}>
-          <span className="mx-auto grid h-12 w-12 place-items-center rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-500 light:border-zinc-300 light:bg-zinc-100">
+          <span className="mx-auto grid h-12 w-12 place-items-center rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-300 light:bg-zinc-100">
             <Inbox className="h-5 w-5" aria-hidden="true" />
           </span>
           <p className="mt-3 text-sm font-semibold text-zinc-200 light:text-zinc-800">
             No vulnerabilities matched this query
           </p>
-          <p className="mx-auto mt-1 max-w-lg text-xs leading-relaxed text-zinc-500">
+          <p className="mx-auto mt-1 max-w-lg text-xs leading-relaxed text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
             NVD returned no CVEs for the selected vendor and product. Check the spelling, try the
             vendor&apos;s canonical product identifier, or widen the result limit.
           </p>
           {executedSearch && (
-            <p className="mt-3 font-mono text-[10px] text-zinc-500">
+            <p className="mt-3 font-mono text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
               {executedSearch.vendorName} / {executedSearch.productName} ·{' '}
               {formatDateTime(executedSearch.at)}
             </p>
@@ -1158,7 +1158,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   <h2 className="text-sm font-semibold text-zinc-100 light:text-zinc-900">
                     Search results
                   </h2>
-                  <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-500">
+                  <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                     {executedSearch && (
                       <>
                         <span>
@@ -1222,7 +1222,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
               <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                 <div className="relative w-full sm:max-w-xs">
                   <Search
-                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500"
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 light:text-zinc-600"
                     aria-hidden="true"
                   />
                   <input
@@ -1231,14 +1231,14 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     placeholder="Filter by CVE, title, CWE, or CPE…"
                     value={resultQuery}
                     onChange={(event) => setResultQuery(event.target.value)}
-                    className={`${inputClass} py-2 pl-9 pr-9 text-xs`}
-                  />
+                     className={`${inputClass} pl-9 pr-9`}
+                   />
                   {resultQuery && (
                     <button
                       type="button"
                       aria-label="Clear result filter"
                       onClick={() => setResultQuery('')}
-                      className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 light:hover:bg-zinc-200 light:hover:text-zinc-900"
+                      className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md text-zinc-400 dark:text-zinc-500 light:text-zinc-600 transition hover:bg-zinc-800 hover:text-zinc-200 light:hover:bg-zinc-200 light:hover:text-zinc-900"
                     >
                       <X className="h-3 w-3" aria-hidden="true" />
                     </button>
@@ -1252,7 +1252,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   id="severity-filter"
                   value={severityFilter}
                   onChange={(event) => setSeverityFilter(event.target.value as SeverityFilter)}
-                  className={`${inputClass} w-full py-2 text-xs sm:w-40`}
+                  className={`${inputClass} sm:w-40`}
                 >
                   <option value="ALL">All severities</option>
                   <option value="CRITICAL">Critical</option>
@@ -1287,7 +1287,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   </button>
                 )}
 
-                <span className="ml-auto text-[11px] text-zinc-500" aria-live="polite">
+                <span className="ml-auto text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600" aria-live="polite">
                   {filteredResults.length === results.length
                     ? `${results.length} results`
                     : `${filteredResults.length} of ${results.length} results`}
@@ -1298,7 +1298,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1080px] text-left text-xs">
                 <caption className="sr-only">NVD vulnerability search results</caption>
-                <thead className="border-b border-zinc-800/80 bg-zinc-950/60 text-[10px] uppercase tracking-[0.06em] text-zinc-500 light:border-zinc-200 light:bg-zinc-50">
+                <thead className="border-b border-zinc-800/80 bg-zinc-950/60 text-[10px] uppercase tracking-[0.06em] text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-200 light:bg-zinc-50">
                   <tr>
                     <th
                       scope="col"
@@ -1360,13 +1360,13 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     <tr>
                       <td colSpan={8} className="px-4 py-14 text-center">
                         <div className="mx-auto flex max-w-sm flex-col items-center">
-                          <span className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-500 light:border-zinc-300 light:bg-zinc-100">
+                          <span className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-300 light:bg-zinc-100">
                             <Inbox className="h-5 w-5" aria-hidden="true" />
                           </span>
                           <p className="mt-3 text-sm font-semibold text-zinc-300 light:text-zinc-800">
                             No results match these filters
                           </p>
-                          <p className="mt-1 text-xs text-zinc-500">
+                          <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                             Clear the text, severity, or KEV filters to restore the full result set.
                           </p>
                           <button
@@ -1401,7 +1401,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                               {cve.title || 'No title provided'}
                             </p>
                             {cve.cwe.length > 0 && (
-                              <p className="mt-1 truncate font-mono text-[10px] text-zinc-500">
+                              <p className="mt-1 truncate font-mono text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                                 {cve.cwe.slice(0, 3).join(' · ')}
                                 {cve.cwe.length > 3 ? ` +${cve.cwe.length - 3}` : ''}
                               </p>
@@ -1414,7 +1414,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                             <span className="font-mono text-sm font-semibold tabular-nums text-zinc-200 light:text-zinc-800">
                               {scored ? cve.cvss.score.toFixed(1) : '—'}
                             </span>
-                            <span className="ml-1.5 font-mono text-[10px] text-zinc-500">
+                            <span className="ml-1.5 font-mono text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                               {scored ? `v${cve.cvss.version}` : 'Unscored'}
                             </span>
                           </td>
@@ -1429,7 +1429,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                                 </p>
                               )}
                               {hasEpss(cve.epss) && (
-                                <p className="font-mono text-[10px] text-zinc-500">
+                                <p className="font-mono text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                                   EPSS {formatEpss(cve.epss?.score ?? 0)} ·{' '}
                                   {formatPercentile(cve.epss?.percentile ?? 0)}
                                 </p>
@@ -1446,13 +1446,13 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                                   {hit.matchingCpes[0]}
                                 </code>
                                 {hit.matchingCpes.length > 1 && (
-                                  <span className="text-[10px] text-zinc-500">
+                                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                                     +{hit.matchingCpes.length - 1} more
                                   </span>
                                 )}
                               </div>
                             ) : (
-                              <span className="text-[11px] text-zinc-500">—</span>
+                              <span className="text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">—</span>
                             )}
                           </td>
                           <td className="px-4 py-3">
@@ -1511,7 +1511,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
           >
             <div className="flex items-start justify-between gap-3 border-b border-zinc-800/80 px-4 py-4 light:border-zinc-200 sm:px-5">
               <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                   NVD vulnerability record
                 </p>
                 <div className="mt-1.5 flex flex-wrap items-center gap-2">
@@ -1548,7 +1548,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   type="button"
                   onClick={() => setInspect(null)}
                   aria-label="Close vulnerability details"
-                  className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 light:hover:bg-zinc-100 light:hover:text-zinc-900"
+                  className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 dark:text-zinc-500 light:text-zinc-600 transition hover:bg-zinc-800 hover:text-zinc-200 light:hover:bg-zinc-100 light:hover:text-zinc-900"
                 >
                   <X className="h-4 w-4" aria-hidden="true" />
                 </button>
@@ -1562,7 +1562,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
 
               <dl className="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-zinc-800/80 bg-zinc-950/40 p-3 text-[11px] light:border-zinc-200 light:bg-zinc-50 sm:grid-cols-4">
                 <div>
-                  <dt className="text-zinc-500">CVSS</dt>
+                  <dt className="text-zinc-400 dark:text-zinc-500 light:text-zinc-600">CVSS</dt>
                   <dd className="mt-0.5 font-mono text-zinc-200 light:text-zinc-800">
                     {inspect.cve.cvss.version === 'UNKNOWN'
                       ? 'Unscored'
@@ -1570,7 +1570,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-zinc-500">EPSS</dt>
+                  <dt className="text-zinc-400 dark:text-zinc-500 light:text-zinc-600">EPSS</dt>
                   <dd className="mt-0.5 font-mono text-zinc-200 light:text-zinc-800">
                     {hasEpss(inspect.cve.epss)
                       ? `${formatEpss(inspect.cve.epss?.score ?? 0)} · ${formatPercentile(
@@ -1580,19 +1580,19 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-zinc-500">Published</dt>
+                  <dt className="text-zinc-400 dark:text-zinc-500 light:text-zinc-600">Published</dt>
                   <dd className="mt-0.5 font-mono text-zinc-200 light:text-zinc-800">
                     {formatDate(inspect.cve.publishedDate)}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-zinc-500">Modified</dt>
+                  <dt className="text-zinc-400 dark:text-zinc-500 light:text-zinc-600">Modified</dt>
                   <dd className="mt-0.5 font-mono text-zinc-200 light:text-zinc-800">
                     {formatDate(inspect.cve.modifiedDate)}
                   </dd>
                 </div>
                 <div className="col-span-2">
-                  <dt className="text-zinc-500">Exploit intelligence</dt>
+                  <dt className="text-zinc-400 dark:text-zinc-500 light:text-zinc-600">Exploit intelligence</dt>
                   <dd className={`mt-0.5 font-medium ${exploitTone(inspect.cve.exploitStatus)}`}>
                     {inspect.cve.exploitStatus === 'None'
                       ? 'No known exploitation'
@@ -1600,7 +1600,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   </dd>
                 </div>
                 <div className="col-span-2">
-                  <dt className="text-zinc-500">CISA KEV</dt>
+                  <dt className="text-zinc-400 dark:text-zinc-500 light:text-zinc-600">CISA KEV</dt>
                   <dd className="mt-0.5 text-zinc-200 light:text-zinc-800">
                     {inspect.cve.cisaKev?.isKev ? (
                       <>
@@ -1619,7 +1619,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                 </div>
                 {inspect.cve.cisaKev?.requiredAction && (
                   <div className="col-span-2 sm:col-span-4">
-                    <dt className="text-zinc-500">Required action</dt>
+                    <dt className="text-zinc-400 dark:text-zinc-500 light:text-zinc-600">Required action</dt>
                     <dd className="mt-0.5 leading-relaxed text-zinc-300 light:text-zinc-700">
                       {inspect.cve.cisaKev?.requiredAction}
                     </dd>
@@ -1646,7 +1646,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     ))}
                   </ul>
                 ) : (
-                  <p className="mt-1 text-[11px] text-zinc-500">
+                  <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                     No CPE entries matched for this result.
                   </p>
                 )}
@@ -1654,7 +1654,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
 
               <section className="mt-5">
                 <h3 className="flex items-center gap-2 text-xs font-semibold text-zinc-200 light:text-zinc-800">
-                  <Tag className="h-3.5 w-3.5 text-zinc-500" aria-hidden="true" />
+                  <Tag className="h-3.5 w-3.5 text-zinc-400 dark:text-zinc-500 light:text-zinc-600" aria-hidden="true" />
                   Weaknesses
                 </h3>
                 {inspect.cve.cwe.length > 0 ? (
@@ -1669,7 +1669,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     ))}
                   </div>
                 ) : (
-                  <p className="mt-1 text-[11px] text-zinc-500">No CWE assigned.</p>
+                  <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">No CWE assigned.</p>
                 )}
               </section>
 
@@ -1693,7 +1693,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   )}
                   {(inspect.cve.remediation?.immediateActions?.length ?? 0) > 0 && (
                     <div className="mt-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                         Immediate actions
                       </p>
                       <ul className="mt-1 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-zinc-400 light:text-zinc-600">
@@ -1705,7 +1705,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   )}
                   {(inspect.cve.remediation?.workarounds?.length ?? 0) > 0 && (
                     <div className="mt-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
                         Workarounds
                       </p>
                       <ul className="mt-1 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-zinc-400 light:text-zinc-600">

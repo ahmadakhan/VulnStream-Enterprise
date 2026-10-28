@@ -232,25 +232,25 @@ export const ThreatFeedsView: React.FC = () => {
           </button>
           <button
             onClick={handleOpenAdd}
-            className="text-xs px-3.5 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition flex items-center space-x-1.5 shadow-sm"
+            className="text-xs px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-semibold border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 transition flex items-center space-x-1.5 shadow-sm"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add Threat Feed</span>
-          </button>
-        </div>
+             <Plus className="w-3.5 h-3.5" />
+             <span>Add Threat Feed</span>
+           </button>
+         </div>
       </div>
 
       {/* Search & Stats Bar */}
       <div className="ui-panel bg-zinc-900/50 dark:bg-zinc-900/50 light:bg-white border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm transition-colors">
         <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
+          <Search className="w-4 h-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 absolute left-3 top-2.5" />
           <input
             type="text"
             aria-label="Search threat feeds"
             placeholder="Search feeds by vendor, protocol, or URL..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 placeholder-zinc-500 focus:outline-none focus:border-zinc-600 transition"
+             className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl pl-9 pr-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 dark:placeholder-zinc-500 light:placeholder-zinc-400 focus:outline-none focus:border-zinc-600 transition"
           />
         </div>
 
@@ -261,9 +261,9 @@ export const ThreatFeedsView: React.FC = () => {
               {feeds.filter((f) => f.enabled).length} Active Feeds
             </span>
           </div>
-          <div className="flex items-center space-x-1.5 text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-            <ShieldCheck className="w-3.5 h-3.5 text-zinc-400" />
-            <span>SSRF Guard: Enforced</span>
+           <div className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>SSRF Guard: Enforced</span>
           </div>
         </div>
       </div>
@@ -310,7 +310,7 @@ export const ThreatFeedsView: React.FC = () => {
             <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
               {filteredFeeds.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-zinc-500">
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
                     {feeds.length
                       ? 'No feeds match your search.'
                       : 'No feeds configured yet. Add a source to start ingesting threat intelligence.'}
@@ -335,7 +335,7 @@ export const ThreatFeedsView: React.FC = () => {
                           </span>
                         )}
                       </div>
-                      <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                      <div className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono mt-0.5">
                         Last Run Ingested: {feed.itemCountLastRun || 0} items
                       </div>
                     </td>
@@ -356,7 +356,7 @@ export const ThreatFeedsView: React.FC = () => {
                     {/* Auth */}
                     <td className="py-3 px-4 font-mono text-[11px]">
                       <div className="flex items-center space-x-1 text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
-                        {feed.authType !== 'NONE' && <Lock className="w-3 h-3 text-zinc-400" />}
+                        {feed.authType !== 'NONE' && <Lock className="w-3 h-3 text-zinc-400 dark:text-zinc-400 light:text-zinc-600" />}
                         <span>{feed.authType}</span>
                       </div>
                       <div className="text-[10px] text-zinc-500">Max {feed.rateLimitPerMin} req/min</div>
@@ -453,37 +453,37 @@ export const ThreatFeedsView: React.FC = () => {
             role="dialog"
             aria-modal="true"
             aria-labelledby="feed-dialog-heading"
-            className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative"
+            className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative"
           >
             <button
               aria-label="Close feed dialog"
               onClick={() => setShowAddModal(false)}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200"
+              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200 dark:text-zinc-500 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-800"
             >
               <X className="w-5 h-5" />
             </button>
 
             <h2
               id="feed-dialog-heading"
-              className="text-base font-bold text-zinc-100 mb-1 flex items-center gap-2"
+              className="text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-1 flex items-center gap-2"
             >
-              <Radio className="w-4 h-4 text-zinc-300" />
+              <Radio className="w-4 h-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-600" />
               {editingFeed ? 'Edit Threat Feed Source' : 'Register Custom Threat Feed'}
             </h2>
-            <p className="text-xs text-zinc-400 mb-4">
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
               Endpoints are protected against SSRF attacks. Secrets are encrypted with AES-256-GCM.
               Destination hosts must be allowed by the deployment administrator.
             </p>
 
             {formError && (
-              <div className="bg-zinc-950 border border-zinc-700 text-zinc-300 text-xs p-3 rounded-xl mb-4">
+                            <div className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 text-xs p-3 rounded-xl mb-4">
                 {formError}
               </div>
             )}
 
             <form onSubmit={handleSaveFeed} className="space-y-4 text-xs">
               <div>
-                <label htmlFor="feed-name" className="block text-zinc-400 mb-1 font-mono">
+                <label htmlFor="feed-name" className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
                   Feed Name *
                 </label>
                 <input
@@ -493,13 +493,13 @@ export const ThreatFeedsView: React.FC = () => {
                   placeholder="e.g. Mandiant Threat Intel Stream"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono focus:border-zinc-600 focus:outline-none"
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="feed-format" className="block text-zinc-400 mb-1 font-mono">
+                  <label htmlFor="feed-format" className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
                     Protocol / Format *
                   </label>
                   <select
@@ -522,7 +522,7 @@ export const ThreatFeedsView: React.FC = () => {
                           : {}),
                       });
                     }}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 font-mono focus:border-zinc-600 focus:outline-none"
+                    className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-mono focus:border-zinc-600 focus:outline-none"
                   >
                     <option value="JSON_SEARCH_API">Normalized CVE JSON array</option>
                     <option value="NVD_API">NVD CVE API 2.0</option>
@@ -536,7 +536,7 @@ export const ThreatFeedsView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label htmlFor="feed-rate" className="block text-zinc-400 mb-1 font-mono">
+                  <label htmlFor="feed-rate" className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
                     Rate Limit (req/min)
                   </label>
                   <input
@@ -546,14 +546,14 @@ export const ThreatFeedsView: React.FC = () => {
                     max={600}
                     value={formData.rateLimitPerMin}
                     onChange={(e) => setFormData({ ...formData, rateLimitPerMin: Number(e.target.value) })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono focus:border-zinc-600 focus:outline-none"
+                    className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="feed-timeout" className="block text-zinc-400 mb-1 font-mono">
+                  <label htmlFor="feed-timeout" className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
                     Request timeout (seconds)
                   </label>
                   <input
@@ -570,7 +570,7 @@ export const ThreatFeedsView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label htmlFor="feed-recovery" className="block text-zinc-400 mb-1 font-mono">
+                  <label htmlFor="feed-recovery" className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
                     Recovery delay (minutes)
                   </label>
                   <input
@@ -593,7 +593,7 @@ export const ThreatFeedsView: React.FC = () => {
               </div>
 
               <div>
-                <label htmlFor="feed-url" className="block text-zinc-400 mb-1 font-mono">
+                <label htmlFor="feed-url" className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
                   Endpoint URL *
                 </label>
                 <input
@@ -603,20 +603,20 @@ export const ThreatFeedsView: React.FC = () => {
                   placeholder="https://feed.provider.org/threats.json"
                   value={formData.url}
                   onChange={(e) => setFormData({ ...formData, url: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono focus:border-zinc-600 focus:outline-none"
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="feed-auth-type" className="block text-zinc-400 mb-1 font-mono">
+                  <label htmlFor="feed-auth-type" className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
                     Authentication Type
                   </label>
                   <select
                     id="feed-auth-type"
                     value={formData.authType}
                     onChange={(e) => setFormData({ ...formData, authType: e.target.value as FeedAuthType })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-200 font-mono focus:border-zinc-600 focus:outline-none"
+                    className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-200 dark:text-zinc-200 light:text-zinc-800 font-mono focus:border-zinc-600 focus:outline-none"
                   >
                     <option value="NONE">None (Public)</option>
                     <option value="API_KEY">API Key Header</option>
@@ -626,7 +626,7 @@ export const ThreatFeedsView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label htmlFor="feed-token" className="block text-zinc-400 mb-1 font-mono">
+                  <label htmlFor="feed-token" className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
                     Secret Key / Token
                   </label>
                   <input
@@ -644,22 +644,22 @@ export const ThreatFeedsView: React.FC = () => {
                     disabled={formData.authType === 'NONE'}
                     value={formData.authSecretKey}
                     onChange={(e) => setFormData({ ...formData, authSecretKey: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono focus:border-zinc-600 focus:outline-none disabled:opacity-40"
+                    className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none disabled:opacity-40"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end space-x-2 pt-3 border-t border-zinc-800">
+              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800 dark:border-zinc-800 light:border-zinc-200">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 text-xs font-medium transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 font-semibold"
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold transition"
                 >
                   {editingFeed ? 'Save Changes' : 'Save Feed'}
                 </button>
@@ -672,17 +672,17 @@ export const ThreatFeedsView: React.FC = () => {
       {/* Delete Feed Confirmation Modal */}
       {deletingFeed && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
-            <h3 className="text-sm font-bold text-zinc-100 mb-2">Delete Threat Feed Source?</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed mb-6">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+            <h3 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-2">Delete Threat Feed Source?</h3>
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 leading-relaxed mb-6">
               Are you sure you want to remove <strong>{deletingFeed.name}</strong>? Automated polling for this
               endpoint will terminate immediately.
             </p>
-            <div className="flex justify-end space-x-2">
+            <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setDeletingFeed(null)}
-                className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium"
+                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 text-xs font-medium transition"
               >
                 Cancel
               </button>
@@ -690,7 +690,7 @@ export const ThreatFeedsView: React.FC = () => {
                 type="button"
                 onClick={() => void handleDeleteFeed()}
                 disabled={deletePending}
-                className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
+                className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold disabled:opacity-50 transition"
               >
                 {deletePending ? 'Deleting…' : 'Delete Feed'}
               </button>

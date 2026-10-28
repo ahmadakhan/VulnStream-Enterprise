@@ -205,13 +205,13 @@ export const RecipientsView: React.FC = () => {
         </div>
 
         <div className="relative w-72 hidden md:block">
-          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-2.5" />
+          <Search className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 absolute left-3 top-2.5" />
           <input
             type="text"
             placeholder={activeTab === 'email' ? 'Search recipients...' : 'Search webhooks...'}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl pl-8 pr-3 py-1.5 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 placeholder-zinc-500 focus:outline-none focus:border-zinc-600 transition"
+            className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl pl-8 pr-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 placeholder-zinc-500 dark:placeholder-zinc-500 light:placeholder-zinc-400 focus:outline-none focus:border-zinc-600 transition"
           />
         </div>
       </div>
@@ -236,7 +236,7 @@ export const RecipientsView: React.FC = () => {
                 <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
                   {filteredRecipients.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-zinc-500">
+                      <td colSpan={7} className="py-8 text-center text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
                         No recipients match the filter.
                       </td>
                     </tr>
@@ -298,7 +298,7 @@ export const RecipientsView: React.FC = () => {
                         <td className="py-3 px-4 text-right">
                           <button
                             onClick={() => setDeletingRecipientId(r.id)}
-                            className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
+                            className="p-1 rounded hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
                             title="Delete"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -412,35 +412,35 @@ export const RecipientsView: React.FC = () => {
       {/* Webhook Test Result Modal */}
       {testResult && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               onClick={() => setTestResult(null)}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200"
+              className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-800"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center space-x-2 text-emerald-400 mb-2">
+            <div className="flex items-center gap-2 text-emerald-400 mb-2">
               <CheckCircle2 className="w-5 h-5" />
-              <h2 className="text-sm font-bold text-zinc-100">Webhook Test Queued</h2>
+              <h2 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900">Webhook Test Queued</h2>
             </div>
-            <p className="text-xs text-zinc-400 mb-4">
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
               A test notification was queued for{' '}
-              <strong className="text-zinc-200">{testResult.endpointName}</strong>.
+              <strong className="text-zinc-200 dark:text-zinc-200 light:text-zinc-800">{testResult.endpointName}</strong>.
             </p>
 
-            <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 font-mono text-[11px] space-y-2 text-zinc-300">
+            <div className="bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-3 font-mono text-[11px] space-y-2 text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
               <div className="flex justify-between">
-                <span className="text-zinc-500">HTTP Status:</span>
+                <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600">HTTP Status:</span>
                 <span className="text-emerald-400 font-bold">{testResult.statusCode} Queued</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-zinc-500">Delivery:</span>
-                <span className="text-zinc-200">Pending worker acceptance</span>
+                <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600">Delivery:</span>
+                <span className="text-zinc-200 dark:text-zinc-200 light:text-zinc-800">Pending worker acceptance</span>
               </div>
               <div>
-                <span className="text-zinc-500 block mb-1">Signature:</span>
-                <span className="text-zinc-400 text-[10px] break-all bg-zinc-900 p-1.5 rounded block">
+                <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 block mb-1">Signature:</span>
+                <span className="text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[10px] break-all bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-200 p-1.5 rounded block">
                   {testResult.signature || 'Generated when the worker sends the request'}
                 </span>
               </div>
@@ -449,7 +449,7 @@ export const RecipientsView: React.FC = () => {
             <div className="mt-4 flex justify-end">
               <button
                 onClick={() => setTestResult(null)}
-                className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 font-semibold text-xs transition"
+                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-200 light:hover:bg-zinc-300 text-zinc-100 dark:text-zinc-100 light:text-zinc-800 font-semibold text-xs transition"
               >
                 Close
               </button>
@@ -461,25 +461,25 @@ export const RecipientsView: React.FC = () => {
       {/* Add Email Recipient Modal */}
       {showAddEmailModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               onClick={() => setShowAddEmailModal(false)}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200"
+              className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-800"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <h2 className="text-base font-bold text-zinc-100 mb-1 flex items-center gap-2">
-              <Mail className="w-4 h-4 text-zinc-300" />
+            <h2 className="text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-1 flex items-center gap-2">
+              <Mail className="w-4 h-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-600" />
               Add Email Recipient
             </h2>
-            <p className="text-xs text-zinc-400 mb-4">
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
               Security team recipients are sent alerts automatically. Everyone recipients are held for
               security-team review before delivery.
             </p>
 
             {errorMsg && (
-              <div className="mb-3 p-2.5 bg-zinc-950 border border-rose-800/60 rounded-xl text-xs text-rose-300 flex items-center space-x-1.5">
+              <div className="mb-3 p-2.5 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-rose-800/60 dark:border-rose-800/60 light:border-rose-200/60 rounded-xl text-xs text-rose-300 flex items-center gap-1.5">
                 <AlertCircle className="w-4 h-4" />
                 <span>{errorMsg}</span>
               </div>
@@ -487,42 +487,42 @@ export const RecipientsView: React.FC = () => {
 
             <form onSubmit={handleAddEmailSubmit} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Recipient Name *</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Recipient Name *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Lead DevSecOps"
                   value={emailForm.name}
                   onChange={(e) => setEmailForm({ ...emailForm, name: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Email Address *</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Email Address *</label>
                 <input
                   type="email"
                   required
                   placeholder="e.g. secops-team@enterprise.org"
                   value={emailForm.email}
                   onChange={(e) => setEmailForm({ ...emailForm, email: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Role / Designation</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Role / Designation</label>
                 <input
                   type="text"
                   placeholder="e.g. SOC Tier 3 Responder"
                   value={emailForm.role}
                   onChange={(e) => setEmailForm({ ...emailForm, role: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Notification group</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Notification group</label>
                 <select
                   value={emailForm.deliveryGroup}
                   onChange={(e) =>
@@ -531,18 +531,18 @@ export const RecipientsView: React.FC = () => {
                       deliveryGroup: e.target.value as NonNullable<EmailRecipient['deliveryGroup']>,
                     })
                   }
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                 >
                   <option value="SECURITY_TEAM">Security team · send automatically</option>
                   <option value="EVERYONE">Everyone · require security review</option>
                 </select>
-                <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500">
+                <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
                   Review-required alerts stay queued until an authorized operator approves them.
                 </p>
               </div>
 
               <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Subscription Filter Tier</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Subscription Filter Tier</label>
                 <select
                   value={emailForm.subscriptionTier}
                   onChange={(e) =>
@@ -551,7 +551,7 @@ export const RecipientsView: React.FC = () => {
                       subscriptionTier: e.target.value as EmailRecipient['subscriptionTier'],
                     })
                   }
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                 >
                   <option value="CRITICAL_HIGH_ONLY">Critical &amp; High Only (Standard)</option>
                   <option value="CISA_KEV_ONLY">CISA KEV Actively Exploited Only</option>
@@ -559,17 +559,17 @@ export const RecipientsView: React.FC = () => {
                 </select>
               </div>
 
-              <div className="flex justify-end space-x-2 pt-3 border-t border-zinc-800">
+              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800 dark:border-zinc-800 light:border-zinc-200">
                 <button
                   type="button"
                   onClick={() => setShowAddEmailModal(false)}
-                  className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold text-xs transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 font-semibold"
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold text-xs transition"
                 >
                   Save Recipient
                 </button>
@@ -582,24 +582,24 @@ export const RecipientsView: React.FC = () => {
       {/* Add Webhook Modal */}
       {showAddWebhookModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
               onClick={() => setShowAddWebhookModal(false)}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200"
+              className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-800"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <h2 className="text-base font-bold text-zinc-100 mb-1 flex items-center gap-2">
-              <Webhook className="w-4 h-4 text-zinc-300" />
+            <h2 className="text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-1 flex items-center gap-2">
+              <Webhook className="w-4 h-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-600" />
               Register Autonomous Webhook Channel
             </h2>
-            <p className="text-xs text-zinc-400 mb-4">
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
               Dispatches JSON payloads with HMAC-SHA256 signature immediately upon vulnerability correlation.
             </p>
 
             {errorMsg && (
-              <div className="mb-3 p-2.5 bg-zinc-950 border border-rose-800/60 rounded-xl text-xs text-rose-300 flex items-center space-x-1.5">
+              <div className="mb-3 p-2.5 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-rose-800/60 dark:border-rose-800/60 light:border-rose-200/60 rounded-xl text-xs text-rose-300 flex items-center gap-1.5">
                 <AlertCircle className="w-4 h-4" />
                 <span>{errorMsg}</span>
               </div>
@@ -607,19 +607,19 @@ export const RecipientsView: React.FC = () => {
 
             <form onSubmit={handleAddWebhookSubmit} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Channel Name *</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Channel Name *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. SecOps Alerts (Slack)"
                   value={webhookForm.name}
                   onChange={(e) => setWebhookForm({ ...webhookForm, name: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Provider Format</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Provider Format</label>
                 <select
                   value={webhookForm.provider}
                   onChange={(e) =>
@@ -628,7 +628,7 @@ export const RecipientsView: React.FC = () => {
                       provider: e.target.value as WebhookEndpoint['provider'],
                     })
                   }
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                 >
                   <option value="SLACK">Slack Incoming Webhook</option>
                   <option value="TEAMS">Microsoft Teams Connector</option>
@@ -637,19 +637,19 @@ export const RecipientsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-zinc-400 mb-1 font-mono">Webhook URL *</label>
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">Webhook URL *</label>
                 <input
                   type="url"
                   required
                   placeholder="https://hooks.slack.com/services/..."
                   value={webhookForm.url}
                   onChange={(e) => setWebhookForm({ ...webhookForm, url: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono text-[11px] focus:border-zinc-600 focus:outline-none"
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-zinc-400 mb-1 font-mono">
+                <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
                   HMAC shared secret (32+ characters for Generic HMAC)
                 </label>
                 <input
@@ -657,21 +657,21 @@ export const RecipientsView: React.FC = () => {
                   placeholder="Required for Generic HMAC receivers"
                   value={webhookForm.secretToken}
                   onChange={(e) => setWebhookForm({ ...webhookForm, secretToken: e.target.value })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono focus:border-zinc-600 focus:outline-none"
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl px-3 py-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
                 />
               </div>
 
-              <div className="flex justify-end space-x-2 pt-3 border-t border-zinc-800">
+              <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800 dark:border-zinc-800 light:border-zinc-200">
                 <button
                   type="button"
                   onClick={() => setShowAddWebhookModal(false)}
-                  className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold text-xs transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 font-semibold"
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold text-xs transition"
                 >
                   Register Webhook
                 </button>
@@ -684,15 +684,15 @@ export const RecipientsView: React.FC = () => {
       {/* Delete Recipient Confirmation */}
       {deletingRecipientId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
-            <h3 className="text-sm font-bold text-zinc-100 mb-2">Remove Recipient?</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed mb-6">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+            <h3 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-2">Remove Recipient?</h3>
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 leading-relaxed mb-6">
               This recipient will stop receiving automated vulnerability notifications.
             </p>
-            <div className="flex justify-end space-x-2">
+            <div className="flex justify-end gap-2">
               <button
                 onClick={() => setDeletingRecipientId(null)}
-                className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium"
+                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold text-xs transition"
               >
                 Cancel
               </button>
@@ -700,7 +700,7 @@ export const RecipientsView: React.FC = () => {
                 onClick={async () => {
                   if (await deleteRecipient(deletingRecipientId)) setDeletingRecipientId(null);
                 }}
-                className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
+                className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold disabled:opacity-50 transition"
               >
                 Remove
               </button>
@@ -712,15 +712,15 @@ export const RecipientsView: React.FC = () => {
       {/* Delete Webhook Confirmation */}
       {deletingWebhookId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="ui-panel bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
-            <h3 className="text-sm font-bold text-zinc-100 mb-2">Remove Webhook Endpoint?</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed mb-6">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+            <h3 className="text-sm font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-2">Remove Webhook Endpoint?</h3>
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 leading-relaxed mb-6">
               Automated payload delivery to this endpoint will be terminated.
             </p>
-            <div className="flex justify-end space-x-2">
+            <div className="flex justify-end gap-2">
               <button
                 onClick={() => setDeletingWebhookId(null)}
-                className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium"
+                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 light:bg-zinc-100 light:hover:bg-zinc-200 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold text-xs transition"
               >
                 Cancel
               </button>
@@ -728,7 +728,7 @@ export const RecipientsView: React.FC = () => {
                 onClick={async () => {
                   if (await deleteWebhook(deletingWebhookId)) setDeletingWebhookId(null);
                 }}
-                className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
+                className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold disabled:opacity-50 transition"
               >
                 Remove
               </button>
