@@ -121,6 +121,7 @@ export const recipientSchema = z.object({
   deliveryGroup: z.enum(['SECURITY_TEAM', 'EVERYONE']).default('SECURITY_TEAM'),
   subscriptionTier: z.enum(['ALL_SEVERITIES', 'CRITICAL_HIGH_ONLY', 'CISA_KEV_ONLY']),
   enabled: z.boolean(),
+  dailyDigest: z.boolean().default(false),
 });
 export const webhookSchema = z
   .object({
@@ -329,7 +330,7 @@ export const settingsSchema = z.object({
     fromEmail: z.literal(''),
   }),
   // Defaults keep settings stored before retention was configurable valid.
-  retentionConfig: z
+       retentionConfig: z
     .object({
       enabled: z.boolean(),
       retentionHours: z.number().int().min(1).max(8760),
@@ -346,6 +347,14 @@ export const settingsSchema = z.object({
       autoCleanup: true,
       retentionMode: 'rolling',
     }),
+  timezone: z.string().min(1).max(100).default('UTC'),
+  dailyDigest: z
+    .object({
+      enabled: z.boolean().default(true),
+      time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default('09:00'),
+      includeHealthReport: z.boolean().default(true),
+    })
+    .default({ enabled: true, time: '09:00', includeHealthReport: true }),
 }).superRefine((value, ctx) => {
   if (value.emailRetryMaxDelayMinutes < value.emailRetryInitialDelayMinutes)
     ctx.addIssue({

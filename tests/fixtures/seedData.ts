@@ -823,6 +823,12 @@ export const INITIAL_SETTINGS: AppSettings = {
     autoCleanup: true,
     retentionMode: 'rolling',
   },
+  timezone: 'America/New_York',
+  dailyDigest: {
+    enabled: true,
+    time: '09:00',
+    includeHealthReport: true,
+  },
 };
 
 export const INITIAL_ADVISORY_TEMPLATE = `<!DOCTYPE html>

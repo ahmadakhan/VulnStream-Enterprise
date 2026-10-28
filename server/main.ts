@@ -28,6 +28,7 @@ import { createApp } from './app';
 import { createRequester } from './network';
 import { createMailSender, deliverNext } from './delivery';
 import { flushDueDigest } from './digest';
+import { runDailyDigest } from './dailyDigest';
 import { closePdfRenderer } from './pdf';
 import { processPipeline } from './pipeline';
 import { runRetention } from './retention';
@@ -264,6 +265,22 @@ const retentionTick = () => {
 };
 const retentionTimer = setInterval(retentionTick, 60000);
 retentionTick();
+// The daily digest is a calendar job (daily summary + health report at the
+// configured time/timezone). It is polled on the same cadence as retention and
+// self-claims the calendar day, so it needs no separate clock.
+let dailyDigestRunning: Promise<unknown> | null = null;
+const dailyDigestTick = () => {
+  if (stopping || config.WORKER_ENABLED !== 'true' || dailyDigestRunning) return;
+  dailyDigestRunning = (async () => {
+    await runDailyDigest(pool);
+  })()
+    .catch(report('dailyDigest'))
+    .finally(() => {
+      dailyDigestRunning = null;
+    });
+};
+const dailyDigestTimer = setInterval(dailyDigestTick, 60000);
+dailyDigestTick();
 const cleanup = setInterval(() => {
   // Session and login-attempt expiry are security invariants, not retained
   // business data. Queue rows and operational events follow the retention

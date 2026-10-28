@@ -35,6 +35,31 @@ const withEmailRetryDefaults = (value: AppSettings): AppSettings => ({
   emailRetryMaxDelayMinutes: value.emailRetryMaxDelayMinutes ?? 60,
 });
 
+export const TIMEZONES: string[] = [
+  'UTC',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Europe/Moscow',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Sao_Paulo',
+  'America/Argentina/Buenos_Aires',
+  'America/Mexico_City',
+  'America/Toronto',
+  'Asia/Tokyo',
+  'Asia/Shanghai',
+  'Asia/Kolkata',
+  'Asia/Dubai',
+  'Asia/Singapore',
+  'Australia/Sydney',
+  'Australia/Melbourne',
+  'Pacific/Auckland',
+  'Pacific/Honolulu',
+];
+
 function SectionHeading({
   icon: Icon,
   title,
@@ -103,7 +128,12 @@ export function SettingsView() {
      (form.emailRetryMaxAttempts ?? 6) !== (settings.emailRetryMaxAttempts ?? 6) ||
      (form.emailRetryInitialDelayMinutes ?? 1) !==
        (settings.emailRetryInitialDelayMinutes ?? 1) ||
-      (form.emailRetryMaxDelayMinutes ?? 60) !== (settings.emailRetryMaxDelayMinutes ?? 60);
+      (form.emailRetryMaxDelayMinutes ?? 60) !== (settings.emailRetryMaxDelayMinutes ?? 60) ||
+    form.timezone !== settings.timezone ||
+    (form.dailyDigest?.enabled ?? false) !== (settings.dailyDigest?.enabled ?? false) ||
+    (form.dailyDigest?.time ?? '09:00') !== (settings.dailyDigest?.time ?? '09:00') ||
+    (form.dailyDigest?.includeHealthReport ?? true) !==
+      (settings.dailyDigest?.includeHealthReport ?? true);
   const securityDirty =
     securityForm.sessionTimeoutMins !== settings.securityPolicy.sessionTimeoutMins ||
     securityForm.minPasswordLen !== settings.securityPolicy.minPasswordLen ||
@@ -277,6 +307,24 @@ export function SettingsView() {
                     </span>
                   </label>
                 </div>
+
+                <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
+                    Timezone
+                    <select
+                      className={field}
+                      value={form.timezone || 'UTC'}
+                      onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+                    >
+                      {TIMEZONES.map((tz) => (
+                        <option key={tz} value={tz}>
+                          {tz}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="ui-description mt-1.5 block">
+                      Timezone used to schedule the daily digest and to render human-readable dates.
+                    </span>
+                  </label>
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">

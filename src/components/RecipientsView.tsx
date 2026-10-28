@@ -8,6 +8,7 @@ export const RecipientsView: React.FC = () => {
   const {
     recipients,
     addRecipient,
+    updateRecipient,
     toggleRecipientEnabled,
     deleteRecipient,
     webhooks,
@@ -34,6 +35,7 @@ export const RecipientsView: React.FC = () => {
     deliveryGroup: 'SECURITY_TEAM' as NonNullable<EmailRecipient['deliveryGroup']>,
     subscriptionTier: 'CRITICAL_HIGH_ONLY' as EmailRecipient['subscriptionTier'],
     enabled: true,
+    dailyDigest: false,
   });
 
   // Webhook form state
@@ -77,6 +79,7 @@ export const RecipientsView: React.FC = () => {
       deliveryGroup: emailForm.deliveryGroup,
       subscriptionTier: emailForm.subscriptionTier,
       enabled: emailForm.enabled,
+      dailyDigest: emailForm.dailyDigest,
     });
 
     if (ok) {
@@ -88,6 +91,7 @@ export const RecipientsView: React.FC = () => {
         deliveryGroup: 'SECURITY_TEAM',
         subscriptionTier: 'CRITICAL_HIGH_ONLY',
         enabled: true,
+        dailyDigest: false,
       });
     } else {
       setErrorMsg('Invalid email format. Please check and try again.');
@@ -230,15 +234,16 @@ export const RecipientsView: React.FC = () => {
                     <th className="py-3 px-4">Delivery / filter</th>
                     <th className="py-3 px-4">Success Rate</th>
                     <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Daily digest</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
-                  {filteredRecipients.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="py-8 text-center text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
-                        No recipients match the filter.
-                      </td>
+                    {filteredRecipients.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="py-8 text-center text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
+                          No recipients match the filter.
+                        </td>
                     </tr>
                   ) : (
                     filteredRecipients.map((r) => (
@@ -292,10 +297,24 @@ export const RecipientsView: React.FC = () => {
                                 : 'bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-100 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 border-zinc-800 dark:border-zinc-800 light:border-zinc-300'
                             }`}
                           >
-                            {r.enabled ? 'ACTIVE' : 'MUTED'}
-                          </button>
-                        </td>
-                        <td className="py-3 px-4 text-right">
+                          {r.enabled ? 'ACTIVE' : 'MUTED'}
+                            </button>
+                          </td>
+                          <td className="py-3 px-4">
+                            <button
+                              type="button"
+                              onClick={() => updateRecipient({ ...r, dailyDigest: !r.dailyDigest })}
+                              className={`inline-flex items-center justify-center w-5 h-5 rounded border transition ${
+                                r.dailyDigest
+                                  ? 'bg-amber-500 border-amber-500 text-white'
+                                  : 'bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-100 border-zinc-700 dark:border-zinc-700 light:border-zinc-300 text-zinc-500 dark:text-zinc-500 light:text-zinc-600'
+                              }`}
+                              title={r.dailyDigest ? 'Opted out of daily digest' : 'Opt in to daily digest'}
+                            >
+                              <Send className="w-3 h-3" />
+                            </button>
+                          </td>
+                          <td className="py-3 px-4 text-right">
                           <button
                             onClick={() => setDeletingRecipientId(r.id)}
                             className="p-1 rounded hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900 transition"
@@ -558,6 +577,26 @@ export const RecipientsView: React.FC = () => {
                   <option value="ALL_SEVERITIES">All Severities (Includes Low / Medium)</option>
                 </select>
               </div>
+
+              <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={emailForm.dailyDigest}
+                    onChange={(e) => setEmailForm({ ...emailForm, dailyDigest: e.target.checked })}
+                    className="h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-amber-500 focus:ring-amber-500 light:bg-white"
+                  />
+                  <span>
+                    <span className="block font-medium text-zinc-200 light:text-zinc-800">
+                      Subscribe to daily digest
+                    </span>
+                    <span className="ui-description mt-0.5 block">
+                      Receive a daily summary of findings plus an operational health-check report at the
+                      time configured in Settings.
+                    </span>
+                  </span>
+                </div>
+              </label>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-zinc-800 dark:border-zinc-800 light:border-zinc-200">
                 <button

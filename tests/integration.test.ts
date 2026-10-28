@@ -479,7 +479,8 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
         vendorSeed: true,
       });
       assert.equal(seeded.status, 200);
-      const seededFeed = seeded.body as { id: string };
+      const seededFeed = (await list<any>(pool, 'feeds')).find((f) => f.name === 'Seeded NVD');
+      assert.ok(seededFeed, 'Seeded NVD feed should exist in database');
       assert.equal(
         (await command('feed.delete', undefined, seededFeed.id)).status,
         403,
@@ -499,8 +500,34 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
         enabled: false,
       });
       assert.equal(custom.status, 200);
-      const customResult = await command('feed.delete', undefined, (custom.body as { id: string }).id);
+      const customFeed = (await list<any>(pool, 'feeds')).find((f) => f.name === 'Custom Feed');
+      assert.ok(customFeed, 'Custom Feed should exist in database');
+      const customResult = await command('feed.delete', undefined, customFeed.id);
       assert.equal(customResult.status, 200);
+    });
+    await t.test('non-vendor-seeded NVD feeds cannot be deleted but can be toggled', async () => {
+      const nvd = await command('feed.save', {
+        name: 'Custom NVD',
+        type: 'NVD_API',
+        url: 'https://8.8.8.8/nvd',
+        authType: 'NONE',
+        rateLimitPerMin: 10,
+        enabled: true,
+        vendorSeed: false,
+      });
+      assert.equal(nvd.status, 200);
+      const nvdFeed = (await list<any>(pool, 'feeds')).find((f) => f.name === 'Custom NVD');
+      assert.ok(nvdFeed, 'Custom NVD feed should exist in database');
+      assert.equal(
+        (await command('feed.delete', undefined, nvdFeed.id)).status,
+        403,
+        'non-vendor-seeded NVD feed should be rejected',
+      );
+      assert.equal(
+        (await command('feed.toggle', undefined, nvdFeed.id)).status,
+        200,
+        'non-vendor-seeded NVD feed should be toggleable',
+      );
     });
     await t.test('retention policy persists through settings.save', async () => {
       const retentionConfig = {

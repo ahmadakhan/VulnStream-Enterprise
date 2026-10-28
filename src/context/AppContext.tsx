@@ -429,6 +429,7 @@ function useApplication() {
       return result?.success || false;
     },
     addRecipient: (rec: Omit<EmailRecipient, 'id' | 'deliverySuccessRate'>) => save('recipient.save', rec),
+    updateRecipient: (rec: EmailRecipient) => save('recipient.save', rec, rec.id),
     toggleRecipientEnabled: async (id: string) => {
       const updated = !!(await command('recipient.toggle', undefined, id));
       if (updated) await refreshAfterMutation();

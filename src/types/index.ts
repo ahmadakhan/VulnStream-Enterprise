@@ -579,6 +579,8 @@ export interface EmailRecipient {
   subscriptionTier: 'ALL_SEVERITIES' | 'CRITICAL_HIGH_ONLY' | 'CISA_KEV_ONLY';
   enabled: boolean;
   deliverySuccessRate: number;
+  /** Opt a recipient into the daily digest (daily summary + health report) subscription. */
+  dailyDigest?: boolean;
 }
 
 export interface WebhookEndpoint {
@@ -816,6 +818,23 @@ export interface AppSettings {
     fromEmail: string;
   };
   retentionConfig: RetentionConfig;
+  /**
+   * IANA timezone identifier (e.g. `America/New_York`) used for scheduling the
+   * daily digest and for formatting human-readable dates server-side and client-side.
+   * Defaults to `UTC`; an invalid value falls back to `UTC` at runtime.
+   */
+  timezone: string;
+  /**
+   * Daily digest subscription: a daily summary of findings plus an operational
+   * health-check report sent to recipients that opt in, at `time` in `timezone`.
+   */
+  dailyDigest: {
+    enabled: boolean;
+    /** `HH:mm` 24h, e.g. `09:00`. */
+    time: string;
+    /** Include a server health-check snapshot in the daily report. */
+    includeHealthReport: boolean;
+  };
 }
 
 export interface SystemHealth {

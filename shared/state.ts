@@ -54,13 +54,19 @@ export const DEFAULT_SETTINGS: AppSettings = {
   logVerbosity: 'standard',
   ntpConfig: { enabled: false, server: '', driftToleranceMs: 50 },
   mailgunConfig: { enabled: false, apiKey: '', domain: '', fromEmail: '' },
-  retentionConfig: {
+   retentionConfig: {
     enabled: false,
     retentionHours: 24,
     cleanupIntervalMinutes: 60,
     maxArchivedRecords: 10000,
     autoCleanup: true,
     retentionMode: 'rolling',
+  },
+  timezone: 'UTC',
+  dailyDigest: {
+    enabled: true,
+    time: '09:00',
+    includeHealthReport: true,
   },
 };
 /**

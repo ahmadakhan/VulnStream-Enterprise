@@ -1,4 +1,4 @@
- Endpoint URL *--
+--
 -- 030 — per-operator email address for self-service password reset.
 --
 -- Until now the OTP for a password reset went to SMTP_FROM, the deployment's
