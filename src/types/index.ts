@@ -192,6 +192,14 @@ export interface RemediationPlaybook {
   stepByStep: string[];
 }
 
+export interface ReviewEdits {
+  audienceNotice?: string;
+  reviewerComment?: string;
+  reviewerName?: string;
+  customBodyOverride?: string;
+  customFields?: Record<string, string>;
+}
+
 export interface TemplateCustomization {
   fontFamily: 'sans' | 'mono' | 'serif' | 'system';
   fontColor: string;
@@ -487,6 +495,7 @@ export interface Advisory {
   affectedSystems: string[];
   isDigestBatch?: boolean;
   vendorLink?: string;
+  edits?: ReviewEdits;
 }
 
 export interface PipelinePhase {
@@ -639,6 +648,7 @@ export interface EmailQueueItem {
   error: string | null;
   preview?: string;
   cveIds?: string[];
+  edits?: ReviewEdits;
 }
 
 export interface AuditLog {

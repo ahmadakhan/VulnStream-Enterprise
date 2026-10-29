@@ -224,6 +224,140 @@ test(
         });
         assert.equal(sent, 1);
       });
+      await t.test('review edits are persisted and applied on approval to email html', async () => {
+        await reset();
+        const id = await enqueue(
+          pool,
+          'email',
+          'all',
+          'TEST',
+          {
+            subject: 'Test',
+            text: 'see html',
+            html: '<html><body><p>Original</p></body></html>',
+            cveIds: [],
+          },
+          'review-edits-apply',
+          'REVIEW',
+        );
+        await createUser(pool, 'edit-admin', 'Edit-test-password-2026!', 'ADMIN');
+        const app = createApp(pool, config, noNetwork),
+          agent = supertest.agent(app);
+        const logged = await agent
+          .post('/api/login')
+          .set('Origin', config.APP_ORIGIN)
+          .send({ username: 'edit-admin', password: 'Edit-test-password-2026!' });
+        const editRes = await agent
+          .post(`/api/email/${id}/edit`)
+          .set('Origin', config.APP_ORIGIN)
+          .set('x-csrf-token', logged.body.csrfToken)
+          .send({
+            audienceNotice: 'Broad distribution notice',
+            reviewerComment: 'Verified by admin',
+            reviewerName: 'edit-admin',
+          });
+        assert.equal(editRes.status, 200);
+        const saved = await pool.query('SELECT edits, payload FROM outbox WHERE id=$1', [id]);
+        assert.deepEqual(saved.rows[0].edits, {
+          audienceNotice: 'Broad distribution notice',
+          reviewerComment: 'Verified by admin',
+          reviewerName: 'edit-admin',
+        });
+        const previewRes = await agent
+          .get(`/api/email/${id}/preview`)
+          .set('Origin', config.APP_ORIGIN)
+          .set('x-csrf-token', logged.body.csrfToken)
+          .send();
+        assert.equal(previewRes.status, 200);
+        assert.ok(previewRes.body.html.includes('Broad distribution notice'));
+        assert.ok(previewRes.body.html.includes('Verified by admin'));
+        const approved = await agent
+          .post(`/api/email/${id}/approve`)
+          .set('Origin', config.APP_ORIGIN)
+          .set('x-csrf-token', logged.body.csrfToken)
+          .send({});
+        assert.equal(approved.status, 200);
+        const delivered = await pool.query('SELECT payload, status FROM outbox WHERE id=$1', [id]);
+        const deliveredHtml = delivered.rows[0].payload.html;
+        assert.ok(deliveredHtml.includes('Broad distribution notice'));
+        assert.ok(deliveredHtml.includes('Verified by admin'));
+        assert.equal(delivered.rows[0].status, 'QUEUED');
+      });
+      await t.test('review edits rejected for non-REVIEW jobs', async () => {
+        await reset();
+        const id = await enqueue(
+          pool,
+          'email',
+          'test',
+          'TEST',
+          { subject: 'Test', text: 'Test', cveIds: [] },
+          'edit-non-review',
+          'QUEUED',
+        );
+        await createUser(pool, 'edit-admin2', 'Edit-test-password-2026!', 'ADMIN');
+        const app = createApp(pool, config, noNetwork),
+          agent = supertest.agent(app);
+        const logged = await agent
+          .post('/api/login')
+          .set('Origin', config.APP_ORIGIN)
+          .send({ username: 'edit-admin2', password: 'Edit-test-password-2026!' });
+        const editRes = await agent
+          .post(`/api/email/${id}/edit`)
+          .set('Origin', config.APP_ORIGIN)
+          .set('x-csrf-token', logged.body.csrfToken)
+          .send({ audienceNotice: 'Should fail' });
+        assert.equal(editRes.status, 409);
+      });
+      await t.test('review edits escape XSS in preview and approval', async () => {
+        await reset();
+        const id = await enqueue(
+          pool,
+          'email',
+          'all',
+          'TEST',
+          {
+            subject: 'Test',
+            text: 'see html',
+            html: '<html><body><p>Original</p></body></html>',
+            cveIds: [],
+          },
+          'review-xss',
+          'REVIEW',
+        );
+        await createUser(pool, 'xss-admin', 'Xss-test-password-2026!', 'ADMIN');
+        const app = createApp(pool, config, noNetwork),
+          agent = supertest.agent(app);
+        const logged = await agent
+          .post('/api/login')
+          .set('Origin', config.APP_ORIGIN)
+          .send({ username: 'xss-admin', password: 'Xss-test-password-2026!' });
+        const editRes = await agent
+          .post(`/api/email/${id}/edit`)
+          .set('Origin', config.APP_ORIGIN)
+          .set('x-csrf-token', logged.body.csrfToken)
+          .send({
+            audienceNotice: '<img src=x onerror=alert(1)>',
+            reviewerComment: '<script>alert(1)</script>',
+          });
+        assert.equal(editRes.status, 200);
+        const previewRes = await agent
+          .get(`/api/email/${id}/preview`)
+          .set('Origin', config.APP_ORIGIN)
+          .set('x-csrf-token', logged.body.csrfToken)
+          .send();
+        assert.ok(!previewRes.body.html.includes('<img src=x'), 'XSS in audience notice must be escaped');
+        assert.ok(!previewRes.body.html.includes('<script>'), 'XSS in reviewer comment must be escaped');
+        const approved = await agent
+          .post(`/api/email/${id}/approve`)
+          .set('Origin', config.APP_ORIGIN)
+          .set('x-csrf-token', logged.body.csrfToken)
+          .send({});
+        assert.equal(approved.status, 200);
+        const delivered = await pool.query('SELECT payload FROM outbox WHERE id=$1', [id]);
+        const deliveredHtml = delivered.rows[0].payload.html;
+        assert.ok(!deliveredHtml.includes('<img src=x'), 'XSS must be escaped in final delivered html');
+        assert.ok(!deliveredHtml.includes('<script>'), 'XSS must be escaped in final delivered html');
+      });
       await t.test('health-only digests retain an explicitly empty recipient subset', async () => {
         await reset();
         const cve = makeCve('CVE-2026-98106');

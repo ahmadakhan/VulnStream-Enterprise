@@ -86,6 +86,7 @@ import type {
   ThreatSearchResponse,
   ThreatAnalytics,
   CpeMatchSimulation,
+  ReviewEdits,
 } from '../src/types/index.ts';
 import {
   DEFAULT_DAILY_DIGEST_CUSTOMIZATION,
@@ -140,6 +141,21 @@ const outboxId = (value: unknown): string => {
   const parsed = z.uuid().safeParse(value);
   if (!parsed.success) throw invalidId();
   return parsed.data;
+};
+const escapeHtml = (value: string) =>
+  value.replace(
+    /[&<>"']/g,
+    (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!,
+  );
+const safeNoticeHtml = (edits: ReviewEdits): { noticeBlock: string; commentBlock: string } => {
+  const noticeBlock = edits.audienceNotice
+    ? `<div style="margin:16px 0;padding:12px 16px;border-left:3px solid #2563eb;background:#f0f9ff;border-radius:6px;font-size:13px;line-height:20px;color:#0c4a6e;">${escapeHtml(edits.audienceNotice).replace(/\n/g, '<br/>')}</div>`
+    : '';
+  const byLine = edits.reviewerName ? ` by ${escapeHtml(edits.reviewerName)}` : '';
+  const commentBlock = edits.reviewerComment
+    ? `<div style="margin:16px 0;padding:12px 16px;border-left:3px solid #f59e0b;background:#fffbeb;border-radius:6px;font-size:13px;line-height:20px;color:#78350f;"><strong>Reviewer note:${byLine}</strong> ${escapeHtml(edits.reviewerComment).replace(/\n/g, '<br/>')}</div>`
+    : '';
+  return { noticeBlock, commentBlock };
 };
 async function refreshAdvisoryDeliveryStatus(db: pg.Pool | import('pg').PoolClient, advisoryId: string) {
   const advisory = await getForUpdate<Advisory>(db, 'advisories', advisoryId);
@@ -409,7 +425,10 @@ export function createApp(
       const expiresAt = new Date(Date.now() + 10 * 60_000);
       await transaction(pool, async (db) => {
         // Serialize issuance with completion and account changes across replicas.
-        const current = await db.query('SELECT id FROM users WHERE id=$1 AND email=$2 AND NOT disabled FOR UPDATE', [user.id, user.email]);
+        const current = await db.query(
+          'SELECT id FROM users WHERE id=$1 AND email=$2 AND NOT disabled FOR UPDATE',
+          [user.id, user.email],
+        );
         if (!current.rowCount) throw new HttpError(400, 'Account changed; request a new reset code');
         await db.query('DELETE FROM password_reset_tokens WHERE username=$1', [username]);
         await db.query('INSERT INTO password_reset_tokens(username,code_hash,expires_at) VALUES($1,$2,$3)', [
@@ -502,10 +521,7 @@ export function createApp(
       const hash = await passwordHash(newPassword);
       await transaction(pool, async (db) => {
         const user = (
-          await db.query(
-            'SELECT id FROM users WHERE username=$1 AND NOT disabled FOR UPDATE',
-            [username],
-          )
+          await db.query('SELECT id FROM users WHERE username=$1 AND NOT disabled FOR UPDATE', [username])
         ).rows[0];
         if (!user) throw new HttpError(400, 'Invalid or expired code');
         const consumed = await db.query(
@@ -572,7 +588,11 @@ export function createApp(
   });
   if (options.correlation) {
     const runtime = options.correlation;
-    app.get('/api/correlation/workflows', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (_req, res) => res.json(await correlationWorkflows(pool))));
+    app.get(
+      '/api/correlation/workflows',
+      requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
+      asyncRoute(async (_req, res) => res.json(await correlationWorkflows(pool))),
+    );
     app.patch(
       '/api/correlation/policy',
       requireRole('ADMIN'),
@@ -620,7 +640,10 @@ export function createApp(
         res.json({ removed });
       }),
     );
-    app.get('/api/correlation/assets', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (req, res) => {
+    app.get(
+      '/api/correlation/assets',
+      requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
+      asyncRoute(async (req, res) => {
         const query = z
           .object({ q: z.string().trim().max(200).default(''), after: z.uuid().optional() })
           .strict()
@@ -640,7 +663,11 @@ export function createApp(
       }),
     );
 
-    app.get('/api/correlation', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (_req, res) => res.json(await runtime.supervisor.snapshot())));
+    app.get(
+      '/api/correlation',
+      requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
+      asyncRoute(async (_req, res) => res.json(await runtime.supervisor.snapshot())),
+    );
     app.post(
       '/api/correlation/concurrency',
       requireRole('ADMIN', 'OPERATOR'),
@@ -763,7 +790,10 @@ export function createApp(
         res.status(202).json({ queued: accepted.length });
       }),
     );
-    app.get('/api/correlation/search', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (req, res) => {
+    app.get(
+      '/api/correlation/search',
+      requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
+      asyncRoute(async (req, res) => {
         const { q } = z.object({ q: z.string().trim().min(1).max(200) }).parse(req.query);
         const result = await pool.query(
           `SELECT id,title,url,processed_at FROM unstructured_advisories
@@ -774,12 +804,9 @@ export function createApp(
       }),
     );
   }
-  app.get(
-    '/api/session',
-    requireAuth(pool, config),
-    (req, res) =>
-      res.json({
-        username: req.operator!.username,
+  app.get('/api/session', requireAuth(pool, config), (req, res) =>
+    res.json({
+      username: req.operator!.username,
       // The operator's own address. It is not a secret from them, and the
       // account form prefills it so an edit does not silently clear it.
       email: req.operator!.email,
@@ -828,7 +855,7 @@ export function createApp(
     '/api/threat/intelligence/search',
     requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
     asyncRoute(async (req, res) => {
-       const { vendor, product, limit, startDate } = z
+      const { vendor, product, limit, startDate } = z
         .object({
           vendor: z.string().trim().min(1).max(200),
           product: z.string().trim().max(200).default(''),
@@ -921,7 +948,10 @@ export function createApp(
       res.json(result);
     }),
   );
-  app.post('/api/session/renew', requireAuth(pool, config), asyncRoute(async (req, res) => {
+  app.post(
+    '/api/session/renew',
+    requireAuth(pool, config),
+    asyncRoute(async (req, res) => {
       const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
       const row = (
         await pool.query(
@@ -941,7 +971,10 @@ export function createApp(
       res.json({ expiresAt: row.expires_at.toISOString() });
     }),
   );
-  app.post('/api/logout', requireAuth(pool, config), asyncRoute(async (req, res) => {
+  app.post(
+    '/api/logout',
+    requireAuth(pool, config),
+    asyncRoute(async (req, res) => {
       await pool.query('DELETE FROM sessions WHERE token_hash=$1', [req.operator!.sessionHash]);
       // __Host- cookies are only cleared when the deletion carries the same
       // Secure/Path attributes as the original cookie.
@@ -949,7 +982,10 @@ export function createApp(
       res.json({ success: true });
     }),
   );
-  app.post('/api/password', requireAuth(pool, config), asyncRoute(async (req, res) => {
+  app.post(
+    '/api/password',
+    requireAuth(pool, config),
+    asyncRoute(async (req, res) => {
       const data = z
         .object({ currentPassword: z.string().min(1).max(128), newPassword: z.string().min(14).max(128) })
         .parse(req.body);
@@ -984,11 +1020,8 @@ export function createApp(
     requireRole('ADMIN'),
     asyncRoute(async (_req, res) =>
       res.json(
-        (
-          await pool.query(
-            'SELECT id,username,email,role,disabled,created_at FROM users ORDER BY username',
-          )
-        ).rows,
+        (await pool.query('SELECT id,username,email,role,disabled,created_at FROM users ORDER BY username'))
+          .rows,
       ),
     ),
   );
@@ -1064,7 +1097,10 @@ export function createApp(
         ]);
         if (!changed.rowCount) throw new HttpError(404, 'Operator not found');
         await db.query('DELETE FROM sessions WHERE user_id=$1', [req.params.id]);
-        await db.query('DELETE FROM password_reset_tokens WHERE username=(SELECT username FROM users WHERE id=$1)', [userId.data]);
+        await db.query(
+          'DELETE FROM password_reset_tokens WHERE username=(SELECT username FROM users WHERE id=$1)',
+          [userId.data],
+        );
         await appendAudit(
           db,
           'Password reset',
@@ -1084,8 +1120,7 @@ export function createApp(
     asyncRoute(async (req, res) => {
       const userId = z.uuid().safeParse(req.params.id);
       if (!userId.success) throw invalidId();
-      if (req.params.id === req.operator!.id)
-        throw new HttpError(400, 'You cannot delete your own account');
+      if (req.params.id === req.operator!.id) throw new HttpError(400, 'You cannot delete your own account');
       await deleteUser(pool, userId.data, req.operator!.username, req.ip || '');
       res.json({ success: true });
     }),
@@ -1096,7 +1131,10 @@ export function createApp(
       res.json(publicState(await state(pool, { limits: STATE_COLLECTION_LIMITS }))),
     ),
   );
-  app.get('/api/collections/:kind', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (req, res) => {
+  app.get(
+    '/api/collections/:kind',
+    requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
+    asyncRoute(async (req, res) => {
       const query = z
         .object({
           limit: z.coerce.number().int().min(1).max(1000).default(50),
@@ -1146,7 +1184,10 @@ export function createApp(
       );
     }),
   );
-  app.get('/api/audit/verify', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (req, res) => {
+  app.get(
+    '/api/audit/verify',
+    requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
+    asyncRoute(async (req, res) => {
       const rows = await pool.query('SELECT data FROM audit ORDER BY seq ASC');
       const logs = rows.rows.map((row) => row.data);
       const verified = verifyAuditChain(logs.reverse());
@@ -1238,13 +1279,17 @@ export function createApp(
       });
     }),
   );
-  app.get('/api/email-queue', requireRole('ADMIN', 'OPERATOR', 'VIEWER'), asyncRoute(async (_req, res) => {
+  app.get(
+    '/api/email-queue',
+    requireRole('ADMIN', 'OPERATOR', 'VIEWER'),
+    asyncRoute(async (_req, res) => {
       const rows = await pool.query(
         `SELECT id, payload->>'recipientEmail' AS "recipientEmail", advisory_id AS "advisoryId",
           payload->>'subject' AS subject, status, attempts,
           CASE WHEN status='REVIEW' THEN NULL ELSE next_attempt END AS "nextAttemptAt",
           created_at AS "createdAt", error, left(payload->>'text', 4000) AS preview,
-          payload->'cveIds' AS "cveIds"
+          payload->'cveIds' AS "cveIds",
+          edits AS "edits"
          FROM outbox
          WHERE channel='email' AND status IN ('REVIEW','QUEUED','SENDING','FAILED')
          ORDER BY created_at DESC, id DESC LIMIT 1000`,
@@ -1339,7 +1384,10 @@ export function createApp(
       const start = performance.now();
       const headers: Record<string, string> =
         feed.type === 'RSS_ATOM'
-          ? { 'user-agent': RSS_USER_AGENT, accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' }
+          ? {
+              'user-agent': RSS_USER_AGENT,
+              accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml',
+            }
           : {};
       let secret: string;
       try {
@@ -1551,7 +1599,8 @@ export function createApp(
           createdDate: new Date().toISOString(),
           deliveryStatus: 'PENDING',
           recipientCount: 1,
-          executiveSummary: 'Preview of the daily digest template. This is not a live vulnerability advisory.',
+          executiveSummary:
+            'Preview of the daily digest template. This is not a live vulnerability advisory.',
           affectedSystems: ['Example inventory asset'],
           remediationInstructions: 'Preview only; no remediation action is required.',
         };
@@ -1579,13 +1628,11 @@ export function createApp(
         );
         return id;
       });
-      res
-        .status(202)
-        .json({
-          success: true,
-          message: 'Daily digest test queued. Check the delivery log for provider acceptance.',
-          id,
-        });
+      res.status(202).json({
+        success: true,
+        message: 'Daily digest test queued. Check the delivery log for provider acceptance.',
+        id,
+      });
     }),
   );
   app.post(
@@ -1651,10 +1698,24 @@ export function createApp(
       const id = outboxId(req.params.id);
       await transaction(pool, async (db) => {
         const row = await db.query(
-          "UPDATE outbox SET status='QUEUED',review_approved=true,attempts=0,next_attempt=now(),error=NULL,locked_at=NULL,lock_token=NULL,updated_at=now() WHERE id=$1 AND channel='email' AND status='REVIEW' RETURNING advisory_id",
+          "UPDATE outbox SET status='QUEUED',review_approved=true,attempts=0,next_attempt=now(),error=NULL,locked_at=NULL,lock_token=NULL,updated_at=now() WHERE id=$1 AND channel='email' AND status='REVIEW' RETURNING advisory_id, edits, payload",
           [id],
         );
         if (!row.rowCount) throw new HttpError(409, 'Only notifications awaiting review can be approved');
+        const edits: ReviewEdits = row.rows[0].edits || {};
+        if (edits.audienceNotice || edits.reviewerComment) {
+          const currentPayload = row.rows[0].payload;
+          let updatedHtml = currentPayload.html || '';
+          const { noticeBlock, commentBlock } = safeNoticeHtml(edits);
+          if (noticeBlock) updatedHtml = updatedHtml.replace(/(<body[^>]*>)/i, `$1${noticeBlock}`);
+          if (commentBlock) updatedHtml = updatedHtml.replace(/(<\/body>)/i, `${commentBlock}$1`);
+          if (updatedHtml !== currentPayload.html) {
+            await db.query('UPDATE outbox SET payload=$2::jsonb WHERE id=$1', [
+              id,
+              JSON.stringify({ ...currentPayload, html: updatedHtml }),
+            ]);
+          }
+        }
         const log = await getForUpdate<any>(db, 'emailLogs', id);
         if (log)
           await put(db, 'emailLogs', id, {
@@ -1674,6 +1735,80 @@ export function createApp(
           req.ip || '',
         );
         await refreshAdvisoryDeliveryStatus(db, String(row.rows[0].advisory_id));
+      });
+      res.json({ success: true });
+    }),
+  );
+  app.get(
+    '/api/email/:id/preview',
+    requireRole('ADMIN', 'OPERATOR'),
+    asyncRoute(async (req, res) => {
+      const id = outboxId(req.params.id);
+      const row = await pool.query(
+        `SELECT o.payload->>'html' AS "html", o.payload->>'text' AS "text",
+                o.edits, o.advisory_id, o.status
+          FROM outbox o
+          WHERE o.id=$1 AND o.channel='email' AND o.status IN ('REVIEW','QUEUED')`,
+        [id],
+      );
+      if (!row.rowCount) throw new HttpError(404, 'Email job not found or not in a previewable state');
+      const record = row.rows[0];
+      const html = record.html || '';
+      const edits: ReviewEdits = record.edits || {};
+      const { noticeBlock, commentBlock } = safeNoticeHtml(edits);
+      let previewHtml = html;
+      if (noticeBlock) previewHtml = previewHtml.replace(/(<body[^>]*>)/i, `$1${noticeBlock}`);
+      if (commentBlock) previewHtml = previewHtml.replace(/(<\/body>)/i, `${commentBlock}$1`);
+      res.json({ html: previewHtml, edits, advisoryId: record.advisory_id });
+    }),
+  );
+  app.post(
+    '/api/email/:id/edit',
+    requireRole('ADMIN', 'OPERATOR'),
+    asyncRoute(async (req, res) => {
+      const id = outboxId(req.params.id);
+      const { audienceNotice, reviewerComment, reviewerName, customBodyOverride, customFields } = z
+        .object({
+          audienceNotice: z.string().max(2000).optional(),
+          reviewerComment: z.string().max(2000).optional(),
+          reviewerName: z.string().max(100).optional(),
+          customBodyOverride: z.string().max(50000).optional(),
+          customFields: z.record(z.string(), z.string().max(2000)).optional(),
+        })
+        .parse(req.body);
+      await transaction(pool, async (db) => {
+        const current = await db.query(
+          "SELECT edits, payload FROM outbox WHERE id=$1 AND channel='email' AND status='REVIEW' FOR UPDATE",
+          [id],
+        );
+        if (!current.rowCount) throw new HttpError(409, 'Only email jobs in REVIEW status can be edited');
+        const existingEdits: ReviewEdits = current.rows[0].edits || {};
+        const mergedEdits: ReviewEdits = {
+          ...existingEdits,
+          ...(audienceNotice !== undefined && { audienceNotice }),
+          ...(reviewerComment !== undefined && { reviewerComment }),
+          ...(reviewerName !== undefined && { reviewerName }),
+          ...(customBodyOverride !== undefined && { customBodyOverride }),
+          ...(customFields !== undefined && { customFields }),
+        };
+        let updatedPayload = current.rows[0].payload;
+        if (customBodyOverride !== undefined) {
+          updatedPayload = { ...current.rows[0].payload, html: customBodyOverride };
+        }
+        await db.query('UPDATE outbox SET edits=$2::jsonb, payload=$3::jsonb, updated_at=now() WHERE id=$1', [
+          id,
+          JSON.stringify(mergedEdits),
+          JSON.stringify(updatedPayload),
+        ]);
+        await appendAudit(
+          db,
+          'Email review edited',
+          `Delivery ${id}`,
+          req.operator!.username,
+          'EMAIL',
+          'INFO',
+          req.ip || '',
+        );
       });
       res.json({ success: true });
     }),
@@ -1859,9 +1994,9 @@ export function createApp(
         'webhook.save',
         'webhook.delete',
         'webhook.toggle',
-         'settings.save',
-         'template.save',
-         'dailyDigestTemplate.save',
+        'settings.save',
+        'template.save',
+        'dailyDigestTemplate.save',
         'email.configure',
         'alias.save',
         'alias.delete',

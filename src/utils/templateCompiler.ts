@@ -154,7 +154,14 @@ ${stampHtml}
 </td>
 </tr>
 
-<tr class="ms-rteTableEvenRow-default">
+<tr class="ms-rteTableEvenRow-default" style="display:none;">
+<td class="ms-rteTableEvenCol-default">Audience Notice</td>
+<td class="ms-rteTableOddCol-default">
+<div style="margin-top:8px;padding:8px 12px;border-left:3px solid ${config.accentColor};background:#f0f9ff;font-size:12px;line-height:20px;">{{audience_notice}}</div>
+</td>
+</tr>
+
+<tr class="ms-rteTableOddRow-default">
 <td class="ms-rteTableEvenCol-default">Affected Products and Versions</td>
 <td class="ms-rteTableOddCol-default">
 <ul>
@@ -197,6 +204,15 @@ ${stampHtml}
 <td class="ms-rteTableEvenCol-default">Honeywell Recommended Action</td>
 <td class="ms-rteTableOddCol-default">
 {{recommended_actions}}
+</td>
+</tr>
+
+<tr class="ms-rteTableOddRow-default">
+<td class="ms-rteTableEvenCol-default">
+<a name="review_comment" id="review_comment"><span style="color:#f8f8f8;">Reviewer Comment</span></a>
+</td>
+<td class="ms-rteTableOddCol-default">
+<div style="margin-top:8px;padding:8px 12px;border-left:3px solid #f59e0b;background:#fffbeb;font-size:12px;line-height:20px;">{{reviewer_comment}}</div>
 </td>
 </tr>
 
@@ -253,8 +269,9 @@ export interface DailyDigestParts {
 }
 
 const digestEscapeHtml = (value: string) =>
-  String(value).replace(/[&<>"']/g, (ch) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!,
+  String(value).replace(
+    /[&<>"']/g,
+    (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!,
   );
 
 function normalizeDigestConfig(config: TemplateCustomization): TemplateCustomization {
@@ -344,10 +361,7 @@ ${stampHtml}
 </html>`;
 }
 
-export function renderDailyFindingSummary(
-  findings: DigestFinding[],
-  config: TemplateCustomization,
-): string {
+export function renderDailyFindingSummary(findings: DigestFinding[], config: TemplateCustomization): string {
   const safe = normalizeDigestConfig(config);
   const fontCss = getFontFamilyCss(safe.fontFamily);
   if (!findings.length) {
@@ -366,17 +380,13 @@ export function renderDailyFindingSummary(
             `<li style="margin-bottom:2px"><strong>${digestEscapeHtml(f.cveId)}</strong> — ${digestEscapeHtml(f.assetName)}${f.vendor ? ` (${digestEscapeHtml(f.vendor)})` : ''}</li>`,
         )
         .join('');
-      const extra =
-        items.length > 25 ? `<li style="color:#71717a">…and ${items.length - 25} more</li>` : '';
+      const extra = items.length > 25 ? `<li style="color:#71717a">…and ${items.length - 25} more</li>` : '';
       return `<h3 style="margin:16px 0 4px;font-family:${digestEscapeHtml(fontCss)};font-size:13px;font-weight:600;color:${safe.headingColor};">${s} (${items.length})</h3><ul style="font-family:${digestEscapeHtml(fontCss)};font-size:11px;line-height:20px;color:${safe.fontColor};margin:0 0 8px;padding-left:18px;list-style:disc">${list}${extra}</ul>`;
     });
   return parts.join('');
 }
 
-export function renderDailyHealthReport(
-  health: DigestHealth | null,
-  config: TemplateCustomization,
-): string {
+export function renderDailyHealthReport(health: DigestHealth | null, config: TemplateCustomization): string {
   if (!health) return '';
   const safe = normalizeDigestConfig(config);
   const fontCss = getFontFamilyCss(safe.fontFamily);

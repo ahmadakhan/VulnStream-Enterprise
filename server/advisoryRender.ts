@@ -1,4 +1,4 @@
-import type { Advisory } from '../src/types/index.ts';
+import type { Advisory, ReviewEdits } from '../src/types/index.ts';
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: '#ef4444',
@@ -26,6 +26,7 @@ export function renderAdvisory(template: string, advisory: Advisory): string {
       /[&<>"']/g,
       (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!,
     );
+  const edits: ReviewEdits = advisory.edits || {};
   const values: Record<string, string> = {
     severity: advisory.severity,
     advisory_id: advisory.id,
@@ -77,6 +78,12 @@ export function renderAdvisory(template: string, advisory: Advisory): string {
 <li>Apply vendor patches immediately following your change management process.</li>
 <li>Validate backup, restore, and operational functionality after remediation.</li>
 </ul>`,
+    audience_notice: edits.audienceNotice
+      ? escape(edits.audienceNotice).replace(/\n/g, '<br/>')
+      : 'This advisory is being distributed to all recipients per the EVERYONE delivery policy.',
+    reviewer_comment: edits.reviewerComment
+      ? `<strong>Reviewer note${edits.reviewerName ? ` by ${escape(edits.reviewerName)}` : ''}</strong> ${escape(edits.reviewerComment).replace(/\n/g, '<br/>')}`
+      : '',
   };
   const rawHtmlTokens = new Set([
     'cve_id_links',
@@ -84,6 +91,8 @@ export function renderAdvisory(template: string, advisory: Advisory): string {
     'affected_systems_html',
     'mitigation_steps',
     'recommended_actions',
+    'audience_notice',
+    'reviewer_comment',
   ]);
   return template.replace(/{{([a-z_]+)}}/g, (_, key) => {
     if (rawHtmlTokens.has(key)) return values[key] || '';

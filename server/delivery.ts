@@ -32,6 +32,7 @@ import type {
   AlertedCVE,
   EmailConfiguration,
   AppSettings,
+  ReviewEdits,
 } from '../src/types/index.ts';
 export interface Job {
   id: string;
@@ -66,6 +67,7 @@ export interface Job {
   attempts: number;
   lock_token: string;
   review_approved?: boolean;
+  edits?: ReviewEdits;
   priority?: number;
 }
 export type MailSender = (

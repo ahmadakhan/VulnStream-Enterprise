@@ -4,16 +4,18 @@ import {
   AlertTriangle,
   Check,
   Clock3,
+  Edit3,
   Inbox,
   RefreshCw,
   RotateCw,
   Search,
+  Send,
   ShieldCheck,
   Trash2,
   X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import type { EmailQueueItem } from '../types';
+import type { EmailQueueItem, ReviewEdits } from '../types';
 import { CveLink } from './CveLink';
 
 import { formatDateTime as fmtDateTime } from '../utils/dateTime';
@@ -33,6 +35,8 @@ export function EmailQueueView() {
     deleteEmailQueueItem,
     approveEmailDelivery,
     rejectEmailDelivery,
+    editEmailReview,
+    previewEmailReview,
     session,
   } = useApp();
   const [items, setItems] = useState<EmailQueueItem[]>([]);
@@ -43,11 +47,16 @@ export function EmailQueueView() {
   const [deleting, setDeleting] = useState<EmailQueueItem | null>(null);
   const [reviewing, setReviewing] = useState<EmailQueueItem | null>(null);
   const [rejecting, setRejecting] = useState<EmailQueueItem | null>(null);
-   const [reviewBusy, setReviewBusy] = useState(false);
+  const [editing, setEditing] = useState<EmailQueueItem | null>(null);
+  const [previewHtml, setPreviewHtml] = useState<string>('');
+  const [edits, setEdits] = useState<ReviewEdits>({});
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
-   const canManage = session?.role === 'ADMIN' || session?.role === 'OPERATOR';
-   const REFRESH_INTERVAL_MS = 10_000;
-   const [lastRefreshedAt, setLastRefreshedAt] = useState<number>(Date.now());
+  const canManage = session?.role === 'ADMIN' || session?.role === 'OPERATOR';
+  const REFRESH_INTERVAL_MS = 10_000;
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number>(Date.now());
 
   const refresh = async () => {
     setLoading(true);
@@ -76,6 +85,22 @@ export function EmailQueueView() {
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
+
+  useEffect(() => {
+    if (editing) {
+      setEdits(editing.edits || {});
+      setPreviewLoading(true);
+      void previewEmailReview(editing.id).then((preview) => {
+        if (preview) {
+          setPreviewHtml(preview.html);
+          setEdits(preview.edits);
+        } else {
+          setPreviewHtml(editing.preview || '');
+        }
+        setPreviewLoading(false);
+      });
+    }
+  }, [editing]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -152,7 +177,8 @@ export function EmailQueueView() {
           title="Auto-refreshing every 10 seconds"
         >
           <Clock3 className="inline h-3.5 w-3.5" aria-hidden="true" />
-          Auto-refresh in {Math.max(0, Math.ceil((REFRESH_INTERVAL_MS - (Date.now() - lastRefreshedAt)) / 1000))}s
+          Auto-refresh in{' '}
+          {Math.max(0, Math.ceil((REFRESH_INTERVAL_MS - (Date.now() - lastRefreshedAt)) / 1000))}s
         </span>
       </header>
 
@@ -293,13 +319,22 @@ export function EmailQueueView() {
                       {canManage && (
                         <div className="inline-flex items-center justify-end gap-2">
                           {item.status === 'REVIEW' && (
-                            <button
-                              type="button"
-                              onClick={() => setReviewing(item)}
-                              className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-violet-500/30 px-2.5 py-1 text-[11px] font-medium text-violet-300 transition hover:bg-violet-500/10 light:text-violet-700"
-                            >
-                              <ShieldCheck className="h-3 w-3" aria-hidden="true" /> Review
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setEditing(item)}
+                                className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-sky-500/30 px-2.5 py-1 text-[11px] font-medium text-sky-300 transition hover:bg-sky-500/10 light:text-sky-700"
+                              >
+                                <Edit3 className="h-3 w-3" aria-hidden="true" /> Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setReviewing(item)}
+                                className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-violet-500/30 px-2.5 py-1 text-[11px] font-medium text-violet-300 transition hover:bg-violet-500/10 light:text-violet-700"
+                              >
+                                <ShieldCheck className="h-3 w-3" aria-hidden="true" /> Review
+                              </button>
+                            </>
                           )}
                           {item.status === 'FAILED' && (
                             <button
@@ -477,6 +512,204 @@ export function EmailQueueView() {
               >
                 <Check className="h-3.5 w-3.5" />
                 {reviewBusy ? 'Saving…' : 'Approve and queue'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {editing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !editBusy) setEditing(null);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-email-title"
+            className={`${panel} w-full max-w-5xl p-0 flex flex-col max-h-[90vh]`}
+          >
+            <div className="flex items-start justify-between gap-4 p-5 pb-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-sky-300 light:text-sky-700">
+                  Edit for EVERYONE distribution
+                </p>
+                <h2 id="edit-email-title" className="mt-1 text-base font-semibold">
+                  {editing.subject}
+                </h2>
+                <p className="mt-1 text-xs text-zinc-500">
+                  To {editing.recipientEmail} · Advisory {editing.advisoryId}
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close editor"
+                className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800"
+                disabled={editBusy}
+                onClick={() => {
+                  if (!editBusy) setEditing(null);
+                }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              <div className="grid grid-cols-1 gap-0 p-5 pt-3 xl:grid-cols-2">
+                <div className="xl:pr-4 xl:border-r xl:border-zinc-800/80 light:xl:border-zinc-200">
+                  <div className="space-y-4">
+                    <div>
+                      <label
+                        htmlFor="audience-notice"
+                        className="block text-xs font-medium text-zinc-300 light:text-zinc-700"
+                      >
+                        Audience notice
+                      </label>
+                      <textarea
+                        id="audience-notice"
+                        rows={4}
+                        placeholder="Notice shown above the advisory body for all recipients"
+                        value={edits.audienceNotice || ''}
+                        onChange={(e) => setEdits({ ...edits, audienceNotice: e.target.value || undefined })}
+                        className="mt-1 w-full resize-y font-mono text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="reviewer-comment"
+                        className="block text-xs font-medium text-zinc-300 light:text-zinc-700"
+                      >
+                        Reviewer comment
+                      </label>
+                      <textarea
+                        id="reviewer-comment"
+                        rows={3}
+                        placeholder="Optional context added at the bottom of the email"
+                        value={edits.reviewerComment || ''}
+                        onChange={(e) => setEdits({ ...edits, reviewerComment: e.target.value || undefined })}
+                        className="mt-1 w-full resize-y font-mono text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="reviewer-name"
+                        className="block text-xs font-medium text-zinc-300 light:text-zinc-700"
+                      >
+                        Reviewer name
+                      </label>
+                      <input
+                        id="reviewer-name"
+                        type="text"
+                        maxLength={100}
+                        placeholder="Name attached to the reviewer comment"
+                        value={edits.reviewerName || ''}
+                        onChange={(e) => setEdits({ ...edits, reviewerName: e.target.value || undefined })}
+                        className="mt-1 w-full text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="custom-body"
+                        className="block text-xs font-medium text-zinc-300 light:text-zinc-700"
+                      >
+                        Custom body override (advanced)
+                      </label>
+                      <textarea
+                        id="custom-body"
+                        rows={6}
+                        placeholder="Override the entire HTML body — leave empty to keep the template"
+                        value={edits.customBodyOverride || ''}
+                        onChange={(e) =>
+                          setEdits({ ...edits, customBodyOverride: e.target.value || undefined })
+                        }
+                        className="mt-1 w-full resize-y font-mono text-xs"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const preview = await previewEmailReview(editing.id);
+                        if (preview) {
+                          setPreviewHtml(preview.html);
+                          setEdits(preview.edits);
+                        }
+                      }}
+                      className="ui-secondary w-full"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" /> Refresh preview with saved edits
+                    </button>
+                  </div>
+                </div>
+
+                <div className="xl:pl-4">
+                  <p className="mb-2 text-xs font-medium text-zinc-300 light:text-zinc-700">
+                    Live preview (email + PDF)
+                  </p>
+                  {previewLoading ? (
+                    <div className="flex h-60 items-center justify-center text-xs text-zinc-500">
+                      <RefreshCw className="h-4 w-4 animate-spin" /> Generating preview…
+                    </div>
+                  ) : (
+                    <iframe
+                      title="Email preview"
+                      sandbox="allow-same-origin allow-scripts"
+                      className="h-[480px] w-full rounded-xl border border-zinc-800/80 light:border-zinc-200"
+                      srcDoc={previewHtml}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-zinc-800/80 p-4 light:border-zinc-200">
+              <button
+                type="button"
+                className="ui-secondary"
+                disabled={editBusy}
+                onClick={() => setEditing(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ui-secondary"
+                disabled={editBusy}
+                onClick={async () => {
+                  setPreviewLoading(true);
+                  const preview = await previewEmailReview(editing.id);
+                  if (preview) {
+                    setPreviewHtml(preview.html);
+                    setEdits(preview.edits);
+                  }
+                  setPreviewLoading(false);
+                }}
+              >
+                <Send className="h-3.5 w-3.5" /> Preview
+              </button>
+              <button
+                type="button"
+                className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-sky-600 px-4 text-xs font-semibold text-white hover:bg-sky-500"
+                disabled={editBusy}
+                onClick={async () => {
+                  setEditBusy(true);
+                  const result = await editEmailReview(editing.id, edits);
+                  if (result) {
+                    await previewEmailReview(editing.id).then((preview) => {
+                      if (preview) setPreviewHtml(preview.html);
+                    });
+                    setEditing(null);
+                    await refresh();
+                  }
+                  setEditBusy(false);
+                }}
+              >
+                {editBusy ? 'Saving…' : 'Save edits'}
               </button>
             </div>
           </section>

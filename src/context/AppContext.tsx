@@ -29,8 +29,13 @@ import type {
   ThreatSearchResponse,
   ThreatAnalytics,
   CpeMatchSimulation,
+  ReviewEdits,
 } from '../types';
-import { compileCustomizedTemplate, compileDailyDigestTemplate, DEFAULT_DAILY_DIGEST_CUSTOMIZATION } from '../utils/templateCompiler';
+import {
+  compileCustomizedTemplate,
+  compileDailyDigestTemplate,
+  DEFAULT_DAILY_DIGEST_CUSTOMIZATION,
+} from '../utils/templateCompiler';
 
 const SESSION_RENEW_THRESHOLD_SEC = 60;
 
@@ -291,8 +296,9 @@ function useApplication() {
       return result;
     });
   const activeExecution = snapshot.executions.find((e) => ['RUNNING', 'QUEUED'].includes(e.status));
-   const customization = draft || snapshot.templateCustomization;
-   const dailyDigestCustomization = dailyDigestDraft || snapshot.dailyDigestCustomization || DEFAULT_DAILY_DIGEST_CUSTOMIZATION;
+  const customization = draft || snapshot.templateCustomization;
+  const dailyDigestCustomization =
+    dailyDigestDraft || snapshot.dailyDigestCustomization || DEFAULT_DAILY_DIGEST_CUSTOMIZATION;
   return {
     ...snapshot,
     activeTab,
@@ -516,6 +522,14 @@ function useApplication() {
     retryEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/retry`),
     approveEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/approve`),
     rejectEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/reject`),
+    editEmailReview: (id: string, edits: Partial<ReviewEdits>) =>
+      call<{ success: boolean }>(`/email/${encodeURIComponent(id)}/edit`, edits),
+    previewEmailReview: (id: string) =>
+      safely(() =>
+        request<{ html: string; edits: ReviewEdits; advisoryId: string }>(
+          `/email/${encodeURIComponent(id)}/preview`,
+        ),
+      ),
     listEmailQueue: () => safely(() => request<EmailQueueItem[]>('/email-queue')),
     deleteEmailQueueItem: (id: string) => call(`/email/${encodeURIComponent(id)}`, {}, 'DELETE'),
     isPipelineRunning: !!activeExecution,
@@ -534,26 +548,28 @@ function useApplication() {
       if (success) setDraft(null);
       return success;
     },
-     setAdvisoryTemplate: (advisoryTemplate: string) => save('template.save', { advisoryTemplate }),
-     dailyDigestCustomization,
-     dailyDigestTemplate: dailyDigestDraft ? compileDailyDigestTemplate(dailyDigestDraft) : snapshot.dailyDigestTemplate,
-     updateDailyDigestCustomization: (update: Partial<TemplateCustomization>) =>
-       setDailyDigestDraft((prev) => ({ ...dailyDigestCustomization, ...prev, ...update })),
-     saveDailyDigestTemplate: async () => {
-       const success = await save('dailyDigestTemplate.save', { dailyDigestCustomization });
-       if (success) setDailyDigestDraft(null);
-       return success;
-     },
-     sendTestEmail: async (email: string) =>
-       (await call<{ success: boolean; message: string }>('/test-email', { email })) || {
-         success: false,
-         message: 'Test could not be queued; see the error banner.',
-       },
-     sendTestDailyDigestEmail: async (email: string) =>
-       (await call<{ success: boolean; message: string }>('/test-daily-digest', { email })) || {
-         success: false,
-         message: 'Test could not be queued; see the error banner.',
-       },
+    setAdvisoryTemplate: (advisoryTemplate: string) => save('template.save', { advisoryTemplate }),
+    dailyDigestCustomization,
+    dailyDigestTemplate: dailyDigestDraft
+      ? compileDailyDigestTemplate(dailyDigestDraft)
+      : snapshot.dailyDigestTemplate,
+    updateDailyDigestCustomization: (update: Partial<TemplateCustomization>) =>
+      setDailyDigestDraft((prev) => ({ ...dailyDigestCustomization, ...prev, ...update })),
+    saveDailyDigestTemplate: async () => {
+      const success = await save('dailyDigestTemplate.save', { dailyDigestCustomization });
+      if (success) setDailyDigestDraft(null);
+      return success;
+    },
+    sendTestEmail: async (email: string) =>
+      (await call<{ success: boolean; message: string }>('/test-email', { email })) || {
+        success: false,
+        message: 'Test could not be queued; see the error banner.',
+      },
+    sendTestDailyDigestEmail: async (email: string) =>
+      (await call<{ success: boolean; message: string }>('/test-daily-digest', { email })) || {
+        success: false,
+        message: 'Test could not be queued; see the error banner.',
+      },
     updateSettings: (settings: Partial<AppSettings>) => save('settings.save', settings),
     configureEmailProvider: (configuration: EmailConfiguration) => save('email.configure', configuration),
     // Audit events are recorded by server operations, never accepted as client claims.
