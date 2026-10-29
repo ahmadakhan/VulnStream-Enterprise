@@ -119,7 +119,7 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
 <tr>
 <td align="center" style="padding:24px 12px;">
 
-<table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0" class="container" style="width:680px;max-width:680px;background:${config.cardBg};border:1px solid #e2e8f0;">
+<table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0" class="container" style="width:680px;max-width:680px;background:${config.cardBg};border:1px ${config.borderStyle} #e2e8f0;">
 
     ${classificationBanner}
 
