@@ -1730,7 +1730,7 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         }),
         true,
       );
-      const job = (await pool.query('SELECT status,error FROM outbox')).rows[0];
+      const job = (await pool.query('SELECT status,error,payload FROM outbox')).rows[0];
       assert.equal(transports, 1, String(job.error));
       assert.equal(job.status, 'ACCEPTED');
       // The digest carried the finding, which the current 90% policy confirms. A
@@ -1782,12 +1782,12 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         refusedTransports++;
         return 'must-not-send';
       });
-      const refused = (await pool.query('SELECT status,error FROM outbox')).rows[0];
+      const refused = (await pool.query('SELECT status,error,payload FROM outbox')).rows[0];
       assert.equal(refusedTransports, 0, 'a review-held finding must not reach the transport');
       // A deliberately held finding is routed to operator review. It must not be
       // failed as a stale bundle: a rebuild cannot change the held verdict, so the
       // old behaviour retried the same impossible send forever.
-      assert.equal(refused.status, 'FAILED');
+      assert.equal(refused.status, 'REVIEW');
       assert.match(refused.error, /require review/);
       // A hold the pipeline cannot change must not trigger an endless rebuild loop.
       assert.equal(
@@ -1817,7 +1817,6 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         cveId: 'CVE-2026-98011',
         applicabilityRequiresReview: false,
         cpeMatchDetails: undefined,
-        versionRange: undefined,
       };
       await save('aliases', 'vendor-alias', {
         id: 'vendor-alias', scope: 'VENDOR', canonical: 'example', aliases: ['example_alias'],

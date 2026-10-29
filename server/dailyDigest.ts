@@ -1,8 +1,10 @@
 import type pg from 'pg';
-import { get, list, put, transaction, schemaLockKey, type Db } from './db';
+import { get, getMany, list, put, transaction, schemaLockKey, type Db } from './db';
 import { writeEvent } from './events';
 import { enqueue, findingRevision, revision, recipientAllows } from './delivery';
 import { advisoryEmail } from './advisoryEmail';
+import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
+import { buildAliasMap } from '../src/utils/cpeMatcher';
 import { renderAdvisory } from './advisoryRender';
 import { resolveTimezone as resolveSettingsTimezone } from '../src/utils/dateTime';
 import { DEFAULT_SETTINGS } from '../shared/state';
@@ -12,6 +14,9 @@ import {
 } from '../src/utils/templateCompiler';
 import type {
   Advisory,
+  AliasEntry,
+  NormalizedCVE,
+  WatchListItem,
   AppSettings,
   EmailRecipient,
   Finding,
@@ -313,7 +318,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
         // made the whole digest fail as stale every day (and, because the
         // findings stay held, repeat on the next day too). Held findings remain
         // available for operator review; they are not summarised in the email.
-        const findings: Finding[] = findingRows.rows
+        const candidates: Finding[] = findingRows.rows
           .map((r) => r.data)
           .filter(
             (f) =>
@@ -324,9 +329,30 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
                 'NOT_APPLICABLE',
                 'SUPPRESSED_VEX_NOT_AFFECTED',
                 'DELIVERY_FAILED',
-                'REVIEW_REQUIRED',
               ].includes(f.notificationStatus),
           );
+
+        // Reassess against today's inventory and policy, including findings
+        // held under an older threshold. Never treat a stored hold as approval.
+        const ids = [...new Set(candidates.map(f => f.cveId))];
+        const [cached, assets, withdrawals, aliases] = await Promise.all([
+          getMany<NormalizedCVE>(db, 'cveData', ids),
+          getMany<WatchListItem>(db, 'watchlist', [...new Set(candidates.map(f => f.matchedAssetId))]),
+          getMany<{ modifiedDate: string }>(db, 'cveWithdrawals', ids),
+          list<AliasEntry>(db, 'aliases'),
+        ]);
+        const cves = new Map(candidates.map(f => [f.cveId, cached.get(f.cveId) || f.cve]));
+        const current = runVulnerabilityPipeline([], [...cves.values()], [...assets.values()], [], [],
+          { ...DEFAULT_SETTINGS, ...settings, scopeHours: 0 }, 'Daily digest', false,
+          buildAliasMap(aliases, 'VENDOR'), buildAliasMap(aliases, 'PRODUCT'), undefined, aliases).newFindings;
+        const matches = new Map(current.map(f => [`${f.cveId}:${f.matchedAssetId}`, f]));
+        const findings = candidates.flatMap(f => {
+          const match = matches.get(`${f.cveId}:${f.matchedAssetId}`);
+          const withdrawal = withdrawals.get(f.cveId);
+          if (match?.notificationStatus !== 'QUEUED_FOR_DISPATCH' ||
+              (withdrawal && Date.parse(match.cve.modifiedDate) <= Date.parse(withdrawal.modifiedDate))) return [];
+          return [{ ...f, ...match, id: f.id }];
+        });
 
         const template = await readTemplate(db);
         const advisory = buildDailyDigestAdvisory(findings, settings, todayKey);
