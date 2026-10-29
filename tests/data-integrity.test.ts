@@ -56,6 +56,24 @@ test('invalid CVE identifiers do not collapse distinct findings onto one identit
   assert.equal(reconciled.find((item) => item.id === 'finding-b')?.matchingEvidence, 'evidence-b');
 });
 
+test('duplicate candidate identities are deduplicated, keeping the first occurrence', () => {
+  const existing: Finding[] = [];
+  const dupA = finding('finding-dup-a', 'CVE-2026-82001', 'evidence-first');
+  const dupB = finding('finding-dup-b', 'CVE-2026-82001', 'evidence-second');
+  const other = finding('finding-other', 'CVE-2026-82002', 'evidence-other');
+
+  const reconciled = reconcileFindings(existing, [dupA, dupB, other]);
+  assert.deepEqual(
+    reconciled.map((item) => item.id).sort(),
+    ['finding-dup-a', 'finding-other'],
+  );
+  assert.equal(reconciled.length, 2);
+  assert.equal(
+    reconciled.find((item) => item.matchedAssetId === 'asset-1' && item.cveId === 'CVE-2026-82001')?.id,
+    'finding-dup-a',
+  );
+});
+
 test('identifiers reject control characters but keep legitimate separators', () => {
   assert.equal(idSchema.safeParse('asset-1:production').success, true);
   assert.equal(idSchema.safeParse('bad\u0000id').success, false);

@@ -9,8 +9,26 @@ export function reconcileFindings(
   now = new Date().toISOString(),
 ): Finding[] {
   const previous = new Map(existing.map((f) => [identity(f), f]));
-  const current = new Set(candidates.map(identity));
-  const result = candidates.map((candidate) => {
+  const uniqueCandidates: Finding[] = [];
+  {
+    const seen = new Set<string>();
+    const dupes: Finding[] = [];
+    for (const candidate of candidates) {
+      const id = identity(candidate);
+      if (seen.has(id)) {
+        dupes.push(candidate);
+        continue;
+      }
+      seen.add(id);
+      uniqueCandidates.push(candidate);
+    }
+    if (dupes.length)
+      console.warn(
+        `[reconcileFindings] dropped ${dupes.length} duplicate candidate(s) with identities already present in the candidate set`,
+      );
+  }
+  const current = new Set(uniqueCandidates.map(identity));
+  const result = uniqueCandidates.map((candidate) => {
     const old = previous.get(identity(candidate));
     if (!old) return candidate;
     let notificationStatus = candidate.notificationStatus;
