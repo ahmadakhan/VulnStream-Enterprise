@@ -555,12 +555,12 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
           assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED'")).rows[0].n, 0, 'automatic dispatch is disabled');
           // Explicit operator approval releases the held email after the policy
           // permits it. It does not resurrect the failed webhook.
-          await pool.query("UPDATE outbox SET status='QUEUED', review_approved=true, attempts=0 WHERE status='REVIEW' AND channel='email'");
+          await pool.query("UPDATE outbox SET status='QUEUED', review_approved=true, attempts=0, next_attempt=now(), error=NULL WHERE status='REVIEW' AND channel='email'");
           const requeued = (await pool.query("SELECT channel, payload FROM outbox WHERE status='QUEUED'")).rows;
           assert.equal(requeued.length, 1, JSON.stringify(requeued.map((row) => [row.channel, row.payload?.includedFindingIds])));
           assert.equal(requeued[0].channel, 'email');
           while (await deliverNext(pool, config, webhookRequest, mail)) { /* Rebuilt, revalidated jobs only. */ }
-          assert.equal(emails, 1, JSON.stringify((await pool.query('SELECT channel,status,error,payload FROM outbox')).rows));
+          assert.equal(emails, 1, JSON.stringify((await pool.query('SELECT channel,status,error FROM outbox')).rows));
           assert.equal(webhooks, 0);
           await run();
           assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED'")).rows[0].n, 0);
