@@ -1551,17 +1551,14 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         affectedSystems: [finding.matchedAssetName],
         isDigestBatch: false,
       };
-      console.log('DBGQUEUE', JSON.stringify((await transaction(pool, (db) => queueAdvisory(db, advisory, [finding])))));
-      console.log('DBGROWS', JSON.stringify((await pool.query("SELECT id,status,payload->>'digestKey' dk,payload->>'includedFindingIds' inc FROM outbox")).rows));
-      const before = transports;
+      await transaction(pool, (db) => queueAdvisory(db, advisory, [finding]));
+      let refusedTransports = 0;
       await deliverNext(pool, config, request, async () => {
-        transports++;
+        refusedTransports++;
         return 'must-not-send';
       });
       const refused = (await pool.query('SELECT status,error FROM outbox')).rows[0];
-      assert.equal(transports, before, 'a review-held finding must not reach the transport');
-      assert.equal(refused.status, 'FAILED');
-      assert.match(refused.error, /requires review|no longer applicable/);
+      assert.equal(refusedTransports, 0, 'a review-held finding must not reach the transport');
       assert.equal(refused.status, 'FAILED');
       assert.match(refused.error, /requires review|no longer applicable/);
     });
