@@ -167,6 +167,7 @@ export interface AppState {
   advisoryTemplate: string;
   dailyDigestCustomization: TemplateCustomization;
   dailyDigestTemplate: string;
+  dailyDigestCustomTemplate: string | null;
   aliases: AliasEntry[];
   /** Exact row counts for every collection, independent of the returned slice. */
   counts: CollectionCounts;
@@ -199,6 +200,7 @@ export const emptyState = (): AppState => ({
   advisoryTemplate: compileCustomizedTemplate(DEFAULT_TEMPLATE_CUSTOMIZATION),
   dailyDigestCustomization: { ...DEFAULT_DAILY_DIGEST_CUSTOMIZATION },
   dailyDigestTemplate: compileDailyDigestTemplate(DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
+  dailyDigestCustomTemplate: null,
   counts: zeroCounts(),
   summary: { activeFindings: 0, criticalFindings: 0, kevFindings: 0, deliveredEmails: 0 },
 });

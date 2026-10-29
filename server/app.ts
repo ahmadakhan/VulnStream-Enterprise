@@ -1566,6 +1566,7 @@ export function createApp(
           throw new HttpError(409, 'Configure an email provider in Settings before sending a test');
         const data = await state(db);
         const dailyConfig = data.dailyDigestCustomization || DEFAULT_DAILY_DIGEST_CUSTOMIZATION;
+        const dailyDigestTemplate = data.dailyDigestCustomTemplate;
         const sampleFindings: DigestFinding[] = [
           { cveId: 'CVE-2026-0001', severity: 'CRITICAL', assetName: 'edge-router-01', vendor: 'VendorX' },
           { cveId: 'CVE-2026-0002', severity: 'CRITICAL', assetName: 'auth-service' },
@@ -1622,7 +1623,7 @@ export function createApp(
            medium_kpi: digestSeverityKpi('MEDIUM', severityCounts.MEDIUM, dailyConfig),
            low_kpi: digestSeverityKpi('LOW', severityCounts.LOW, dailyConfig),
          };
-        const html = renderDailyDigest(dailyConfig, parts);
+          const html = renderDailyDigest(dailyConfig, parts, dailyDigestTemplate ?? undefined);
         const testAdvisory: Advisory = {
           id: parts.advisory_id,
           title: parts.advisory_title,

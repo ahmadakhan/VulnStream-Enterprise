@@ -577,9 +577,15 @@ function useApplication() {
     setDailyDigestCustomTemplate: setDailyDigestCustomTemplatePersisted,
     updateDailyDigestCustomization: (update: Partial<TemplateCustomization>) =>
       setDailyDigestDraft((prev) => ({ ...dailyDigestCustomization, ...prev, ...update })),
-    saveDailyDigestTemplate: async () => {
-      const success = await save('dailyDigestTemplate.save', { dailyDigestCustomization });
-      if (success) setDailyDigestDraft(null);
+    saveDailyDigestTemplate: async (customTemplate?: string | null) => {
+      const success = await save('dailyDigestTemplate.save', {
+        dailyDigestCustomization,
+        dailyDigestCustomTemplate: customTemplate ?? null,
+      });
+      if (success) {
+        setDailyDigestDraft(null);
+        if (!customTemplate) setDailyDigestCustomTemplate(null);
+      }
       return success;
     },
     sendTestEmail: async (email: string, forceReview = false) =>

@@ -542,7 +542,8 @@ export async function state(db: Db, options: StateOptions = {}): Promise<AppStat
   // Saved branding is authoritative; regenerate HTML with the current layout so
   // existing installations receive layout fixes without losing customization.
   snapshot.advisoryTemplate = compileCustomizedTemplate(snapshot.templateCustomization);
-  snapshot.dailyDigestTemplate = compileDailyDigestTemplate(snapshot.dailyDigestCustomization);
+  snapshot.dailyDigestTemplate =
+    snapshot.dailyDigestCustomTemplate || compileDailyDigestTemplate(snapshot.dailyDigestCustomization);
   await attachCounts(db, snapshot);
   return snapshot;
 }
@@ -613,6 +614,7 @@ export async function pipelineState(db: Db): Promise<AppState> {
     else if (row.kind === 'template') Object.assign(snapshot, row.data);
   }
   snapshot.advisoryTemplate = compileCustomizedTemplate(snapshot.templateCustomization);
-  snapshot.dailyDigestTemplate = compileDailyDigestTemplate(snapshot.dailyDigestCustomization);
+  snapshot.dailyDigestTemplate =
+    snapshot.dailyDigestCustomTemplate || compileDailyDigestTemplate(snapshot.dailyDigestCustomization);
   return snapshot;
 }

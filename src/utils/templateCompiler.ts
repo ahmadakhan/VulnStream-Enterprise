@@ -618,11 +618,15 @@ ${classificationBanner}
             </div>
 
              <div style="font-size:12px;line-height:20px;color:#64748b;">
-                This digest provides a consolidated view of newly identified vulnerabilities and platform
-                health status. Prioritize remediation activities according to asset criticality,
-                business impact, and established vulnerability management SLAs. All implementation
-                and remediation activities should follow approved change management procedures.
-            </div>
+                 This digest provides a consolidated view of newly identified vulnerabilities and platform
+                 health status. Prioritize remediation activities according to asset criticality,
+                 business impact, and established vulnerability management SLAs. All implementation
+                 and remediation activities should follow approved change management procedures.
+             </div>
+
+             <div style="margin-top:12px;font-size:11px;line-height:18px;color:#94a3b8;">
+                 Severity breakdown: {{critical_count}} Critical, {{high_count}} High, {{medium_count}} Medium, {{low_count}} Low
+             </div>
 
             <div style="margin-top:12px;font-size:12px;line-height:20px;color:#64748b;">
                 For questions or additional information, contact:
@@ -858,9 +862,9 @@ export const digestSeverityKpi = (
 </td>`;
 };
 
-export function renderDailyDigest(config: TemplateCustomization, parts: DailyDigestParts): string {
-  const template = compileDailyDigestTemplate(config);
-  return template
+export function renderDailyDigest(config: TemplateCustomization, parts: DailyDigestParts, template?: string): string {
+  const compiled = template || compileDailyDigestTemplate(config);
+  return compiled
     .replace(/{{report_generated}}/g, digestEscapeHtml(parts.report_generated))
     .replace(/{{finding_count}}/g, String(parts.finding_count))
     .replace(/{{critical_count}}/g, String(parts.critical_count))

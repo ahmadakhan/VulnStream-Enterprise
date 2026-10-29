@@ -427,12 +427,19 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
       advisoryTemplate: compileCustomizedTemplate(input.templateCustomization),
     });
   } else if (action === 'dailyDigestTemplate.save') {
-    const input = z.object({ dailyDigestCustomization: templateSchema }).parse(data);
+    const input = z
+      .object({
+        dailyDigestCustomization: templateSchema,
+        dailyDigestCustomTemplate: z.string().nullish(),
+      })
+      .parse(data);
     const existing = (await getForUpdate<any>(db, 'template', 'main')) || {};
     await put(db, 'template', 'main', {
       ...existing,
       dailyDigestCustomization: input.dailyDigestCustomization,
-      dailyDigestTemplate: compileDailyDigestTemplate(input.dailyDigestCustomization),
+      dailyDigestCustomTemplate: input.dailyDigestCustomTemplate ?? null,
+      dailyDigestTemplate:
+        input.dailyDigestCustomTemplate || compileDailyDigestTemplate(input.dailyDigestCustomization),
     });
   } else if (action === 'finding.status') {
     const input = z

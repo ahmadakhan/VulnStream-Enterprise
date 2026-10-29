@@ -88,6 +88,11 @@ async function readDailyDigestConfig(db: Db): Promise<TemplateCustomization> {
   return row?.dailyDigestCustomization || DEFAULT_DAILY_DIGEST_CUSTOMIZATION;
 }
 
+async function readDailyDigestTemplate(db: Db): Promise<string | null> {
+  const row = await get<{ dailyDigestCustomTemplate?: string | null }>(db, 'template', 'main');
+  return row?.dailyDigestCustomTemplate ?? null;
+}
+
 const severityRank = (s: Advisory['severity']) => SEVERITY_RANK.indexOf(s);
 
 const buildDailyDigestAdvisory = (findings: Finding[], settings: AppSettings, dateKey: string): Advisory => {
@@ -393,6 +398,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
         });
 
         const dailyConfig = await readDailyDigestConfig(db);
+        const dailyDigestTemplate = await readDailyDigestTemplate(db);
         const advisory = buildDailyDigestAdvisory(findings, settings, todayKey);
         const heldForReview = findingRows.rows.filter(
           (r) => r.data?.cveId && r.data.notificationStatus === 'REVIEW_REQUIRED',
@@ -462,7 +468,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
            medium_kpi: digestSeverityKpi('MEDIUM', mediumCount, dailyConfig),
            low_kpi: digestSeverityKpi('LOW', lowCount, dailyConfig),
           };
-          const html = renderDailyDigest(dailyConfig, parts);
+          const html = renderDailyDigest(dailyConfig, parts, dailyDigestTemplate ?? undefined);
           const payload = {
             ...advisoryEmail(view, html),
             cveIds: view.cveIds,

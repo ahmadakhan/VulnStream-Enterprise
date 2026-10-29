@@ -266,7 +266,7 @@ export const DailyDigestView: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!(await saveDailyDigestTemplate())) return;
+    if (!(await saveDailyDigestTemplate(isCustomTemplate ? customTemplate : null))) return;
     setSaveToast(true);
     setTimeout(() => setSaveToast(false), 2500);
   };
