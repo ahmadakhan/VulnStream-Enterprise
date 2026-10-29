@@ -662,3 +662,4 @@
     animation: none;
   }
 }
+.registration-body { min-width: 0; }
