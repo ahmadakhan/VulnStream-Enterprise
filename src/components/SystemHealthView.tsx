@@ -24,7 +24,8 @@ const tones: Record<Tone, string> = {
 const panel =
   'rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white';
 const muted = 'text-zinc-400 light:text-zinc-600';
-const date = (value: string | null) => (value ? fmtDateTime(value) : 'Not available');
+const date = (value: string | null, timezone?: string) =>
+  value ? fmtDateTime(value, timezone) : 'Not available';
 const duration = (seconds: number) => {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
@@ -50,7 +51,7 @@ function Badge({ children, tone = 'neutral' }: { children: React.ReactNode; tone
 }
 
 export function SystemHealthView() {
-  const { health } = useApp();
+  const { health, settings } = useApp();
   const [status, setStatus] = useState<SystemHealth | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshFailed, setRefreshFailed] = useState(false);
@@ -184,7 +185,7 @@ export function SystemHealthView() {
               <div className="shrink-0 border-t border-zinc-800/70 pl-0 pt-3 text-xs sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0 light:border-zinc-200">
                 <p className={`text-[10px] font-semibold uppercase tracking-wider ${muted}`}>Last checked</p>
                 <time className="mt-1 block font-medium tabular-nums" dateTime={status.checkedAt}>
-                  {date(status.checkedAt)}
+                  {date(status.checkedAt, settings.timezone)}
                 </time>
               </div>
             </div>
@@ -299,13 +300,13 @@ export function SystemHealthView() {
                   [
                     'Oldest due delivery',
                     status.deliveryQueue.oldestDueCreatedAt
-                      ? date(status.deliveryQueue.oldestDueCreatedAt)
+                      ? date(status.deliveryQueue.oldestDueCreatedAt, settings.timezone)
                       : 'No deliveries due',
                   ],
                   [
                     'Next delayed retry',
                     status.deliveryQueue.nextScheduledAttempt
-                      ? date(status.deliveryQueue.nextScheduledAttempt)
+                      ? date(status.deliveryQueue.nextScheduledAttempt, settings.timezone)
                       : 'No retries scheduled',
                   ],
                   [
@@ -367,7 +368,7 @@ export function SystemHealthView() {
                     Last scheduled run
                   </p>
                   <p className="mt-1.5 break-words font-medium leading-relaxed">
-                    {status.lastScheduledRun ? date(status.lastScheduledRun) : 'Not yet run'}
+                    {status.lastScheduledRun ? date(status.lastScheduledRun, settings.timezone) : 'Not yet run'}
                   </p>
                 </div>
                 <div>

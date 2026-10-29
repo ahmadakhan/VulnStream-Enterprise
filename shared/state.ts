@@ -26,6 +26,13 @@ export const DEFAULT_EMAIL_CONFIG: EmailConfiguration = {
   mailgunDomain: '', mailgunRegion: 'US', mailtrapMode: 'LIVE', mailtrapInboxId: '',
   postmarkMessageStream: 'outbound', mailjetApiSecret: '',
 };
+/**
+ * Timezone applied when the operator has not configured one in Settings.
+ * Rendering and the daily-digest schedule both fall back to this value, so a
+ * deployment never silently inherits a server's or browser's local clock.
+ */
+export const DEFAULT_TIMEZONE = 'UTC';
+
 export const DEFAULT_SETTINGS: AppSettings = {
   scopeHours: 24,
   schedulerIntervalMinutes: 60,
@@ -62,7 +69,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     autoCleanup: true,
     retentionMode: 'rolling',
   },
-  timezone: 'UTC',
+  timezone: DEFAULT_TIMEZONE,
   dailyDigest: {
     enabled: true,
     time: '09:00',

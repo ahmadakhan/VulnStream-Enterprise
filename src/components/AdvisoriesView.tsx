@@ -7,8 +7,10 @@ import { useCollection } from '../hooks/useCollection';
 import { copyText } from '../utils/clipboard';
 import { CveLink } from './CveLink';
 import { formatDate as fmtDate } from '../utils/dateTime';
+import { useApp } from '../context/AppContext';
 
 export const AdvisoriesView: React.FC = () => {
+  const { settings } = useApp();
   const [copied, setCopied] = useState<string | null>(null);
   const [activeModalAdvisory, setActiveModalAdvisory] = useState<Advisory | null>(null);
 
@@ -199,7 +201,7 @@ ${adv.remediationInstructions}
                   ))}
                 </div>
                 <div className="text-[10px] text-zinc-500 font-mono pt-1">
-                  Generated: {fmtDate(adv.createdDate)}
+                  Generated: {fmtDate(adv.createdDate, settings.timezone)}
                 </div>
               </div>
             </div>

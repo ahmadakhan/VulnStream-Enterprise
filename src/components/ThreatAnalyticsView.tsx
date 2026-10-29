@@ -609,7 +609,7 @@ function Legend({ items }: { items: { label: string; color: string; value: numbe
 }
 
 export const ThreatAnalyticsView: React.FC = () => {
-  const { fetchThreatAnalytics } = useApp();
+  const { fetchThreatAnalytics, settings } = useApp();
   const fetchRef = useRef(fetchThreatAnalytics);
   // The context value is rebuilt on every render, which makes `fetchThreatAnalytics`
   // a new reference each render. Holding the latest ref decouples data loading from
@@ -830,7 +830,7 @@ export const ThreatAnalyticsView: React.FC = () => {
             <KpiCard
               icon={<BarChart3 className="h-5 w-5 text-teal-400" />}
               label="Generated"
-              value={formatDate(analytics.generatedAt)}
+              value={formatDate(analytics.generatedAt, settings.timezone)}
               subtitle="Data freshness"
             />
           </div>

@@ -967,7 +967,7 @@ export const WatchListView: React.FC = () => {
                             </span>
                           </div>
                           <div className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono mt-0.5">
-                            Registered: {fmtDate(asset.createdAt)}
+                            Registered: {fmtDate(asset.createdAt, settings.timezone)}
                           </div>
                         </td>
 

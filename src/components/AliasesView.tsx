@@ -57,7 +57,8 @@ function AliasDialog({
   );
 }
 export const AliasesView: React.FC = () => {
-  const { aliases, addAlias, updateAlias, deleteAlias, promoteAlias, revokeAlias, session } = useApp();
+  const { aliases, addAlias, updateAlias, deleteAlias, promoteAlias, revokeAlias, session, settings } =
+    useApp();
   const admin = session?.role === 'ADMIN';
   const [scope, setScope] = useState<Scope>('VENDOR');
   const [search, setSearch] = useState('');
@@ -352,9 +353,9 @@ export const AliasesView: React.FC = () => {
                         {entry.evidenceCount ? ` · ${entry.evidenceCount} supporting findings` : ''}
                       </span>
                       {entry.expiresAt && (
-                        <span title={`Expires ${formatDateTime(entry.expiresAt)}`}>
+                        <span title={`Expires ${formatDateTime(entry.expiresAt, settings.timezone)}`}>
                           <Clock size={12} aria-hidden="true" />
-                          Expires {formatDate(entry.expiresAt)}
+                          Expires {formatDate(entry.expiresAt, settings.timezone)}
                         </span>
                       )}
                     </div>

@@ -8,7 +8,7 @@ import type { EmailDeliveryLog } from '../types';
 import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 export const EmailHistoryView: React.FC = () => {
-  const { retryEmailDelivery, emailConfig, setActiveTab, refresh } = useApp();
+  const { retryEmailDelivery, emailConfig, setActiveTab, refresh, settings } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [retryingId, setRetryingId] = useState<string | null>(null);
@@ -177,7 +177,7 @@ export const EmailHistoryView: React.FC = () => {
 
                       {/* Timestamp */}
                       <td className="py-3 px-4 font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600 text-[11px]">
-                        {log.sentAt ? fmtDateTime(log.sentAt) : 'Not accepted yet'}
+                        {log.sentAt ? fmtDateTime(log.sentAt, settings.timezone) : 'Not accepted yet'}
                       </td>
 
                       {/* Actions */}

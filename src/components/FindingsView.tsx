@@ -20,10 +20,10 @@ import { Pagination } from './Pagination';
 import { useCollection } from '../hooks/useCollection';
 import { copyText } from '../utils/clipboard';
 import { CveLink } from './CveLink';
-import { formatDateTime as fmtDateTime } from '../utils/dateTime';
+import { formatDateTime as fmtDateTime, formatTime as fmtTime } from '../utils/dateTime';
 
 export const FindingsView: React.FC = () => {
-  const { selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification, deleteFinding } =
+  const { selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification, deleteFinding, settings } =
     useApp();
   const [removeFeedback, setRemoveFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(
     null,
@@ -256,10 +256,10 @@ export const FindingsView: React.FC = () => {
 
                           {/* CVE dates */}
                           <td className="py-3 px-3.5 whitespace-nowrap text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono text-[11px]">
-                            {fmtDateTime(finding.cve.publishedDate)}
+                            {fmtDateTime(finding.cve.publishedDate, settings.timezone)}
                           </td>
                           <td className="py-3 px-3.5 whitespace-nowrap text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono text-[11px]">
-                            {fmtDateTime(finding.cve.modifiedDate)}
+                            {fmtDateTime(finding.cve.modifiedDate, settings.timezone)}
                           </td>
 
                           {/* Matched Product */}
@@ -325,10 +325,7 @@ export const FindingsView: React.FC = () => {
                             </div>
                             {finding.autoDispatchedAt && (
                               <div className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
-                                {new Date(finding.autoDispatchedAt).toLocaleTimeString([], {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
+                                {fmtTime(finding.autoDispatchedAt, settings.timezone)}
                               </div>
                             )}
                           </td>
@@ -552,7 +549,7 @@ export const FindingsView: React.FC = () => {
                         {event.details}
                       </div>
                       <div className="text-zinc-500 font-mono text-[10px]">
-                        {fmtDateTime(event.timestamp)}
+                        {fmtDateTime(event.timestamp, settings.timezone)}
                       </div>
                     </div>
                   </div>

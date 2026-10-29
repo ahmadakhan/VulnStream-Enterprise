@@ -23,7 +23,7 @@ interface InventoryRow {
 const field = 'ui-field cr-operation-field';
 const button = 'ui-secondary';
 export function CorrelationOperations() {
-  const { session, csrfToken } = useApp();
+  const { session, csrfToken, settings } = useApp();
   const [state, setState] = useState<CorrelationWorkflows | null>(null);
   const [policy, setPolicy] = useState<CorrelationPolicy | null>(null);
   const [notice, setNotice] = useState('');
@@ -385,7 +385,7 @@ export function CorrelationOperations() {
               >
                 <span className="block font-mono text-xs">{letter.id}</span>
                 <span className="text-xs text-zinc-500">
-                  {letter.errorCode} · {fmtDateTime(letter.createdAt)}
+                  {letter.errorCode} · {fmtDateTime(letter.createdAt, settings.timezone)}
                 </span>
               </button>
             ))}

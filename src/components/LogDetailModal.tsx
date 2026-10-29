@@ -1,7 +1,7 @@
 import React, { useId } from 'react';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import { X } from 'lucide-react';
-import { formatDateTime as fmtDateTime } from '../utils/dateTime';
+import { formatDateTime as fmtDateTime, timezoneLabel } from '../utils/dateTime';
 
 export interface LogDetailField {
   label: string;
@@ -28,6 +28,8 @@ interface LogDetailModalProps {
   level: 'INFO' | 'WARNING' | 'ERROR';
   timestamp: string;
   fields: LogDetailField[];
+  /** Operator-configured timezone (`settings.timezone`); UTC when unset. */
+  timezone?: string;
   onClose: () => void;
 }
 
@@ -38,6 +40,7 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
   level,
   timestamp,
   fields,
+  timezone,
   onClose,
 }) => {
   const dialogRef = useDialogFocus(onClose);
@@ -86,7 +89,9 @@ export const LogDetailModal: React.FC<LogDetailModalProps> = ({
             >
               {level}
             </span>
-            <span className="text-[11px] text-zinc-500">{fmtDateTime(timestamp, 'UTC')} UTC</span>
+            <span className="text-[11px] text-zinc-500">
+              {fmtDateTime(timestamp, timezone)} {timezoneLabel(timezone)}
+            </span>
           </div>
         </div>
         <dl className="audit-log-body text-xs">

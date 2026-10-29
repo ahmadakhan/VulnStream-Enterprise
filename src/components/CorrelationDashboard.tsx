@@ -21,6 +21,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { formatTime } from '../utils/dateTime';
 import type { CorrelationSnapshot } from '../../shared/correlation';
 import './correlation.css';
 
@@ -42,7 +43,7 @@ const healthLabels = {
 const percent = (value: number) => Math.min(100, Math.max(0, value));
 
 export function CorrelationDashboard() {
-  const { csrfToken, session } = useApp();
+  const { csrfToken, session, settings } = useApp();
   const [snapshot, setSnapshot] = useState<CorrelationSnapshot | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -441,9 +442,7 @@ export function CorrelationDashboard() {
                   <pre>{JSON.stringify(log)}</pre>
                 ) : (
                   <>
-                    <time dateTime={log.timestamp}>
-                      {new Date(log.timestamp).toLocaleTimeString([], { hour12: false })}
-                    </time>
+                    <time dateTime={log.timestamp}>{formatTime(log.timestamp, settings.timezone)}</time>
                     <span className="cr-log-level">{log.level}</span>
                     <div className="cr-log-message">
                       <span>{log.event.replace(/[_\.]+/g, ' ')}</span>
@@ -477,7 +476,7 @@ export function CorrelationDashboard() {
             </span>
             <span>
               {updatedAt
-                ? `Last received ${updatedAt.toLocaleTimeString([], { hour12: false })}`
+                ? `Last received ${formatTime(updatedAt, settings.timezone)}`
                 : 'No snapshot received'}
             </span>
           </div>

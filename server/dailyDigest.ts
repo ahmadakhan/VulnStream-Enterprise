@@ -4,6 +4,7 @@ import { writeEvent } from './events';
 import { enqueue, findingRevision, revision } from './delivery';
 import { advisoryEmail } from './advisoryEmail';
 import { renderAdvisory } from './advisoryRender';
+import { resolveTimezone as resolveSettingsTimezone } from '../src/utils/dateTime';
 import { DEFAULT_SETTINGS } from '../shared/state';
 import {
   DEFAULT_TEMPLATE_CUSTOMIZATION,
@@ -37,15 +38,10 @@ const SEVERITY_RANK: Advisory['severity'][] = ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH
  * cannot produce a second 9 AM mail.
  */
 
-const resolveTimezone = (value: string | undefined): string => {
-  if (!value) return 'UTC';
-  try {
-    new Intl.DateTimeFormat('en', { timeZone: value });
-    return value;
-  } catch {
-    return 'UTC';
-  }
-};
+// The daily digest runs on the same clock as the UI: the operator-configured
+// Settings timezone, or the documented system default when none is stored or
+// the stored value is not a zone this runtime knows.
+const resolveTimezone = (value: string | undefined): string => resolveSettingsTimezone(value);
 
 const calendarDateKey = (timezone: string, now: number): string =>
   new Intl.DateTimeFormat('en-CA', {

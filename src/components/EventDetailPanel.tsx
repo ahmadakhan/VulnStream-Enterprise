@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { OperationalEvent } from '../types';
 import { formatEventContext, humanizeEventKey } from '../utils/eventText';
+import { formatDateTime, timezoneLabel } from '../utils/dateTime';
 
 const LEVEL_STYLES: Record<OperationalEvent['level'], string> = {
   INFO: 'border-blue-500/20 bg-blue-500/10 text-blue-300 light:text-blue-700',
@@ -81,9 +82,11 @@ function Metric({ icon: Icon, label, value }: { icon: typeof Clock; label: strin
  */
 export const EventDetailPanel: React.FC<{
   event: OperationalEvent;
+  /** Operator-configured timezone (`settings.timezone`); UTC when unset. */
+  timezone?: string;
   onClose: () => void;
   onFilterByTrackingId?: (trackingId: string) => void;
-}> = ({ event, onClose, onFilterByTrackingId }) => {
+}> = ({ event, timezone, onClose, onFilterByTrackingId }) => {
   const [raw, setRaw] = React.useState(false);
   const dialogRef = useDialogFocus(onClose);
 
@@ -167,8 +170,8 @@ export const EventDetailPanel: React.FC<{
           <dl className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2.5">
             <Metric
               icon={Clock}
-              label="Occurred (UTC)"
-              value={new Date(event.timestamp).toISOString().slice(0, 19).replace('T', ' ')}
+              label={`Occurred (${timezoneLabel(timezone)})`}
+              value={formatDateTime(event.timestamp, timezone)}
             />
             {event.runId && <Metric icon={Cpu} label="Execution" value={event.runId.slice(0, 8)} />}
             {timings.map((timing) => (

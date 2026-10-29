@@ -25,7 +25,7 @@ import { LogDetailModal } from './LogDetailModal';
 import { EventDetailPanel } from './EventDetailPanel';
 import { formatEventContext } from '../utils/eventText';
 import { SecondaryButton } from './SecondaryButton';
-import { formatDateTime as fmtDateTime, formatDate } from '../utils/dateTime';
+import { formatDateTime as fmtDateTime, formatDate, timezoneLabel } from '../utils/dateTime';
 import './investigation-pages.css';
 import './audit-trail.css';
 
@@ -46,7 +46,7 @@ const auditLevel = (level: AuditLog['level']) => (
 );
 
 const AuditTrailView: React.FC = () => {
-  const { fetchCollection, refreshVersion, verifyAuditChainRemote } = useApp();
+  const { fetchCollection, refreshVersion, verifyAuditChainRemote, settings } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
@@ -462,7 +462,7 @@ const AuditTrailView: React.FC = () => {
                     </td>
                     <td>
                       <time dateTime={log.timestamp} className="audit-timestamp">
-                        {fmtDateTime(log.timestamp, 'UTC')}
+                        {fmtDateTime(log.timestamp, settings.timezone)}
                       </time>
                     </td>
                   </tr>
@@ -498,7 +498,7 @@ const AuditTrailView: React.FC = () => {
                   <span className="audit-source-ip">Source: {log.ipAddress || 'Not recorded'}</span>
                   <time dateTime={log.timestamp}>
                     <Clock3 size={13} aria-hidden="true" />
-                    {fmtDateTime(log.timestamp, 'UTC')} UTC
+                    {fmtDateTime(log.timestamp, settings.timezone)} {timezoneLabel(settings.timezone)}
                   </time>
                 </footer>
               </article>
@@ -543,6 +543,7 @@ const AuditTrailView: React.FC = () => {
           title={selectedLog.event}
           level={selectedLog.level}
           timestamp={selectedLog.timestamp}
+          timezone={settings.timezone}
           onClose={() => setSelectedLog(null)}
           fields={[
             { label: 'Category', value: selectedLog.category, mono: true },
@@ -564,7 +565,7 @@ const AuditTrailView: React.FC = () => {
 };
 
 export const OperationalLogsView: React.FC = () => {
-  const { fetchEvents } = useApp();
+  const { fetchEvents, settings } = useApp();
   const [tab, setTab] = useState<'events' | 'audit'>('audit');
   const [category, setCategory] = useState('');
   const [level, setLevel] = useState('');
@@ -866,10 +867,11 @@ export const OperationalLogsView: React.FC = () => {
                                 column width the single-line form clipped the
                                 value ("Oct 25, 2026, 9:"). */}
                             <div className="whitespace-nowrap tabular-nums">
-                              {formatDate(event.timestamp, 'UTC')}
+                              {formatDate(event.timestamp, settings.timezone)}
                             </div>
                             <div className="mt-0.5 whitespace-nowrap font-mono text-[10px] tabular-nums text-zinc-500">
-                              {fmtDateTime(event.timestamp, 'UTC')} UTC
+                              {fmtDateTime(event.timestamp, settings.timezone)}{' '}
+                              {timezoneLabel(settings.timezone)}
                             </div>
                           </td>
                           <td className="px-4 py-3.5 align-top text-[11px] text-zinc-300 light:text-zinc-700">
@@ -989,6 +991,7 @@ export const OperationalLogsView: React.FC = () => {
       {selectedEvent && (
         <EventDetailPanel
           event={selectedEvent}
+          timezone={settings.timezone}
           onClose={() => setSelectedEvent(null)}
           onFilterByTrackingId={(trackingId) => {
             setSelectedEvent(null);

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { createPool, migrate, transaction, put, putMany, list, get } from '../server/db.ts';
 import { runDailyDigest } from '../server/dailyDigest';
+import { resolveTimezone } from '../src/utils/dateTime';
 import { queueRun, processPipeline, rebuildFromCurrentInventory, stopRun } from '../server/pipeline';
 import { deliverNext, queueAdvisory, queueDigestAdvisory, type Job } from '../server/delivery';
 import { flushDueDigest } from '../server/digest';
@@ -1462,6 +1463,66 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       assert.equal(transports, 1, String(delivered.error));
       assert.equal(delivered.status, 'ACCEPTED');
       assert.equal(delivered.error, null);
+    });
+    await t.test('daily digest follows the Settings timezone, with a default when unset', async () => {
+      await reset();
+      await save('recipients', 'rec', {
+        id: 'rec',
+        name: 'Test',
+        email: 'test@example.invalid',
+        enabled: true,
+        dailyDigest: true,
+        deliveryGroup: 'SECURITY_TEAM',
+        subscriptionTier: 'ALL_SEVERITIES',
+      });
+      // Pick a zone whose local date differs from UTC right now, so a schedule
+      // that ignored the setting would be observably wrong.
+      const zones = ['Pacific/Kiritimati', 'Pacific/Pago_Pago'];
+      const keyFor = (zone: string, at = Date.now()) =>
+        new Intl.DateTimeFormat('en-CA', {
+          timeZone: zone,
+          year: 'numeric',
+          month: '2-digit',
+          day: 'numeric',
+        }).format(at);
+      const configured = zones.find((zone) => keyFor(zone) !== keyFor('UTC'));
+      assert.ok(configured, 'no zone currently differs from UTC by a calendar day');
+      // Pin the expected day when the digest is queued: a run that straddles
+      // local midnight between this assertion and the job would otherwise read
+      // as a timezone bug.
+      const digestDay = keyFor(resolveTimezone(configured));
+      for (const [timezone, expected] of [
+        [configured, configured],
+        // Unset, blank and unusable values fall back to the documented default.
+        [undefined, 'UTC'],
+        ['', 'UTC'],
+        ['Not/AZone', 'UTC'],
+      ] as const) {
+        await reset();
+        await save('settings', 'main', {
+          ...DEFAULT_SETTINGS,
+          timezone,
+          dailyDigest: { enabled: true, time: '00:00', includeHealthReport: false },
+        });
+        await save('recipients', 'rec', {
+          id: 'rec',
+          name: 'Test',
+          email: 'test@example.invalid',
+          enabled: true,
+          dailyDigest: true,
+          deliveryGroup: 'SECURITY_TEAM',
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        assert.equal(await runDailyDigest(pool), 1, `digest not queued for ${timezone}`);
+        const [job] = (await pool.query('SELECT payload,advisory_id FROM outbox')).rows;
+        const expectedKey: string = expected === configured ? digestDay : keyFor(resolveTimezone(expected));
+        assert.equal(
+          job.advisory_id,
+          `${DEFAULT_SETTINGS.advisoryPrefix}DAILY_${expectedKey.replace(/-/g, '')}`,
+          `digest for ${timezone} used the wrong calendar day`,
+        );
+        assert.match(job.payload.subject, new RegExp(expectedKey));
+      }
     });
     await t.test('daily digest of review-held findings delivers instead of failing as stale', async () => {
       await reset();

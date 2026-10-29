@@ -18,7 +18,8 @@ import {
 import { formatDateTime as fmtDateTime } from '../utils/dateTime';
 
 export const ThreatFeedsView: React.FC = () => {
-  const { feeds, toggleFeedEnabled, testFeedConnectivity, addFeed, updateFeed, deleteFeed } = useApp();
+  const { feeds, toggleFeedEnabled, testFeedConnectivity, addFeed, updateFeed, deleteFeed, settings } =
+    useApp();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -385,7 +386,7 @@ export const ThreatFeedsView: React.FC = () => {
                       </div>
                       {feed.enabled && feed.healthStatus === 'DOWN' && feed.circuitOpenUntil && (
                         <div className="text-[10px] text-amber-400 mt-1">
-                          Automatic retry after {fmtDateTime(feed.circuitOpenUntil)}
+                          Automatic retry after {fmtDateTime(feed.circuitOpenUntil, settings.timezone)}
                         </div>
                       )}
                       {feed.healthStatus !== 'HEALTHY' && feed.errorLog && (
