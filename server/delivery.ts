@@ -1173,8 +1173,10 @@ export async function deliverNext(
         // findings they describe — only manually reviewed advisories set
         // `advisoryId`. Gating this bookkeeping on that binding left every
         // auto-queued finding marked QUEUED_FOR_DISPATCH after an accepted send,
-        // so it was re-queued and re-sent on the next pipeline run.
-        if (f.advisoryId === advisory.id || (!f.advisoryId && f.autoDispatchedAt))
+        // so it was re-queued and re-sent on the next pipeline run. A
+        // REVIEW_REQUIRED finding released by this acceptance has neither
+        // field set yet, so it must be admitted explicitly.
+        if (f.advisoryId === advisory.id || (!f.advisoryId && f.autoDispatchedAt) || releasedByReview)
           await put(db, 'findings', findingId, {
             ...f,
             advisoryId: f.advisoryId ?? advisory.id,
