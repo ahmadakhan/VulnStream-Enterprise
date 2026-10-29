@@ -5,6 +5,7 @@ import { Shield, Flame, Radio, FileText, Server, ArrowUpRight, Cpu, MailCheck, S
 import { Finding } from '../types';
 import { CveLink } from './CveLink';
 import { compareFindingsByRecency } from '../utils/findingSort';
+import { formatDate } from '../utils/dateTime';
 
 export const DashboardView: React.FC = () => {
   const {
@@ -217,6 +218,15 @@ export const DashboardView: React.FC = () => {
                     </div>
                     <div className="text-xs text-zinc-300 dark:text-zinc-300 light:text-zinc-700 line-clamp-1">
                       {finding.cve.title}
+                    </div>
+                    <div className="text-[10px] text-zinc-400 dark:text-zinc-400 light:text-zinc-500 font-mono flex items-center gap-2">
+                      <span>
+                        Published: {formatDate(finding.cve.publishedDate, settings.timezone)}
+                      </span>
+                      <span>•</span>
+                      <span>
+                        Modified: {formatDate(finding.cve.modifiedDate, settings.timezone)}
+                      </span>
                     </div>
                     <div className="text-[11px] text-zinc-400 dark:text-zinc-400 light:text-zinc-500 font-mono flex items-center gap-2">
                       <span>

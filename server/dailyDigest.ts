@@ -1,7 +1,7 @@
 import type pg from 'pg';
 import { get, list, put, transaction, schemaLockKey, type Db } from './db';
 import { writeEvent } from './events';
-import { enqueue } from './delivery';
+import { enqueue, findingRevision, revision } from './delivery';
 import { advisoryEmail } from './advisoryEmail';
 import { renderAdvisory } from './advisoryRender';
 import { DEFAULT_SETTINGS } from '../shared/state';
@@ -316,6 +316,15 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
             cveIds: advisory.cveIds,
             recipientEmail: recipient.email,
             includedFindingIds: findings.map((finding) => finding.id),
+            // Content-revision evidence, so the delivery worker can prove the
+            // queued body still describes the current CVE cache instead of
+            // rejecting it as a revision-less legacy payload.
+            findingRevisions: Object.fromEntries(
+              findings.map((finding) => [finding.id, findingRevision(finding)]),
+            ),
+            cveRevisions: Object.fromEntries(
+              findings.map((finding) => [finding.cveId, revision(finding.cve)]),
+            ),
             digestKey: `daily:${todayKey}`,
           };
           if (

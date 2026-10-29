@@ -151,7 +151,7 @@ export const emailRetrySchedule = (policy: EmailRetryPolicy) =>
  * changed" failure when the pipeline correctly treats the refresh as a
  * no-op.
  */
-const revision = (cve: NormalizedCVE) =>
+export const revision = (cve: NormalizedCVE) =>
   createHash('sha256')
     .update(
       stableJson({
@@ -183,7 +183,7 @@ const revision = (cve: NormalizedCVE) =>
  * already catches genuine applicability changes via the `!match` and
  * `notificationStatus` checks below.
  */
-const findingRevision = (finding: Finding) =>
+export const findingRevision = (finding: Finding) =>
   createHash('sha256')
     .update(
       stableJson({
@@ -201,7 +201,7 @@ const findingRevision = (finding: Finding) =>
  * summary, remediation, or changed CVE evidence) gets a new revision and can be
  * delivered again.
  */
-const advisoryRevision = (advisory: Advisory, findings: Finding[]) =>
+export const advisoryRevision = (advisory: Advisory, findings: Finding[]) =>
   createHash('sha256')
     .update(
       stableJson({
@@ -758,6 +758,9 @@ export async function deliverNext(
   // Set when the revalidation detects a stale advisory bundle so the catch
   // block can trigger an immediate rebuild instead of a hard permanent failure.
   let staleAdvisory = false;
+  // Set when a legacy payload was rebuilt from current intelligence during this
+  // attempt, so the recovery path does not rebuild the same payload twice.
+  let legacyRebuilt = false;
   try {
     if (!retryPolicy.enabled && job.attempts > 1 && job.channel === 'email' && !job.review_approved) {
       permanent = true;
@@ -792,13 +795,30 @@ export async function deliverNext(
       ? job.payload.includedFindingIds
       : advisory?.findingIds ?? [];
     if (advisory && declaredCveIds.some((id) => !job.payload.cveRevisions?.[id])) {
-      permanent = true;
-      throw new Error(
-        'Advisory revision is no longer applicable; rebuild legacy queued payload from current intelligence',
-      );
+      // Jobs queued before content-revision evidence existed cannot be validated
+      // against the advisory they describe. Rebuild the payload from the
+      // current CVE cache first; revalidation below then decides whether it is
+      // still deliverable. If the rebuild cannot produce evidence for every
+      // declared CVE (e.g. the CVE was removed from the cache), the bundle is
+      // stale and recovery rebuilds it from the current inventory instead.
+      const { rebuildLegacyDeliveryPayload } = await import('./pipeline');
+      if (await rebuildLegacyDeliveryPayload(pool, job)) {
+        legacyRebuilt = true;
+        declaredCveIds = job.payload.cveIds?.length ? job.payload.cveIds : advisory.cveIds;
+      }
+      if (declaredCveIds.some((id) => !job.payload.cveRevisions?.[id])) {
+        permanent = true;
+        staleAdvisory = true;
+        throw new Error(
+          'Advisory revision is no longer applicable; rebuild legacy queued payload from current intelligence',
+        );
+      }
     }
     if (advisory && !declaredFindingIds.length) {
+      // Nothing in this bundle can still be delivered; recover through the same
+      // current-inventory rebuild path instead of a bare operator-facing error.
       permanent = true;
+      staleAdvisory = true;
       throw new Error('Advisory has no findings; rebuild from current inventory before delivery');
     }
     if (advisory) {
@@ -972,7 +992,7 @@ export async function deliverNext(
       staleAdvisory = false;
       try {
         const { rebuildFromCurrentInventory } = await import('./pipeline');
-        await rebuildFromCurrentInventory(pool, job.advisory_id, error);
+        await rebuildFromCurrentInventory(pool, job.advisory_id, error, { payloadRebuilt: legacyRebuilt });
       } catch (rebuildError) {
         errorInfo = describeError(rebuildError);
       }

@@ -6,6 +6,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import {
   get,
   getForUpdate,
+  getMany,
   list,
   put,
   putMany,
@@ -47,11 +48,68 @@ import { recoveryDue, recoveryAt, shouldStartAutomaticRun } from './feedRecovery
 import { ingestionWindow, type FeedCursor } from './ingestionState';
 import type { Requester } from './network';
 import type { Config } from './config';
-import { queueAdvisory } from './delivery';
+import { findingRevision, queueAdvisory, revision, type Job } from './delivery';
 import { bufferFindingsForDigest } from './digest';
 import { renderAdvisory } from './advisoryRender';
 import { HttpError } from './validation';
+import { advisoryEmail } from './advisoryEmail';
 export { renderAdvisory } from './advisoryRender';
+/**
+ * Rebuilds a queued job's stored payload from current intelligence.
+ *
+ * Jobs queued before content-revision evidence existed (or whose payload was
+ * queued under an older revision scheme) carry no `cveRevisions`, so the
+ * delivery worker cannot prove the advisory text still describes the current
+ * CVE corpus. Rather than failing such a job permanently, the payload is
+ * regenerated from the advisory and the findings it currently references, with
+ * fresh `cveRevisions` / `findingRevisions` computed from the current cache. A
+ * job whose findings no longer match the stored CVE revisions keeps its stale
+ * evidence, so the worker's normal applicability check still rejects it and
+ * rebuilds the bundle instead of delivering outdated content.
+ *
+ * Returns true when the payload was rewritten; false when the job no longer
+ * exists, belongs to a native correlation (which has its own evidence hash), or
+ * already carries revision evidence.
+ */
+export async function rebuildLegacyDeliveryPayload(db: pg.Pool | pg.PoolClient, job: Job): Promise<boolean> {
+  if (job.payload.nativeCorrelation) return false;
+  const advisory = await get<Advisory>(db, 'advisories', job.advisory_id);
+  if (!advisory) return false;
+  const evidence = job.payload.cveRevisions ?? {};
+  if (advisory.cveIds.length && advisory.cveIds.every((cveId) => evidence[cveId])) return false;
+  const findingIds = job.payload.includedFindingIds?.length
+    ? job.payload.includedFindingIds
+    : advisory.findingIds;
+  const findings = [...(await getMany<Finding>(db, 'findings', findingIds)).values()];
+  const cves = await getMany<NormalizedCVE>(db, 'cveData', advisory.cveIds);
+  const cveRevisions: Record<string, string> = { ...evidence };
+  for (const cveId of advisory.cveIds) {
+    const cve = cves.get(cveId);
+    if (cve) cveRevisions[cveId] = revision(cve);
+  }
+  const findingRevisions: Record<string, string> = { ...(job.payload.findingRevisions ?? {}) };
+  for (const finding of findings) findingRevisions[finding.id] = findingRevision(finding);
+  const body = advisoryEmail(
+    advisory,
+    job.payload.html,
+    findings.map(
+      (finding) =>
+        `${finding.cveId} | ${finding.cve.cvss.severity}${finding.cve.cisaKev?.isKev ? ' | CISA KEV' : ''} | ${finding.matchedAssetName}`,
+    ),
+  );
+  await db.query('UPDATE outbox SET payload=$2::jsonb, updated_at=now() WHERE id=$1', [
+    job.id,
+    JSON.stringify({
+      ...job.payload,
+      ...body,
+      cveIds: advisory.cveIds,
+      cveRevisions,
+      findingRevisions,
+    }),
+  ]);
+  job.payload = { ...job.payload, ...body, cveIds: advisory.cveIds, cveRevisions, findingRevisions };
+  return true;
+}
 type KevSnapshot = {
   fingerprint: string;
   etag?: string;
@@ -175,8 +233,10 @@ export async function queueRun(
  * findings are no longer applicable. Marks all sibling outbox jobs for the
  * advisory as FAILED so the pipeline's stale-bundle detection
  * (`staleBundles` in `processPipeline`) can rebuild the bundle from current
- * matches, and queues an immediate pipeline run so recovery is not delayed
- * until the next scheduled tick.
+ * matches, queues an immediate pipeline run so recovery is not delayed until
+ * the next scheduled tick, and — unless the caller already rebuilt this
+ * payload from current intelligence — does the same for jobs that were still
+ * queued under a legacy payload with no revision evidence.
  *
  * The job currently being processed by the delivery worker is excluded:
  * the worker's post-delivery bookkeeping will finalize it (including email
@@ -186,7 +246,15 @@ export async function rebuildFromCurrentInventory(
   pool: pg.Pool,
   advisoryId: string,
   reason: string,
+  options: { payloadRebuilt?: boolean } = {},
 ): Promise<void> {
+  if (!options.payloadRebuilt) {
+    const legacy = await pool.query<Job>(
+      "SELECT * FROM outbox WHERE advisory_id=$1 AND status='QUEUED' AND payload->'cveRevisions' IS NULL",
+      [advisoryId],
+    );
+    for (const job of legacy.rows) await rebuildLegacyDeliveryPayload(pool, job).catch(() => false);
+  }
   await pool.query(
     `UPDATE outbox
        SET status='FAILED', error=$1, next_attempt=now(),

@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { createPool, migrate, transaction, put, putMany, list, get } from '../server/db.ts';
-import { queueRun, processPipeline, stopRun } from '../server/pipeline';
-import { deliverNext, queueAdvisory, queueDigestAdvisory } from '../server/delivery';
+import { queueRun, processPipeline, rebuildFromCurrentInventory, stopRun } from '../server/pipeline';
+import { deliverNext, queueAdvisory, queueDigestAdvisory, type Job } from '../server/delivery';
 import { flushDueDigest } from '../server/digest';
 import { loadConfig } from '../server/config.ts';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
@@ -1312,18 +1312,107 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         await run();
         await pool.query("UPDATE outbox SET payload=payload-'cveRevisions'");
         let transports = 0;
+        const delivered = await deliverNext(pool, config, request, async () => {
+          transports++;
+          return 'must-not-send';
+        });
+        assert.equal(delivered, true);
+        // The payload is rebuilt from the current cache in place, so the job
+        // delivers its current content instead of demanding an operator rebuild.
+        assert.equal(transports, 1);
+        const job = (await pool.query('SELECT status,payload FROM outbox')).rows[0];
+        assert.equal(job.status, 'ACCEPTED');
+        assert.ok(job.payload.cveRevisions[vulnerability().cveId]);
+        assert.match(job.payload.text, /CVE-2026-98001 \| HIGH/);
+        // No recovery rebuild is triggered once the rebuilt payload is accepted.
+        assert.equal((await pool.query('SELECT count(*)::int AS n FROM outbox')).rows[0].n, 1);
+      },
+    );
+    await t.test(
+      'legacy queued payloads whose evidence cannot be rebuilt recover from current inventory',
+      async () => {
+        await reset();
+        await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
+        await save('watchlist', 'asset', asset());
+        const cve = vulnerability();
+        await save('cveData', cve.cveId, cve);
+        await save('recipients', 'rec', {
+          id: 'rec',
+          name: 'Test',
+          email: 'test@example.invalid',
+          enabled: true,
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        await run();
+        await pool.query("UPDATE outbox SET payload=payload-'cveRevisions'");
+        // The CVE is no longer in the cache, so no revision evidence can be
+        // produced for it and the queued bundle is stale by definition.
+        await transaction(pool, (db) => db.query("DELETE FROM records WHERE kind='cveData'"));
+        let transports = 0;
         await deliverNext(pool, config, request, async () => {
           transports++;
           return 'must-not-send';
         });
         assert.equal(transports, 0);
-        await run();
-        assert.equal(
-          (await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED'")).rows[0].n,
-          1,
-        );
+        assert.equal((await pool.query('SELECT status FROM outbox')).rows[0].status, 'FAILED');
+        assert.match((await pool.query('SELECT error FROM outbox')).rows[0].error, /no longer applicable/);
+        // Recovery queued an immediate run; the run clears the advisory binding,
+        // finds no current match and queues nothing further.
+        await processPipeline(pool, config, request);
+        const findings = await list<Finding>(pool, 'findings');
+        assert.equal(findings[0].notificationStatus, 'NOT_APPLICABLE');
+        assert.equal(findings[0].advisoryId, null);
+        assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED'")).rows[0].n, 0);
       },
     );
+    await t.test('jobs without revision evidence are rebuilt in place by the recovery path', async () => {
+      await reset();
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
+      await save('watchlist', 'asset', asset());
+      await save('cveData', vulnerability().cveId, vulnerability());
+      await save('recipients', 'rec', {
+        id: 'rec',
+        name: 'Test',
+        email: 'test@example.invalid',
+        enabled: true,
+        subscriptionTier: 'ALL_SEVERITIES',
+      });
+      await run();
+      // A webhook endpoint gives the advisory a second transport job.
+      await save('webhooks', 'hook', {
+        id: 'hook',
+        name: 'Test hook',
+        url: encrypt('https://example.invalid/hook', config.ENCRYPTION_KEY, 'webhook-url:hook'),
+        secretToken: encrypt('secret', config.ENCRYPTION_KEY, 'webhook:hook'),
+        provider: 'GENERIC_HMAC',
+        events: ['ALL'],
+        enabled: true,
+        deliveryCount: 0,
+      });
+      // Only findings without an advisory binding are queued, so clear it first.
+      await transaction(pool, (db) =>
+        db.query("UPDATE records SET data=data-'advisoryId' WHERE kind='findings'"),
+      );
+      await run();
+      await pool.query("UPDATE outbox SET payload=payload-'cveRevisions'");
+      const jobs = (await pool.query('SELECT * FROM outbox ORDER BY channel')).rows as Job[];
+      assert.equal(jobs.length, 2);
+      const stale = jobs[0];
+      const sibling = jobs[1];
+      // The sibling was already rejected by its transport; recovery must repair
+      // the remaining legacy payloads rather than fail them as well.
+      await pool.query("UPDATE outbox SET status='FAILED',error='transport rejected' WHERE id=$1", [sibling.id]);
+      await rebuildFromCurrentInventory(pool, stale.advisory_id, 'Some advisory findings are no longer applicable');
+      const recovered = (await pool.query('SELECT status,payload FROM outbox WHERE id=$1', [stale.id])).rows[0];
+      assert.equal(recovered.status, 'QUEUED');
+      assert.ok(recovered.payload.cveRevisions[vulnerability().cveId]);
+      assert.ok(recovered.payload.findingRevisions);
+      // The sibling that failed for a transport reason is left untouched.
+      assert.equal(
+        (await pool.query('SELECT error FROM outbox WHERE id=$1', [sibling.id])).rows[0].error,
+        'transport rejected',
+      );
+    });
     await t.test('NVD withdrawals invalidate cached findings and block older feed resurrection', async () => {
       await reset();
       await save('watchlist', 'asset', asset());
