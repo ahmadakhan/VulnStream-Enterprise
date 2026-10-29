@@ -266,6 +266,11 @@ export interface DailyDigestParts {
   findings_summary: string;
   health_report: string;
   recipient_name: string;
+  critical_count: number;
+  high_count: number;
+  asset_count: number;
+  executive_summary: string;
+  report_generated: string;
 }
 
 const digestEscapeHtml = (value: string) =>
