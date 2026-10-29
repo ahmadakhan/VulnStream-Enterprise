@@ -16,6 +16,91 @@ export function buildCpeUrl(keyword: string, resultsPerPage: number): URL {
 }
 
 /**
+ * Builds a URL for the NVD CPE dictionary API using a cpeMatchString query
+ * with wildcard support. Unlike keywordSearch (which matches titles and
+ * reference text), cpeMatchString performs structural pattern matching
+ * against CPE 2.3 component names, so a wildcard vendor (`*`) finds
+ * dictionary entries regardless of the NVD-registered vendor label.
+ */
+export function buildCpeMatchStringUrl(matchString: string, resultsPerPage: number): URL {
+  const url = new URL(NVD_CPE_ENDPOINT);
+  url.searchParams.set('cpeMatchString', matchString);
+  url.searchParams.set('resultsPerPage', String(resultsPerPage));
+  return url;
+}
+
+/**
+ * Escapes special characters in a CPE 2.3 component value for use in a
+ * cpeMatchString query. The NVD dictionary stores CPE names with certain
+ * characters escaped (e.g. "+" -> "\+", "(" -> "\("), so the match string
+ * must apply the same escaping to find matching entries. Wildcard
+ * characters `*` and `?` are also escaped so a literal occurrence in the
+ * product name is matched rather than treated as a cpeMatchString wildcard.
+ */
+function escapeCpeComponent(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\+/g, '\\+')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .replace(/\:/g, '\\:')
+    .replace(/\*/g, '\\*')
+    .replace(/\?/g, '\\?');
+}
+
+/**
+ * Parses the NVD CPE API response body into structured results, deduplicating
+ * against an optional set of already-seen CPE names (case-insensitive).
+ */
+function parseNvdCpeProducts(
+  body: string,
+  exactCpe?: string,
+  seenCpes?: Set<string>,
+): { results: NvdCpeSearchResult[]; totalResults: number } {
+  let data: any;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    throw new Error('NVD returned a non-JSON CPE search response');
+  }
+
+  if (!Array.isArray(data?.products) || !Number.isSafeInteger(data?.totalResults) || data.totalResults < 0)
+    throw new Error('NVD returned an invalid CPE search response');
+
+  const configurations: any[] = data.products;
+  const results: NvdCpeSearchResult[] = [];
+  for (const entry of configurations) {
+    const cpe = entry?.cpe || entry;
+    const name = typeof cpe?.cpeName === 'string' ? cpe.cpeName : '';
+    if (!name || cpe?.deprecated === true) continue;
+    if (exactCpe && name.toLowerCase() !== exactCpe.toLowerCase()) continue;
+    if (seenCpes && seenCpes.has(name.toLowerCase())) continue;
+    const parsed = parseCPE23(name);
+    if (!parsed.isValid) continue;
+    const title =
+      Array.isArray(cpe?.titles) && typeof cpe.titles[0]?.title === 'string'
+        ? cpe.titles[0].title
+        : undefined;
+    results.push({
+      cpeName: name,
+      cpeNameId: typeof cpe?.cpeNameId === 'string' ? cpe.cpeNameId : '',
+      part: parsed.part,
+      vendor: parsed.vendor,
+      product: parsed.product,
+      version: parsed.version,
+      update: parsed.update,
+      targetSw: parsed.targetSw,
+      targetHw: parsed.targetHw,
+      ...(title ? { title } : {}),
+    });
+    seenCpes?.add(name.toLowerCase());
+  }
+
+  const total = Number.isInteger(data?.totalResults) ? Number(data.totalResults) : results.length;
+  return { results, totalResults: total };
+}
+
+/**
  * Reads the API key from the first enabled NVD feed configured with API-key
  * authentication. Returns an empty string when no NVD key is configured, in
  * which case the NVD CPE search is served from the public, unauthenticated
@@ -97,8 +182,8 @@ export async function searchNvdCpes(
     if (cpeNameId) url.searchParams.set('cpeNameId', cpeNameId);
     else url.searchParams.set('cpeMatchString', exactCpe);
   }
-  const fetchPage = (key: string) =>
-    request(url.href, {
+  const fetchPage = (key: string, urlObj: URL = url) =>
+    request(urlObj.href, {
       headers: { Accept: 'application/json', ...(key ? { apiKey: key } : {}) },
       timeoutMs: 20000,
       socketTimeoutMs: 15000,
@@ -106,6 +191,8 @@ export async function searchNvdCpes(
       sameHostRedirects: true,
     });
   let response = await fetchPage(apiKey);
+
+  let effectiveKey = apiKey;
 
   // NVD reports rejected credentials with 404 and a diagnostic message header.
   // Only that case can fall back to the public budget: an unrelated 404 is an
@@ -119,7 +206,8 @@ export async function searchNvdCpes(
     apiKey &&
     /invalid\s+api\s*key/i.test(Array.isArray(message) ? message.join(' ') : message || '')
   ) {
-    response = await fetchPage('');
+    effectiveKey = '';
+    response = await fetchPage(effectiveKey);
   }
 
   if (response.status === 429) {
@@ -133,45 +221,41 @@ export async function searchNvdCpes(
 
   if (response.status !== 200) throw new Error(`NVD CPE search returned HTTP ${response.status}`);
 
-  let data: any;
-  try {
-    data = JSON.parse(response.body);
-  } catch {
-    throw new Error('NVD returned a non-JSON CPE search response');
+  const seenCpes = new Set<string>();
+  const { results, totalResults } = parseNvdCpeProducts(response.body, exactCpe, seenCpes);
+
+  // When no exact CPE lookup is requested and a product name is supplied,
+  // also search with a cpeMatchString that uses a wildcard vendor (`*`).
+  // This surfaces NVD dictionary entries even when the operator's vendor
+  // label differs from the published NVD vendor (e.g. "notepad_plus_plus"
+  // vs. the registered "don_ho"), so the operator can still select a
+  // published, verified identifier before saving.
+  if (!exactCpe && product.trim()) {
+    const escapedProduct = escapeCpeComponent(product.trim());
+    const matchString = `cpe:2.3:*:*:${escapedProduct}:*:*:*:*:*:*:*:*`;
+    const wildcardUrl = buildCpeMatchStringUrl(matchString, pageSize);
+    try {
+      const wildcardResponse = await fetchPage(effectiveKey, wildcardUrl);
+      if (wildcardResponse.status === 429) {
+        throw {
+          __nvdRateLimit: true,
+          retryAfter: wildcardResponse.headers['retry-after'],
+          status: 429,
+          message: 'NVD rate limit reached; retry later',
+        } as NvdRateLimitError;
+      }
+      if (wildcardResponse.status === 200) {
+        const wildcardParsed = parseNvdCpeProducts(wildcardResponse.body, undefined, seenCpes);
+        results.push(...wildcardParsed.results);
+        return { results, totalResults: totalResults + wildcardParsed.totalResults };
+      }
+    } catch (error) {
+      if (isNvdRateLimitError(error)) throw error;
+      // Non-fatal: a failed wildcard search still returns the keyword results
+    }
   }
 
-  if (!Array.isArray(data?.products) || !Number.isSafeInteger(data?.totalResults) || data.totalResults < 0)
-    throw new Error('NVD returned an invalid CPE search response');
-
-  const configurations: any[] = data.products;
-  const results: NvdCpeSearchResult[] = [];
-  for (const entry of configurations) {
-    const cpe = entry?.cpe || entry;
-    const name = typeof cpe?.cpeName === 'string' ? cpe.cpeName : '';
-    if (!name || cpe?.deprecated === true) continue;
-    if (exactCpe && name.toLowerCase() !== exactCpe.toLowerCase()) continue;
-    const parsed = parseCPE23(name);
-    if (!parsed.isValid) continue;
-    const title =
-      Array.isArray(cpe?.titles) && typeof cpe.titles[0]?.title === 'string'
-        ? cpe.titles[0].title
-        : undefined;
-    results.push({
-      cpeName: name,
-      cpeNameId: typeof cpe?.cpeNameId === 'string' ? cpe.cpeNameId : '',
-      part: parsed.part,
-      vendor: parsed.vendor,
-      product: parsed.product,
-      version: parsed.version,
-      update: parsed.update,
-      targetSw: parsed.targetSw,
-      targetHw: parsed.targetHw,
-      ...(title ? { title } : {}),
-    });
-  }
-
-  const total = Number.isInteger(data?.totalResults) ? Number(data.totalResults) : results.length;
-  return { results, totalResults: total };
+  return { results, totalResults };
 }
 
 export interface NvdRateLimitError {

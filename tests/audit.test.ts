@@ -465,6 +465,19 @@ test('inventory CPE builder escapes token delimiters instead of emitting invalid
   assert.equal(matchCPE(built, 'cpe:2.3:a:acme:gateway\\:edge:1.0:*:*:*:*:*:*:*').matched, true);
 });
 
+test('buildStrictCpe23 escapes plus signs so generated CPEs align with NVD dictionary names', () => {
+  const built = buildStrictCpe23('a', 'notepad_plus_plus', 'notepad++', '*', '*');
+  const parsed = parseCPE23(built);
+  assert.equal(parsed.isValid, true);
+  assert.equal(parsed.vendor, 'notepad_plus_plus');
+  assert.equal(parsed.product, 'notepad\\+\\+');
+  // The escaped product must match the NVD dictionary entry format.
+  assert.equal(
+    matchCPE(built, 'cpe:2.3:a:notepad_plus_plus:notepad\\+\\+:*:*:*:*:*:*:*:*').matched,
+    true,
+  );
+});
+
 test('a CPE range cannot override an explicit vulnerable version token', () => {
   assert.equal(matchCPE(cpe('2.0'), cpe('1.0'), { versionEndExcluding: '3.0' }).matched, false);
 });

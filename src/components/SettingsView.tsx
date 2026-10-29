@@ -114,6 +114,98 @@ function SettingsDialog({
   );
 }
 
+function ProcessingSection({
+  number,
+  id,
+  title,
+  description,
+  children,
+}: {
+  number: string;
+  id: string;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="processing-section" aria-labelledby={id}>
+      <header>
+        <span className="processing-step" aria-hidden="true">
+          {number}
+        </span>
+        <div>
+          <h3 id={id}>{title}</h3>
+          <p>{description}</p>
+        </div>
+      </header>
+      <div className="processing-section-body">{children}</div>
+    </section>
+  );
+}
+
+function ProcessingToggle({
+  id,
+  title,
+  description,
+  checked,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  title: string;
+  description: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className={`processing-toggle ${disabled ? 'is-disabled' : ''}`} htmlFor={id}>
+      <span>
+        <strong>{title}</strong>
+        <span id={`${id}-hint`}>{description}</span>
+      </span>
+      <input
+        id={id}
+        type="checkbox"
+        role="switch"
+        checked={checked}
+        disabled={disabled}
+        aria-describedby={`${id}-hint`}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    </label>
+  );
+}
+
+function ProcessingField({
+  id,
+  label,
+  hint,
+  unit,
+  children,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  unit?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="processing-field">
+      <label htmlFor={id}>{label}</label>
+      <div className={`processing-control ${unit ? 'has-unit' : ''}`}>
+        {children}
+        {unit && (
+          <span className="processing-unit" aria-hidden="true">
+            {unit}
+          </span>
+        )}
+      </div>
+      <p id={`${id}-hint`}>{hint}</p>
+    </div>
+  );
+}
+
 export function SettingsView() {
   const {
     settings,
@@ -130,6 +222,7 @@ export function SettingsView() {
   const [form, setForm] = useState<AppSettings>(() => withEmailRetryDefaults(settings));
   const [securityForm, setSecurityForm] = useState<AppSettings['securityPolicy']>(settings.securityPolicy);
   const [message, setMessage] = useState('');
+  const [processingSaveError, setProcessingSaveError] = useState(false);
   const [securityMessage, setSecurityMessage] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -291,438 +384,453 @@ export function SettingsView() {
             <div id="settings-processing" hidden={activeSection !== 'processing'}>
               <form
                 id="processing-settings-form"
-                className="ui-card space-y-5"
+                className="ui-card processing-settings-form"
                 aria-labelledby="processing-settings-title"
+                aria-busy={pending > 0}
                 onChangeCapture={() => setMessage('')}
-                onSubmit={async (e) => {
-                  e.preventDefault();
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  if (pending > 0 || !processingDirty) return;
                   setMessage('');
-                  if (await updateSettings({ ...form, securityPolicy: settings.securityPolicy }))
-                    setMessage('Settings saved successfully.');
+                  setProcessingSaveError(false);
+                  const saved = await updateSettings({ ...form, securityPolicy: settings.securityPolicy });
+                  setProcessingSaveError(!saved);
+                  setMessage(
+                    saved
+                      ? 'Settings saved successfully.'
+                      : 'Could not save processing settings. Your changes are still available to retry.',
+                  );
                 }}
               >
                 <SectionHeading
                   icon={SlidersHorizontal}
                   id="processing-settings-title"
                   title="Processing and dispatch"
-                  description="Control ingestion windows, scheduled processing, and automatic notifications."
+                  description="Configure how intelligence is collected, reviewed, and delivered to your recipients."
                 />
-
-                <div className="settings-configuration-summary" aria-label="Processing configuration summary">
+                <div
+                  className="settings-configuration-summary processing-summary"
+                  aria-label="Processing configuration summary"
+                >
                   <div>
-                    <span>Scheduled processing</span>
-                    <strong>{form.schedulerEnabled ? 'Enabled' : 'Manual runs'}</strong>
+                    <span>Pipeline schedule</span>
+                    <strong>
+                      <i className={form.schedulerEnabled ? 'is-enabled' : ''} aria-hidden="true" />
+                      {form.schedulerEnabled ? `Every ${form.schedulerIntervalMinutes} min` : 'Manual runs'}
+                    </strong>
                   </div>
                   <div>
                     <span>Automatic dispatch</span>
-                    <strong>{form.autoDispatchEnabled ? 'Enabled' : 'Review first'}</strong>
+                    <strong>
+                      <i className={form.autoDispatchEnabled ? 'is-enabled' : ''} aria-hidden="true" />
+                      {form.autoDispatchEnabled ? 'Enabled' : 'Review first'}
+                    </strong>
                   </div>
                   <div>
-                    <span>Workspace timezone</span>
-                    <strong>{form.timezone || 'UTC'}</strong>
+                    <span>Daily digest</span>
+                    <strong>
+                      <i className={form.dailyDigest?.enabled ? 'is-enabled' : ''} aria-hidden="true" />
+                      {form.dailyDigest?.enabled
+                        ? `${form.dailyDigest.time || '09:00'} local time`
+                        : 'Disabled'}
+                    </strong>
                   </div>
                 </div>
-                <div className="settings-group-heading">
-                  <h3>Pipeline defaults</h3>
-                  <p>Set the scope, cadence, and context for each processing run.</p>
-                </div>
-                <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                    Scope window
-                    <span className="ml-1 font-normal text-zinc-500">(hours)</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={2880}
-                      required
-                      className={field}
-                      value={form.scopeHours}
-                      onChange={(e) => setForm({ ...form, scopeHours: Number(e.target.value) })}
-                    />
-                    <span className="ui-description mt-1.5 block">
-                      How far back each ingestion run checks for updates.
-                    </span>
-                  </label>
-                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                    Schedule interval
-                    <span className="ml-1 font-normal text-zinc-500">(minutes)</span>
-                    <input
-                      type="number"
-                      min={5}
-                      max={10080}
-                      required
-                      className={field}
-                      value={form.schedulerIntervalMinutes}
-                      onChange={(e) => setForm({ ...form, schedulerIntervalMinutes: Number(e.target.value) })}
-                    />
-                    <span className="ui-description mt-1.5 block">
-                      The delay between scheduled pipeline runs.
-                    </span>
-                  </label>
-                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                    Advisory prefix
-                    <input
-                      required
-                      pattern="[A-Za-z0-9_\-]{1,30}"
-                      className={field}
-                      value={form.advisoryPrefix}
-                      onChange={(e) => setForm({ ...form, advisoryPrefix: e.target.value })}
-                    />
-                    <span className="ui-description mt-1.5 block">
-                      Prefix used when generating advisory identifiers.
-                    </span>
-                  </label>
-                  <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                    Operational log detail
-                    <select
-                      className={field}
-                      value={form.logVerbosity ?? 'standard'}
-                      onChange={(e) =>
-                        setForm({ ...form, logVerbosity: e.target.value as AppSettings['logVerbosity'] })
-                      }
-                    >
-                      <option value="standard">Standard — lifecycle &amp; security events</option>
-                      <option value="verbose">Verbose — full forensic telemetry</option>
-                    </select>
-                    <span className="ui-description mt-1.5 block">
-                      Standard records pipeline, feed, matching, delivery and security events, plus every
-                      warning and error. Verbose additionally persists per-advisory correlation telemetry
-                      (extraction and database timings). Warnings and errors are never suppressed. Applied to
-                      the next advisory without a restart.
-                    </span>
-                  </label>
-                </div>
-
-                <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                  Timezone
-                  <select
-                    className={field}
-                    value={form.timezone || 'UTC'}
-                    onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+                <fieldset className="processing-settings-fields" disabled={pending > 0}>
+                  <legend className="sr-only">Processing and delivery configuration</legend>
+                  <ProcessingSection
+                    number="01"
+                    id="processing-pipeline"
+                    title="Pipeline scheduling"
+                    description="Choose when the pipeline runs and how far back it looks for updates."
                   >
-                    {TIMEZONES.map((tz) => (
-                      <option key={tz} value={tz}>
-                        {tz}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="ui-description mt-1.5 block">
-                    Timezone used to schedule the daily digest and to render human-readable dates.
-                  </span>
-                </label>
-
-                <div className="settings-group-heading">
-                  <h3>Notifications & delivery</h3>
-                  <p>Choose how confirmed findings reach your recipients.</p>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
-                    <input
-                      type="checkbox"
+                    <ProcessingToggle
+                      id="processing-scheduler"
+                      title="Enable server scheduler"
+                      description="Allow the server to start pipeline runs on the configured interval."
                       checked={form.schedulerEnabled}
-                      onChange={(e) => setForm({ ...form, schedulerEnabled: e.target.checked })}
+                      onChange={(checked) => setForm({ ...form, schedulerEnabled: checked })}
                     />
-                    <span>
-                      <span className="block font-medium text-zinc-200 light:text-zinc-800">
-                        Enable server scheduler
-                      </span>
-                      <span className="ui-description mt-0.5 block">
-                        Allow the server to start scheduled pipeline runs.
-                      </span>
-                    </span>
-                  </label>
-                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
-                    <input
-                      type="checkbox"
+                    <div className="processing-field-grid">
+                      <ProcessingField
+                        id="processing-scope"
+                        label="Scope window"
+                        unit="hours"
+                        hint="How far back each ingestion run checks for updates."
+                      >
+                        <input
+                          id="processing-scope"
+                          type="number"
+                          min={1}
+                          max={2880}
+                          required
+                          aria-describedby="processing-scope-hint"
+                          className={field}
+                          value={form.scopeHours}
+                          onChange={(event) => setForm({ ...form, scopeHours: Number(event.target.value) })}
+                        />
+                      </ProcessingField>
+                      <ProcessingField
+                        id="processing-interval"
+                        label="Schedule interval"
+                        unit="minutes"
+                        hint={
+                          form.schedulerEnabled
+                            ? 'Time between scheduled pipeline runs.'
+                            : 'Enable the scheduler to apply this interval.'
+                        }
+                      >
+                        <input
+                          id="processing-interval"
+                          type="number"
+                          min={5}
+                          max={10080}
+                          required
+                          disabled={!form.schedulerEnabled}
+                          aria-describedby="processing-interval-hint"
+                          className={field}
+                          value={form.schedulerIntervalMinutes}
+                          onChange={(event) =>
+                            setForm({ ...form, schedulerIntervalMinutes: Number(event.target.value) })
+                          }
+                        />
+                      </ProcessingField>
+                      <ProcessingField
+                        id="processing-prefix"
+                        label="Advisory prefix"
+                        hint="Used when generating advisory identifiers."
+                      >
+                        <input
+                          id="processing-prefix"
+                          required
+                          pattern={String.raw`[A-Za-z0-9_\-]{1,30}`}
+                          aria-describedby="processing-prefix-hint"
+                          className={field}
+                          value={form.advisoryPrefix}
+                          onChange={(event) => setForm({ ...form, advisoryPrefix: event.target.value })}
+                        />
+                      </ProcessingField>
+                      <ProcessingField
+                        id="processing-logs"
+                        label="Operational log detail"
+                        hint="Warnings and errors are recorded at both levels."
+                      >
+                        <select
+                          id="processing-logs"
+                          aria-describedby="processing-logs-hint"
+                          className={field}
+                          value={form.logVerbosity ?? 'standard'}
+                          onChange={(event) =>
+                            setForm({
+                              ...form,
+                              logVerbosity: event.target.value as AppSettings['logVerbosity'],
+                            })
+                          }
+                        >
+                          <option value="standard">Standard · lifecycle and security</option>
+                          <option value="verbose">Verbose · forensic telemetry</option>
+                        </select>
+                      </ProcessingField>
+                    </div>
+                    <details className="processing-help">
+                      <summary>What is included in operational logs?</summary>
+                      <p>
+                        Standard records pipeline, feed, matching, delivery, and security events. Verbose adds
+                        per-advisory correlation telemetry, including extraction and database timings. Changes
+                        apply to the next advisory.
+                      </p>
+                    </details>
+                  </ProcessingSection>
+                  <ProcessingSection
+                    number="02"
+                    id="processing-dispatch"
+                    title="Automatic dispatch"
+                    description="Decide when confirmed findings can move directly to delivery."
+                  >
+                    <ProcessingToggle
+                      id="processing-auto-dispatch"
+                      title="Send confirmed findings automatically"
+                      description="Security-team recipients receive eligible findings automatically. Everyone-tier recipients wait in Email Queue for review."
                       checked={form.autoDispatchEnabled}
-                      onChange={(e) => setForm({ ...form, autoDispatchEnabled: e.target.checked })}
+                      onChange={(checked) => setForm({ ...form, autoDispatchEnabled: checked })}
                     />
-                    <span>
-                      <span className="block font-medium text-zinc-200 light:text-zinc-800">
-                        Automatic dispatch
-                      </span>
-                      <span className="ui-description mt-0.5 block">
-                        Send confirmed findings to security teams automatically; everyone recipients wait in
-                        Email Queue for security review.
-                      </span>
-                    </span>
-                  </label>
-                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={form.autoDispatchConfidenceThreshold ?? 90}
-                        onChange={(e) =>
+                    <div className="processing-field-grid">
+                      <ProcessingField
+                        id="processing-confidence"
+                        label="Minimum match confidence"
+                        unit="/ 100"
+                        hint="Findings below this confidence require review. Set to 0 to remove the confidence minimum."
+                      >
+                        <input
+                          id="processing-confidence"
+                          type="number"
+                          min={0}
+                          max={100}
+                          disabled={!form.autoDispatchEnabled}
+                          aria-describedby="processing-confidence-hint"
+                          className={field}
+                          value={form.autoDispatchConfidenceThreshold ?? 90}
+                          onChange={(event) =>
+                            setForm({
+                              ...form,
+                              autoDispatchConfidenceThreshold: parseInt(event.target.value) || 0,
+                            })
+                          }
+                        />
+                      </ProcessingField>
+                      <div className="processing-context">
+                        <ShieldCheck size={17} aria-hidden="true" />
+                        <div>
+                          <strong>Review and recipient rules still apply</strong>
+                          <p>
+                            Automatic dispatch follows the configured subscription tier and delivery policies.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </ProcessingSection>
+                  <ProcessingSection
+                    number="03"
+                    id="processing-digests"
+                    title="Digest delivery"
+                    description="Configure short-window batching and the scheduled daily summary independently."
+                  >
+                    <ProcessingField
+                      id="processing-timezone"
+                      label="Workspace timezone"
+                      hint="Used for the daily digest schedule and human-readable dates."
+                    >
+                      <select
+                        id="processing-timezone"
+                        aria-describedby="processing-timezone-hint"
+                        className={field}
+                        value={form.timezone || 'UTC'}
+                        onChange={(event) => setForm({ ...form, timezone: event.target.value })}
+                      >
+                        {form.timezone && !TIMEZONES.includes(form.timezone) && (
+                          <option value={form.timezone}>{form.timezone}</option>
+                        )}
+                        {TIMEZONES.map((timezone) => (
+                          <option key={timezone} value={timezone}>
+                            {timezone}
+                          </option>
+                        ))}
+                      </select>
+                    </ProcessingField>
+                    <div className="processing-digest-group">
+                      <div className="processing-subheading">
+                        <h4>Batch new findings</h4>
+                        <p>Combine detections within a short delivery window.</p>
+                      </div>
+                      <ProcessingToggle
+                        id="processing-batching"
+                        title="Combine threats into one email"
+                        description="Send one combined email per recipient, containing only findings permitted by their subscription."
+                        checked={form.digestBatchingEnabled ?? false}
+                        onChange={(checked) => setForm({ ...form, digestBatchingEnabled: checked })}
+                      />
+                      <ProcessingField
+                        id="processing-batch-window"
+                        label="Batching window"
+                        unit="minutes"
+                        hint="How long to collect detections before sending the combined email."
+                      >
+                        <input
+                          id="processing-batch-window"
+                          type="number"
+                          min={1}
+                          max={1440}
+                          disabled={!form.digestBatchingEnabled}
+                          aria-describedby="processing-batch-window-hint"
+                          className={field}
+                          value={form.digestWindowMinutes ?? 5}
+                          onChange={(event) =>
+                            setForm({
+                              ...form,
+                              digestWindowMinutes: Math.max(1, parseInt(event.target.value) || 1),
+                            })
+                          }
+                        />
+                      </ProcessingField>
+                    </div>
+                    <div className="processing-digest-group">
+                      <div className="processing-subheading">
+                        <h4>Daily summary</h4>
+                        <p>A calendar-based digest for recipients who opt in.</p>
+                      </div>
+                      <ProcessingToggle
+                        id="processing-daily-digest"
+                        title="Enable daily digest"
+                        description="Send a daily findings summary at the selected local time."
+                        checked={form.dailyDigest?.enabled ?? false}
+                        onChange={(checked) =>
                           setForm({
                             ...form,
-                            autoDispatchConfidenceThreshold: parseInt(e.target.value) || 0,
+                            dailyDigest: {
+                              ...(form.dailyDigest ?? { time: '09:00', includeHealthReport: true }),
+                              enabled: checked,
+                            },
                           })
                         }
-                        className="mt-1 w-16 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none light:border-zinc-300 light:bg-white light:text-zinc-900"
                       />
-                      <span>
-                        <span className="block font-medium text-zinc-200 light:text-zinc-800">
-                          Auto-dispatch confidence threshold
-                        </span>
-                        <span className="ui-description mt-0.5 block">
-                          Minimum confidence (0-100) for automatic email dispatch. Set to 0 to send all
-                          findings regardless of confidence level.
-                        </span>
-                      </span>
-                    </div>
-                  </label>
-                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
-                    <input
-                      type="checkbox"
-                      checked={form.digestBatchingEnabled ?? false}
-                      onChange={(e) => setForm({ ...form, digestBatchingEnabled: e.target.checked })}
-                    />
-                    <span>
-                      <span className="block font-medium text-zinc-200 light:text-zinc-800">
-                        Combine threats into one email
-                      </span>
-                      <span className="ui-description mt-0.5 block">
-                        Buffer detections for the window and send one combined email per recipient. Each
-                        recipient only receives the findings permitted by its subscription tier.
-                      </span>
-                    </span>
-                  </label>
-                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="number"
-                        min="1"
-                        max="1440"
-                        value={form.digestWindowMinutes ?? 5}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            digestWindowMinutes: Math.max(1, parseInt(e.target.value) || 1),
-                          })
-                        }
-                        className="mt-1 w-16 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none light:border-zinc-300 light:bg-white light:text-zinc-900"
-                      />
-                      <span>
-                        <span className="block font-medium text-zinc-200 light:text-zinc-800">
-                          Digest window (minutes)
-                        </span>
-                        <span className="ui-description mt-0.5 block">
-                          How long to collect detections before sending the combined email.
-                        </span>
-                      </span>
-                    </div>
-                  </label>
-
-                  <div className="sm:col-span-2 mt-1 border-t border-zinc-800/70 pt-4 light:border-zinc-200">
-                    <h3 className="text-xs font-semibold text-zinc-200 light:text-zinc-800">Daily digest</h3>
-                    <p className="ui-description mt-1">
-                      A calendar subscription that delivers a daily summary of findings plus an operational
-                      health-check report to recipients that opt in, at a fixed local time in the configured
-                      timezone.
-                    </p>
-                    <div className="grid gap-3 sm:grid-cols-2 sm:items-start pt-2">
-                      <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
-                        <div className="flex items-center gap-3">
+                      <div className="processing-field-grid">
+                        <ProcessingField
+                          id="processing-digest-time"
+                          label="Delivery time"
+                          hint={`Local time in ${form.timezone || 'UTC'}.`}
+                        >
                           <input
-                            type="checkbox"
-                            checked={form.dailyDigest?.enabled ?? false}
-                            onChange={(e) =>
+                            id="processing-digest-time"
+                            type="time"
+                            required
+                            disabled={!form.dailyDigest?.enabled}
+                            aria-describedby="processing-digest-time-hint"
+                            className={field}
+                            value={form.dailyDigest?.time ?? '09:00'}
+                            onChange={(event) =>
                               setForm({
                                 ...form,
                                 dailyDigest: {
-                                  ...(form.dailyDigest ?? { time: '09:00', includeHealthReport: true }),
-                                  enabled: e.target.checked,
+                                  ...(form.dailyDigest ?? { enabled: false, includeHealthReport: true }),
+                                  time: event.target.value,
                                 },
                               })
                             }
-                            disabled={pending > 0}
                           />
-                          <span>
-                            <span className="block font-medium text-zinc-200 light:text-zinc-800">
-                              Enable daily digest
-                            </span>
-                            <span className="ui-description mt-0.5 block">
-                              Send the daily summary and health report on schedule.
-                            </span>
-                          </span>
-                        </div>
-                      </label>
-                      <label className="block text-xs font-medium text-zinc-300 light:text-zinc-700">
-                        Delivery time
-                        <input
-                          type="time"
-                          className={field}
-                          value={form.dailyDigest?.time ?? '09:00'}
-                          onChange={(e) =>
+                        </ProcessingField>
+                        <ProcessingToggle
+                          id="processing-health-report"
+                          title="Include health-check report"
+                          description="Append an operational health snapshot to the daily digest."
+                          checked={form.dailyDigest?.includeHealthReport ?? true}
+                          disabled={!form.dailyDigest?.enabled}
+                          onChange={(checked) =>
                             setForm({
                               ...form,
                               dailyDigest: {
-                                ...(form.dailyDigest ?? { enabled: false, includeHealthReport: true }),
-                                time: e.target.value,
+                                ...(form.dailyDigest ?? { enabled: false, time: '09:00' }),
+                                includeHealthReport: checked,
                               },
                             })
                           }
                         />
-                        <span className="ui-description mt-1.5 block">
-                          Local time (in the selected timezone) the digest is delivered.
-                        </span>
-                      </label>
-                      <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="checkbox"
-                            checked={form.dailyDigest?.includeHealthReport ?? true}
-                            onChange={(e) =>
-                              setForm({
-                                ...form,
-                                dailyDigest: {
-                                  ...(form.dailyDigest ?? { enabled: false, time: '09:00' }),
-                                  includeHealthReport: e.target.checked,
-                                },
-                              })
-                            }
-                            disabled={pending > 0}
-                          />
-                          <span>
-                            <span className="block font-medium text-zinc-200 light:text-zinc-800">
-                              Include health-check report
-                            </span>
-                            <span className="ui-description mt-0.5 block">
-                              Append an operational health snapshot to each daily digest.
-                            </span>
-                          </span>
-                        </div>
-                      </label>
+                      </div>
                     </div>
-                  </div>
-
-                  <div className="sm:col-span-2 mt-1 border-t border-zinc-800/70 pt-4 light:border-zinc-200">
-                    <h3 className="text-xs font-semibold text-zinc-200 light:text-zinc-800">
-                      Email retry policy
-                    </h3>
-                    <p className="ui-description mt-1">
-                      Transient provider or network failures are retried automatically. Permanent provider
-                      rejections (for example, an invalid recipient or credentials) still require operator
-                      correction.
-                    </p>
-                  </div>
-                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
-                    <input
-                      type="checkbox"
+                  </ProcessingSection>
+                  <ProcessingSection
+                    number="04"
+                    id="processing-retries"
+                    title="Email retry policy"
+                    description="Recover from transient provider or network failures with exponential backoff."
+                  >
+                    <ProcessingToggle
+                      id="processing-retry-enabled"
+                      title="Enable automatic email retry"
+                      description="Keep eligible failed deliveries queued and retry them with an increasing delay."
                       checked={form.emailRetryEnabled ?? true}
-                      onChange={(e) => setForm({ ...form, emailRetryEnabled: e.target.checked })}
+                      onChange={(checked) => setForm({ ...form, emailRetryEnabled: checked })}
                     />
-                    <span>
-                      <span className="block font-medium text-zinc-200 light:text-zinc-800">
-                        Enable automatic email retry
-                      </span>
-                      <span className="ui-description mt-0.5 block">
-                        Keep failed deliveries queued with exponential backoff instead of marking them failed
-                        after the first transport error.
-                      </span>
-                    </span>
-                  </label>
-                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="number"
-                        min="1"
-                        max="20"
-                        disabled={!form.emailRetryEnabled}
-                        value={form.emailRetryMaxAttempts ?? 6}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            emailRetryMaxAttempts: Math.min(20, Math.max(1, parseInt(e.target.value) || 1)),
-                          })
-                        }
-                        className="mt-1 w-16 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-50 light:border-zinc-300 light:bg-white light:text-zinc-900"
-                      />
-                      <span>
-                        <span className="block font-medium text-zinc-200 light:text-zinc-800">
-                          Maximum attempts
-                        </span>
-                        <span className="ui-description mt-0.5 block">
-                          Total sends per email, including the first attempt. A value of 1 disables automatic
-                          retries while keeping the initial delivery.
-                        </span>
-                      </span>
+                    <div className="processing-field-grid processing-retry-grid">
+                      <ProcessingField
+                        id="processing-retry-attempts"
+                        label="Maximum attempts"
+                        unit="sends"
+                        hint="Includes the first send. A value of 1 permits only the initial attempt."
+                      >
+                        <input
+                          id="processing-retry-attempts"
+                          type="number"
+                          min={1}
+                          max={20}
+                          disabled={!form.emailRetryEnabled}
+                          aria-describedby="processing-retry-attempts-hint"
+                          className={field}
+                          value={form.emailRetryMaxAttempts ?? 6}
+                          onChange={(event) =>
+                            setForm({
+                              ...form,
+                              emailRetryMaxAttempts: Math.min(
+                                20,
+                                Math.max(1, parseInt(event.target.value) || 1),
+                              ),
+                            })
+                          }
+                        />
+                      </ProcessingField>
+                      <ProcessingField
+                        id="processing-retry-initial"
+                        label="Initial backoff"
+                        unit="minutes"
+                        hint="Delay before the second attempt; doubles after each failure."
+                      >
+                        <input
+                          id="processing-retry-initial"
+                          type="number"
+                          min={1}
+                          max={1440}
+                          disabled={!form.emailRetryEnabled}
+                          aria-describedby="processing-retry-initial-hint"
+                          className={field}
+                          value={form.emailRetryInitialDelayMinutes ?? 1}
+                          onChange={(event) => {
+                            const initial = Math.min(1440, Math.max(1, parseInt(event.target.value) || 1));
+                            setForm({
+                              ...form,
+                              emailRetryInitialDelayMinutes: initial,
+                              emailRetryMaxDelayMinutes: Math.max(
+                                initial,
+                                form.emailRetryMaxDelayMinutes ?? 60,
+                              ),
+                            });
+                          }}
+                        />
+                      </ProcessingField>
+                      <ProcessingField
+                        id="processing-retry-maximum"
+                        label="Maximum backoff"
+                        unit="minutes"
+                        hint="Upper limit for the delay between attempts."
+                      >
+                        <input
+                          id="processing-retry-maximum"
+                          type="number"
+                          min={form.emailRetryInitialDelayMinutes ?? 1}
+                          max={10080}
+                          disabled={!form.emailRetryEnabled}
+                          aria-describedby="processing-retry-maximum-hint"
+                          className={field}
+                          value={form.emailRetryMaxDelayMinutes ?? 60}
+                          onChange={(event) =>
+                            setForm({
+                              ...form,
+                              emailRetryMaxDelayMinutes: Math.max(
+                                form.emailRetryInitialDelayMinutes ?? 1,
+                                Math.min(10080, Math.max(1, parseInt(event.target.value) || 1)),
+                              ),
+                            })
+                          }
+                        />
+                      </ProcessingField>
                     </div>
-                  </label>
-                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="number"
-                        min="1"
-                        max="1440"
-                        disabled={!form.emailRetryEnabled}
-                        value={form.emailRetryInitialDelayMinutes ?? 1}
-                        onChange={(e) => {
-                          const initial = Math.min(1440, Math.max(1, parseInt(e.target.value) || 1));
-                          setForm({
-                            ...form,
-                            emailRetryInitialDelayMinutes: initial,
-                            // Keep the ceiling valid without a server round-trip.
-                            emailRetryMaxDelayMinutes: Math.max(
-                              initial,
-                              form.emailRetryMaxDelayMinutes ?? 60,
-                            ),
-                          });
-                        }}
-                        className="mt-1 w-16 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-50 light:border-zinc-300 light:bg-white light:text-zinc-900"
-                      />
-                      <span>
-                        <span className="block font-medium text-zinc-200 light:text-zinc-800">
-                          Initial backoff (minutes)
-                        </span>
-                        <span className="ui-description mt-0.5 block">
-                          Delay before the second attempt. The delay doubles after each failed try.
-                        </span>
-                      </span>
-                    </div>
-                  </label>
-                  <label className="settings-toggle-card ui-check-row cursor-pointer text-xs leading-relaxed">
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="number"
-                        min={form.emailRetryInitialDelayMinutes ?? 1}
-                        max="10080"
-                        disabled={!form.emailRetryEnabled}
-                        value={form.emailRetryMaxDelayMinutes ?? 60}
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            emailRetryMaxDelayMinutes: Math.max(
-                              form.emailRetryInitialDelayMinutes ?? 1,
-                              Math.min(10080, Math.max(1, parseInt(e.target.value) || 1)),
-                            ),
-                          })
-                        }
-                        className="mt-1 w-16 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-50 light:border-zinc-300 light:bg-white light:text-zinc-900"
-                      />
-                      <span>
-                        <span className="block font-medium text-zinc-200 light:text-zinc-800">
-                          Maximum backoff (minutes)
-                        </span>
-                        <span className="ui-description mt-0.5 block">
-                          Upper bound for the exponential delay between delivery attempts.
-                        </span>
-                      </span>
-                    </div>
-                  </label>
-                </div>
-
-                <p className="rounded-xl border border-zinc-800 bg-zinc-950/30 px-4 py-3 text-xs leading-relaxed text-zinc-400 light:border-zinc-200 light:bg-zinc-50 light:text-zinc-600">
-                  Outbound host permissions are managed by the deployment administrator. Host clock
-                  synchronization, CSRF protection, and private-network safeguards are enforced at runtime.
-                </p>
-
-                <div className="ui-actions justify-between">
+                    <p className="processing-footnote">
+                      <AlertCircle size={14} aria-hidden="true" />
+                      Permanent provider rejections, such as invalid recipients or credentials, require
+                      operator correction.
+                    </p>
+                  </ProcessingSection>
+                </fieldset>
+                <div className="ui-actions processing-save-actions">
                   {message ? (
-                    <p role="status" className="ui-success inline-flex items-center gap-2">
-                      <Check className="h-3.5 w-3.5" aria-hidden="true" /> {message}
+                    <p
+                      role={processingSaveError ? 'alert' : 'status'}
+                      className={`${processingSaveError ? 'processing-save-error' : 'ui-success'} processing-save-feedback`}
+                    >
+                      {processingSaveError ? (
+                        <AlertCircle size={15} aria-hidden="true" />
+                      ) : (
+                        <Check size={15} aria-hidden="true" />
+                      )}
+                      {message}
                     </p>
                   ) : (
                     <span className="settings-save-state">
@@ -739,14 +847,19 @@ export function SettingsView() {
                         onClick={() => {
                           setForm(withEmailRetryDefaults(settings));
                           setMessage('');
+                          setProcessingSaveError(false);
                         }}
                       >
-                        <RotateCcw size={14} />
+                        <RotateCcw size={14} aria-hidden="true" />
                         Reset changes
                       </button>
                     )}
                     <button type="submit" disabled={pending > 0 || !processingDirty} className="ui-primary">
-                      {pending > 0 ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
+                      {pending > 0 ? (
+                        <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Save size={14} aria-hidden="true" />
+                      )}
                       {pending > 0 ? 'Saving…' : 'Save settings'}
                     </button>
                   </div>

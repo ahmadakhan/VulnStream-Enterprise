@@ -43,8 +43,10 @@ const PARTS: DailyDigestParts = {
   findings_summary: renderDailyFindingSummary(FINDINGS, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
   health_report: renderDailyHealthReport(HEALTH, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
   recipient_name: 'Team',
-  critical_count: 2,
+   critical_count: 2,
   high_count: 1,
+  medium_count: 1,
+  low_count: 1,
   asset_count: 5,
   executive_summary:
     'A total of <strong>5 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>1 Medium</strong>, and <strong>1 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.',

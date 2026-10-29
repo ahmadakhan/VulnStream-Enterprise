@@ -65,7 +65,7 @@ export function registrationAssetsFromCpes(
       cpes,
       targetHw: architectures.size === 1 && parsed.targetHw !== '*' ? parsed.targetHw : undefined,
       assetTag: `${details.assetTag.trim()}${groups.size > 1 ? `-${index + 1}` : ''}`,
-      ownerGroup: details.ownerGroup.trim() || 'SecOps-Core',
+      ownerGroup: details.ownerGroup.trim() || 'Cyber',
       notes: details.notes.trim(),
       purls: details.purls.length ? details.purls : undefined,
       active: true,
@@ -110,5 +110,15 @@ export function dictionaryCpesForCandidate(candidate: string, dictionaryCpes: st
       entry.product.toLowerCase() === parsed.product.toLowerCase()
     );
   });
-  return matches.length ? matches : [candidate];
+  if (matches.length) return matches;
+  // Fallback: match by part + product only, ignoring vendor differences.
+  // This handles cases where the operator's vendor label differs from the
+  // NVD-registered vendor (e.g. "notepad_plus_plus" vs. "don_ho"), so the
+  // generated CPE is still replaced with the verified dictionary name and no
+  // stale, unverified CPE reaches the final monitored-product list.
+  const fallbackMatches = dictionaryCpes.filter((cpe) => {
+    const entry = parseCPE23(cpe);
+    return entry.isValid && entry.part === parsed.part && entry.product.toLowerCase() === parsed.product.toLowerCase();
+  });
+  return fallbackMatches.length ? fallbackMatches : [candidate];
 }

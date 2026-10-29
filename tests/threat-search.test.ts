@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { searchThreatIntelligence } from '../server/threatSearch';
+import { searchThreatIntelligence, generateCpePrefixes } from '../server/threatSearch';
 import type { Requester } from '../server/network';
 import { loadConfig } from '../server/config';
 
@@ -95,7 +95,11 @@ function createMockDb(hasAliases = false): Parameters<typeof searchThreatIntelli
   } as unknown as Parameters<typeof searchThreatIntelligence>[1];
 }
 
-function createRequester(response: { status: number; body: string; headers?: Record<string, string> }): Requester {
+function createRequester(response: {
+  status: number;
+  body: string;
+  headers?: Record<string, string>;
+}): Requester {
   return async () => ({
     status: response.status,
     body: response.body,
@@ -277,8 +281,13 @@ test('searchThreatIntelligence generates CPE virtual-match prefixes for parts a,
   assert.ok(matchString, 'virtualMatchString parameter should be present');
   assert.ok(matchString.startsWith('cpe:2.3:'), 'should use CPE 2.3 format');
   assert.ok(
-    matchString.endsWith(':microsoft:windows_10'),
-    'should target the vendor/product prefix without a version',
+    matchString.startsWith('cpe:2.3:a:microsoft:windows_10:'),
+    'should target the vendor/product prefix with CPE 2.3 format',
+  );
+  assert.equal(
+    matchString.split(':').length,
+    13,
+    'should have 13 fields (cpe:2.3:part:vendor:product + 8 wildcard components)',
   );
 });
 
@@ -334,7 +343,11 @@ test('searchThreatIntelligence passes pubStartDate to the NVD API when startDate
   const cpeUrls = calledUrls.filter((u) => u.includes('virtualMatchString='));
   assert.ok(cpeUrls.length >= 1, 'should make CPE virtual-match requests');
   const startDate = new URL(cpeUrls[0]).searchParams.get('pubStartDate');
-  assert.equal(startDate, '2024-01-01T00:00:00.000', 'should send pubStartDate in ISO 8601 with milliseconds');
+  assert.equal(
+    startDate,
+    '2024-01-01T00:00:00.000',
+    'should send pubStartDate in ISO 8601 with milliseconds',
+  );
 });
 
 test('searchThreatIntelligence omits pubStartDate when no startDate is given', async () => {
@@ -411,4 +424,39 @@ test('searchThreatIntelligence returns startDate in the response', async () => {
   });
 
   assert.equal(result.startDate, '2024-01-01');
+});
+
+test('generateCpePrefixes produces valid CPE 2.3 match strings for all three parts', () => {
+  const prefixes = generateCpePrefixes('microsoft', 'windows_10');
+  assert.equal(prefixes.length, 3);
+  assert.deepEqual(prefixes, [
+    'cpe:2.3:a:microsoft:windows_10:*:*:*:*:*:*:*:*',
+    'cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*',
+    'cpe:2.3:h:microsoft:windows_10:*:*:*:*:*:*:*:*',
+  ]);
+});
+
+test('generateCpePrefixes produces a string with exactly 13 fields (12 colons)', () => {
+  const prefixes = generateCpePrefixes('apache', 'http_server');
+  for (const prefix of prefixes) {
+    const fields = prefix.split(':');
+    assert.equal(fields.length, 13, `CPE should have 13 fields: ${prefix}`);
+    assert.equal(fields[0], 'cpe');
+    assert.equal(fields[1], '2.3');
+  }
+});
+
+test('generateCpePrefixes escapes empty vendor/product as literal values', () => {
+  const prefixes = generateCpePrefixes('vendor', 'product');
+  for (const prefix of prefixes) {
+    const fields = prefix.split(':');
+    assert.equal(fields.length, 13);
+    assert.equal(fields[0], 'cpe');
+    assert.equal(fields[1], '2.3');
+    assert.equal(fields[3], 'vendor');
+    assert.equal(fields[4], 'product');
+    for (let i = 5; i < 13; i++) {
+      assert.equal(fields[i], '*', `field at index ${i} should be a wildcard`);
+    }
+  }
 });

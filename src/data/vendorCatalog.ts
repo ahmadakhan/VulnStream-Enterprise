@@ -762,10 +762,18 @@ export function buildStrictCpe23(
   version: string = '*',
   targetHw: string = '*',
 ): string {
-  // ':' and '\' are the only characters that break CPE 2.3 formatted-string
-  // tokenization. Escape them so inventory names such as "acme:gateway" still
-  // produce a parseable, matchable criterion. Wildcards stay unescaped.
-  const escape = (value: string) => value.replace(/\\/g, '\\\\').replace(/:/g, '\\:');
+  // ':' and '\' break CPE 2.3 formatted-string tokenization and must be escaped
+  // so inventory names such as "acme:gateway" still produce a parseable, matchable
+  // criterion. The NVD dictionary additionally normalizes "+" and parentheses
+  // (e.g. "notepad++" -> "notepad\+\+"), so those are escaped too so generated
+  // CPEs align with published dictionary names. Wildcards stay unescaped.
+  const escape = (value: string) =>
+    value
+      .replace(/\\/g, '\\\\')
+      .replace(/:/g, '\\:')
+      .replace(/\+/g, '\\+')
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)');
   const normVendor = escape((vendor || 'any').toLowerCase().trim().replace(/\s+/g, '_'));
   const normProduct = escape((product || 'any').toLowerCase().trim().replace(/\s+/g, '_'));
   const normVersion = version?.trim() ? escape(version.trim()) : '*';

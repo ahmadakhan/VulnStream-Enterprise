@@ -125,8 +125,10 @@ export const DailyDigestView: React.FC = () => {
     dailyDigestTemplate
       .replace(/{{report_generated}}/g, previewDate)
       .replace(/{{finding_count}}/g, String(SAMPLE_FINDINGS.length))
-      .replace(/{{critical_count}}/g, '2')
-      .replace(/{{high_count}}/g, '1')
+      .replace(/{{critical_count}}/g, String(SAMPLE_FINDINGS.filter((f) => f.severity === 'CRITICAL').length))
+      .replace(/{{high_count}}/g, String(SAMPLE_FINDINGS.filter((f) => f.severity === 'HIGH').length))
+      .replace(/{{medium_count}}/g, String(SAMPLE_FINDINGS.filter((f) => f.severity === 'MEDIUM').length))
+      .replace(/{{low_count}}/g, String(SAMPLE_FINDINGS.filter((f) => f.severity === 'LOW').length))
       .replace(/{{asset_count}}/g, '5')
       .replace(/{{executive_summary}}/g, 'A total of <strong>5 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>1 Medium</strong>, and <strong>1 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.')
       .replace(/{{findings_summary}}/g, findingsSummary)
@@ -168,6 +170,15 @@ export const DailyDigestView: React.FC = () => {
 
   const handleSendTest = async (e: React.FormEvent) => {
     e.preventDefault();
+    const rendered = getRenderedHtml();
+    const unrenderedTokens = rendered.match(/\{\{[a-z_]+\}\}/g);
+    if (unrenderedTokens && unrenderedTokens.length > 0) {
+      setTestResult({
+        success: false,
+        message: `Template has unrendered tokens in preview: ${[...new Set(unrenderedTokens)].join(', ')}. Check the HTML source or token list.`,
+      });
+      return;
+    }
     const res = await sendTestDailyDigestEmail(testEmail);
     setTestResult(res);
     if (res.success) {
@@ -619,11 +630,13 @@ export const DailyDigestView: React.FC = () => {
             <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono text-[11px] font-medium">
               Click to Copy:
             </span>
-            {[
+            {            [
               '{{report_generated}}',
               '{{finding_count}}',
               '{{critical_count}}',
               '{{high_count}}',
+              '{{medium_count}}',
+              '{{low_count}}',
               '{{asset_count}}',
               '{{executive_summary}}',
               '{{findings_summary}}',

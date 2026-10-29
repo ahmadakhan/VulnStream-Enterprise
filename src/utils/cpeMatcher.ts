@@ -478,6 +478,9 @@ export const DEFAULT_VENDOR_ALIASES: Record<string, string[]> = {
   linux: ['linux_kernel', 'kernel'],
   postgresql: ['postgres', 'postgresql_global_development_group'],
   hashicorp: ['hashicorp_inc'],
+  sentinelone: ['sentinelone_inc', 'sentinel_one'],
+  adobe: ['adobe_systems'],
+  canonical: ['ubuntu'],
 };
 
 export const DEFAULT_PRODUCT_ALIASES: Record<string, string[]> = {
@@ -776,7 +779,10 @@ export function matchesWatchlistItem(
         assetParsed.isValid && (!assetParsed.version || assetParsed.version === '*');
       const vulnParsed = parseCPE23(vulnCpe);
       const vulnConstrainsVersion =
-        vulnParsed.isValid && vulnParsed.version !== '*' && vulnParsed.version !== '-' && !hasUnescapedCpeWildcard(vulnParsed.version);
+        vulnParsed.isValid &&
+        vulnParsed.version !== '*' &&
+        vulnParsed.version !== '-' &&
+        !hasUnescapedCpeWildcard(vulnParsed.version);
       const matchRes = matchCPE(
         assetCpe,
         vulnCpe,
@@ -850,15 +856,15 @@ export function matchesWatchlistItem(
           method: versionRange ? 'STRICT_CPE_INTERVAL' : 'STRICT_CPE',
           confidence: requiresReview ? 70 : versionRange ? 100 : 90,
           matchedCpe: vulnCpe,
-            evidence: genericIdentity
-              ? 'Matched CPE product identity inferred from the inventory record; confirm the generic CPE is intended (70% confidence)'
-              : versionRange
-                ? requiresReview
-                  ? 'Matched strict CPE 2.3 product identifiers; version or architecture applicability requires review'
-                  : `Matched strict CPE 2.3 component tokens + verified in version interval [< ${versionRange.versionEndExcluding || versionRange.versionEndIncluding}] (100% confidence)`
-                : requiresReview
-                  ? 'Matched strict CPE 2.3 component tokens; review required (wildcard version or context) (70% confidence)'
-                  : 'Matched strict CPE 2.3 component tokens (90% confidence)',
+          evidence: genericIdentity
+            ? 'Matched CPE product identity inferred from the inventory record; confirm the generic CPE is intended (70% confidence)'
+            : versionRange
+              ? requiresReview
+                ? 'Matched strict CPE 2.3 product identifiers; version or architecture applicability requires review'
+                : `Matched strict CPE 2.3 component tokens + verified in version interval [< ${versionRange.versionEndExcluding || versionRange.versionEndIncluding}] (100% confidence)`
+              : requiresReview
+                ? 'Matched strict CPE 2.3 component tokens; review required (wildcard version or context) (70% confidence)'
+                : 'Matched strict CPE 2.3 component tokens (90% confidence)',
           applicabilityRequiresReview: requiresReview,
         });
       }
@@ -892,12 +898,7 @@ export function matchesWatchlistItem(
   if (declaredVersion) versionCandidates.add(declaredVersion);
   for (const cpe of assetCpes) {
     const parsed = parseCPE23(cpe);
-    if (
-      parsed.isValid &&
-      parsed.version &&
-      parsed.version !== '*' &&
-      parsed.version !== '-'
-    )
+    if (parsed.isValid && parsed.version && parsed.version !== '*' && parsed.version !== '-')
       versionCandidates.add(parsed.version);
   }
   const assetVersions = [...versionCandidates];
@@ -912,14 +913,13 @@ export function matchesWatchlistItem(
       : [];
   // Exclude only when every known version is comparable and provably outside.
   // One unparseable identifier means applicability still needs review.
-  const allVersionsProvablyOutside =
-    Boolean(
-      rangeHasBounds &&
-        versionRange &&
-        assetVersions.length > 0 &&
-        comparableVersions.length === assetVersions.length &&
-        inRangeVersions.length === 0,
-    );
+  const allVersionsProvablyOutside = Boolean(
+    rangeHasBounds &&
+    versionRange &&
+    assetVersions.length > 0 &&
+    comparableVersions.length === assetVersions.length &&
+    inRangeVersions.length === 0,
+  );
 
   // A CPE mismatch is only allowed to fall through when it concerns the
   // vendor/product names. If the structured identity is the same and a CPE

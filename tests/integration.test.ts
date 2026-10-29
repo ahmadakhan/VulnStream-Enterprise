@@ -244,12 +244,14 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
   url.searchParams.set('options', `-c search_path=${schema}`);
   const pool = createPool(url.href);
   let capturedUrl = '',
+    capturedUrls: string[] = [],
     capturedBody = '',
     capturedHeaders: Record<string, string> = {},
     responseStatus = 200,
     responseBody = '[]';
   const requester: Requester = async (_url, options) => {
     capturedUrl = _url;
+    capturedUrls.push(_url);
     capturedBody = options?.body || '';
     capturedHeaders = options?.headers || {};
     return { status: responseStatus, body: responseBody, headers: {} };
@@ -619,11 +621,15 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
         const result = await operator.get('/api/cpes/search').query({ vendor: 'Microsoft', product: 'windows_10', limit: 50 });
         assert.equal(result.status, 200, JSON.stringify(result.body));
         assert.equal(result.body.results[0].cpeName, cpeName);
-        const url = new URL(capturedUrl);
-        assert.equal(url.origin + url.pathname, 'https://services.nvd.nist.gov/rest/json/cpes/2.0');
-        assert.equal(url.searchParams.get('keywordSearch'), 'Microsoft windows 10');
-        assert.equal(url.searchParams.has('apiKey'), false);
+        assert.equal(capturedUrls.length, 2, 'keyword search followed by wildcard-vendor search');
+        const keywordUrl = new URL(capturedUrls[0]);
+        assert.equal(keywordUrl.origin + keywordUrl.pathname, 'https://services.nvd.nist.gov/rest/json/cpes/2.0');
+        assert.equal(keywordUrl.searchParams.get('keywordSearch'), 'Microsoft windows 10');
+        assert.equal(keywordUrl.searchParams.has('apiKey'), false);
         assert.equal(capturedHeaders.apiKey, 'cpe-test-api-key');
+        const wildcardUrl = new URL(capturedUrls[1]);
+        assert.equal(wildcardUrl.searchParams.get('cpeMatchString'), 'cpe:2.3:*:*:windows_10:*:*:*:*:*:*:*:*');
+        assert.equal(wildcardUrl.searchParams.has('keywordSearch'), false);
         responseStatus = 404;
         responseBody = '';
         const failed = await operator.get('/api/cpes/search').query({ vendor: 'Microsoft', product: 'Windows' });
@@ -631,6 +637,8 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       } finally {
         responseStatus = 200;
         responseBody = '[]';
+        capturedUrl = '';
+        capturedUrls = [];
         await pool.query("DELETE FROM records WHERE kind='feeds' AND id=$1", [feedId]);
       }
     });

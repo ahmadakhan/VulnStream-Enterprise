@@ -130,7 +130,7 @@ export const WatchListView: React.FC = () => {
   const [versionInput, setVersionInput] = useState('*');
   const [targetHwInput, setTargetHwInput] = useState('*');
   const [assetTagInput, setAssetTagInput] = useState('');
-  const [ownerGroupInput, setOwnerGroupInput] = useState('SecOps-Core');
+  const [ownerGroupInput, setOwnerGroupInput] = useState('Cyber');
   const [notesInput, setNotesInput] = useState('');
   const [purlInput, setPurlInput] = useState('');
   const [cpeExpressionInput, setCpeExpressionInput] = useState('');
@@ -347,7 +347,7 @@ export const WatchListView: React.FC = () => {
     setVersionInput('*');
     setTargetHwInput('*');
     setAssetTagInput('');
-    setOwnerGroupInput('SecOps-Core');
+    setOwnerGroupInput('Cyber');
     setNotesInput('');
     setPurlInput('');
     setCpeExpressionInput('');
@@ -1260,7 +1260,7 @@ export const WatchListView: React.FC = () => {
                           id="registration-owner-group"
                           type="text"
                           required
-                          placeholder="e.g. SecOps-Core"
+                          placeholder="e.g. Cyber"
                           value={ownerGroupInput}
                           onChange={(e) => setOwnerGroupInput(e.target.value)}
                           className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
@@ -1996,7 +1996,7 @@ export const WatchListView: React.FC = () => {
                 setBulkJsonText(e.target.value);
                 setBulkFeedback(null);
               }}
-              placeholder={`[\n  {\n    "vendor": "microsoft",\n    "product": "windows_server_2022",\n    "assetTag": "DC-PDC01",\n    "ownerGroup": "SecOps-Core",\n    "cpes": ["cpe:2.3:o:microsoft:windows_server_2022:20348:*:*:*:*:*:x64:*"]\n  }\n]`}
+              placeholder={`[\n  {\n    "vendor": "microsoft",\n    "product": "windows_server_2022",\n    "assetTag": "DC-PDC01",\n    "ownerGroup": "Cyber",\n    "cpes": ["cpe:2.3:o:microsoft:windows_server_2022:20348:*:*:*:*:*:x64:*"]\n  }\n]`}
               className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-3 font-mono text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none leading-relaxed"
             />
 

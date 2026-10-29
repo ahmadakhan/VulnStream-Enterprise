@@ -13,11 +13,9 @@ const config = loadConfig({
 });
 
 test('searchNvdCpes parses verified NVD CPE configurations and forwards the API key', async () => {
-  let calledUrl = '';
-  let calledOptions: RequestOptions | undefined;
+  const calls: { url: string; options: RequestOptions | undefined }[] = [];
   const requester: Requester = async (url, options) => {
-    calledOptions = options;
-    calledUrl = url;
+    calls.push({ url, options });
     return {
       status: 200,
       body: JSON.stringify({
@@ -32,7 +30,7 @@ test('searchNvdCpes parses verified NVD CPE configurations and forwards the API 
           },
           {
             cpe: {
-              cpeName: 'cpe:2.3:o:microsoft:windows_server_2022:20348:*:*:*:*:*:*:*',
+              cpeName: 'cpe:2.3:o:microsoft:windows_server_2022:20348:*:*:*:*:*:x64:*',
               cpeNameId: 'id-2',
             },
           },
@@ -51,14 +49,27 @@ test('searchNvdCpes parses verified NVD CPE configurations and forwards the API 
     50,
   );
 
-  assert.equal(totalResults, 3);
+  // First call is the keyword search; second is the wildcard-vendor cpeMatchString search.
+  assert.equal(calls.length, 2);
+  const keywordUrl = new URL(calls[0].url);
+  const wildcardUrl = new URL(calls[1].url);
+
+  assert.equal(keywordUrl.origin + keywordUrl.pathname, 'https://services.nvd.nist.gov/rest/json/cpes/2.0');
+  assert.equal(keywordUrl.searchParams.get('keywordSearch'), 'microsoft windows 10');
+  assert.equal(wildcardUrl.searchParams.get('cpeMatchString'), 'cpe:2.3:*:*:windows_10:*:*:*:*:*:*:*:*');
+  assert.equal(wildcardUrl.searchParams.has('keywordSearch'), false);
+
+  // Both calls forward the API key in headers (never in the URL).
+  for (const entry of calls) {
+    assert.equal(entry.options?.headers?.apiKey, 'secret-key');
+    assert.equal(entry.options?.sameHostRedirects, true);
+  }
+
+  // Keyword search returns 2 valid CPEs; wildcard search returns the same
+  // CPEs which are deduplicated against the seen-set.
   assert.equal(results.length, 2);
-  const url = new URL(calledUrl);
-  assert.equal(url.origin + url.pathname, 'https://services.nvd.nist.gov/rest/json/cpes/2.0');
-  assert.equal(url.searchParams.has('apiKey'), false, 'API 2.0 rejects API keys in URLs');
-  assert.equal(calledOptions?.headers?.apiKey, 'secret-key');
-  assert.equal(calledOptions?.sameHostRedirects, true);
-  assert.equal(url.searchParams.get('keywordSearch'), 'microsoft windows 10');
+  // totalResults is the sum of both NVD responses.
+  assert.equal(totalResults, 6);
   assert.equal(results[0].cpeName, 'cpe:2.3:a:microsoft:windows_10:10.0.19041:*:*:*:*:*:*:*');
   assert.equal(results[0].part, 'a');
   assert.equal(results[0].vendor, 'microsoft');
@@ -70,18 +81,26 @@ test('searchNvdCpes parses verified NVD CPE configurations and forwards the API 
 });
 
 test('searchNvdCpes omits the API key and falls back to public rate budget', async () => {
-  let calledUrl = '';
-  const requester: Requester = async (url) => {
-    calledUrl = url;
+  const calls: { url: string; options: RequestOptions | undefined }[] = [];
+  const requester: Requester = async (url, options) => {
+    calls.push({ url, options });
     return { status: 200, body: JSON.stringify({ totalResults: 0, products: [] }), headers: {} };
   };
 
   const { results } = await searchNvdCpes(requester, '', 'cisco', 'ios', 20);
 
   assert.equal(results.length, 0);
-  assert.ok(!calledUrl.includes('apiKey='), 'should not append an apiKey when none configured');
-  assert.ok(calledUrl.includes('keywordSearch=cisco+ios'));
-  assert.ok(calledUrl.includes('resultsPerPage=20'));
+  // Two calls: keyword search + wildcard-vendor cpeMatchString search.
+  assert.equal(calls.length, 2);
+  const keywordUrl = new URL(calls[0].url);
+  const wildcardUrl = new URL(calls[1].url);
+
+  assert.ok(!keywordUrl.searchParams.has('apiKey'), 'should not append an apiKey when none configured');
+  assert.equal(keywordUrl.searchParams.get('keywordSearch'), 'cisco ios');
+  assert.equal(keywordUrl.searchParams.get('resultsPerPage'), '20');
+
+  assert.equal(wildcardUrl.searchParams.get('cpeMatchString'), 'cpe:2.3:*:*:ios:*:*:*:*:*:*:*:*');
+  assert.equal(wildcardUrl.searchParams.get('resultsPerPage'), '20');
 });
 
 test('searchNvdCpes surfaces NVD rate-limit errors with retry-after guidance', async () => {
@@ -154,11 +173,17 @@ test('an invalid key retries once without credentials using the same CPE query',
     await searchNvdCpes(requester, 'expired-key', 'Cisco', 'adaptive_security_appliance', 50),
     { results: [], totalResults: 0 },
   );
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].url, calls[1].url);
+  // Three calls: keyword search (404 → retry), keyword search retry, wildcard vendor search.
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0].url, calls[1].url, 'keyword search retry uses same URL');
   assert.equal(calls[0].options?.headers?.apiKey, 'expired-key');
   assert.equal(calls[1].options?.headers?.apiKey, undefined);
+  assert.equal(calls[2].options?.headers?.apiKey, undefined, 'wildcard search also uses the effective key');
   assert.equal(new URL(calls[0].url).searchParams.get('keywordSearch'), 'Cisco adaptive security appliance');
+  assert.equal(
+    new URL(calls[2].url).searchParams.get('cpeMatchString'),
+    'cpe:2.3:*:*:adaptive_security_appliance:*:*:*:*:*:*:*:*',
+  );
 });
 
 test('a genuine 404 is an upstream error rather than an empty dictionary result', async () => {
@@ -265,4 +290,83 @@ test('dictionary IDs verify wildcard CPE names without relying on a truncated ma
     result.results.map((entry) => entry.cpeName),
     [name],
   );
+});
+
+test('wildcard vendor search escapes special characters in the product name for cpeMatchString', async () => {
+  const calls: { url: string; options: RequestOptions | undefined }[] = [];
+  const requester: Requester = async (url, options) => {
+    calls.push({ url, options });
+    if (calls.length <= 1) {
+      // Keyword search returns no results for the bogus vendor label.
+      return { status: 200, body: JSON.stringify({ totalResults: 0, products: [] }), headers: {} };
+    }
+    // Wildcard-vendor cpeMatchString search returns the real NVD entry.
+    return {
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        totalResults: 1,
+        products: [
+          {
+            cpe: {
+              cpeName: 'cpe:2.3:a:don_ho:notepad\\+\\+:5.5:*:*:*:*:*:*:*',
+              cpeNameId: 'notepadpp-id',
+              deprecated: false,
+              titles: [{ title: 'Notepad++ 5.5' }],
+            },
+          },
+        ],
+      }),
+    };
+  };
+
+  const { results, totalResults } = await searchNvdCpes(
+    requester,
+    '',
+    'notepad_plus_plus',
+    'notepad++',
+    50,
+  );
+
+  // Two calls: keyword search + wildcard-vendor cpeMatchString search.
+  assert.equal(calls.length, 2);
+
+  // The wildcard search escapes "+" as "\(" so the NVD API can match
+  // against the dictionary entry that stores "notepad\+\+".
+  const wildcardUrl = new URL(calls[1].url);
+  assert.equal(wildcardUrl.searchParams.get('cpeMatchString'), 'cpe:2.3:*:*:notepad\\+\\+:*:*:*:*:*:*:*:*');
+  assert.equal(wildcardUrl.searchParams.has('keywordSearch'), false);
+
+  // The NVD-verified CPE (vendor "don_ho") is included in results even
+  // though the operator's vendor label was "notepad_plus_plus".
+  assert.equal(results.length, 1);
+  assert.equal(results[0].cpeName, 'cpe:2.3:a:don_ho:notepad\\+\\+:5.5:*:*:*:*:*:*:*');
+  assert.equal(results[0].vendor, 'don_ho');
+  assert.equal(results[0].product, 'notepad\\+\\+');
+  assert.equal(results[0].title, 'Notepad++ 5.5');
+  assert.equal(totalResults, 1);
+});
+
+test('wildcard vendor search is skipped for exact CPE verification', async () => {
+  const calls: { url: string; options: RequestOptions | undefined }[] = [];
+  const requester: Requester = async (url, options) => {
+    calls.push({ url, options });
+    return {
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        totalResults: 1,
+        products: [
+          { cpe: { cpeName: 'cpe:2.3:a:example:widget:1.0:*:*:*:*:*:*:*', cpeNameId: 'exact-id', deprecated: false } },
+        ],
+      }),
+    };
+  };
+
+  await searchNvdCpes(requester, '', '', '', 200, 'cpe:2.3:a:example:widget:1.0:*:*:*:*:*:*:*');
+  // Only the cpeMatchString exact-lookup call is made; no wildcard search.
+  assert.equal(calls.length, 1);
+  const url = new URL(calls[0].url);
+  assert.equal(url.searchParams.get('cpeMatchString'), 'cpe:2.3:a:example:widget:1.0:*:*:*:*:*:*:*');
+  assert.equal(url.searchParams.has('keywordSearch'), false);
 });

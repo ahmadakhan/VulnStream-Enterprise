@@ -90,7 +90,14 @@ export async function searchThreatIntelligence(
     try {
       const result = await fetchNvdCves(request, apiKey, cpePrefix, limit, nvdStartDate);
       for (const cve of result.cves) {
-        const matchingCpes = findMatchingCpes(cve, cpePrefix, trimmedVendor, trimmedProduct, customVendorAliases, customProductAliases);
+        const matchingCpes = findMatchingCpes(
+          cve,
+          cpePrefix,
+          trimmedVendor,
+          trimmedProduct,
+          customVendorAliases,
+          customProductAliases,
+        );
         if (matchingCpes.length > 0) {
           const normId = normalizeCveId(cve.cveId);
           if (!normId || !seenCves.has(normId)) {
@@ -111,7 +118,14 @@ export async function searchThreatIntelligence(
         retryAfter = err.retryAfter ?? undefined;
         break;
       }
-      // Continue to keyword fallback on other errors
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          event: 'nvd_cpe_search_error',
+          cpePrefix,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
     }
   }
 
@@ -147,9 +161,18 @@ export async function searchThreatIntelligence(
       if (err instanceof ThreatSearchRateLimitError) {
         rateLimited = true;
         retryAfter = err.retryAfter ?? undefined;
-       }
-     }
-   }
+      } else {
+        console.warn(
+          JSON.stringify({
+            level: 'warn',
+            event: 'nvd_keyword_fallback_error',
+            keyword,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      }
+    }
+  }
 
   // Sort by CVSS severity descending
   hits.sort((a, b) => {
@@ -224,10 +247,7 @@ async function fetchNvdResponse(request: Requester, url: string): Promise<NvdFet
         ? parseRetryAfter(retryAfterHeader)
         : parseRetryAfter(retryAfterHeader[0])
       : null;
-    throw new ThreatSearchRateLimitError(
-      'NVD rate limit reached; retry later',
-      retryAfter,
-    );
+    throw new ThreatSearchRateLimitError('NVD rate limit reached; retry later', retryAfter);
   }
 
   if (response.status !== 200) {
@@ -260,10 +280,9 @@ function parseRetryAfter(header: string): number | undefined {
   return Number.isFinite(asDate) ? Math.max(1, Math.round((asDate - Date.now()) / 1000)) : undefined;
 }
 
-function generateCpePrefixes(vendor: string, product: string): string[] {
-  return (['a', 'o', 'h'] as const).map(
-    (part) => `cpe:2.3:${part}:${vendor}:${product}:*:*:*:*:*:*:*:*:*`,
-  );
+export function generateCpePrefixes(vendor: string, product: string): string[] {
+  const wildcards = ['*', '*', '*', '*', '*', '*', '*', '*'].join(':');
+  return (['a', 'o', 'h'] as const).map((part) => `cpe:2.3:${part}:${vendor}:${product}:${wildcards}`);
 }
 
 function findMatchingCpes(

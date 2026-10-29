@@ -421,6 +421,8 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
           const severityCounts = countSeverities(included);
           const criticalCount = severityCounts.CRITICAL ?? 0;
           const highCount = severityCounts.HIGH ?? 0;
+          const mediumCount = severityCounts.MEDIUM ?? 0;
+          const lowCount = severityCounts.LOW ?? 0;
           const uniqueAssets = new Set(included.map((finding) => finding.matchedAssetName));
           const reportGenerated = formatReportGenerated(new Date(), timezone);
           const executiveSummary = formatExecutiveSummary(included.length, severityCounts);
@@ -444,6 +446,8 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
             recipient_name: recipient.name || recipient.email,
             critical_count: criticalCount,
             high_count: highCount,
+            medium_count: mediumCount,
+            low_count: lowCount,
             asset_count: uniqueAssets.size,
             executive_summary: executiveSummary,
             report_generated: reportGenerated,
