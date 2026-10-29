@@ -283,7 +283,7 @@ export const PipelineExecutionsView: React.FC = () => {
           {[
             ['Records read', execution.stats?.rawIngested ?? 0],
             ['Normalized CVEs', execution.stats?.normalized ?? 0],
-            ['Product matches', execution.stats?.matchedWatchlist ?? 0],
+            ['Vulnerabilities detected', execution.stats?.matchedWatchlist ?? 0],
             ['Notifications queued', execution.stats?.notificationsQueued || 0],
           ].map(([label, value]) => (
             <div key={label} className={`${panel} p-4`}>
