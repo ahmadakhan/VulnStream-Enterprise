@@ -1183,7 +1183,11 @@ export function createApp(
         [watchItem],
         [],
         [],
-        { ...settings, scopeHours: 0 },
+        // The tester must report whether the match is deliverable under the
+        // workspace policy, so it evaluates with the real confidence bar instead
+        // of the 90% default it would otherwise inherit from a partial settings
+        // object.
+        { ...DEFAULT_SETTINGS, ...settings, scopeHours: 0 },
         'Simulation',
         false,
         buildAliasMap(aliases, 'VENDOR'),
@@ -1195,6 +1199,8 @@ export function createApp(
         cve: finding.cve,
         method: finding.matchingMethod,
         confidence: finding.notificationStatus === 'REVIEW_REQUIRED' ? 0 : 100,
+        // matchingEvidence carries the precise hold reason (policy threshold,
+        // missing inventory version, or unverifiable CVE evidence).
         evidence: finding.matchingEvidence,
         autoAction: finding.notificationStatus === 'REVIEW_REQUIRED' ? 'REVIEW_REQUIRED' : 'MATCH_CONFIRMED',
         suppressed: false,

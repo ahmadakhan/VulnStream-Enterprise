@@ -313,10 +313,15 @@ export function runVulnerabilityPipeline(
     for (const asset of assetsForCve(cve, canonical)) {
       const key = `${canonical}:${asset.id}`;
       if (known.has(key) && !includeExistingCandidates) continue;
+      // An explicit CPE match criteria is authoritative for its own entry: a
+      // per-entry range without bounds means "any version of this product", so the
+      // product-level versionRange must not be applied across all criteria. The
+      // product-level range is only a fallback when the CVE has no match details
+      // at all.
       const applicabilitySets = cve.cpeMatchDetails?.length
         ? cve.cpeMatchDetails.map(({ criteria, range }) => ({
             cpes: [criteria],
-            range: range || cve.versionRange,
+            range: range && Object.values(range).some(Boolean) ? range : undefined,
           }))
         : [{ cpes: cve.cpeMatches, range: cve.versionRange }];
       // Per-CPE ranges apply only to that CPE criterion. PURLs use the
@@ -357,13 +362,43 @@ export function runVulnerabilityPipeline(
         );
       const result = matches.filter((match) => match.matched).sort((a, b) => b.confidence - a.confidence)[0];
       if (!result?.matched) continue;
-      const requiresReview = cve.applicabilityRequiresReview || result.applicabilityRequiresReview;
-      if (requiresReview) result.confidence = 0;
+      // Distinguish the two sources of review requirement so each is held only
+      // for its own reason:
+      //  - cve.applicabilityRequiresReview is an ingestion-time flag set when the
+      //    CVE configuration uses AND/negate operators that cannot be safely
+      //    flattened. When the advisory has NO CPE data at all, this flag is just
+      //    "NVD hasn't analyzed applicability yet" — a match from the
+      //    vendor/product fallback is still a real product correlation, so it is
+      //    not held purely on that basis.
+      //  - result.applicabilityRequiresReview is a match-level signal that the
+      //    match itself is uncertain (version range cannot be verified, package
+      //    identity without a version, etc.). This always holds the finding.
+      const advisoryLacksApplicabilityData = !(cve.cpeMatches?.length || cve.cpeMatchDetails?.length);
+      const cveReviewOverride = cve.applicabilityRequiresReview && !advisoryLacksApplicabilityData;
+      const unverifiableMatch = cveReviewOverride || result.applicabilityRequiresReview;
+      if (unverifiableMatch) result.confidence = 0;
       const confirmed =
-        !requiresReview && result.confidence >= (settings.autoDispatchConfidenceThreshold ?? 90);
+        !unverifiableMatch && result.confidence >= (settings.autoDispatchConfidenceThreshold ?? 90);
+      // Say *why* a match is held. A held finding is re-derived before every
+      // delivery attempt, so the reason has to name the actual blocker (policy
+      // threshold vs. missing inventory version vs. unverifiable CVE evidence)
+      // instead of implying one the operator cannot act on. The reason is tied to
+      // the finding's notificationStatus so the evidence and the hold agree.
+      const threshold = settings.autoDispatchConfidenceThreshold ?? 90;
+      const holdReason = confirmed
+        ? undefined
+        : cveReviewOverride
+          ? 'the CVE configuration uses complex AND/negate criteria that require manual verification'
+          : result.applicabilityRequiresReview
+            ? !asset.version || asset.version === '*'
+              ? 'the inventory item has no version, so the version range cannot be verified'
+              : 'the available CVE evidence cannot verify this version'
+            : `${result.confidence}% confidence is below the ${threshold}% auto-dispatch threshold`;
       const evidence = confirmed
-        ? 'Structured package/version correlation'
-        : 'Product correlation; version or applicability requires review';
+        ? advisoryLacksApplicabilityData
+          ? `Product correlation; the advisory has no CPE data yet, so the ${result.confidence}% match was dispatched under the workspace policy`
+          : 'Structured package/version correlation'
+        : `Product correlation; held for review because ${holdReason}`;
       newFindings.push({
         id: crypto.randomUUID(),
         cveId: canonical,

@@ -191,7 +191,7 @@ Server-side ordering and filtering cast JSON fields to `timestamptz`/`numeric`. 
 
 Regression coverage: `tests/rate-limit.test.ts`.
 
-**Known limitation:** the mutation limiter is per process. With multiple replicas, each replica enforces its own bucket, so the effective burst allowance scales with the replica count. This still bounds abuse per replica, but a globally shared quota would require a database- or gateway-backed limiter.
+**Addressed:** the mutation limiter was originally per-process. It is now backed by the `consume_rate_limit_token` PostgreSQL function (`server/migrations/010_shared_rate_limit.sql`, refined by `012_rate_limit_return.sql`) and `createDatabaseRateLimiter` (`server/rateLimit.ts:71-87`). The bucket lives in `rate_limit_buckets` and the decision plus refill-update happen atomically under `FOR UPDATE`, so every replica shares one quota per operator. `server/app.ts:540-543` uses the database limiter by default for both mutation and ingest quotas, and `server/runtimePrivileges.ts:9,32` grants the runtime role CRUD on the table and `EXECUTE` on the function. The cross-replica test (`tests/rate-limit.test.ts:57-89`) verifies that two limiter instances share a single token bucket.
 
 ### Verification
 `npx tsc --noEmit`, `npm run build`, `npm test` without a database (178 tests: 173 pass, 5 skipped), and the full PostgreSQL run (237 tests, 237 pass) all succeeded.

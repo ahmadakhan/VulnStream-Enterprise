@@ -241,6 +241,12 @@ export async function queueRun(
  * The job currently being processed by the delivery worker is excluded:
  * the worker's post-delivery bookkeeping will finalize it (including email
  * log updates) in its own transaction.
+ *
+ * Jobs that are still deliverable are regrouped here (see
+ * `regroupStaleAdvisory`) instead of being failed with the stale bundle. Without
+ * that, a bundle containing one review-held finding would fail in its entirety
+ * and the rebuilt run would only queue findings that are not bound to an
+ * advisory, so the still-applicable findings would never be delivered.
  */
 export async function rebuildFromCurrentInventory(
   pool: pg.Pool,
@@ -255,19 +261,166 @@ export async function rebuildFromCurrentInventory(
     );
     for (const job of legacy.rows) await rebuildLegacyDeliveryPayload(pool, job).catch(() => false);
   }
+  // Regroup the still-deliverable jobs of this bundle before failing the rest,
+  // so a single held finding cannot silently drop the deliverable findings.
+  const { regrouped, holdGated } = await regroupStaleAdvisory(pool, advisoryId).catch(() => ({
+    regrouped: false,
+    holdGated: false,
+  }));
   await pool.query(
     `UPDATE outbox
        SET status='FAILED', error=$1, next_attempt=now(),
            locked_at=NULL, lock_token=NULL, updated_at=now()
-     WHERE advisory_id=$2 AND status IN ('QUEUED','SENDING')
-       AND id <> (
-         SELECT id FROM outbox
-          WHERE advisory_id=$2 AND status='SENDING' AND lock_token IS NOT NULL
-          ORDER BY next_attempt FOR UPDATE SKIP LOCKED LIMIT 1
-       )`,
-    [reason, advisoryId],
+     WHERE advisory_id=$2 AND (status='QUEUED' OR (status='SENDING' AND $3::boolean))`,
+    [reason, advisoryId, regrouped || holdGated],
   );
-  await queueRun(pool, 24, 'delivery-rebuild');
+  // A run is only needed when the bundle was split: a bundle whose findings are
+  // merely rate-limited must not start a rebuild loop that repeats every minute.
+  if (regrouped) await queueRun(pool, 24, 'delivery-rebuild');
+}
+/**
+ * Rebuilds the still-deliverable jobs of a stale bundle under a new advisory.
+ *
+ * A bundle is failed as a whole when one of its findings is no longer
+ * deliverable, but that must not withhold the findings that still are. Each
+ * sibling job is revalidated against the current confidence policy and
+ * inventory; jobs whose findings all remain `QUEUED_FOR_DISPATCH` are moved to
+ * a fresh advisory with fresh revision evidence and requeued, and only the jobs
+ * that are genuinely undeliverable are left to the caller's FAILED update.
+ *
+ * Sending stays behind the existing delivery-worker revalidation: this only
+ * regroups the queue, it never contacts a transport. Existing advisories and
+ * their findings are left untouched so the retained audit trail still shows
+ * what was originally queued.
+ *
+ * `holdGated` distinguishes a finding that is withheld on purpose (confidence
+ * policy / review) from one that lost applicability. A held finding must not
+ * trigger a pipeline rebuild on every delivery attempt: the rebuild cannot
+ * change the verdict, so the bundle would fail forever.
+ */
+export async function regroupStaleAdvisory(
+  pool: pg.Pool,
+  advisoryId: string,
+): Promise<{ regrouped: boolean; holdGated: boolean }> {
+  return transaction(pool, async (db) => {
+    const advisory = await get<Advisory>(db, 'advisories', advisoryId);
+    if (!advisory) return { regrouped: false, holdGated: false };
+    const settings = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
+    const jobs = (
+      await db.query<Job>(
+        "SELECT * FROM outbox WHERE advisory_id=$1 AND status='QUEUED' AND payload->'nativeCorrelation' IS NULL",
+        [advisoryId],
+      )
+    ).rows;
+    if (!jobs.length) return { regrouped: false, holdGated: false };
+    const aliasEntries = await list<AliasEntry>(db, 'aliases');
+    const vendorAliases = buildAliasMap(aliasEntries, 'VENDOR');
+    const productAliases = buildAliasMap(aliasEntries, 'PRODUCT');
+    const deliverability = new Map<string, boolean>();
+    const evidence = new Map<
+      string,
+      { cveRevisions: Record<string, string>; findingRevisions: Record<string, string> }
+    >();
+    let holdGated = false;
+    for (const job of jobs) {
+      const findingIds = job.payload.includedFindingIds?.length
+        ? job.payload.includedFindingIds
+        : advisory.findingIds;
+      const findings = [...(await getMany<Finding>(db, 'findings', findingIds)).values()];
+      const cves = await getMany<NormalizedCVE>(db, 'cveData', [...new Set(findings.map((f) => f.cveId))]);
+      const assets = await getMany<WatchListItem>(db, 'watchlist', [...new Set(findings.map((f) => f.matchedAssetId))]);
+      const cveRevisions: Record<string, string> = {};
+      const findingRevisions: Record<string, string> = {};
+      let deliverable = findings.length > 0,
+        held = false;
+      for (const finding of findings) {
+        const cve = cves.get(finding.cveId) || finding.cve;
+        const asset = assets.get(finding.matchedAssetId);
+        if (cve) cveRevisions[cve.cveId] = revision(cve);
+        // Only findings the current policy and inventory still admit may move to
+        // the new bundle; a review-held or unverifiable finding stays in place and
+        // is finalized by the caller's FAILED update.
+        if (!asset?.active || !cve) {
+          deliverable = false;
+          continue;
+        }
+        const match = runVulnerabilityPipeline(
+          [],
+          [cve],
+          [asset],
+          [],
+          [],
+          { ...DEFAULT_SETTINGS, ...settings, scopeHours: 0 },
+          'Server worker',
+          false,
+          vendorAliases,
+          productAliases,
+          undefined,
+          aliasEntries,
+        ).newFindings[0];
+        if (!match || match.notificationStatus === 'REVIEW_REQUIRED') held = true;
+        if (match?.notificationStatus !== 'QUEUED_FOR_DISPATCH') {
+          deliverable = false;
+          continue;
+        }
+        findingRevisions[finding.id] = findingRevision({ ...finding, ...match });
+      }
+      deliverability.set(job.id, deliverable);
+      evidence.set(job.id, { cveRevisions, findingRevisions });
+      holdGated ||= held;
+    }
+    const regroup = jobs.filter((job) => deliverability.get(job.id));
+    if (!regroup.length) return { regrouped: false, holdGated };
+    const isDigest = Boolean(jobs[0].payload.digestKey) && jobs.every((job) => job.payload.digestKey === jobs[0].payload.digestKey);
+    const replacement: Advisory = {
+      ...advisory,
+      id: settings.advisoryPrefix + randomUUID(),
+      createdDate: new Date().toISOString(),
+      deliveryStatus: 'PENDING',
+    };
+    await put(db, 'advisories', replacement.id, replacement);
+    for (const job of regroup) {
+      const { cveRevisions, findingRevisions } = evidence.get(job.id)!;
+      const included = job.payload.includedFindingIds?.length
+        ? job.payload.includedFindingIds
+        : advisory.findingIds;
+      const groupedFindings = [...(await getMany<Finding>(db, 'findings', included)).values()];
+      const body = advisoryEmail(
+        replacement,
+        job.payload.html,
+        groupedFindings.map(
+          (finding) =>
+            `${finding.cveId} | ${finding.cve.cvss.severity}${finding.cve.cisaKev?.isKev ? ' | CISA KEV' : ''} | ${finding.matchedAssetName}`,
+        ),
+      );
+      await db.query(
+        `UPDATE outbox
+            SET advisory_id=$2, payload=$3::jsonb, review_approved=false,
+                locked_at=NULL, lock_token=NULL, next_attempt=now(), error=NULL, updated_at=now()
+          WHERE id=$1 AND status='QUEUED'`,
+        [
+          job.id,
+          replacement.id,
+          JSON.stringify({
+            ...job.payload,
+            ...body,
+            cveIds: Array.from(new Set(groupedFindings.map((f) => f.cveId))).sort(),
+            includedFindingIds: included,
+            cveRevisions,
+            findingRevisions,
+            digestKey: isDigest ? `${job.payload.digestKey}:regrouped` : undefined,
+          }),
+        ],
+      );
+    }
+    await writeEvent(db, {
+      category: 'EMAIL',
+      code: 'delivery.bundle_regrouped',
+      message: `Regrouped ${regroup.length} deliverable job(s) from a stale advisory bundle`,
+      context: { staleAdvisoryId: advisoryId, advisoryId: replacement.id, jobs: regroup.length },
+    });
+    return { regrouped: true, holdGated };
+  });
 }
 class PipelineStopped extends Error {
   constructor() {
@@ -685,7 +838,10 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       inventory,
       [],
       [],
-      { ...matchingSettings, scopeHours: 0 },
+      // A partial persisted settings object would fall back to the 90% default
+      // threshold. Use the loaded defaults so the preliminary pass honours the
+      // same confidence policy as the final pass.
+      { ...DEFAULT_SETTINGS, ...matchingSettings, scopeHours: 0 },
       'Server worker',
       false,
       vendorAliases,
