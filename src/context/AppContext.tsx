@@ -58,6 +58,13 @@ function useApplication() {
   const [clock, setClock] = useState(Date.now()),
     [draft, setDraft] = useState<TemplateCustomization | null>(null),
     [dailyDigestDraft, setDailyDigestDraft] = useState<TemplateCustomization | null>(null),
+    [dailyDigestCustomTemplate, setDailyDigestCustomTemplate] = useState(() => {
+      try {
+        return localStorage.getItem('vulnstream_dailyDigestCustomTemplate');
+      } catch {
+        return null;
+      }
+    }),
     [refreshVersion, setRefreshVersion] = useState(0),
     [pending, setPending] = useState(0);
   const sessionRef = useRef(session);
@@ -257,6 +264,7 @@ function useApplication() {
       setSnapshot(emptyState());
       setDraft(null);
       setDailyDigestDraft(null);
+      setDailyDigestCustomTemplate(null);
     });
   const requestPasswordReset = (username: string) =>
     safely(
@@ -299,6 +307,21 @@ function useApplication() {
   const customization = draft || snapshot.templateCustomization;
   const dailyDigestCustomization =
     dailyDigestDraft || snapshot.dailyDigestCustomization || DEFAULT_DAILY_DIGEST_CUSTOMIZATION;
+  const dailyDigestTemplate =
+    dailyDigestCustomTemplate ||
+    (dailyDigestDraft
+      ? compileDailyDigestTemplate(dailyDigestDraft)
+      : snapshot.dailyDigestTemplate);
+  const setDailyDigestCustomTemplatePersisted = (template: string | null) => {
+    setDailyDigestCustomTemplate(template);
+    try {
+      if (template) {
+        localStorage.setItem('vulnstream_dailyDigestCustomTemplate', template);
+      } else {
+        localStorage.removeItem('vulnstream_dailyDigestCustomTemplate');
+      }
+    } catch {}
+  };
   return {
     ...snapshot,
     activeTab,
@@ -550,9 +573,8 @@ function useApplication() {
     },
     setAdvisoryTemplate: (advisoryTemplate: string) => save('template.save', { advisoryTemplate }),
     dailyDigestCustomization,
-    dailyDigestTemplate: dailyDigestDraft
-      ? compileDailyDigestTemplate(dailyDigestDraft)
-      : snapshot.dailyDigestTemplate,
+    dailyDigestTemplate,
+    setDailyDigestCustomTemplate: setDailyDigestCustomTemplatePersisted,
     updateDailyDigestCustomization: (update: Partial<TemplateCustomization>) =>
       setDailyDigestDraft((prev) => ({ ...dailyDigestCustomization, ...prev, ...update })),
     saveDailyDigestTemplate: async () => {

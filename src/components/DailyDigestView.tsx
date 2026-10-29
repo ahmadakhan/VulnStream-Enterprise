@@ -41,6 +41,7 @@ export const DailyDigestView: React.FC = () => {
     updateDailyDigestCustomization,
     sendTestDailyDigestEmail,
     saveDailyDigestTemplate,
+    setDailyDigestCustomTemplate,
   } = useApp();
 
   const [testEmail, setTestEmail] = useState('');
@@ -89,20 +90,20 @@ export const DailyDigestView: React.FC = () => {
     setViewFormat('preview');
   };
 
-  const handleDiscardEditor = () => {
-    if (customTemplate !== (isCustomTemplate ? customTemplate : dailyDigestTemplate)) {
-      setCustomTemplate('');
-      setIsCustomTemplate(false);
-      setCustomTemplate(dailyDigestTemplate);
-    }
-  };
-
   const handleApplyCustomTemplate = () => {
     const trimmed = customTemplate.trim();
     if (trimmed) {
+      setDailyDigestCustomTemplate(trimmed);
       setIsCustomTemplate(true);
       setViewFormat('preview');
     }
+  };
+
+  const handleResetCustomTemplate = () => {
+    setCustomTemplate('');
+    setIsCustomTemplate(false);
+    setDailyDigestCustomTemplate(null);
+    setCustomTemplate(dailyDigestTemplate);
   };
 
   const tokenList = useMemo(() => ['{{report_generated}}', '{{finding_count}}', '{{critical_count}}', '{{high_count}}', '{{medium_count}}', '{{low_count}}', '{{asset_count}}', '{{executive_summary}}', '{{findings_summary}}', '{{health_report}}'], []);
