@@ -644,6 +644,43 @@ export const ENTERPRISE_VENDOR_CATALOG: CatalogVendor[] = [
     ],
   },
   {
+    name: 'SentinelOne',
+    normalizedId: 'sentinelone',
+    aliases: ['sentinelone_inc', 'sentinel_one'],
+    products: [
+      {
+        name: 'Singularity Platform',
+        normalizedId: 'singularity_platform',
+        part: 'a',
+        description: 'AI-powered Endpoint Protection and Response Platform',
+      },
+      {
+        name: 'Singularity Complete',
+        normalizedId: 'singularity_complete',
+        part: 'a',
+        description: 'Full-Stack Endpoint Detection and Response (EDR/XDR)',
+      },
+      {
+        name: 'Singularity Cloud',
+        normalizedId: 'singularity_cloud',
+        part: 'a',
+        description: 'Cloud Workload Protection and Container Security',
+      },
+      {
+        name: 'Purple Knight',
+        normalizedId: 'purple_knight',
+        part: 'a',
+        description: 'Active Directory and Azure Security Assessment',
+      },
+      {
+        name: 'Vigilance',
+        normalizedId: 'vigilance',
+        part: 'a',
+        description: 'Managed Detection and Response Service',
+      },
+    ],
+  },
+  {
     name: 'Adobe',
     normalizedId: 'adobe',
     aliases: ['adobe_systems'],

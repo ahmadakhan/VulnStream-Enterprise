@@ -74,162 +74,298 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>Security advisory</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="x-apple-disable-message-reformatting">
+<title>Security Advisory</title>
+
 <style>
   body,table,td,a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
   table,td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
   table { border-collapse:collapse; }
-   a { overflow-wrap:anywhere; word-break:break-word; }
-   .ms-rteTableEvenCol-default { font-weight:700;color:${escapeHtml(config.headingColor)}; }
-   .sev-critical { background:#ef4444;color:#ffffff; }
-   .sev-high { background:#f59e0b;color:#ffffff; }
-   .sev-medium { background:#eab308;color:#1e293b; }
-   .sev-low { background:#10b981;color:#ffffff; }
-   .sev-badge { display:inline-block;padding:2px 10px;border-radius:4px;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px; }
-  @media only screen and (max-width:600px) {
-    .outer { padding:16px 8px !important; }
-    .ms-rteTableEvenCol-default { width:30% !important; }
+  a { overflow-wrap:anywhere; word-break:break-word; }
+  .severity-badge {
+    display:inline-block;
+    padding:4px 10px;
+    border-radius:4px;
+    color:#ffffff;
+    font-size:11px;
+    line-height:16px;
+    font-weight:700;
+    letter-spacing:0.5px;
+  }
+  .severity-critical { background:#ef4444; }
+  .severity-high { background:#f59e0b; }
+  .severity-medium { background:#eab308; }
+  .severity-low { background:#10b981; }
+  .severity-unknown { background:#6b7280; }
+  body{
+    margin:0;
+    padding:0;
+    background:${config.canvasBg};
+    font-family:${escapeHtml(fontCss)};
+  }
+  table{
+    border-collapse:collapse;
+  }
+  a{
+    color:${config.accentColor};
+    text-decoration:underline;
+    word-break:break-word;
+  }
+  @media only screen and (max-width:600px){
+    .container{
+      width:100% !important;
+    }
+    .mobile-padding{
+      padding:20px !important;
+    }
+    .title{
+      font-size:22px !important;
+      line-height:28px !important;
+    }
   }
 </style>
 </head>
-<body style="margin:0;padding:0;background:${config.canvasBg};color:${config.fontColor};font-family:${escapeHtml(fontCss)};">
-<p>​​​​​​​​<br/></p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:${config.canvasBg};">
-<tr><td class="outer" align="center" style="padding:36px 16px;">
-<!--[if mso]><table role="presentation" width="680" align="center"><tr><td><![endif]-->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;max-width:680px;background:${config.cardBg};border:1px ${config.borderStyle} #cbd5e1;border-radius:${config.borderRadius};">
-${classificationBanner}
- <tr><td class="section" style="padding:20px 32px;background:${config.headerBg};border-top:4px solid ${config.accentColor};">
- <p style="margin:0 0 12px;color:${headerMuted};font-size:10px;line-height:14px;font-weight:700;letter-spacing:2px;">VULNSTREAM / THREAT INTELLIGENCE</p>
- <p style="margin:0 0 6px;"><span style="display:inline-block;padding:4px 10px;background:#ffffff;color:#0f172a;font-size:10px;line-height:14px;letter-spacing:1px;font-weight:700;border-radius:4px;">{{severity}}</span></p>
- <h1 class="advisory-title" style="margin:0 0 8px;font-size:24px;line-height:30px;font-weight:700;letter-spacing:-.25px;color:${headerText};">{{advisory_title}}</h1>
- <p style="margin:0;font-size:11px;line-height:18px;color:${headerMuted};">{{advisory_id}}<br>Date: {{dispatch_date}}</p>
- </td></tr>
-<tr><td class="section" style="padding:24px 32px;font-size:14px;line-height:24px;color:${config.fontColor};">
-${stampHtml}
-<p>​​​​​​​​<br/></p>
-<table class="ms-rteTable-default" cellspacing="0" style="width:100%;">
-<tbody>
 
-<tr class="ms-rteTableEvenRow-default">
-<td class="ms-rteTableEvenCol-default" style="width:11%;">Vulnerability Name</td>
-<td class="ms-rteTableOddCol-default">
-{{executive_summary}}
-</td>
-</tr>
+<body>
 
-<tr class="ms-rteTableOddRow-default">
-<td class="ms-rteTableEvenCol-default">CVE ID​​​​​</td>
-<td class="ms-rteTableOddCol-default">
-{{cve_id_links}}
-</td>
-</tr>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${config.canvasBg}">
+<tr>
+<td align="center" style="padding:24px 12px;">
 
-<tr class="ms-rteTableEvenRow-default">
-<td class="ms-rteTableEvenCol-default">Severity</td>
-<td class="ms-rteTableOddCol-default">
-<font class="ms-rteForeColor-2"><strong>{{severity}}</strong></font>
-</td>
-</tr>
+<table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0" class="container" style="width:680px;max-width:680px;background:${config.cardBg};border:1px ${config.borderStyle} #e2e8f0;border-radius:${config.borderRadius};">
 
-<tr class="ms-rteTableOddRow-default">
-<td class="ms-rteTableEvenCol-default">Date of Release</td>
-<td class="ms-rteTableOddCol-default">{{dispatch_date}}</td>
-</tr>
+    ${classificationBanner}
 
-<tr class="ms-rteTableEvenRow-default">
-<td class="ms-rteTableEvenCol-default">Date of Update</td>
-<td class="ms-rteTableOddCol-default">{{dispatch_date}}</td>
-</tr>
+    <!-- HEADER -->
+    <tr>
+        <td bgcolor="${config.headerBg}" style="padding:20px 32px;border-top:4px solid ${config.accentColor};">
 
-<tr class="ms-rteTableOddRow-default">
-<td class="ms-rteTableEvenCol-default">
-<a name="zero_day" id="zero_day"><span style="color:#f8f8f8;">Vulnerability Details</span></a>
-</td>
-<td class="ms-rteTableOddCol-default">
-{{cve_details}}
-</td>
-</tr>
+            ${stampHtml}
 
-<tr class="ms-rteTableEvenRow-default" style="display:none;">
-<td class="ms-rteTableEvenCol-default">Audience Notice</td>
-<td class="ms-rteTableOddCol-default">
-<div style="margin-top:8px;padding:8px 12px;border-left:3px solid ${config.accentColor};background:#f0f9ff;font-size:12px;line-height:20px;">{{audience_notice}}</div>
-</td>
-</tr>
+            <div style="font-size:10px;font-weight:bold;letter-spacing:1.5px;color:${headerMuted};margin-bottom:8px;">
+                THREAT INTELLIGENCE &amp; SECURITY OPERATIONS
+            </div>
 
-<tr class="ms-rteTableOddRow-default">
-<td class="ms-rteTableEvenCol-default">Affected Products and Versions</td>
-<td class="ms-rteTableOddCol-default">
-<ul>
-{{affected_systems_html}}
-</ul>
-</td>
-</tr>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:8px;">
+                <tr>
+                    <td>
+                        {{severity_header_badge}}
+                    </td>
+                </tr>
+            </table>
 
-<tr class="ms-rteTableOddRow-default">
-<td class="ms-rteTableEvenCol-default">
-<a name="fix_section" id="fix_section"><span style="color:#f8f8f8;">Fix</span></a>
-</td>
-<td class="ms-rteTableOddCol-default">
-<ol>
-<li><strong>Remediation:</strong> <div style="margin-top:8px;border-left:3px solid ${config.accentColor};padding:8px 0 8px 12px;white-space:pre-wrap;overflow-wrap:anywhere;">{{remediation_steps}}</div></li>
-</ol>
-<a href="{{vendor_link}}" target="_blank">Click for details</a>
-</td>
-</tr>
+            <div class="title" style="font-size:24px;line-height:30px;font-weight:bold;color:${headerText};margin-bottom:6px;">
+                Security Advisory
+            </div>
 
-<tr class="ms-rteTableEvenRow-default">
-<td class="ms-rteTableEvenCol-default">
-<a name="mitigation" id="mitigation"><span style="color:#f8f8f8;">Workaround/Temporary fix/Mitigation</span></a>
-</td>
-<td class="ms-rteTableOddCol-default">
-{{mitigation_steps}}
-</td>
-</tr>
+            <div style="font-size:16px;line-height:22px;font-weight:600;color:${headerText};margin-bottom:8px;">
+                {{advisory_title}}
+            </div>
 
-<tr class="ms-rteTableOddRow-default">
-<td class="ms-rteTableEvenCol-default">Resource</td>
-<td class="ms-rteTableOddCol-default">
-<ul>
-<li><a href="{{vendor_link}}" target="_blank">Vendor Security Advisory</a></li>
-</ul>
-</td>
-</tr>
+            <div style="font-size:12px;line-height:18px;color:${headerMuted};">
+                Advisory ID: {{advisory_id}}<br>
+                Report Generated: {{dispatch_date}}
+            </div>
 
-<tr class="ms-rteTableEvenRow-default">
-<td class="ms-rteTableEvenCol-default">Honeywell Recommended Action</td>
-<td class="ms-rteTableOddCol-default">
-{{recommended_actions}}
-</td>
-</tr>
+        </td>
+    </tr>
 
-<tr class="ms-rteTableOddRow-default">
-<td class="ms-rteTableEvenCol-default">
-<a name="review_comment" id="review_comment"><span style="color:#f8f8f8;">Reviewer Comment</span></a>
-</td>
-<td class="ms-rteTableOddCol-default">
-<div style="margin-top:8px;padding:8px 12px;border-left:3px solid #f59e0b;background:#fffbeb;font-size:12px;line-height:20px;">{{reviewer_comment}}</div>
-</td>
-</tr>
+    <!-- EXECUTIVE SUMMARY -->
+    <tr>
+        <td style="padding:24px 32px;border-bottom:1px solid #e2e8f0;">
 
-</tbody>
+            <div style="font-size:11px;font-weight:bold;letter-spacing:1.5px;color:${config.accentColor};margin-bottom:8px;">
+                EXECUTIVE SUMMARY
+            </div>
+
+            <p style="margin:0;font-size:14px;line-height:24px;color:${config.fontColor};">
+                {{executive_summary}}
+            </p>
+
+        </td>
+    </tr>
+
+    <!-- ADVISORY DETAILS -->
+    <tr>
+        <td class="mobile-padding" style="padding:32px;">
+
+            <div style="font-size:11px;font-weight:bold;letter-spacing:1.5px;color:${config.accentColor};margin-bottom:12px;">
+                ADVISORY DETAILS
+            </div>
+
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;line-height:22px;">
+
+                <tr>
+                    <td width="30%" bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        Vulnerability Name
+                    </td>
+                    <td style="padding:12px;border:1px solid #e2e8f0;color:#334155;">
+                        {{executive_summary}}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        CVE ID
+                    </td>
+                    <td style="padding:12px;border:1px solid #e2e8f0;">
+                        {{cve_id_links}}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        Severity
+                    </td>
+                    <td style="padding:12px;border:1px solid #e2e8f0;">
+                        {{severity_badge}}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        Date of Release
+                    </td>
+                    <td style="padding:12px;border:1px solid #e2e8f0;">
+                        {{dispatch_date}}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        Date of Update
+                    </td>
+                    <td style="padding:12px;border:1px solid #e2e8f0;">
+                        {{dispatch_date}}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        Vulnerability Details
+                    </td>
+
+                    <td style="padding:12px;border:1px solid #e2e8f0;">
+                        {{cve_details}}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        Affected Products &amp; Versions
+                    </td>
+                    <td style="padding:12px;border:1px solid #e2e8f0;">
+                        <ul style="margin:0;padding-left:18px;">
+                            {{affected_systems_html}}
+                        </ul>
+                    </td>
+                </tr>
+
+                <tr>
+                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        Remediation
+                    </td>
+                    <td style="padding:12px;border:1px solid #e2e8f0;">
+
+                        <div style="background:#f8fafc;border-left:4px solid ${config.accentColor};padding:12px;">
+                            {{remediation_steps}}
+                        </div>
+
+                        <p style="margin:12px 0 0;">
+                            <a href="{{vendor_link}}" target="_blank">
+                                View Vendor Guidance
+                            </a>
+                        </p>
+
+                    </td>
+                </tr>
+
+                <tr>
+                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        Workaround / Mitigation
+                    </td>
+                    <td style="padding:12px;border:1px solid #e2e8f0;">
+                        {{mitigation_steps}}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        References
+                    </td>
+                    <td style="padding:12px;border:1px solid #e2e8f0;">
+                        <ul style="margin:0;padding-left:18px;">
+                            <li>
+                                <a href="{{vendor_link}}" target="_blank">
+                                    Vendor Security Advisory
+                                </a>
+                            </li>
+                        </ul>
+                    </td>
+                </tr>
+
+                <tr>
+                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        Recommended Action
+                    </td>
+                    <td style="padding:12px;border:1px solid #e2e8f0;">
+                        {{recommended_actions}}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        Audience Notice
+                    </td>
+                    <td style="padding:12px;border:1px solid #e2e8f0;">
+                        <div style="margin-top:8px;padding:8px 12px;border-left:3px solid ${config.accentColor};background:#f0f9ff;font-size:12px;line-height:20px;">
+                            {{audience_notice}}
+                        </div>
+                    </td>
+                </tr>
+
+                <tr>
+                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        Reviewer Comment
+                    </td>
+                    <td style="padding:12px;border:1px solid #e2e8f0;">
+                        <div style="margin-top:8px;padding:8px 12px;border-left:3px solid #f59e0b;background:#fffbeb;font-size:12px;line-height:20px;">
+                            {{reviewer_comment}}
+                        </div>
+                    </td>
+                </tr>
+
+            </table>
+
+        </td>
+    </tr>
+
+    <!-- FOOTER -->
+    <tr>
+        <td style="padding:24px 32px;border-top:1px solid #e2e8f0;background:#fafafa;">
+
+            <div style="font-size:13px;font-weight:bold;color:#0f172a;margin-bottom:8px;">
+                BA Threat Intelligence
+            </div>
+
+            <div style="font-size:12px;line-height:20px;color:#64748b;">
+                This advisory was generated from monitored inventory, vendor security notifications,
+                and threat intelligence sources. Evaluate applicability to your environment before
+                implementing remediation actions. All remediation activities should follow approved
+                operational and change management procedures.
+            </div>
+
+        </td>
+    </tr>
+
 </table>
-<br/>
-<br/>
-<br/>
-<br/>
-</td></tr>
-<tr><td class="section" style="padding:20px 32px;border-top:1px solid #cbd5e1;font-size:11px;line-height:18px;color:${config.fontColor};">
-<p style="margin:0 0 8px;font-weight:700;">BA Threat Intel · Security Operations</p>
-<p style="margin:0;">Generated from monitored inventory and threat intelligence. Validate applicability and follow your approved change process before remediation.</p>
-</td></tr>
+
+</td>
+</tr>
 </table>
-<!--[if mso]></td></tr></table><![endif]-->
-</td></tr></table>
+
 </body>
 </html>`;
 }

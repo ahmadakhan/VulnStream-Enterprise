@@ -20,12 +20,16 @@ import { encrypt, randomToken } from './secrets.ts';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
 import { emailConfigSchema } from './validation.ts';
 import { emailEndpoint } from './emailProviders.ts';
-import {
-  compileCustomizedTemplate,
-  compileDailyDigestTemplate,
-} from '../src/utils/templateCompiler.ts';
+import { compileCustomizedTemplate, compileDailyDigestTemplate } from '../src/utils/templateCompiler.ts';
 import type { Config } from './config';
-import { isSmtpEmailProvider, type AliasEntry, type AppSettings, type Finding, type EmailConfiguration, type WatchListItem } from '../src/types/index.ts';
+import {
+  isSmtpEmailProvider,
+  type AliasEntry,
+  type AppSettings,
+  type Finding,
+  type EmailConfiguration,
+  type WatchListItem,
+} from '../src/types/index.ts';
 
 export interface CommandRequest {
   action: string;
@@ -137,7 +141,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
         assetId = old?.id || randomUUID();
       const asset = { ...old, ...item, id: assetId, createdAt: old?.createdAt || now };
       await put(db, 'watchlist', assetId, asset);
-      await syncCorrelationAsset(db,asset);
+      await syncCorrelationAsset(db, asset);
     }
     await appendAudit(
       db,
@@ -154,6 +158,15 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     // Pre-validate all rows before inserting any, collecting per-row errors with line numbers.
     const validItems: { id: string; [key: string]: unknown }[] = [];
     const rowErrors: string[] = [];
+    const identity = (item: { id: string; [key: string]: unknown } | Record<string, unknown>) => {
+      const asAny = item as Record<string, unknown>;
+      return JSON.stringify([
+        (asAny.vendor || ('any' as string)).toString().toLowerCase(),
+        (asAny.product || ('any' as string)).toString().toLowerCase(),
+        ((asAny.cpes as string[]) || []).map((c) => c.trim().toLowerCase()).sort(),
+        [...((asAny.purls as string[]) || [])].sort(),
+      ]);
+    };
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
       const rowNumber = i + 1;
@@ -161,14 +174,45 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
         watchlistImportSchema.element.parse(row);
         validItems.push(row as { id: string; [key: string]: unknown });
       } catch (e: any) {
-        rowErrors.push(`Row ${rowNumber}: ${e instanceof z.ZodError ? e.issues.map(issue => `${issue.path?.join('.') || 'root'}: ${issue.message}`).join('; ') : e.message}`);
+        rowErrors.push(
+          `Row ${rowNumber}: ${e instanceof z.ZodError ? e.issues.map((issue) => `${issue.path?.join('.') || 'root'}: ${issue.message}`).join('; ') : e.message}`,
+        );
       }
     }
     if (rowErrors.length) {
       return { success: false, imported: 0, errors: rowErrors };
     }
-    let imported = 0;
+    // Detect duplicate entries: an incoming item whose vendor + product + CPEs + PURLs
+    // already exist on a different watchlist record (regardless of ID) is rejected.
+    const existing = await list<any>(db, 'watchlist');
+    const existingIdentities = new Map<string, any>();
+    for (const item of existing) {
+      existingIdentities.set(identity(item), item);
+    }
+    const duplicateErrors: string[] = [];
+    const deduped: typeof validItems = [];
+    const seenInBatch = new Set<string>();
     for (const item of validItems) {
+      const itemIdentity = identity(item);
+      const existingItem = existingIdentities.get(itemIdentity);
+      if (existingItem && existingItem.id !== item.id) {
+        duplicateErrors.push(
+          `Duplicate: "${item.vendor || ''} / ${item.product || ''}" already exists as asset tag "${existingItem.assetTag || existingItem.id}".`,
+        );
+        continue;
+      }
+      if (seenInBatch.has(itemIdentity)) {
+        duplicateErrors.push(`Duplicate within batch: "${item.vendor || ''} / ${item.product || ''}".`);
+        continue;
+      }
+      seenInBatch.add(itemIdentity);
+      deduped.push(item);
+    }
+    if (duplicateErrors.length) {
+      return { success: false, imported: 0, errors: duplicateErrors };
+    }
+    let imported = 0;
+    for (const item of deduped) {
       const old = await getForUpdate<any>(db, 'watchlist', item.id);
       const merged = {
         ...old,
@@ -178,7 +222,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
         exposure: item.exposure ?? old?.exposure,
       };
       await put(db, 'watchlist', item.id, merged);
-      await syncCorrelationAsset(db,merged as WatchListItem);
+      await syncCorrelationAsset(db, merged as WatchListItem);
       imported += 1;
     }
     await appendAudit(db, 'Assets imported', `${imported} assets`, actor, 'WATCHLIST', 'INFO', ipAddress);
@@ -236,8 +280,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     if (!id) throw new HttpError(400, 'Record ID required');
     const row = await getForUpdate<AliasEntry>(db, 'aliases', id);
     if (!row) throw new HttpError(404, 'Record not found');
-    if (row.source !== 'AUTO')
-      throw new HttpError(400, 'Only an automatically learned alias can be revoked');
+    if (row.source !== 'AUTO') throw new HttpError(400, 'Only an automatically learned alias can be revoked');
     // The tombstone gets its own id so a *different* spelling of the same
     // canonical name can still be learned later. It carries the rejected pairs
     // in `revokedAliases`, which is never used for matching.
@@ -267,9 +310,7 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     // A row lock cannot protect a uniqueness predicate for a row that does not
     // exist yet: two concurrent creates both see no match and both insert.
     // Serialize recipient writes for the transaction instead.
-    await db.query(`SELECT pg_advisory_xact_lock(hashtext($1), ${schemaLockKey})`, [
-      'recipients-unique',
-    ]);
+    await db.query(`SELECT pg_advisory_xact_lock(hashtext($1), ${schemaLockKey})`, ['recipients-unique']);
     const old = await checkExisting('recipients');
     const exists = (await list<any>(db, 'recipients')).some((r) => r.email === input.email && r.id !== id);
     if (exists) throw new HttpError(409, 'Recipient already exists');
@@ -341,14 +382,16 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
         : old.provider === input.provider
           ? old.mailjetApiSecret
           : '';
-    if (!smtpProvider && !apiKey)
-      throw new HttpError(400, 'Enter an API token for the selected provider');
+    if (!smtpProvider && !apiKey) throw new HttpError(400, 'Enter an API token for the selected provider');
     if (input.provider === 'MAILJET_API' && !input.mailjetApiSecret && !mailjetApiSecret)
       throw new HttpError(400, 'Enter your Mailjet API secret');
     if (smtpProvider && input.smtpHost) {
       const allowedHosts = config.EGRESS_ALLOWED_HOSTS.split(',').map((host) => host.trim().toLowerCase());
       if (!allowedHosts.includes(input.smtpHost.toLowerCase().trim()))
-        throw new HttpError(400, `Add ${input.smtpHost} to EGRESS_ALLOWED_HOSTS before configuring this SMTP host`);
+        throw new HttpError(
+          400,
+          `Add ${input.smtpHost} to EGRESS_ALLOWED_HOSTS before configuring this SMTP host`,
+        );
       const presetRequiresAuth = input.provider !== 'SMTP_CUSTOM' && input.provider !== 'SMTP';
       if (presetRequiresAuth && (!input.smtpUsername || !smtpPassword))
         throw new HttpError(400, 'SMTP username and password or API secret are required');
@@ -356,8 +399,16 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
         throw new HttpError(400, 'Provide both SMTP username and password, or leave both blank');
     }
     const endpoint = emailEndpoint(input);
-    if (endpoint && !config.EGRESS_ALLOWED_HOSTS.split(',').map((host) => host.trim().toLowerCase()).includes(new URL(endpoint).hostname))
-      throw new HttpError(400, `Allow ${new URL(endpoint).hostname} in EGRESS_ALLOWED_HOSTS before configuring this provider`);
+    if (
+      endpoint &&
+      !config.EGRESS_ALLOWED_HOSTS.split(',')
+        .map((host) => host.trim().toLowerCase())
+        .includes(new URL(endpoint).hostname)
+    )
+      throw new HttpError(
+        400,
+        `Allow ${new URL(endpoint).hostname} in EGRESS_ALLOWED_HOSTS before configuring this provider`,
+      );
     await put(db, 'emailConfig', 'main', { ...input, apiKey, smtpPassword, mailjetApiSecret });
   } else if (action === 'settings.save') {
     const old = (await getForUpdate<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
@@ -407,7 +458,10 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     await remove(db, 'findings', id);
     // A deleted finding may have been referenced by an open advisory; clear
     // the link so the advisory does not resurrect the record on its next write.
-    await db.query('UPDATE records SET data = jsonb_set(data, \'{findingIds}\', (data->\'findingIds\') - $1::text) WHERE kind=\'advisories\' AND data ? \'findingIds\'', [id]);
+    await db.query(
+      "UPDATE records SET data = jsonb_set(data, '{findingIds}', (data->'findingIds') - $1::text) WHERE kind='advisories' AND data ? 'findingIds'",
+      [id],
+    );
   } else if (/^(feed|asset|recipient|webhook)\.(delete|toggle)$/.test(action)) {
     const [entity, operation] = action.split('.'),
       kind = (
@@ -421,7 +475,8 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     if (!old) throw new HttpError(404, 'Record not found');
     if (entity === 'feed' && operation === 'delete' && (old.vendorSeed || old.type === 'NVD_API'))
       throw new HttpError(403, 'Vendor-seeded feeds and NVD sources cannot be deleted');
-    if (entity === 'asset') await syncCorrelationAsset(db,{...old,active:operation === 'delete' ? false : !old.active});
+    if (entity === 'asset')
+      await syncCorrelationAsset(db, { ...old, active: operation === 'delete' ? false : !old.active });
     if (operation === 'delete') {
       await remove(db, kind, id);
       // Source checkpoints are internal state keyed by feed id; deleting the

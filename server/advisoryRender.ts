@@ -7,11 +7,35 @@ const SEVERITY_COLORS: Record<string, string> = {
   LOW: '#10b981',
   UNKNOWN: '#6b7280',
 };
-const SEVERITY_BADGE = (severity: string) => {
+const SEVERITY_BADGE = (severity: string, suffix = '') => {
   const color = SEVERITY_COLORS[severity] || SEVERITY_COLORS.UNKNOWN;
   const label = severity || 'UNKNOWN';
-  return `<span style="display:inline-block;padding:2px 10px;border-radius:4px;background:${color};color:#ffffff;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px;">${label}</span>`;
+  return `<span style="display:inline-block;padding:4px 10px;border-radius:4px;background:${color};color:#ffffff;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px;">${label}${suffix}</span>`;
 };
+
+/**
+ * Validates that all required advisory fields needed by the email template
+ * are populated. Called by renderAdvisory to prevent emails with empty
+ * content from being queued for delivery.
+ */
+export function validateAdvisoryFields(advisory: Advisory): AdvisoryFieldValidation {
+  const missingFields: string[] = [];
+  if (!advisory.id || !advisory.id.trim()) missingFields.push('id');
+  if (!advisory.title || !advisory.title.trim()) missingFields.push('title');
+  if (!advisory.severity) missingFields.push('severity');
+  if (!advisory.executiveSummary || !advisory.executiveSummary.trim())
+    missingFields.push('executiveSummary');
+  if (!advisory.remediationInstructions || !advisory.remediationInstructions.trim())
+    missingFields.push('remediationInstructions');
+  if (!advisory.affectedSystems || advisory.affectedSystems.length === 0)
+    missingFields.push('affectedSystems');
+  return { valid: missingFields.length === 0, missingFields };
+}
+
+export interface AdvisoryFieldValidation {
+  valid: boolean;
+  missingFields: string[];
+}
 
 /**
  * Renders the operator-managed advisory template for one advisory view.
@@ -19,8 +43,17 @@ const SEVERITY_BADGE = (severity: string) => {
  * A digest is rendered from a recipient-specific advisory view (a subset of the
  * findings in the combined advisory), so the rendered HTML can never disclose a
  * finding that the recipient is not subscribed to.
+ *
+ * Throws if any required advisory field is empty, preventing emails with
+ * missing content from being queued for delivery.
  */
 export function renderAdvisory(template: string, advisory: Advisory): string {
+  const validation = validateAdvisoryFields(advisory);
+  if (!validation.valid) {
+    throw new Error(
+      `Cannot render advisory email with empty required fields: ${validation.missingFields.join(', ')}`,
+    );
+  }
   const escape = (v: string) =>
     v.replace(
       /[&<>"']/g,
@@ -81,19 +114,23 @@ export function renderAdvisory(template: string, advisory: Advisory): string {
     audience_notice: edits.audienceNotice
       ? escape(edits.audienceNotice).replace(/\n/g, '<br/>')
       : 'This advisory is being distributed to all recipients per the EVERYONE delivery policy.',
-    reviewer_comment: edits.reviewerComment
-      ? `<strong>Reviewer note${edits.reviewerName ? ` by ${escape(edits.reviewerName)}` : ''}</strong> ${escape(edits.reviewerComment).replace(/\n/g, '<br/>')}`
-      : '',
-  };
-  const rawHtmlTokens = new Set([
-    'cve_id_links',
-    'cve_details',
-    'affected_systems_html',
-    'mitigation_steps',
-    'recommended_actions',
-    'audience_notice',
-    'reviewer_comment',
-  ]);
+     reviewer_comment: edits.reviewerComment
+       ? `<strong>Reviewer note${edits.reviewerName ? ` by ${escape(edits.reviewerName)}` : ''}</strong> ${escape(edits.reviewerComment).replace(/\n/g, '<br/>')}`
+       : '',
+     severity_badge: SEVERITY_BADGE(advisory.severity),
+     severity_header_badge: SEVERITY_BADGE(advisory.severity, ' SEVERITY'),
+   };
+   const rawHtmlTokens = new Set([
+     'cve_id_links',
+     'cve_details',
+     'affected_systems_html',
+     'mitigation_steps',
+     'recommended_actions',
+     'audience_notice',
+     'reviewer_comment',
+     'severity_badge',
+     'severity_header_badge',
+   ]);
   return template.replace(/{{([a-z_]+)}}/g, (_, key) => {
     if (rawHtmlTokens.has(key)) return values[key] || '';
     return escape(values[key] || '');

@@ -261,7 +261,9 @@ function parseRetryAfter(header: string): number | undefined {
 }
 
 function generateCpePrefixes(vendor: string, product: string): string[] {
-  return (['a', 'o', 'h'] as const).map((part) => `cpe:2.3:${part}:${vendor}:${product}`);
+  return (['a', 'o', 'h'] as const).map(
+    (part) => `cpe:2.3:${part}:${vendor}:${product}:*:*:*:*:*:*:*:*:*`,
+  );
 }
 
 function findMatchingCpes(

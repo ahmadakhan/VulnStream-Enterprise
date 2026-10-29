@@ -437,6 +437,34 @@ export const WatchListView: React.FC = () => {
     });
   };
 
+  const itemIdentity = (item: { vendor: string; product: string; cpes: string[]; purls?: string[] }) =>
+    [
+      (item.vendor || 'any').toLowerCase(),
+      (item.product || 'any').toLowerCase(),
+      ...item.cpes.map((c) => c.trim().toLowerCase()).sort(),
+      ...(item.purls || []).map((p) => p.trim().toLowerCase()).sort(),
+    ].join('|');
+
+  const checkDuplicates = (
+    incoming: Array<{ vendor: string; product: string; cpes: string[]; purls?: string[]; id?: string }>,
+  ): string[] => {
+    const errors: string[] = [];
+    const existingMap = new Map<string, WatchListItem>();
+    for (const item of watchlist) {
+      existingMap.set(itemIdentity(item), item);
+    }
+    for (const item of incoming) {
+      const identity = itemIdentity(item);
+      const existing = existingMap.get(identity);
+      if (existing && existing.id !== item.id) {
+        errors.push(
+          `"${item.vendor} / ${item.product}" is already monitored as "${existing.assetTag || existing.id}".`,
+        );
+      }
+    }
+    return errors;
+  };
+
   const handleNvdSearch = async () => {
     if (!vendorInput.trim()) return;
     const sequence = ++nvdSearchSequence.current;
@@ -613,21 +641,27 @@ export const WatchListView: React.FC = () => {
           ownerGroup: ownerGroupInput.trim() || 'Unassigned',
           notes: notesInput.trim(),
         };
-        const saved = await saveRegisteredProducts([
-          updatedItem,
-          ...productsToAdd
-            .filter((product) => product.cpes.length > 0)
-            .map((product) => ({
-              ...registrationAssetsFromCpes(product.cpes, {
-                assetTag: product.assetTag,
-                ownerGroup: product.ownerGroup,
-                notes: product.notes,
-                purls: [],
-              })[0],
-              id: crypto.randomUUID(),
-              createdAt: new Date().toISOString(),
-            })),
-        ]);
+        const newProducts = productsToAdd
+          .filter((product) => product.cpes.length > 0)
+          .map((product) => ({
+            ...registrationAssetsFromCpes(product.cpes, {
+              assetTag: product.assetTag,
+              ownerGroup: product.ownerGroup,
+              notes: product.notes,
+              purls: [],
+            })[0],
+            id: crypto.randomUUID(),
+            createdAt: new Date().toISOString(),
+          }));
+        const newProductDupErrors = checkDuplicates(newProducts);
+        if (newProductDupErrors.length) {
+          setSaveFeedback({
+            type: 'error',
+            message: `Duplicate monitored products not allowed. ${newProductDupErrors.join(' ')}`,
+          });
+          return;
+        }
+        const saved = await saveRegisteredProducts([updatedItem, ...newProducts]);
         if (!saved.success || saved.errors?.length) {
           setSaveFeedback({
             type: 'error',
@@ -657,6 +691,14 @@ export const WatchListView: React.FC = () => {
         notes: notesInput,
         purls: purlList,
       });
+      const dupErrors = checkDuplicates(newItems);
+      if (dupErrors.length) {
+        setSaveFeedback({
+          type: 'error',
+          message: `Duplicate monitored products not allowed. ${dupErrors.join(' ')}`,
+        });
+        return;
+      }
       const result = await bulkImportWatchlist(newItems);
       if (!result.errors.length) setShowAddModal(false);
       else
@@ -1262,6 +1304,9 @@ export const WatchListView: React.FC = () => {
                           'Cisco',
                           'Fortinet',
                           'VMware',
+                          'SentinelOne',
+                          'Ubuntu',
+                          'Adobe',
                           'Veeam',
                           'Palo Alto Networks',
                           'Apache',
@@ -1573,9 +1618,10 @@ export const WatchListView: React.FC = () => {
                       </div>
 
                       <p className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
-                        Search the NIST dictionary for {vendorInput.trim() || 'vendor'}
-                        {nvdSearchProductTerm && ` / ${nvdSearchProductTerm}`}. Add matching entries to the
-                        product. Requests are subject to NVD rate limits.
+                        Wildcard-matching {vendorInput.trim() || 'vendor'} against the NIST dictionary using
+                        the custom product name
+                        {nvdSearchProductTerm && ` / ${nvdSearchProductTerm}`} or catalog selection. Add
+                        matching entries to the product. Requests are subject to NVD rate limits.
                       </p>
                       {nvdError && (
                         <div
