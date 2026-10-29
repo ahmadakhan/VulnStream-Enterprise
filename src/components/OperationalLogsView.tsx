@@ -1,5 +1,5 @@
 import { PageHeading } from './PageHeading';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { EVENT_CATEGORIES, OperationalEvent, AuditLog } from '../types';
 import {
@@ -48,6 +48,7 @@ const auditLevel = (level: AuditLog['level']) => (
 const AuditTrailView: React.FC = () => {
   const { fetchCollection, refreshVersion, verifyAuditChainRemote, settings } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
@@ -298,37 +299,43 @@ const AuditTrailView: React.FC = () => {
             >
               Search entries
             </label>
-            <Search className="absolute left-3 top-3 h-4 w-4 text-zinc-500" />
-            <input
-              type="search"
-              id="audit-query"
-              aria-label="Search audit trail"
-              placeholder="Event, actor, details, or IP address"
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 py-2.5 pl-9 pr-10 text-xs text-zinc-100 placeholder-zinc-500 transition focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900"
-            />
-            {searchTerm && (
-              <button
-                type="button"
-                className="audit-query-clear"
-                aria-label="Clear audit search"
-                onClick={() => {
-                  setSearchTerm('');
+            <div className="audit-query-control">
+              <Search className="h-4 w-4 text-zinc-500" aria-hidden="true" />
+              <input
+                ref={searchInputRef}
+                autoComplete="off"
+                type="search"
+                id="audit-query"
+                aria-label="Search audit trail"
+                placeholder="Event, actor, details, or IP address"
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
                   setCurrentPage(1);
                 }}
-              >
-                <X size={14} aria-hidden="true" />
-              </button>
-            )}
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-950 py-2.5 pl-9 pr-10 text-xs text-zinc-100 placeholder-zinc-500 transition focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  className="audit-query-clear"
+                  aria-label="Clear audit search"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setCurrentPage(1);
+                    searchInputRef.current?.focus();
+                  }}
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
+              )}
+            </div>
           </div>
 
           <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
             Category
             <select
+              id="audit-category"
               value={categoryFilter}
               onChange={(e) => {
                 setCategoryFilter(e.target.value);
@@ -349,6 +356,7 @@ const AuditTrailView: React.FC = () => {
           <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
             Event level
             <select
+              id="audit-level"
               value={levelFilter}
               onChange={(e) => {
                 setLevelFilter(e.target.value);

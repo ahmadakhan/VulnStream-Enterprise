@@ -74,14 +74,22 @@
   font-size: 12px;
 }
 .audit-trail-panel .audit-filter-grid :is(input, select) {
-  min-height: 44px;
-  background: var(--ui-control);
+  min-height: 44px !important;
+  background-color: var(--ui-control);
   border-color: var(--ui-border);
   color: var(--ui-text);
   font-size: 13px;
 }
-.audit-trail-panel .audit-query-field > svg {
-  bottom: 14px;
+.audit-query-control {
+  position: relative;
+}
+.audit-trail-panel .audit-query-control > svg {
+  position: absolute;
+  top: 50%;
+  bottom: auto;
+  left: 12px;
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 .audit-query-field input::-webkit-search-cancel-button {
   -webkit-appearance: none;
@@ -89,7 +97,9 @@
 .audit-query-clear {
   position: absolute;
   right: 8px;
-  bottom: 8px;
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
   display: grid;
   place-items: center;
   width: 28px;
