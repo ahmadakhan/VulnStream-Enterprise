@@ -236,27 +236,10 @@ export async function queueRun(
     { locks: ['pipeline-queue'] },
   );
 }
-/**
- * Rebuild a stale advisory bundle from current inventory.
- *
- * Called by the delivery worker when it detects that a queued advisory's
- * findings are no longer applicable. Marks all sibling outbox jobs for the
- * advisory as FAILED so the pipeline's stale-bundle detection
- * (`staleBundles` in `processPipeline`) can rebuild the bundle from current
- * matches, queues an immediate pipeline run so recovery is not delayed until
- * the next scheduled tick, and — unless the caller already rebuilt this
- * payload from current intelligence — does the same for jobs that were still
- * queued under a legacy payload with no revision evidence.
- *
- * The job currently being processed by the delivery worker is excluded:
- * the worker's post-delivery bookkeeping will finalize it (including email
- * log updates) in its own transaction.
- *
- * Jobs that are still deliverable are regrouped here (see
- * `regroupStaleAdvisory`) instead of being failed with the stale bundle. Without
- * that, a bundle containing one review-held finding would fail in its entirety
- * and the rebuilt run would only queue findings that are not bound to an
- * advisory, so the still-applicable findings would never be delivered.
+/** Recover an unsent stale advisory after its failed attempt is committed.
+ * Rebuild applicable subsets, invalidate remaining queued siblings, and leave
+ * every in-flight delivery lease untouched. Policy holds do not start ingestion
+ * loops; a wholly inapplicable bundle schedules one reconciliation run.
  */
 export async function rebuildFromCurrentInventory(
   pool: pg.Pool,
@@ -299,25 +282,10 @@ export async function rebuildFromCurrentInventory(
   // bundle needs correlation to reconcile inventory; policy holds await review.
   if (!regrouped && !holdGated) await queueRun(pool, 24, 'delivery-rebuild');
 }
-/**
- * Rebuilds the still-deliverable jobs of a stale bundle under a new advisory.
- *
- * A bundle is failed as a whole when one of its findings is no longer
- * deliverable, but that must not withhold the findings that still are. Each
- * sibling job is revalidated against the current confidence policy and
- * inventory; jobs whose findings all remain `QUEUED_FOR_DISPATCH` are moved to
- * a fresh advisory with fresh revision evidence and requeued, and only the jobs
- * that are genuinely undeliverable are left to the caller's FAILED update.
- *
- * Sending stays behind the existing delivery-worker revalidation: this only
- * regroups the queue, it never contacts a transport. Existing advisories and
- * their findings are left untouched so the retained audit trail still shows
- * what was originally queued.
- *
- * `holdGated` distinguishes a finding that is withheld on purpose (confidence
- * policy / review) from one that lost applicability. A held finding must not
- * trigger a pipeline rebuild on every delivery attempt: the rebuild cannot
- * change the verdict, so the bundle would fail forever.
+/** Regenerate unsent delivery subsets from current inventory and policy.
+ * Queued jobs move to a fresh advisory; failed pre-transport attempts retain
+ * their history and receive an idempotent replacement. Accepted and sending
+ * jobs are excluded. Only the retained findings bind to the new advisory.
  */
 export async function regroupStaleAdvisory(
   pool: pg.Pool,

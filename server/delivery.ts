@@ -777,9 +777,8 @@ export async function deliverNext(
       permanent = true;
       throw new Error('Automatic email retry is disabled by the current settings');
     }
-    // A review-held job consumes its first attempt before an operator approves
-    // it. Approval is an explicit send, so it must not be blocked by a retry
-    // budget of one; subsequent attempts follow the configured policy.
+    // Approval resets the attempt count. The transport budget still applies
+    // after approval, including recovery of an abandoned sending lease.
     if (job.attempts > retryPolicy.maxAttempts) {
       permanent = true;
       throw new Error('Delivery retry budget exhausted after worker recovery');
