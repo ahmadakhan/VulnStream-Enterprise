@@ -53,6 +53,7 @@ import { bufferFindingsForDigest } from './digest';
 import { renderAdvisory } from './advisoryRender';
 import { HttpError } from './validation';
 import { advisoryEmail } from './advisoryEmail';
+import { currentAdvisoryView, currentAdvisoryBody } from './advisoryRebuild';
 export { renderAdvisory } from './advisoryRender';
 /**
  * Rebuilds a queued job's stored payload from current intelligence.
@@ -75,41 +76,48 @@ export async function rebuildLegacyDeliveryPayload(db: pg.Pool | pg.PoolClient, 
   if (job.payload.nativeCorrelation) return false;
   const advisory = await get<Advisory>(db, 'advisories', job.advisory_id);
   if (!advisory) return false;
+  const declaredCves = job.payload.cveIds ?? advisory.cveIds;
   const evidence = job.payload.cveRevisions ?? {};
-  if (advisory.cveIds.length && advisory.cveIds.every((cveId) => evidence[cveId])) return false;
-  const findingIds = job.payload.includedFindingIds?.length
-    ? job.payload.includedFindingIds
-    : advisory.findingIds;
-  const findings = [...(await getMany<Finding>(db, 'findings', findingIds)).values()];
-  const cves = await getMany<NormalizedCVE>(db, 'cveData', advisory.cveIds);
-  const cveRevisions: Record<string, string> = { ...evidence };
-  for (const cveId of advisory.cveIds) {
-    const cve = cves.get(cveId);
-    if (cve) cveRevisions[cveId] = revision(cve);
+  if (declaredCves.every(cveId => evidence[cveId])) return false;
+  const findingIds = job.payload.includedFindingIds ?? advisory.findingIds;
+  const findingMap = await getMany<Finding>(db, 'findings', findingIds);
+  if (!findingIds.length || findingMap.size !== new Set(findingIds).size) return false;
+  const settings = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
+  const aliases = await list<AliasEntry>(db, 'aliases');
+  const current: Finding[] = [];
+  for (const finding of findingMap.values()) {
+    const [asset, cve, withdrawal] = await Promise.all([
+      get<WatchListItem>(db, 'watchlist', finding.matchedAssetId),
+      get<NormalizedCVE>(db, 'cveData', finding.cveId),
+      get<{ modifiedDate: string }>(db, 'cveWithdrawals', finding.cveId),
+    ]);
+    if (!asset?.active || !cve || ['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(finding.status) ||
+        (withdrawal && Date.parse(cve.modifiedDate) <= Date.parse(withdrawal.modifiedDate))) return false;
+    const match = runVulnerabilityPipeline([], [cve], [asset], [], [], { ...DEFAULT_SETTINGS, ...settings, scopeHours: 0 },
+      'Server worker', false, buildAliasMap(aliases, 'VENDOR'), buildAliasMap(aliases, 'PRODUCT'), undefined, aliases).newFindings[0];
+    if (match?.notificationStatus !== 'QUEUED_FOR_DISPATCH') return false;
+    current.push({ ...finding, ...match, id: finding.id });
   }
-  const findingRevisions: Record<string, string> = { ...(job.payload.findingRevisions ?? {}) };
-  for (const finding of findings) findingRevisions[finding.id] = findingRevision(finding);
-  const body = advisoryEmail(
-    advisory,
-    job.payload.html,
-    findings.map(
-      (finding) =>
-        `${finding.cveId} | ${finding.cve.cvss.severity}${finding.cve.cisaKev?.isKev ? ' | CISA KEV' : ''} | ${finding.matchedAssetName}`,
-    ),
+  const view = currentAdvisoryView(advisory, current);
+  if (view.cveIds.length !== new Set(declaredCves).size || declaredCves.some(id => !view.cveIds.includes(id))) return false;
+  const payload = {
+    ...job.payload,
+    ...await currentAdvisoryBody(db, view, current),
+    cveIds: view.cveIds,
+    includedFindingIds: view.findingIds,
+    cveRevisions: Object.fromEntries(current.map(f => [f.cveId, revision(f.cve)])),
+    findingRevisions: Object.fromEntries(current.map(f => [f.id, findingRevision(f)])),
+  };
+  const updated = await db.query(
+    "UPDATE outbox SET payload=$2::jsonb, review_approved=false, updated_at=now() WHERE id=$1 AND (status='QUEUED' OR (status='SENDING' AND lock_token=$3))",
+    [job.id, JSON.stringify(payload), job.lock_token],
   );
-  await db.query('UPDATE outbox SET payload=$2::jsonb, updated_at=now() WHERE id=$1', [
-    job.id,
-    JSON.stringify({
-      ...job.payload,
-      ...body,
-      cveIds: advisory.cveIds,
-      cveRevisions,
-      findingRevisions,
-    }),
-  ]);
-  job.payload = { ...job.payload, ...body, cveIds: advisory.cveIds, cveRevisions, findingRevisions };
+  if (!updated.rowCount) return false;
+  job.payload = payload;
+  job.review_approved = false;
   return true;
 }
+
 type KevSnapshot = {
   fingerprint: string;
   etag?: string;
@@ -271,12 +279,12 @@ export async function rebuildFromCurrentInventory(
     `UPDATE outbox
        SET status='FAILED', error=$1, next_attempt=now(),
            locked_at=NULL, lock_token=NULL, updated_at=now()
-     WHERE advisory_id=$2 AND (status='QUEUED' OR (status='SENDING' AND $3::boolean))`,
-    [reason, advisoryId, regrouped || holdGated],
+     WHERE advisory_id=$2 AND status='QUEUED'`,
+    [reason, advisoryId],
   );
   // A run is only needed when the bundle was split: a bundle whose findings are
   // merely rate-limited must not start a rebuild loop that repeats every minute.
-  if (regrouped) await queueRun(pool, 24, 'delivery-rebuild');
+  if (!regrouped && !holdGated) await queueRun(pool, 24, 'delivery-rebuild');
 }
 /**
  * Rebuilds the still-deliverable jobs of a stale bundle under a new advisory.
@@ -308,7 +316,7 @@ export async function regroupStaleAdvisory(
     const settings = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
     const jobs = (
       await db.query<Job>(
-        "SELECT * FROM outbox WHERE advisory_id=$1 AND status='QUEUED' AND payload->'nativeCorrelation' IS NULL",
+        "SELECT * FROM outbox WHERE advisory_id=$1 AND (status='QUEUED' OR (status='FAILED' AND COALESCE(error,'') LIKE '%no longer applicable%')) AND payload->'nativeCorrelation' IS NULL FOR UPDATE",
         [advisoryId],
       )
     ).rows;
@@ -319,20 +327,18 @@ export async function regroupStaleAdvisory(
     const deliverability = new Map<string, boolean>();
     const evidence = new Map<
       string,
-      { cveRevisions: Record<string, string>; findingRevisions: Record<string, string> }
+      { cveRevisions: Record<string, string>; findingRevisions: Record<string, string>; findings: Finding[] }
     >();
     let holdGated = false;
     for (const job of jobs) {
-      const findingIds = job.payload.includedFindingIds?.length
-        ? job.payload.includedFindingIds
-        : advisory.findingIds;
+      const findingIds = job.payload.includedFindingIds ?? advisory.findingIds;
       const findings = [...(await getMany<Finding>(db, 'findings', findingIds)).values()];
       const cves = await getMany<NormalizedCVE>(db, 'cveData', [...new Set(findings.map((f) => f.cveId))]);
       const assets = await getMany<WatchListItem>(db, 'watchlist', [...new Set(findings.map((f) => f.matchedAssetId))]);
       const cveRevisions: Record<string, string> = {};
       const findingRevisions: Record<string, string> = {};
-      let deliverable = findings.length > 0,
-        held = false;
+      const current: Finding[] = [];
+      let held = false;
       for (const finding of findings) {
         const cve = cves.get(finding.cveId) || finding.cve;
         const asset = assets.get(finding.matchedAssetId);
@@ -340,8 +346,9 @@ export async function regroupStaleAdvisory(
         // Only findings the current policy and inventory still admit may move to
         // the new bundle; a review-held or unverifiable finding stays in place and
         // is finalized by the caller's FAILED update.
-        if (!asset?.active || !cve) {
-          deliverable = false;
+        const withdrawal = await get<{ modifiedDate: string }>(db, 'cveWithdrawals', finding.cveId);
+        if (!asset?.active || !cve || ['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(finding.status) ||
+            (withdrawal && Date.parse(cve.modifiedDate) <= Date.parse(withdrawal.modifiedDate))) {
           continue;
         }
         const match = runVulnerabilityPipeline(
@@ -358,46 +365,37 @@ export async function regroupStaleAdvisory(
           undefined,
           aliasEntries,
         ).newFindings[0];
-        if (!match || match.notificationStatus === 'REVIEW_REQUIRED') held = true;
+        if (match?.notificationStatus === 'REVIEW_REQUIRED') held = true;
         if (match?.notificationStatus !== 'QUEUED_FOR_DISPATCH') {
-          deliverable = false;
           continue;
         }
-        findingRevisions[finding.id] = findingRevision({ ...finding, ...match });
+        const fresh = { ...finding, ...match, id: finding.id };
+        findingRevisions[finding.id] = findingRevision(fresh);
+        current.push(fresh);
       }
-      deliverability.set(job.id, deliverable);
-      evidence.set(job.id, { cveRevisions, findingRevisions });
+      deliverability.set(job.id, current.length > 0);
+      evidence.set(job.id, { cveRevisions, findingRevisions, findings: current });
       holdGated ||= held;
     }
     const regroup = jobs.filter((job) => deliverability.get(job.id));
     if (!regroup.length) return { regrouped: false, holdGated };
     const isDigest = Boolean(jobs[0].payload.digestKey) && jobs.every((job) => job.payload.digestKey === jobs[0].payload.digestKey);
     const replacement: Advisory = {
-      ...advisory,
+      ...currentAdvisoryView(advisory, [...new Map(regroup.flatMap(job => evidence.get(job.id)!.findings.map(f => [f.id, f] as const))).values()]),
       id: settings.advisoryPrefix + randomUUID(),
       createdDate: new Date().toISOString(),
       deliveryStatus: 'PENDING',
     };
     await put(db, 'advisories', replacement.id, replacement);
     for (const job of regroup) {
-      const { cveRevisions, findingRevisions } = evidence.get(job.id)!;
-      const included = job.payload.includedFindingIds?.length
-        ? job.payload.includedFindingIds
-        : advisory.findingIds;
-      const groupedFindings = [...(await getMany<Finding>(db, 'findings', included)).values()];
-      const body = advisoryEmail(
-        replacement,
-        job.payload.html,
-        groupedFindings.map(
-          (finding) =>
-            `${finding.cveId} | ${finding.cve.cvss.severity}${finding.cve.cisaKev?.isKev ? ' | CISA KEV' : ''} | ${finding.matchedAssetName}`,
-        ),
-      );
+      const { cveRevisions, findingRevisions, findings: groupedFindings } = evidence.get(job.id)!;
+      const included = groupedFindings.map(f => f.id);
+      const body = await currentAdvisoryBody(db, currentAdvisoryView(replacement, groupedFindings), groupedFindings);
       await db.query(
         `UPDATE outbox
-            SET advisory_id=$2, payload=$3::jsonb, review_approved=false,
+            SET advisory_id=$2, payload=$3::jsonb, review_approved=false, status='QUEUED', attempts=0,
                 locked_at=NULL, lock_token=NULL, next_attempt=now(), error=NULL, updated_at=now()
-          WHERE id=$1 AND status='QUEUED'`,
+          WHERE id=$1 AND (status='QUEUED' OR (status='FAILED' AND COALESCE(error,'') LIKE '%no longer applicable%'))`,
         [
           job.id,
           replacement.id,
