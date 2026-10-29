@@ -2,7 +2,31 @@ import { PageHeading } from './PageHeading';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { copyText } from '../utils/clipboard';
-import { FileCode, Send, RotateCcw, CheckCircle2, AlertCircle, Copy, Check, X, Type, Palette, Stamp, Sliders, Smartphone, Monitor, Maximize2, Minimize2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Eye, Code2, Download } from 'lucide-react';
+import {
+  FileCode,
+  Send,
+  RotateCcw,
+  CheckCircle2,
+  AlertCircle,
+  Copy,
+  Check,
+  X,
+  Type,
+  Palette,
+  Stamp,
+  Sliders,
+  Smartphone,
+  Monitor,
+  Maximize2,
+  Minimize2,
+  ZoomIn,
+  ZoomOut,
+  ArrowUp,
+  ArrowDown,
+  Eye,
+  Code2,
+  Download,
+} from 'lucide-react';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../utils/templateCompiler';
 
 export const AdvisoryTemplateView: React.FC = () => {
@@ -16,6 +40,7 @@ export const AdvisoryTemplateView: React.FC = () => {
   } = useApp();
 
   const [testEmail, setTestEmail] = useState('');
+  const [testForceReview, setTestForceReview] = useState(false);
   const [showTestModal, setShowTestModal] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -35,11 +60,13 @@ export const AdvisoryTemplateView: React.FC = () => {
     }),
   ).current;
   const previewId = useRef(
-    `${settings.advisoryPrefix}${new Date().toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    }).replace(new RegExp(' ', 'g'), '')}-PREVIEW`,
+    `${settings.advisoryPrefix}${new Date()
+      .toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      })
+      .replace(new RegExp(' ', 'g'), '')}-PREVIEW`,
   ).current;
   const [iframeHeight, setIframeHeight] = useState<number>(880);
   const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
@@ -120,8 +147,14 @@ export const AdvisoryTemplateView: React.FC = () => {
         /{{executive_summary}}/g,
         'Example content for checking layout. This is not a vulnerability assessment or a delivery record.',
       )
-      .replace(/{{cve_id_links}}/g, '<a href="https://nvd.nist.gov/vuln/detail/CVE-2026-0001" target="_blank">CVE-2026-0001</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2026-0002" target="_blank">CVE-2026-0002</a>')
-      .replace(/{{affected_systems_html}}/g, '<li>Example inventory asset 1</li>\n<li>Example inventory asset 2</li>')
+      .replace(
+        /{{cve_id_links}}/g,
+        '<a href="https://nvd.nist.gov/vuln/detail/CVE-2026-0001" target="_blank">CVE-2026-0001</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2026-0002" target="_blank">CVE-2026-0002</a>',
+      )
+      .replace(
+        /{{affected_systems_html}}/g,
+        '<li>Example inventory asset 1</li>\n<li>Example inventory asset 2</li>',
+      )
       .replace(
         /{{cve_details}}/g,
         '<div style="margin-bottom:12px;">\n<span><a href="https://nvd.nist.gov/vuln/detail/CVE-2026-0001" target="_blank" rel="noopener noreferrer" style="font-family:monospace;font-weight:600;text-decoration:underline;">CVE-2026-0001</a></span>\n</div>\n<ul style="margin:0 0 8px;padding-left:18px;font-size:12px;line-height:20px;">\n<li style="margin-bottom:2px;"><strong>Severity:</strong> <span style="display:inline-block;padding:2px 10px;border-radius:4px;background:#ef4444;color:#ffffff;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px;">HIGH</span></li>\n<li style="margin-bottom:2px;"><strong>Vendor Advisory:</strong> <a href="https://example.com" target="_blank" rel="noopener noreferrer">View source</a></li>\n</ul>',
@@ -157,7 +190,7 @@ export const AdvisoryTemplateView: React.FC = () => {
 
   const handleSendTest = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await sendTestEmail(testEmail);
+    const res = await sendTestEmail(testEmail, testForceReview);
     setTestResult(res);
     if (res.success) {
       setTimeout(() => {
@@ -607,7 +640,7 @@ export const AdvisoryTemplateView: React.FC = () => {
             <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono text-[11px] font-medium">
               Click to Copy:
             </span>
-            {            [
+            {[
               '{{advisory_id}}',
               '{{advisory_title}}',
               '{{severity}}',
@@ -995,6 +1028,19 @@ export const AdvisoryTemplateView: React.FC = () => {
                   onChange={(e) => setTestEmail(e.target.value)}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 font-mono focus:border-zinc-600 focus:outline-none"
                 />
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="testForceReview"
+                  checked={testForceReview}
+                  onChange={(e) => setTestForceReview(e.target.checked)}
+                  className="w-4 h-4 rounded bg-zinc-800 border-zinc-700 text-emerald-500 focus:ring-emerald-500"
+                />
+                <label htmlFor="testForceReview" className="text-zinc-300">
+                  Force into review (simulates EVERYONE distribution)
+                </label>
               </div>
 
               <div className="flex justify-end space-x-2 pt-3 border-t border-zinc-800">

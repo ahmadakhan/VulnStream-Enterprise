@@ -1501,7 +1501,9 @@ export function createApp(
     '/api/test-email',
     requireRole('ADMIN'),
     asyncRoute(async (req, res) => {
-      const { email } = z.object({ email: z.email().max(254) }).parse(req.body);
+      const { email, forceReview } = z
+        .object({ email: z.email().max(254), forceReview: z.boolean().optional() })
+        .parse(req.body);
       const id = await transaction(pool, async (db) => {
         const emailConfig =
           (await getForUpdate<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
@@ -1532,6 +1534,7 @@ export function createApp(
             cveIds: [],
           },
           randomUUID(),
+          forceReview ? 'REVIEW' : undefined,
         );
         await appendAudit(
           db,

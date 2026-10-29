@@ -8,12 +8,11 @@
 -- survive review re-opens and are applied to both the email HTML body and the
 -- PDF attachment at delivery time.
 --
+-- The partial index on outbox (status='REVIEW' AND edits != '{}') is defined in
+-- migrations/indexes/005_outbox_edits_review.sql — built CONCURRENTLY outside the
+-- migration transaction because outbox is a live table in production.
+--
 ALTER TABLE outbox
   ADD COLUMN IF NOT EXISTS edits jsonb NOT NULL DEFAULT '{}'::jsonb;
-
--- Index for fast lookups of jobs that have pending edits while in review.
-CREATE INDEX IF NOT EXISTS outbox_edits_review
-  ON outbox(created_at)
-  WHERE status='REVIEW' AND edits != '{}'::jsonb;
 
 INSERT INTO schema_migrations(version) VALUES(31) ON CONFLICT DO NOTHING;

@@ -560,8 +560,11 @@ function useApplication() {
       if (success) setDailyDigestDraft(null);
       return success;
     },
-    sendTestEmail: async (email: string) =>
-      (await call<{ success: boolean; message: string }>('/test-email', { email })) || {
+    sendTestEmail: async (email: string, forceReview = false) =>
+      (await call<{ success: boolean; message: string }>('/test-email', {
+        email,
+        forceReview,
+      })) || {
         success: false,
         message: 'Test could not be queued; see the error banner.',
       },
