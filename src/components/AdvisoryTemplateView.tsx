@@ -27,6 +27,7 @@ import {
   Code2,
   Download,
   Edit3,
+  Hash,
 } from 'lucide-react';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../utils/templateCompiler';
 
@@ -70,10 +71,11 @@ export const AdvisoryTemplateView: React.FC = () => {
       .replace(new RegExp(' ', 'g'), '')}-PREVIEW`,
   ).current;
   const [iframeHeight, setIframeHeight] = useState<number>(880);
-  const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
-  const [zoomLevel, setZoomLevel] = useState<number>(100);
+   const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
+   const [zoomLevel, setZoomLevel] = useState<number>(100);
    const [viewFormat, setViewFormat] = useState<'preview' | 'editor' | 'html'>('preview');
    const [htmlSubView, setHtmlSubView] = useState<'rendered' | 'template'>('template');
+   const [showTokensInCanvas, setShowTokensInCanvas] = useState(false);
    const [isFullscreen, setIsFullscreen] = useState(false);
    const [copiedHtml, setCopiedHtml] = useState(false);
 
@@ -900,10 +902,23 @@ export const AdvisoryTemplateView: React.FC = () => {
               className="p-1.5 rounded-xl bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 hover:bg-zinc-800 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 transition"
               title="Fullscreen Template Studio"
             >
-              <Maximize2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
+               <Maximize2 className="w-3.5 h-3.5" />
+             </button>
+             <button
+               type="button"
+               onClick={() => setShowTokensInCanvas(!showTokensInCanvas)}
+               className={`p-1.5 rounded-xl flex items-center space-x-1.5 text-xs font-mono transition ${
+                 showTokensInCanvas
+                   ? 'bg-blue-600/20 border border-blue-600 text-blue-300'
+                   : 'bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 hover:bg-zinc-800 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700'
+               }`}
+               title={showTokensInCanvas ? 'Show rendered preview' : 'Show token placeholders in canvas'}
+             >
+               <Hash className="w-3.5 h-3.5" />
+               <span>Show Tokens</span>
+             </button>
+           </div>
+         </div>
 
         {/* View Mode 3: Template Editor with Live Preview */}
         {viewFormat === 'editor' ? (
@@ -1101,7 +1116,7 @@ export const AdvisoryTemplateView: React.FC = () => {
                 <iframe
                   ref={iframeRef}
                   title="HTML Template Preview"
-                  srcDoc={getRenderedHtml()}
+                  srcDoc={showTokensInCanvas ? getTemplateSource() : getRenderedHtml()}
                   onLoad={syncIframeHeight}
                   scrolling={scrollMode === 'fit' ? 'no' : 'auto'}
                   style={{
