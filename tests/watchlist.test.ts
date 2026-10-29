@@ -146,13 +146,15 @@ test('a dictionary selection replaces generated suggestions only for the same pr
   assert.deepEqual(dictionaryCpesForCandidate(generated, [unrelated]), [generated]);
 });
 
-test('dictionary fallback replaces a generated CPE when only the vendor label differs', () => {
+test('strict vendor matching prevents substitution from unrelated vendors', () => {
   // Operator entered "notepad_plus_plus" as the vendor, but the NVD registry
-  // uses the vendor "don_ho". The product name matches (both "notepad\+\+"),
-  // so the generated suggestion is still replaced with the verified name.
+  // uses the vendor "don_ho". Strict matching requires the vendor to match
+  // exactly, so the generated CPE is NOT replaced by the NVD entry. The
+  // operator must manually select the verified dictionary CPE from search
+  // results rather than relying on an automatic substitution.
   const generated = 'cpe:2.3:a:notepad_plus_plus:notepad\\+\\+:*:*:*:*:*:*:*:*';
   const verified = 'cpe:2.3:a:don_ho:notepad\\+\\+:5.5:*:*:*:*:*:*:*';
   const unrelated = 'cpe:2.3:a:example:widget:1.0:*:*:*:*:*:*:*';
-  assert.deepEqual(dictionaryCpesForCandidate(generated, [unrelated, verified]), [verified]);
+  assert.deepEqual(dictionaryCpesForCandidate(generated, [unrelated, verified]), [generated]);
   assert.deepEqual(dictionaryCpesForCandidate(generated, [unrelated]), [generated]);
 });

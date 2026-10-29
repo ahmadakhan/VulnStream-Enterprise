@@ -97,7 +97,10 @@ export async function verifyRegistrationCpes(
   return verified;
 }
 
-/** Replace a generated suggestion only with dictionary names for the same product. */
+/** Replace a generated suggestion only with dictionary names for the same
+ * vendor/product identity. Strict matching ensures that CPEs from unrelated
+ * vendors — even ones that share a product name — are never silently
+ * substituted. */
 export function dictionaryCpesForCandidate(candidate: string, dictionaryCpes: string[]): string[] {
   const parsed = parseCPE23(candidate);
   if (!parsed.isValid) return [candidate];
@@ -110,15 +113,5 @@ export function dictionaryCpesForCandidate(candidate: string, dictionaryCpes: st
       entry.product.toLowerCase() === parsed.product.toLowerCase()
     );
   });
-  if (matches.length) return matches;
-  // Fallback: match by part + product only, ignoring vendor differences.
-  // This handles cases where the operator's vendor label differs from the
-  // NVD-registered vendor (e.g. "notepad_plus_plus" vs. "don_ho"), so the
-  // generated CPE is still replaced with the verified dictionary name and no
-  // stale, unverified CPE reaches the final monitored-product list.
-  const fallbackMatches = dictionaryCpes.filter((cpe) => {
-    const entry = parseCPE23(cpe);
-    return entry.isValid && entry.part === parsed.part && entry.product.toLowerCase() === parsed.product.toLowerCase();
-  });
-  return fallbackMatches.length ? fallbackMatches : [candidate];
+  return matches.length ? matches : [candidate];
 }
