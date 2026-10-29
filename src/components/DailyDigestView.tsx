@@ -119,6 +119,8 @@ export const DailyDigestView: React.FC = () => {
       '{{low_count}}',
       '{{asset_count}}',
       '{{severity_counts}}',
+      '{{severity}}',
+      '{{dispatch_date}}',
       '{{recipient_name}}',
       '{{executive_summary}}',
       '{{findings_summary}}',
@@ -219,6 +221,8 @@ export const DailyDigestView: React.FC = () => {
       .replace(/{{advisory_id}}/g, 'DAILY-PREVIEW')
       .replace(/{{recipient_name}}/g, 'Team')
       .replace(/{{severity_counts}}/g, '2 critical, 1 high, 1 medium, 1 low')
+      .replace(/{{dispatch_date}}/g, new Date().toISOString())
+      .replace(/{{severity}}/g, 'HIGH')
       .replace(/{{executive_summary}}/g, 'A total of <strong>5 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>1 Medium</strong>, and <strong>1 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.')
       .replace(/{{findings_summary}}/g, findingsSummary)
       .replace(/{{health_report}}/g, healthReport)

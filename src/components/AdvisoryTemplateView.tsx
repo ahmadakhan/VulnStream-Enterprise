@@ -26,6 +26,7 @@ import {
   Eye,
   Code2,
   Download,
+  Edit3,
 } from 'lucide-react';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../utils/templateCompiler';
 
@@ -71,9 +72,66 @@ export const AdvisoryTemplateView: React.FC = () => {
   const [iframeHeight, setIframeHeight] = useState<number>(880);
   const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
-  const [viewFormat, setViewFormat] = useState<'preview' | 'html'>('preview');
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [copiedHtml, setCopiedHtml] = useState(false);
+   const [viewFormat, setViewFormat] = useState<'preview' | 'editor' | 'html'>('preview');
+   const [isFullscreen, setIsFullscreen] = useState(false);
+   const [copiedHtml, setCopiedHtml] = useState(false);
+
+   const [customTemplate, setCustomTemplate] = useState<string>('');
+   const [isCustomTemplate, setIsCustomTemplate] = useState(false);
+   const [editorRef, setEditorRef] = useState<HTMLTextAreaElement | null>(null);
+
+   const handleEnterEditor = () => {
+     setCustomTemplate(advisoryTemplate);
+     setIsCustomTemplate(true);
+     setViewFormat('editor');
+   };
+
+   const handleExitEditor = () => {
+     if (isCustomTemplate) {
+       setCustomTemplate('');
+       setIsCustomTemplate(false);
+     }
+     setViewFormat('preview');
+   };
+
+   const handleApplyCustomTemplate = () => {
+     const trimmed = customTemplate.trim();
+     if (trimmed) {
+       setIsCustomTemplate(true);
+       setViewFormat('preview');
+     }
+   };
+
+   const tokenList = [
+     '{{severity_header_badge}}',
+     '{{severity_badge}}',
+     '{{advisory_id}}',
+     '{{advisory_title}}',
+     '{{dispatch_date}}',
+     '{{executive_summary}}',
+     '{{cve_id_links}}',
+     '{{cve_details}}',
+     '{{affected_systems_html}}',
+     '{{remediation_steps}}',
+     '{{mitigation_steps}}',
+     '{{recommended_actions}}',
+     '{{vendor_link}}',
+   ];
+
+   const handleInsertToken = (token: string) => {
+     const el = editorRef;
+     if (el) {
+       const start = el.selectionStart;
+       const end = el.selectionEnd;
+       const value = customTemplate;
+       setCustomTemplate(value.slice(0, start) + token + value.slice(end));
+       const newPos = start + token.length;
+       setTimeout(() => {
+         el.focus();
+         el.setSelectionRange(newPos, newPos);
+       }, 0);
+     }
+   };
 
   // Active customization tool tab
   const [toolTab, setToolTab] = useState<'typography' | 'colors' | 'stamps' | 'tokens'>('colors');
@@ -137,9 +195,10 @@ export const AdvisoryTemplateView: React.FC = () => {
   };
 
   // Preview-only examples; never substitute an unverified real remediation command.
-  const getRenderedHtml = () =>
-    advisoryTemplate
-      .replace(/{{severity}}/g, 'HIGH')
+   const getRenderedHtml = () => {
+     const source = isCustomTemplate && customTemplate ? customTemplate : advisoryTemplate;
+     return source
+       .replace(/{{severity}}/g, 'HIGH')
       .replace(
         /{{severity_header_badge}}/g,
         '<span style="display:inline-block;padding:4px 10px;border-radius:4px;background:#f59e0b;color:#ffffff;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px;">HIGH SEVERITY</span>',
@@ -180,6 +239,7 @@ export const AdvisoryTemplateView: React.FC = () => {
         '<ul>\n<li>Inventory all affected systems identified in this advisory.</li>\n<li>Apply vendor patches immediately following your change management process.</li>\n<li>Validate backup, restore, and operational functionality after remediation.</li>\n</ul>',
       )
        .replace(/{{vendor_link}}/g, 'https://example.com');
+  };
 
   const handleSave = async () => {
     if (!(await saveTemplate())) return;
@@ -721,6 +781,18 @@ export const AdvisoryTemplateView: React.FC = () => {
               </button>
               <button
                 type="button"
+                onClick={handleEnterEditor}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
+                  viewFormat === 'editor'
+                    ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'
+                }`}
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Template Editor</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setViewFormat('html')}
                 className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
                   viewFormat === 'html'
@@ -828,8 +900,112 @@ export const AdvisoryTemplateView: React.FC = () => {
           </div>
         </div>
 
-        {/* View Mode 1: Compiled HTML Code Inspector */}
-        {viewFormat === 'html' ? (
+        {/* View Mode 3: Template Editor with Live Preview */}
+        {viewFormat === 'editor' ? (
+          <div className="ui-panel w-full flex flex-col gap-4 bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 rounded-2xl border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-300 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900/80 border-b border-zinc-800 text-xs font-mono text-zinc-400">
+              <span className="flex items-center space-x-2">
+                <Edit3 className="w-3.5 h-3.5 text-zinc-400" />
+                <span>Template Editor — Live Preview</span>
+              </span>
+              <div className="flex items-center space-x-1">
+                <span className="text-zinc-500">{customTemplate.length} characters</span>
+                {isCustomTemplate && (
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" title="Custom template active" />
+                )}
+              </div>
+            </div>
+
+            {/* Token Toolbar */}
+            <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 bg-zinc-950 border-b border-zinc-800">
+              <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono text-[10px]">
+                Insert Token:
+              </span>
+              {tokenList.map((token) => (
+                <button
+                  key={token}
+                  type="button"
+                  onClick={() => handleInsertToken(token)}
+                  className="bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-200 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 px-2 py-0.5 rounded font-mono text-[10px] hover:border-zinc-600 transition"
+                  title={`Insert ${token}`}
+                >
+                  {token}
+                </button>
+              ))}
+            </div>
+
+            {/* Split View: Editor + Live Preview */}
+            <div className="flex-1 flex h-[560px]">
+              {/* Left: Code Editor */}
+              <div className="w-1/2 border-r border-zinc-800 flex flex-col">
+                <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900/80 border-b border-zinc-800 text-xs font-mono text-zinc-400">
+                  <span>Template HTML Source</span>
+                </div>
+                <textarea
+                  ref={setEditorRef}
+                  value={customTemplate}
+                  onChange={(e) => setCustomTemplate(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.ctrlKey && e.key === 's') {
+                      e.preventDefault();
+                      handleApplyCustomTemplate();
+                    }
+                  }}
+                  className="flex-1 w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 font-mono text-xs p-3 border-0 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 overflow-auto"
+                  spellCheck={false}
+                  placeholder="Edit your advisory template HTML with {{token}} placeholders..."
+                />
+                <div className="flex items-center justify-end gap-2 px-3 py-2 bg-zinc-900/80 border-t border-zinc-800 text-[10px] text-zinc-500 font-mono">
+                  <span>Ctrl+S to apply</span>
+                  <button
+                    type="button"
+                    onClick={handleApplyCustomTemplate}
+                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium transition"
+                  >
+                    Apply to Preview
+                  </button>
+                  {isCustomTemplate && (
+                    <button
+                      type="button"
+                      onClick={handleExitEditor}
+                      className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded font-medium transition"
+                    >
+                      Discard Changes
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Right: Live Preview */}
+              <div className="w-1/2 flex flex-col">
+                <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900/80 border-b border-zinc-800 text-xs font-mono text-zinc-400">
+                  <span>Live Rendered Preview</span>
+                  <div className="flex items-center space-x-1">
+                    <span className="text-zinc-500">{getRenderedHtml().length} chars</span>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-auto bg-zinc-950/80">
+                  <div className="w-[720px] max-w-full mx-auto py-4">
+                    <iframe
+                      srcDoc={getRenderedHtml()}
+                      onLoad={syncIframeHeight}
+                      scrolling="no"
+                      style={{
+                        height: '500px',
+                        width: '100%',
+                        display: 'block',
+                        border: 'none',
+                      }}
+                      className="transition-all duration-150"
+                      sandbox="allow-same-origin"
+                      title="Template Editor Live Preview"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : viewFormat === 'html' ? (
           <div className="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden shadow-inner">
             <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900/80 border-b border-zinc-800 text-xs font-mono text-zinc-400">
               <span className="flex items-center space-x-2">
