@@ -110,12 +110,16 @@ export const DailyDigestView: React.FC = () => {
   const tokenList = useMemo(
     () => [
       '{{report_generated}}',
+      '{{advisory_id}}',
+      '{{advisory_title}}',
       '{{finding_count}}',
       '{{critical_count}}',
       '{{high_count}}',
       '{{medium_count}}',
       '{{low_count}}',
       '{{asset_count}}',
+      '{{severity_counts}}',
+      '{{recipient_name}}',
       '{{executive_summary}}',
       '{{findings_summary}}',
       '{{health_report}}',
@@ -211,6 +215,10 @@ export const DailyDigestView: React.FC = () => {
       .replace(/{{medium_count}}/g, String(mediumCount))
       .replace(/{{low_count}}/g, String(lowCount))
       .replace(/{{asset_count}}/g, '5')
+      .replace(/{{advisory_title}}/g, 'Daily Vulnerability Digest')
+      .replace(/{{advisory_id}}/g, 'DAILY-PREVIEW')
+      .replace(/{{recipient_name}}/g, 'Team')
+      .replace(/{{severity_counts}}/g, '2 critical, 1 high, 1 medium, 1 low')
       .replace(/{{executive_summary}}/g, 'A total of <strong>5 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>1 Medium</strong>, and <strong>1 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.')
       .replace(/{{findings_summary}}/g, findingsSummary)
       .replace(/{{health_report}}/g, healthReport)
