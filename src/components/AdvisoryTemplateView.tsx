@@ -111,7 +111,7 @@ export const AdvisoryTemplateView: React.FC = () => {
       .replace(/{{affected_systems_html}}/g, '<li>Example inventory asset 1</li>\n<li>Example inventory asset 2</li>')
       .replace(
         /{{cve_details}}/g,
-        '<div>\n<span><a href="https://nvd.nist.gov/vuln/detail/CVE-2026-0001" target="_blank">CVE-2026-0001</a></span><br/>\n<span>Example advisory title</span>\n</div>\n<ul>\n<li><strong>Severity:</strong> HIGH</li>\n<li><strong>Source Advisory:</strong> <a href="https://example.com" target="_blank">View vendor advisory</a></li>\n</ul>',
+        '<div style="margin-bottom:12px;">\n<span><a href="https://nvd.nist.gov/vuln/detail/CVE-2026-0001" target="_blank" rel="noopener noreferrer" style="font-family:monospace;font-weight:600;text-decoration:underline;">CVE-2026-0001</a></span>\n</div>\n<ul style="margin:0 0 8px;padding-left:18px;font-size:12px;line-height:20px;">\n<li style="margin-bottom:2px;"><strong>Severity:</strong> <span style="display:inline-block;padding:2px 10px;border-radius:4px;background:#ef4444;color:#ffffff;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px;">HIGH</span></li>\n<li style="margin-bottom:2px;"><strong>Vendor Advisory:</strong> <a href="https://example.com" target="_blank" rel="noopener noreferrer">View source</a></li>\n</ul>',
       )
       .replace(
         /{{remediation_steps}}/g,

@@ -1,5 +1,18 @@
 import type { Advisory } from '../src/types/index.ts';
 
+const SEVERITY_COLORS: Record<string, string> = {
+  CRITICAL: '#ef4444',
+  HIGH: '#f59e0b',
+  MEDIUM: '#eab308',
+  LOW: '#10b981',
+  UNKNOWN: '#6b7280',
+};
+const SEVERITY_BADGE = (severity: string) => {
+  const color = SEVERITY_COLORS[severity] || SEVERITY_COLORS.UNKNOWN;
+  const label = severity || 'UNKNOWN';
+  return `<span style="display:inline-block;padding:2px 10px;border-radius:4px;background:${color};color:#ffffff;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px;">${label}</span>`;
+};
+
 /**
  * Renders the operator-managed advisory template for one advisory view.
  *
@@ -39,16 +52,15 @@ export function renderAdvisory(template: string, advisory: Advisory): string {
     cve_details: advisory.cveIds
       .map(
         (cve: string) =>
-          `<div>
-<span><a href="https://nvd.nist.gov/vuln/detail/${escape(cve)}" target="_blank">${escape(cve)}</a></span><br/>
-<span>${escape(advisory.title)}</span>
+          `<div style="margin-bottom:12px;">
+<span><a href="https://nvd.nist.gov/vuln/detail/${escape(cve)}" target="_blank" rel="noopener noreferrer" style="font-family:monospace;font-weight:600;color:${SEVERITY_COLORS[advisory.severity] || SEVERITY_COLORS.UNKNOWN};text-decoration:underline;">${escape(cve)}</a></span>
 </div>
-<ul>
-<li><strong>Severity:</strong> ${escape(advisory.severity)}</li>
-<li><strong>Source Advisory:</strong> ${
+<ul style="margin:0 0 8px;padding-left:18px;font-size:12px;line-height:20px;">
+<li style="margin-bottom:2px;"><strong>Severity:</strong> ${SEVERITY_BADGE(advisory.severity)}</li>
+<li style="margin-bottom:2px;"><strong>Vendor Advisory:</strong> ${
             advisory.vendorLink
-              ? `<a href="${escape(advisory.vendorLink)}" target="_blank">View vendor advisory</a>`
-              : 'N/A'
+              ? `<a href="${escape(advisory.vendorLink)}" target="_blank" rel="noopener noreferrer">View source</a>`
+              : '<span style="color:#94a3b8;">N/A</span>'
           }</li>
 </ul>`,
       )

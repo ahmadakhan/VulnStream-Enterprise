@@ -82,8 +82,13 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
   body,table,td,a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
   table,td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
   table { border-collapse:collapse; }
-  a { overflow-wrap:anywhere; word-break:break-word; }
-  .ms-rteTableEvenCol-default { font-weight:700;color:${escapeHtml(config.headingColor)}; }
+   a { overflow-wrap:anywhere; word-break:break-word; }
+   .ms-rteTableEvenCol-default { font-weight:700;color:${escapeHtml(config.headingColor)}; }
+   .sev-critical { background:#ef4444;color:#ffffff; }
+   .sev-high { background:#f59e0b;color:#ffffff; }
+   .sev-medium { background:#eab308;color:#1e293b; }
+   .sev-low { background:#10b981;color:#ffffff; }
+   .sev-badge { display:inline-block;padding:2px 10px;border-radius:4px;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px; }
   @media only screen and (max-width:600px) {
     .outer { padding:16px 8px !important; }
     .ms-rteTableEvenCol-default { width:30% !important; }

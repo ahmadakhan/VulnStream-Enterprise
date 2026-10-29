@@ -464,12 +464,12 @@ export function matchCPE(
  * alongside what operators have added.
  */
 export const DEFAULT_VENDOR_ALIASES: Record<string, string[]> = {
-  microsoft: ['msft', 'windows'],
+  microsoft: ['msft'],
   paloaltonetworks: ['palo_alto', 'panw', 'paloalto', 'unit42'],
-  fortinet: ['fortiguard', 'fortios', 'fortinet_technologies'],
+  fortinet: ['fortinet_technologies'],
   cisco: ['cisco_systems', 'cisco-systems'],
-  vmware: ['broadcom', 'esxi', 'vmware_inc'],
-  apache: ['apache_software_foundation', 'httpd'],
+  vmware: ['broadcom', 'vmware_inc'],
+  apache: ['apache_software_foundation'],
   f5: ['f5_networks', 'f5-networks', 'f5_inc'],
   kubernetes: ['k8s'],
   openssl: ['openssl_project', 'openssl-org'],
