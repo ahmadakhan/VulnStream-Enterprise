@@ -26,6 +26,8 @@ import type {
   NormalizedCVE,
   WatchListItem,
   AliasEntry,
+  EmailDeliveryLog,
+  WebhookDeliveryLog,
 } from '../src/types/index.ts';
 import { buildAliasMap, parseCPE23 } from '../src/utils/cpeMatcher';
 import {
@@ -275,15 +277,26 @@ export async function rebuildFromCurrentInventory(
     regrouped: false,
     holdGated: false,
   }));
-  await pool.query(
-    `UPDATE outbox
-       SET status='FAILED', error=$1, next_attempt=now(),
-           locked_at=NULL, lock_token=NULL, updated_at=now()
-     WHERE advisory_id=$2 AND status='QUEUED'`,
-    [reason, advisoryId],
-  );
-  // A run is only needed when the bundle was split: a bundle whose findings are
-  // merely rate-limited must not start a rebuild loop that repeats every minute.
+  await transaction(pool, async db => {
+    const invalidated = await db.query<{ id: string; channel: string; attempts: number }>(
+      `UPDATE outbox
+         SET status='FAILED', error=$1, next_attempt=now(),
+             locked_at=NULL, lock_token=NULL, updated_at=now()
+       WHERE advisory_id=$2 AND status='QUEUED' RETURNING id,channel,attempts`,
+      [reason, advisoryId],
+    );
+    for (const row of invalidated.rows) {
+      if (row.channel === 'email') {
+        const log = await getForUpdate<EmailDeliveryLog>(db, 'emailLogs', row.id);
+        if (log) await put(db, 'emailLogs', row.id, { ...log, status: 'FAILED', attemptCount: row.attempts, nextRetryTime: null, errorMessage: reason });
+      } else {
+        const log = await getForUpdate<WebhookDeliveryLog>(db, 'webhookLogs', row.id);
+        if (log) await put(db, 'webhookLogs', row.id, { ...log, status: 'FAILED', errorMessage: reason });
+      }
+    }
+  });
+  // Fresh replacement jobs are already queued. Only a wholly inapplicable
+  // bundle needs correlation to reconcile inventory; policy holds await review.
   if (!regrouped && !holdGated) await queueRun(pool, 24, 'delivery-rebuild');
 }
 /**
