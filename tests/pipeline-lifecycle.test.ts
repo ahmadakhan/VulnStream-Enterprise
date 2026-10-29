@@ -1524,16 +1524,19 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         true,
       );
       const job = (await pool.query('SELECT status,error FROM outbox')).rows[0];
-      console.log('DBGDJOB', JSON.stringify(job), 'calls', transports, 'held', (await list<Finding>(pool,'findings')).map(f=>f.notificationStatus));
       assert.equal(transports, 1, String(job.error));
       assert.equal(job.status, 'ACCEPTED');
+      // The digest delivered the held finding, so it must no longer be held:
+      // otherwise every daily digest re-selects and re-sends the same finding.
+      const [finding] = await list<Finding>(pool, 'findings');
+      assert.equal(finding.notificationStatus, 'AUTO_DISPATCHED');
+      assert.ok(finding.autoDispatchedAt);
 
-      // The delivery above released the finding for dispatch. Re-hold it, and
-      // put the confidence bar back up so revalidation also holds it, proving the
-      // digest exemption did not weaken the per-finding applicability gate.
+      // A held finding is still refused on a non-digest bundle, so the digest
+      // exemption does not weaken the per-finding applicability gate.
       await transaction(pool, (db) =>
         db.query(
-          "UPDATE records SET data=data||'{\"notificationStatus\":\"REVIEW_REQUIRED\"}'::jsonb WHERE kind='findings'",
+          "UPDATE records SET data=(data-'autoDispatchedAt'-'advisoryId')||'{\"notificationStatus\":\"REVIEW_REQUIRED\"}'::jsonb WHERE kind='findings'",
         ),
       );
       await save('settings', 'main', {
@@ -1544,8 +1547,8 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         dailyDigest: { enabled: true, time: '00:00', includeHealthReport: false },
       });
       await pool.query('DELETE FROM outbox');
-      const [finding] = await list<Finding>(pool, 'findings');
-      assert.equal(finding.notificationStatus, 'REVIEW_REQUIRED');
+      const [heldAgain] = await list<Finding>(pool, 'findings');
+      assert.equal(heldAgain.notificationStatus, 'REVIEW_REQUIRED');
       const advisory: Advisory = {
         id: 'ADV-held',
         title: 'Held finding notice',
@@ -1561,7 +1564,7 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         affectedSystems: [finding.matchedAssetName],
         isDigestBatch: false,
       };
-      await transaction(pool, (db) => queueAdvisory(db, advisory, [finding]));
+      await transaction(pool, (db) => queueAdvisory(db, advisory, [heldAgain]));
       let refusedTransports = 0;
       await deliverNext(pool, config, request, async () => {
         refusedTransports++;

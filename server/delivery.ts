@@ -1162,17 +1162,13 @@ export async function deliverNext(
         const f = findingMap.get(findingId);
         if (!f) continue;
         // A finding held for review was queued in this bundle deliberately
-        // (assessment and digest payloads may include them). Once a transport
-        // for the team that reviewed it accepts the bundle, its notification
-        // lifecycle is dispatched; otherwise it would remain REVIEW_REQUIRED
-        // forever while its advisory reports ACCEPTED.
+        // (assessment and digest payloads may include them). Once the transport
+        // for that bundle accepts it, its notification lifecycle is dispatched;
+        // otherwise it would remain REVIEW_REQUIRED — perpetually re-selected by
+        // the daily digest — while its advisory reports ACCEPTED. A rejected or
+        // still-pending bundle keeps the hold in place.
         const reviewHeld = f?.notificationStatus === 'REVIEW_REQUIRED';
-        const releasedByReview =
-          reviewHeld &&
-          !error &&
-          (job.review_approved || job.channel === 'webhook' || job.target_id !== 'test') &&
-          !totals.pending &&
-          !totals.failed;
+        const releasedByReview = reviewHeld && !error && !totals.pending && !totals.failed;
         // Generated advisories (pipeline, digest, daily) are never bound to the
         // findings they describe — only manually reviewed advisories set
         // `advisoryId`. Gating this bookkeeping on that binding left every
