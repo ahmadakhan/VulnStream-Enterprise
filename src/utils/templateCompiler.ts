@@ -180,16 +180,7 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
                 ADVISORY DETAILS
             </div>
 
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;line-height:22px;">
-
-                <tr>
-                    <td width="30%" bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
-                        Vulnerability Name
-                    </td>
-                    <td style="padding:12px;border:1px solid #e2e8f0;color:#334155;">
-                        {{executive_summary}}
-                    </td>
-                </tr>
+             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;line-height:22px;">
 
                 <tr>
                     <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
@@ -292,8 +283,8 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
                 </tr>
 
                 <tr>
-                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
-                        Recommended Action
+                       <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                        Honeywell Recommended Actions
                     </td>
                     <td style="padding:12px;border:1px solid #e2e8f0;">
                         {{recommended_actions}}
@@ -492,13 +483,13 @@ ${classificationBanner}
                 BA Cyber | THREAT INTELLIGENCE
             </div>
 
-            <div class="title" style="font-size:24px;line-height:30px;font-weight:bold;color:${headerText};margin-bottom:6px;">
-                Daily Vulnerability Digest
-            </div>
+             <div class="title" style="font-size:24px;line-height:30px;font-weight:bold;color:${headerText};margin-bottom:6px;">
+                 {{advisory_title}}
+             </div>
 
-            <div style="font-size:12px;line-height:18px;color:${headerMuted};">
-                Report Generated: {{report_generated}}
-            </div>
+             <div style="font-size:12px;line-height:18px;color:${headerMuted};">
+                 Advisory ID: {{advisory_id}} &middot; Report Generated: {{report_generated}}
+             </div>
 
         </td>
     </tr>
@@ -520,16 +511,20 @@ ${classificationBanner}
                 </tr>
             </table>
 
-        </td>
-    </tr>
+         </td>
+     </tr>
 
-    <!-- EXECUTIVE SUMMARY -->
-    <tr>
-        <td class="mobile-padding" style="padding:28px 32px;">
+     <!-- EXECUTIVE SUMMARY -->
+     <tr>
+         <td class="mobile-padding" style="padding:28px 32px;">
 
-            <div style="font-size:11px;font-weight:bold;letter-spacing:1.5px;color:${config.accentColor};margin-bottom:8px;">
-                EXECUTIVE SUMMARY
-            </div>
+             <p style="margin:0 0 12px 0;font-size:14px;line-height:22px;color:#64748b;">
+                 Hello {{recipient_name}},
+             </p>
+
+             <div style="font-size:11px;font-weight:bold;letter-spacing:1.5px;color:${config.accentColor};margin-bottom:8px;">
+                 EXECUTIVE SUMMARY
+             </div>
 
             <h2 style="margin:0 0 12px 0;font-size:20px;color:${config.headingColor};">
                 Vulnerability Overview
@@ -857,6 +852,10 @@ export function renderDailyDigest(config: TemplateCustomization, parts: DailyDig
     .replace(/{{medium_count}}/g, String(parts.medium_count))
     .replace(/{{low_count}}/g, String(parts.low_count))
     .replace(/{{asset_count}}/g, String(parts.asset_count))
+    .replace(/{{advisory_title}}/g, digestEscapeHtml(parts.advisory_title))
+    .replace(/{{advisory_id}}/g, digestEscapeHtml(parts.advisory_id))
+    .replace(/{{recipient_name}}/g, digestEscapeHtml(parts.recipient_name))
+    .replace(/{{severity_counts}}/g, digestEscapeHtml(parts.severity_counts))
     .replace(/{{executive_summary}}/g, parts.executive_summary)
     .replace(/{{findings_summary}}/g, parts.findings_summary)
     .replace(/{{health_report}}/g, parts.health_report)

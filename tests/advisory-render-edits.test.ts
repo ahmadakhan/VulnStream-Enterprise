@@ -166,8 +166,8 @@ test('renderAdvisory produces template matching the studio HTML structure', () =
   assert.ok(html.includes('BA Threat Intelligence'), 'footer label should appear');
   assert.ok(html.includes('EXECUTIVE SUMMARY'), 'executive summary section should appear');
   assert.ok(html.includes('ADVISORY DETAILS'), 'advisory details section should appear');
-  assert.ok(html.includes('Vulnerability Name'), 'vulnerability name row should appear');
+  assert.ok(!html.includes('Vulnerability Name'), 'vulnerability name row should not appear');
   assert.ok(html.includes('Affected Products &amp; Versions'), 'affected products row should appear');
   assert.ok(html.includes('Workaround / Mitigation'), 'mitigation row should appear');
-  assert.ok(html.includes('Recommended Action'), 'recommended action row should appear');
+  assert.ok(html.includes('Honeywell Recommended Actions'), 'recommended action row should appear');
 });
