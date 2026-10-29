@@ -141,19 +141,19 @@ export const AdvisoryTemplateView: React.FC = () => {
     advisoryTemplate
       .replace(/{{severity}}/g, 'HIGH')
       .replace(
-        /{{severity_badge}}/g,
-        '<span style="display:inline-block;padding:4px 10px;border-radius:4px;background:#f59e0b;color:#ffffff;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px;">HIGH</span>',
-      )
-      .replace(
         /{{severity_header_badge}}/g,
         '<span style="display:inline-block;padding:4px 10px;border-radius:4px;background:#f59e0b;color:#ffffff;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px;">HIGH SEVERITY</span>',
+      )
+      .replace(
+        /{{severity_badge}}/g,
+        '<span style="display:inline-block;padding:4px 10px;border-radius:4px;background:#f59e0b;color:#ffffff;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px;">HIGH</span>',
       )
       .replace(/{{advisory_id}}/g, previewId)
       .replace(/{{advisory_title}}/g, 'Example advisory — template preview only')
       .replace(/{{dispatch_date}}/g, previewDate)
       .replace(
         /{{executive_summary}}/g,
-        'Example content for checking layout. This is not a vulnerability assessment or a delivery record.',
+        'A high-severity security advisory has been identified affecting assets within the monitored environment. Security teams should assess applicability, determine potential exposure, and prioritize remediation in accordance with established vulnerability management and change control procedures.',
       )
       .replace(
         /{{cve_id_links}}/g,
@@ -165,7 +165,7 @@ export const AdvisoryTemplateView: React.FC = () => {
       )
       .replace(
         /{{cve_details}}/g,
-        '<div style="margin-bottom:12px;">\n<span><a href="https://nvd.nist.gov/vuln/detail/CVE-2026-0001" target="_blank" rel="noopener noreferrer" style="font-family:monospace;font-weight:600;text-decoration:underline;">CVE-2026-0001</a></span>\n</div>\n<ul style="margin:0 0 8px;padding-left:18px;font-size:12px;line-height:20px;">\n<li style="margin-bottom:2px;"><strong>Severity:</strong> <span style="display:inline-block;padding:2px 10px;border-radius:4px;background:#ef4444;color:#ffffff;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px;">HIGH</span></li>\n<li style="margin-bottom:2px;"><strong>Vendor Advisory:</strong> <a href="https://example.com" target="_blank" rel="noopener noreferrer">View source</a></li>\n</ul>',
+        '<p style="margin-top:0;">\n<strong>CVE-2026-0001</strong>\n</p>\n<ul style="margin:0;padding-left:18px;">\n<li>\n    Severity:\n    <span style="display:inline-block;padding:2px 8px;border-radius:4px;background:#f59e0b;color:#ffffff;font-size:11px;font-weight:bold;">\n        HIGH\n    </span>\n</li>\n<li>\n    Vendor Advisory:\n    <a href="https://example.com" target="_blank" rel="noopener noreferrer">\n        View Source\n    </a>\n</li>\n</ul>',
       )
       .replace(
         /{{remediation_steps}}/g,
@@ -179,12 +179,7 @@ export const AdvisoryTemplateView: React.FC = () => {
         /{{recommended_actions}}/g,
         '<ul>\n<li>Inventory all affected systems identified in this advisory.</li>\n<li>Apply vendor patches immediately following your change management process.</li>\n<li>Validate backup, restore, and operational functionality after remediation.</li>\n</ul>',
       )
-       .replace(/{{vendor_link}}/g, 'https://example.com')
-       .replace(
-         /{{audience_notice}}/g,
-         'This advisory is being distributed to all recipients per the EVERYONE delivery policy.',
-       )
-       .replace(/{{reviewer_comment}}/g, '');
+       .replace(/{{vendor_link}}/g, 'https://example.com');
 
   const handleSave = async () => {
     if (!(await saveTemplate())) return;
