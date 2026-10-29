@@ -81,8 +81,28 @@ export function renderAdvisory(template: string, advisory: Advisory, findings?: 
     cve_ids: advisory.cveIds.join(', '),
     affected_systems: advisory.affectedSystems.join('\n'),
     affected_systems_html: advisory.affectedSystems
-      .map((sys: string) => `<li>${escape(sys)}</li>`)
+      .map((sys: string) => `<li style="padding-left:18px;margin:4px 0;">${escape(sys)}</li>`)
       .join('\n'),
+    vendor_products: findings
+      ? Array.from(
+          findings.reduce((acc, f) => {
+            const vendor = f.matchedAssetVendor || '';
+            const product = f.matchedAssetProduct || '';
+            if (vendor && product) acc.add(`${vendor} - ${product}`);
+            return acc;
+          }, new Set<string>())
+        ).join('\n')
+      : advisory.affectedSystems.join('\n'),
+    vendor_products_html: findings
+      ? Array.from(
+          findings.reduce((acc, f) => {
+            const vendor = f.matchedAssetVendor || '';
+            const product = f.matchedAssetProduct || '';
+            if (vendor && product) acc.add(`${vendor} - ${product}`);
+            return acc;
+          }, new Set<string>())
+        ).map((pair: string) => `<li style="padding-left:18px;margin:4px 0;">${escape(pair)}</li>`).join('\n')
+      : advisory.affectedSystems.map((sys: string) => `<li style="padding-left:18px;margin:4px 0;">${escape(sys)}</li>`).join('\n'),
     remediation_steps: advisory.remediationInstructions,
     vendor_link: advisory.vendorLink || '',
     remediation_link:
@@ -158,6 +178,7 @@ export function renderAdvisory(template: string, advisory: Advisory, findings?: 
     'cve_id_links',
     'cve_details',
     'affected_systems_html',
+    'vendor_products_html',
     'mitigation_steps',
     'recommended_actions',
     'severity_badge',

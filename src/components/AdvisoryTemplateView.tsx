@@ -115,6 +115,7 @@ export const AdvisoryTemplateView: React.FC = () => {
       '{{cve_id_links}}',
       '{{cve_details}}',
       '{{affected_systems_html}}',
+      '{{vendor_products_html}}',
       '{{remediation_steps}}',
       '{{remediation_link}}',
       '{{mitigation_steps}}',
@@ -229,7 +230,11 @@ export const AdvisoryTemplateView: React.FC = () => {
       )
       .replace(
         /{{affected_systems_html}}/g,
-        '<li>Example inventory asset 1</li>\n<li>Example inventory asset 2</li>',
+        '<li style="padding-left:18px;margin:4px 0;">Example inventory asset 1</li>\n<li style="padding-left:18px;margin:4px 0;">Example inventory asset 2</li>',
+      )
+      .replace(
+        /{{vendor_products_html}}/g,
+        '<li style="padding-left:18px;margin:4px 0;">VendorCorp - ProductSuite</li>\n<li style="padding-left:18px;margin:4px 0;">AnotherVendor - ProductLine</li>',
       )
       .replace(
         /{{cve_details}}/g,
@@ -738,6 +743,7 @@ export const AdvisoryTemplateView: React.FC = () => {
               '{{executive_summary}}',
               '{{cve_id_links}}',
               '{{affected_systems_html}}',
+              '{{vendor_products_html}}',
               '{{cve_details}}',
               '{{remediation_steps}}',
               '{{remediation_link}}',

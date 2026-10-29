@@ -243,7 +243,7 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
                     </td>
                     <td style="padding:12px;border:1px solid #e2e8f0;">
                         <ul style="margin:0;padding-left:18px;">
-                            {{affected_systems_html}}
+                            {{vendor_products_html}}
                         </ul>
                     </td>
                 </tr>
@@ -505,32 +505,7 @@ ${classificationBanner}
         </td>
     </tr>
 
-    <!-- SUMMARY BAR -->
-    <tr>
-        <td style="padding:12px 32px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
-
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                    <td style="font-size:12px;color:#334155;">
-                        <strong>Total Findings:</strong> {{finding_count}}
-                    </td>
-
-                    {{critical_summary}}
-                    {{high_summary}}
-                    {{medium_summary}}
-                    {{low_summary}}
-                 </tr>
-                 <tr>
-                     <td style="font-size:10px;line-height:16px;color:#64748b;padding-top:4px;">
-                         {{severity_counts}}
-                     </td>
-                 </tr>
-             </table>
-
-         </td>
-     </tr>
-
-     <!-- EXECUTIVE SUMMARY -->
+    <!-- EXECUTIVE SUMMARY -->
      <tr>
          <td class="mobile-padding" style="padding:28px 32px;">
 

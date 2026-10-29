@@ -2,7 +2,7 @@ import { PageHeading } from './PageHeading';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { copyText } from '../utils/clipboard';
-import { FileCode, Send, RotateCcw, CheckCircle2, AlertCircle, Copy, Check, X, Type, Palette, Stamp, Sliders, Smartphone, Monitor, Maximize2, Minimize2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Eye, Code2, Download, CalendarDays, Edit3 } from 'lucide-react';
+import { FileCode, Send, RotateCcw, CheckCircle2, AlertCircle, Copy, Check, X, Type, Palette, Stamp, Sliders, Smartphone, Monitor, Maximize2, Minimize2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Eye, Code2, Download, CalendarDays, Edit3, Hash } from 'lucide-react';
 import {
   DEFAULT_DAILY_DIGEST_CUSTOMIZATION,
   renderDailyFindingSummary,
@@ -71,6 +71,8 @@ export const DailyDigestView: React.FC = () => {
   const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [viewFormat, setViewFormat] = useState<'preview' | 'editor' | 'html'>('preview');
+  const [htmlSubView, setHtmlSubView] = useState<'template' | 'rendered'>('template');
+  const [showTokensInCanvas, setShowTokensInCanvas] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copiedHtml, setCopiedHtml] = useState(false);
 
@@ -206,6 +208,10 @@ export const DailyDigestView: React.FC = () => {
     previewDate,
     previewTimestamp,
   ]);
+
+  const getTemplateSource = (): string => {
+    return isCustomTemplate && customTemplate ? customTemplate : dailyDigestTemplate;
+  };
 
   // Dynamically sync iframe height to eliminate internal scrollbars and scroll trapping
   const syncIframeHeight = useCallback(() => {
@@ -907,21 +913,58 @@ export const DailyDigestView: React.FC = () => {
             >
               <Maximize2 className="w-3.5 h-3.5" />
             </button>
+            <button
+              type="button"
+              onClick={() => setShowTokensInCanvas(!showTokensInCanvas)}
+              className={`p-1.5 rounded-xl flex items-center space-x-1.5 text-xs font-mono transition ${
+                showTokensInCanvas
+                  ? 'bg-blue-600/20 border border-blue-600 text-blue-300'
+                  : 'bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 hover:bg-zinc-800 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700'
+              }`}
+              title={showTokensInCanvas ? 'Show rendered preview' : 'Show token placeholders in canvas'}
+            >
+              <Hash className="w-3.5 h-3.5" />
+              <span>Show Tokens</span>
+            </button>
           </div>
         </div>
 
-        {/* View Mode 1: Compiled HTML Code Inspector */}
+        {/* View Mode 1: HTML Code Inspector with Token/Rendered toggle */}
         {viewFormat === 'html' ? (
           <div className="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden shadow-inner">
             <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900/80 border-b border-zinc-800 text-xs font-mono text-zinc-400">
               <span className="flex items-center space-x-2">
                 <Code2 className="w-3.5 h-3.5 text-zinc-400" />
-                <span>Compiled Daily Digest HTML (Production Ready)</span>
+                <span>Template HTML Source</span>
+                <div className="flex items-center space-x-1 bg-zinc-950 border border-zinc-800 rounded-lg ml-4">
+                  <button
+                    type="button"
+                    onClick={() => setHtmlSubView('template')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                      htmlSubView === 'template'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    Template (with tokens)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHtmlSubView('rendered')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                      htmlSubView === 'rendered'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    Rendered (preview values)
+                  </button>
+                </div>
               </span>
-              <span>{getRenderedHtml().length} characters</span>
+              <span>{(htmlSubView === 'template' ? getTemplateSource() : getRenderedHtml()).length} characters</span>
             </div>
             <pre className="p-4 text-xs font-mono text-zinc-300 overflow-x-auto max-h-[640px] leading-relaxed selection:bg-zinc-800">
-              <code>{getRenderedHtml()}</code>
+              <code>{htmlSubView === 'template' ? getTemplateSource() : getRenderedHtml()}</code>
             </pre>
           </div>
         ) : viewFormat === 'editor' ? (
@@ -1023,7 +1066,7 @@ export const DailyDigestView: React.FC = () => {
                 <div className="flex-1 overflow-auto bg-zinc-950/80">
                   <div className="w-[720px] max-w-full mx-auto py-4">
                     <iframe
-                      srcDoc={getRenderedHtml()}
+                  srcDoc={showTokensInCanvas ? getTemplateSource() : getRenderedHtml()}
                       onLoad={syncIframeHeight}
                       scrolling="no"
                       style={{
@@ -1096,7 +1139,7 @@ export const DailyDigestView: React.FC = () => {
                 <iframe
                   ref={iframeRef}
                   title="Daily Digest Preview"
-                  srcDoc={getRenderedHtml()}
+                srcDoc={showTokensInCanvas ? getTemplateSource() : getRenderedHtml()}
                   onLoad={syncIframeHeight}
                   scrolling={scrollMode === 'fit' ? 'no' : 'auto'}
                   style={{

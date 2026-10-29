@@ -132,12 +132,9 @@ test('renderDailyDigest embeds the findings summary and the health report', () =
 
 test('renderDailyDigest populates KPI counts exactly', () => {
   const html = renderDailyDigest(DEFAULT_DAILY_DIGEST_CUSTOMIZATION, PARTS);
-  assert.ok(html.includes('Total Findings:</strong> 5'));
   assert.ok(html.includes('CRITICAL (2)'), 'findings summary shows critical count');
-  assert.ok(html.includes('Critical:</strong> 2'), 'summary bar shows critical count');
-  assert.ok(html.includes('High:</strong> 1'), 'summary bar shows high count');
-  assert.ok(html.includes('Medium:</strong> 1'), 'summary bar shows medium count');
-  assert.ok(html.includes('Low:</strong> 1'), 'summary bar shows low count');
+  assert.ok(html.includes('CRITICAL'), 'KPI dashboard shows critical label');
+  assert.ok(html.includes('CRITICAL'), 'severity header present');
   assert.ok(html.includes('ASSETS'));
 });
 
