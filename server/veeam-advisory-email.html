@@ -3,6 +3,20 @@
 <tbody>
 
 <tr class="ms-rteTableEvenRow-default">
+<td class="ms-rteTableEvenCol-default" style="width:11%;">{{severity_header_badge}}</td>
+<td class="ms-rteTableOddCol-default">
+{{advisory_title}}
+</td>
+</tr>
+
+<tr class="ms-rteTableOddRow-default">
+<td class="ms-rteTableEvenCol-default">Advisory ID</td>
+<td class="ms-rteTableOddCol-default">
+{{advisory_id}}
+</td>
+</tr>
+
+<tr class="ms-rteTableEvenRow-default">
 <td class="ms-rteTableEvenCol-default" style="width:11%;">Vulnerability Name</td>
 <td class="ms-rteTableOddCol-default">
 {{advisory_title}}
@@ -31,6 +45,13 @@
 <tr class="ms-rteTableEvenRow-default">
 <td class="ms-rteTableEvenCol-default">Date of Update</td>
 <td class="ms-rteTableOddCol-default">{{dispatch_date}}</td>
+</tr>
+
+<tr class="ms-rteTableOddRow-default">
+<td class="ms-rteTableEvenCol-default">Executive Summary</td>
+<td class="ms-rteTableOddCol-default">
+{{executive_summary}}
+</td>
 </tr>
 
 <tr class="ms-rteTableOddRow-default">
@@ -70,7 +91,7 @@
 <tr class="ms-rteTableOddRow-default">
 <td class="ms-rteTableEvenCol-default">Resource</td>
 <td class="ms-rteTableOddCol-default">
-{{vendor_link}}
+<a href="{{vendor_link}}" target="_blank">Vendor Security Advisory</a>
 </td>
 </tr>
 
