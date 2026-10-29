@@ -2,7 +2,7 @@ import { PageHeading } from './PageHeading';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { copyText } from '../utils/clipboard';
-import { FileCode, Send, RotateCcw, CheckCircle2, AlertCircle, Copy, Check, X, Type, Palette, Stamp, Sliders, Smartphone, Monitor, Maximize2, Minimize2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Eye, Code2, Download, CalendarDays } from 'lucide-react';
+import { FileCode, Send, RotateCcw, CheckCircle2, AlertCircle, Copy, Check, X, Type, Palette, Stamp, Sliders, Smartphone, Monitor, Maximize2, Minimize2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Eye, Code2, Download, CalendarDays, Edit3, Split } from 'lucide-react';
 import {
   DEFAULT_DAILY_DIGEST_CUSTOMIZATION,
   renderDailyFindingSummary,
@@ -66,9 +66,61 @@ export const DailyDigestView: React.FC = () => {
   const [iframeHeight, setIframeHeight] = useState<number>(880);
   const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
-  const [viewFormat, setViewFormat] = useState<'preview' | 'html'>('preview');
+  const [viewFormat, setViewFormat] = useState<'preview' | 'editor' | 'html'>('preview');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copiedHtml, setCopiedHtml] = useState(false);
+
+  const [customTemplate, setCustomTemplate] = useState<string>('');
+  const [isCustomTemplate, setIsCustomTemplate] = useState(false);
+
+  const [editorRef, setEditorRef] = useState<HTMLTextAreaElement | null>(null);
+
+  const handleEnterEditor = () => {
+    setCustomTemplate(dailyDigestTemplate);
+    setIsCustomTemplate(true);
+    setViewFormat('editor');
+  };
+
+  const handleExitEditor = () => {
+    if (isCustomTemplate) {
+      setCustomTemplate('');
+      setIsCustomTemplate(false);
+    }
+    setViewFormat('preview');
+  };
+
+  const handleDiscardEditor = () => {
+    if (customTemplate !== (isCustomTemplate ? customTemplate : dailyDigestTemplate)) {
+      setCustomTemplate('');
+      setIsCustomTemplate(false);
+      setCustomTemplate(dailyDigestTemplate);
+    }
+  };
+
+  const handleApplyCustomTemplate = () => {
+    const trimmed = customTemplate.trim();
+    if (trimmed) {
+      setIsCustomTemplate(true);
+      setViewFormat('preview');
+    }
+  };
+
+  const tokenList = useMemo(() => ['{{report_generated}}', '{{finding_count}}', '{{critical_count}}', '{{high_count}}', '{{medium_count}}', '{{low_count}}', '{{asset_count}}', '{{executive_summary}}', '{{findings_summary}}', '{{health_report}}'], []);
+
+  const handleInsertToken = (token: string) => {
+    const el = editorRef;
+    if (el) {
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      const value = customTemplate;
+      setCustomTemplate(value.slice(0, start) + token + value.slice(end));
+      const newPos = start + token.length;
+      setTimeout(() => {
+        el.focus();
+        el.setSelectionRange(newPos, newPos);
+      }, 0);
+    }
+  };
 
   // Active customization tool tab
   const [toolTab, setToolTab] = useState<'typography' | 'colors' | 'stamps' | 'tokens'>('colors');
@@ -107,7 +159,7 @@ export const DailyDigestView: React.FC = () => {
   useEffect(() => {
     const timer = setTimeout(syncIframeHeight, 100);
     return () => clearTimeout(timer);
-  }, [dailyDigestCustomization, previewDevice, dailyDigestTemplate, syncIframeHeight]);
+  }, [dailyDigestCustomization, previewDevice, dailyDigestTemplate, customTemplate, syncIframeHeight]);
 
   const scrollToIframeTop = () => {
     try {
@@ -121,8 +173,9 @@ export const DailyDigestView: React.FC = () => {
     } catch {}
   };
 
-  const getRenderedHtml = () =>
-    dailyDigestTemplate
+  const getRenderedHtml = () => {
+    const source = isCustomTemplate && customTemplate ? customTemplate : dailyDigestTemplate;
+    return source
       .replace(/{{report_generated}}/g, previewDate)
       .replace(/{{finding_count}}/g, String(SAMPLE_FINDINGS.length))
       .replace(/{{critical_count}}/g, String(SAMPLE_FINDINGS.filter((f) => f.severity === 'CRITICAL').length))
@@ -133,6 +186,7 @@ export const DailyDigestView: React.FC = () => {
       .replace(/{{executive_summary}}/g, 'A total of <strong>5 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>1 Medium</strong>, and <strong>1 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.')
       .replace(/{{findings_summary}}/g, findingsSummary)
       .replace(/{{health_report}}/g, healthReport);
+  };
 
   const handleDownloadHtml = () => {
     const blob = new Blob([getRenderedHtml()], { type: 'text/html' });
@@ -688,18 +742,30 @@ export const DailyDigestView: React.FC = () => {
                 <Eye className="w-3.5 h-3.5" />
                 <span>Visual Canvas</span>
               </button>
-              <button
-                type="button"
-                onClick={() => setViewFormat('html')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
-                  viewFormat === 'html'
-                    ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'
-                }`}
-              >
-                <Code2 className="w-3.5 h-3.5" />
-                <span>HTML Code</span>
-              </button>
+  <button
+    type="button"
+    onClick={handleEnterEditor}
+    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
+      viewFormat === 'editor'
+        ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm'
+        : 'text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'
+    }`}
+  >
+    <Edit3 className="w-3.5 h-3.5" />
+    <span>Template Editor</span>
+  </button>
+  <button
+    type="button"
+    onClick={() => setViewFormat('html')}
+    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
+      viewFormat === 'html'
+        ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-white text-zinc-100 dark:text-zinc-100 light:text-zinc-900 shadow-sm'
+        : 'text-zinc-400 hover:text-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'
+    }`}
+  >
+    <Code2 className="w-3.5 h-3.5" />
+    <span>HTML Code</span>
+  </button>
             </div>
           </div>
 
@@ -810,6 +876,123 @@ export const DailyDigestView: React.FC = () => {
             <pre className="p-4 text-xs font-mono text-zinc-300 overflow-x-auto max-h-[640px] leading-relaxed selection:bg-zinc-800">
               <code>{getRenderedHtml()}</code>
             </pre>
+          </div>
+        ) : viewFormat === 'editor' ? (
+          <div className="ui-panel w-full flex flex-col gap-4 bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 rounded-2xl border border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-300 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900/80 border-b border-zinc-800 text-xs font-mono text-zinc-400">
+              <span className="flex items-center space-x-2">
+                <Edit3 className="w-3.5 h-3.5 text-zinc-400" />
+                <span>Template Editor — Live Preview</span>
+              </span>
+              <div className="flex items-center space-x-1">
+                <span className="text-zinc-500">{customTemplate.length} characters</span>
+                {isCustomTemplate && (
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" title="Custom template active" />
+                )}
+              </div>
+            </div>
+
+            {/* Token Toolbar */}
+            <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 bg-zinc-950 border-b border-zinc-800">
+              <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono text-[10px]">
+                Insert Token:
+              </span>
+              {tokenList.map((token) => (
+                <button
+                  key={token}
+                  type="button"
+                  onClick={() => handleInsertToken(token)}
+                  className="bg-zinc-900 dark:bg-zinc-900 light:bg-zinc-200 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 px-2 py-0.5 rounded font-mono text-[10px] hover:border-zinc-600 transition"
+                  title={`Insert ${token}`}
+                >
+                  {token}
+                </button>
+              ))}
+            </div>
+
+            {/* Split View: Editor + Live Preview */}
+            <div className="flex-1 flex h-[560px]">
+              {/* Left: Code Editor */}
+              <div className="w-1/2 border-r border-zinc-800 flex flex-col">
+                <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900/80 border-b border-zinc-800 text-xs font-mono text-zinc-400">
+                  <span>Template HTML Source</span>
+                  <div className="flex items-center space-x-1">
+                    <button
+                      type="button"
+                      onClick={() => editorRef?.focus()}
+                      className="p-1 text-zinc-400 hover:text-zinc-200"
+                      title="Focus editor"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  ref={setEditorRef}
+                  value={customTemplate}
+                  onChange={(e) => {
+                    setCustomTemplate(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.ctrlKey && e.key === 's') {
+                      e.preventDefault();
+                      handleApplyCustomTemplate();
+                    }
+                  }}
+                  className="flex-1 w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 font-mono text-xs p-3 border-0 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 overflow-auto"
+                  spellCheck={false}
+                  placeholder="Edit your digest template HTML with {{token}} placeholders..."
+                />
+                <div className="flex items-center justify-end gap-2 px-3 py-2 bg-zinc-900/80 border-t border-zinc-800 text-[10px] text-zinc-500 font-mono">
+                  <span>Ctrl+S to apply</span>
+                  <button
+                    type="button"
+                    onClick={handleApplyCustomTemplate}
+                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium transition"
+                  >
+                    Apply to Preview
+                  </button>
+                  {isCustomTemplate && (
+                    <button
+                      type="button"
+                      onClick={handleExitEditor}
+                      className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded font-medium transition"
+                    >
+                      Discard Changes
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Right: Live Preview */}
+              <div className="w-1/2 flex flex-col">
+                <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900/80 border-b border-zinc-800 text-xs font-mono text-zinc-400">
+                  <span>Live Rendered Preview</span>
+                  <div className="flex items-center space-x-1">
+                    <span className="text-zinc-500">{getRenderedHtml().length} chars</span>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-auto bg-zinc-950/80">
+                  <div className="w-[720px] max-w-full mx-auto py-4">
+                    <iframe
+                      srcDoc={getRenderedHtml()}
+                      onLoad={syncIframeHeight}
+                      scrolling="no"
+                      style={{
+                        height: '500px',
+                        width: '100%',
+                        display: 'block',
+                        border: 'none',
+                        backgroundColor: dailyDigestCustomization.canvasBg || '#09090b',
+                      }}
+                      className="transition-all duration-150"
+                      sandbox="allow-same-origin"
+                      title="Template Editor Live Preview"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         ) : (
           /* View Mode 2: Visual Client Canvas with Enterprise Chrome & Non-Trapping Scrolling */
