@@ -56,6 +56,12 @@ export interface Job {
     includedFindingIds?: string[];
     /** Stable per-batch key used for CVE dispatch accounting across recipients. */
     digestKey?: string;
+    /**
+     * When true, the job is a calendar daily-digest delivery: an overall summary
+     * email. Such jobs never carry a PDF attachment — the body is the summary
+     * itself — so the sender skips PDF rendering entirely.
+     */
+    dailyDigest?: boolean;
   };
   attempts: number;
   lock_token: string;
@@ -316,6 +322,7 @@ export function webhookAllows(hook: WebhookEndpoint, finding: Finding): boolean 
  *  Failures degrade to HTML-only delivery instead of blocking the send. */
 async function buildPdfAttachment(job: Job, config: Config, db?: Db): Promise<EmailAttachment | undefined> {
   if (config.ATTACH_ADVISORY_PDF !== 'true' || !job.payload.html) return undefined;
+  if (job.payload.dailyDigest) return undefined;
   try {
     const pdf = await renderAdvisoryPdf(job.payload.html, config);
     return {
