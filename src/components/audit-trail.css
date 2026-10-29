@@ -16,6 +16,36 @@
   justify-content: flex-end;
   gap: 12px;
 }
+.audit-trail-panel .audit-integrity-actions {
+  flex: 0 0 auto;
+}
+.audit-integrity > div:not(.audit-integrity-actions) {
+  flex: 1 1 300px;
+}
+.audit-integrity.is-verified .audit-integrity-state {
+  color: #6ee7b7;
+}
+.light .audit-integrity.is-verified .audit-integrity-state {
+  color: #047857;
+}
+.audit-integrity.is-failed .audit-integrity-state {
+  color: #fda4af;
+}
+.light .audit-integrity.is-failed .audit-integrity-state {
+  color: #be123c;
+}
+.audit-trail-panel .audit-level.level-warning {
+  color: #fcd34d;
+}
+.light .audit-trail-panel .audit-level.level-warning {
+  color: #92400e;
+}
+.audit-trail-panel .audit-level.level-error {
+  color: #fda4af;
+}
+.light .audit-trail-panel .audit-level.level-error {
+  color: #be123c;
+}
 .audit-trail-panel .audit-integrity-state {
   padding: 0;
   border: 0;
