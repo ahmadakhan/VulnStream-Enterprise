@@ -261,25 +261,21 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
           [DAILY_SCHEDULE_ID],
         );
         const data = row.rows[0]?.data ?? {};
-        if (data.lastKey === todayKey) {
-          await put(db, 'systemState', DAILY_SCHEDULE_ID, {
-            ...data,
-            lastCheckedAt: new Date(now).toISOString(),
-          });
-          return 0;
-        }
 
         const recipients = (await list<EmailRecipient>(db, 'recipients')).filter(
           (r) => r.enabled && r.dailyDigest,
         );
-        // Commit the claim first so a crash mid-send cannot re-fire today's digest.
-        await put(db, 'systemState', DAILY_SCHEDULE_ID, {
-          ...data,
-          lastKey: todayKey,
-          lastRun: new Date(now).toISOString(),
-          lastRecipients: recipients.length,
-        });
+        // The day is claimed only when there is somebody to send to. Claiming it
+        // first meant that a tick running before any recipient opted in (or with
+        // every recipient temporarily disabled) burned the whole day: the claim
+        // request repeated every minute, reported "queued for 0 recipient(s)",
+        // and never delivered the findings that were right there in the window.
+        // A recipient added later that same day now still receives the digest.
         if (!recipients.length) {
+          await put(db, 'systemState', DAILY_SCHEDULE_ID, {
+            ...data,
+            lastCheckedAt: new Date(now).toISOString(),
+          });
           await writeEvent(db, {
             category: 'EMAIL',
             level: 'INFO',
@@ -289,28 +285,51 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
           });
           return 0;
         }
+        if (data.lastKey === todayKey) {
+          await put(db, 'systemState', DAILY_SCHEDULE_ID, {
+            ...data,
+            lastCheckedAt: new Date(now).toISOString(),
+          });
+          return 0;
+        }
+        // Commit the claim before queueing so a crash mid-send cannot re-fire
+        // today's digest.
+        await put(db, 'systemState', DAILY_SCHEDULE_ID, {
+          ...data,
+          lastKey: todayKey,
+          lastRun: new Date(now).toISOString(),
+          lastRecipients: recipients.length,
+        });
 
         const findingRows = await db.query<{ data: Finding }>(
           `SELECT data FROM records WHERE kind='findings' AND created_at > now() - interval '24 hours'`,
         );
-        // A daily digest is a summary of the last 24 hours, so it may include
-        // findings that are held for review or already dispatched; only findings
-        // that lost applicability are excluded. REVIEW_REQUIRED findings are
-        // therefore included, and the delivery worker accepts a review-flagged
-        // finding inside a digest as long as it still matches current inventory.
+        // A daily digest is a summary of the last 24 hours of *deliverable*
+        // findings. A `REVIEW_REQUIRED` finding is deliberately withheld by the
+        // confidence policy or by unverifiable applicability evidence, and the
+        // delivery worker refuses to carry it in an email bundle. Including it
+        // made the whole digest fail as stale every day (and, because the
+        // findings stay held, repeat on the next day too). Held findings remain
+        // available for operator review; they are not summarised in the email.
         const findings: Finding[] = findingRows.rows
           .map((r) => r.data)
           .filter(
             (f) =>
               f &&
               f.cveId &&
-              !['NOT_APPLICABLE', 'SUPPRESSED_VEX_NOT_AFFECTED', 'DELIVERY_FAILED'].includes(
-                f.notificationStatus,
-              ),
+              ![
+                'NOT_APPLICABLE',
+                'SUPPRESSED_VEX_NOT_AFFECTED',
+                'DELIVERY_FAILED',
+                'REVIEW_REQUIRED',
+              ].includes(f.notificationStatus),
           );
 
         const template = await readTemplate(db);
         const advisory = buildDailyDigestAdvisory(findings, settings, todayKey);
+        const heldForReview = findingRows.rows.filter(
+          (r) => r.data?.cveId && r.data.notificationStatus === 'REVIEW_REQUIRED',
+        ).length;
         const worker = (await db.query('SELECT heartbeat FROM scheduler_state WHERE id=1')).rows[0];
         const health = daily.includeHealthReport
           ? await computeHealth(db, settings.schedulerEnabled, worker?.heartbeat ?? null)
@@ -373,6 +392,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
             advisoryId: advisory.id,
             recipients: jobs,
             findings: findings.length,
+            heldForReview,
             date: todayKey,
             time: daily.time,
             timezone,
