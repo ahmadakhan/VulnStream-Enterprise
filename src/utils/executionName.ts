@@ -1,11 +1,17 @@
-import { randomUUID } from 'node:crypto';
-
 /** Build a short, human-friendly display name for a pipeline execution from its id.
  *
  * Executions are keyed by an opaque UUID, but the Execution history list renders a
  * readable label (e.g. `Run 3add6860`) instead of the raw identifier. Legacy rows
  * stored before this name was persisted fall back to this helper on read. */
 export const formatExecutionName = (id: string): string => `Run ${id.slice(0, 8)}`;
+
+function shortUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().split('-')[0].toUpperCase();
+  }
+  const fallback = Math.random().toString(36).slice(2, 10).toUpperCase();
+  return fallback.padStart(8, '0');
+}
 
 /** Build a professional, human-readable advisory identifier.
  *
@@ -20,6 +26,5 @@ export const formatAdvisoryId = (prefix: string, now: Date = new Date()): string
       year: 'numeric',
     })
     .replace(/ /g, '');
-  const shortId = randomUUID().split('-')[0].toUpperCase();
-  return `${prefix}${datePart}-${shortId}`;
+  return `${prefix}${datePart}-${shortUuid()}`;
 };
