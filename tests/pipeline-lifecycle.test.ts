@@ -1524,6 +1524,56 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         assert.match(job.payload.subject, new RegExp(expectedKey));
       }
     });
+    await t.test('a digest tick with no recipients does not consume the day', async () => {
+      await reset();
+      await save('settings', 'main', {
+        ...DEFAULT_SETTINGS,
+        timezone: 'UTC',
+        dailyDigest: { enabled: true, time: '00:00', includeHealthReport: false },
+      });
+      await save('watchlist', 'asset', asset());
+      await save('cveData', vulnerability().cveId, vulnerability());
+      await run();
+      await transaction(pool, (db) =>
+        db.query("UPDATE records SET created_at=now() WHERE kind='findings'"),
+      );
+
+      // The worker polls every minute. Before anyone has opted in, the tick must
+      // report nothing sent without claiming today — otherwise the findings that
+      // arrive later that day are never delivered.
+      assert.equal(await runDailyDigest(pool), 0);
+      assert.equal(
+        (await get<any>(pool, 'systemState', 'dailyDigest-schedule'))?.lastKey,
+        undefined,
+        'an empty tick must not claim the calendar day',
+      );
+
+      // A recipient opts in later the same day; the digest must still go out.
+      await save('recipients', 'rec', {
+        id: 'rec',
+        name: 'Test',
+        email: 'test@example.invalid',
+        enabled: true,
+        dailyDigest: true,
+        deliveryGroup: 'SECURITY_TEAM',
+        subscriptionTier: 'ALL_SEVERITIES',
+      });
+      assert.equal(await runDailyDigest(pool), 1);
+      let transports = 0;
+      assert.equal(
+        await deliverNext(pool, config, request, async () => {
+          transports++;
+          return 'mock-accepted';
+        }),
+        true,
+      );
+      const job = (await pool.query('SELECT status,error FROM outbox')).rows[0];
+      assert.equal(transports, 1, String(job.error));
+      assert.equal(job.status, 'ACCEPTED');
+
+      // The day is now claimed: a later tick must not send a second digest.
+      assert.equal(await runDailyDigest(pool), 0);
+    });
     await t.test('an empty daily digest is skipped, a health-only one delivers', async () => {
       const configure = async (includeHealthReport: boolean, timezone?: string) => {
         await reset();

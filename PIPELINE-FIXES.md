@@ -24,3 +24,11 @@ Final validation: with `TEST_DATABASE_URL` set, **509 of 511 tests passed, zero 
 A browser-queued run completed against an isolated PostgreSQL test database. It reconciled the patched fixture to `NOT_APPLICABLE`, retained four historical findings with three current matches, queued no duplicate deliveries, and displayed the three measured phases correctly. Screenshot: [pipeline-fix-verification.png](pipeline-fix-verification.png).
 
 No live provider messages were sent. Transport tests use injected acknowledgements. Applicability is checked immediately before transport; inventory changes after that check cannot retract an already submitted notification. Historical findings and accepted advisories remain retained for review.
+
+## Stale-bundle failure reasons
+
+The delivery worker labels why a queued advisory was rejected so the reason is visible in the outbox and in the rebuild error:
+
+- `current inventory no longer matches` — no current asset/CVE pair; `rebuildFromCurrentInventory()` clears the advisory binding, `reconcileFindings` retains the finding as `NOT_APPLICABLE`, and it is not re-queued.
+- `current applicability or confidence policy requires review` — the finding still matches, but the workspace confidence policy now holds it as `REVIEW_REQUIRED` (for example the threshold was raised from 80% to 90% after the bundle was queued). The stale bundle fails, the sibling jobs fail with the same reason and an immediate pipeline run is queued. The run reconciles the finding to `REVIEW_REQUIRED` under the current policy; because it is neither `QUEUED_FOR_DISPATCH` nor `AUTO_DISPATCHED` it is **not** added to a new advisory and the delivery worker never calls the transport for it. Restoring a policy that admits the finding (or an operator ruling) makes the next run queue it again.
+- `CVE intelligence changed`, `a CVE was withdrawn`, `a finding was resolved or dismissed`, `inventory or matching evidence changed` — the bundle is stale for that specific reason; accepted or partially accepted advisories are never resent automatically.
