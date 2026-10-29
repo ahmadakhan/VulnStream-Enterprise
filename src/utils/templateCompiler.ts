@@ -182,10 +182,19 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
 
              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;line-height:22px;">
 
-                <tr>
-                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
-                        CVE ID
-                    </td>
+                 <tr>
+                     <td width="30%" bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                         Vulnerability Name
+                     </td>
+                     <td style="padding:12px;border:1px solid #e2e8f0;">
+                         {{advisory_title}}
+                     </td>
+                 </tr>
+
+                 <tr>
+                     <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
+                         CVE ID
+                     </td>
                     <td style="padding:12px;border:1px solid #e2e8f0;">
                         {{cve_id_links}}
                     </td>
@@ -490,6 +499,8 @@ ${classificationBanner}
              <div style="font-size:12px;line-height:18px;color:${headerMuted};">
                  Advisory ID: {{advisory_id}} &middot; Report Generated: {{report_generated}}
              </div>
+             <meta name="dispatch-date" content="{{dispatch_date}}">
+             <meta name="digest-severity" content="{{severity}}">
 
         </td>
     </tr>
@@ -508,8 +519,13 @@ ${classificationBanner}
                     {{high_summary}}
                     {{medium_summary}}
                     {{low_summary}}
-                </tr>
-            </table>
+                 </tr>
+                 <tr>
+                     <td style="font-size:10px;line-height:16px;color:#64748b;padding-top:4px;">
+                         {{severity_counts}}
+                     </td>
+                 </tr>
+             </table>
 
          </td>
      </tr>
@@ -856,6 +872,8 @@ export function renderDailyDigest(config: TemplateCustomization, parts: DailyDig
     .replace(/{{advisory_id}}/g, digestEscapeHtml(parts.advisory_id))
     .replace(/{{recipient_name}}/g, digestEscapeHtml(parts.recipient_name))
     .replace(/{{severity_counts}}/g, digestEscapeHtml(parts.severity_counts))
+    .replace(/{{dispatch_date}}/g, digestEscapeHtml(parts.dispatch_date))
+    .replace(/{{severity}}/g, digestEscapeHtml(parts.severity))
     .replace(/{{executive_summary}}/g, parts.executive_summary)
     .replace(/{{findings_summary}}/g, parts.findings_summary)
     .replace(/{{health_report}}/g, parts.health_report)
