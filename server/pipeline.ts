@@ -1451,6 +1451,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         ],
       };
       execution.stats.rawIngested = rawCount;
+      execution.stats.matchedWatchlist = correlated.newFindings.length;
       execution.stats.notificationsQueued = notificationsQueued;
       execution.stats.advisoriesQueued = advisoriesQueued;
       execution.stats.digestBuffered = digestBuffered;
