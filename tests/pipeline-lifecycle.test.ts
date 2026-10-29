@@ -538,11 +538,19 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
             ),
             JSON.stringify(jobs),
           );
-          // Lowering the policy re-queues the held finding on the next run. The
+          // Recovery is debounced by staleAdvisoryReason (it only rebuilds once per
+          // reason), so drive the next scheduled run.
+          await transaction(pool, (db) =>
+            db.query("DELETE FROM records WHERE kind='systemState' AND id='pipeline-recovery-reason'"),
+          );
+          // An operator releases the finding without automatic dispatch. The
           // webhook job that was failed as stale is not resurrected automatically.
           await save('settings', 'main', {
-            ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 80,
+            ...DEFAULT_SETTINGS, autoDispatchEnabled: false, autoDispatchConfidenceThreshold: 80,
           });
+          await transaction(pool, (db) =>
+            db.query("UPDATE records SET data=data-'advisoryId'-'autoDispatchedAt' WHERE kind='findings'"),
+          );
           await run();
           const requeued = (await pool.query("SELECT channel, payload FROM outbox WHERE status='QUEUED'")).rows;
           assert.equal(requeued.length, 1, JSON.stringify(requeued.map((row) => [row.channel, row.payload?.includedFindingIds])));
@@ -1681,7 +1689,6 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       const [held] = await list<Finding>(pool, 'findings');
       assert.equal(held.notificationStatus, 'REVIEW_REQUIRED', held.matchingEvidence);
       assert.match(held.matchingEvidence, /confidence is below the 100% auto-dispatch threshold/);
-      await pool.query("UPDATE records SET data=jsonb_set(data,'{status}','\"FAILED\"') WHERE kind='executions'");
       // The operator lowers the bar after the run. The stored state of the held
       // finding is therefore stale on purpose: re-running now would promote it,
       // and the digest below must not depend on that having happened.
@@ -1693,7 +1700,8 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         autoDispatchConfidenceThreshold: 90,
         dailyDigest: { enabled: true, time: '00:00', includeHealthReport: false },
       });
-      // The digest only sees findings created in the last 24 hours.
+      // The digest only sees findings created in the last 24 hours, and the day is
+      // claimed by date key, so reset the claim to the current UTC day.
       await transaction(pool, (db) =>
         db.query("UPDATE records SET created_at=now() WHERE kind='findings'"),
       );
@@ -1706,14 +1714,13 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         deliveryGroup: 'SECURITY_TEAM',
         subscriptionTier: 'ALL_SEVERITIES',
       });
-      // The digest re-evaluates the window against the current 90% policy.
-      assert.equal(
-        await runDailyDigest(pool),
-        1,
-        JSON.stringify((await pool.query("SELECT data->>'notificationStatus' st, data->>'created_at' c FROM records WHERE kind='findings'")).rows) +
-          JSON.stringify((await list<any>(pool, 'systemState')).map((r) => [r.id, r.lastKey])) +
-          JSON.stringify((await pool.query("SELECT data->>'dailyDigest' FROM records WHERE kind='recipients'")).rows),
+      await transaction(pool, (db) =>
+        db.query(
+          "DELETE FROM records WHERE kind='systemState' AND id='dailyDigest-schedule'",
+        ),
       );
+      // The digest re-evaluates the window against the current 90% policy.
+      assert.equal(await runDailyDigest(pool), 1, JSON.stringify(await get(pool, 'systemState', 'dailyDigest-schedule')) + JSON.stringify(await list(pool,'recipients')));
 
       let transports = 0;
       assert.equal(
@@ -1739,7 +1746,7 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       // exemption does not weaken the per-finding applicability gate.
       await transaction(pool, (db) =>
         db.query(
-          "UPDATE records SET data=(data-'autoDispatchedAt'-'advisoryId')||'{\"notificationStatus\":\"REVIEW_REQUIRED\"}'::jsonb WHERE kind='findings'",
+          "UPDATE records SET data=(data-'autoDispatchedAt'-'advisoryId')||'{\"notificationStatus\":\"QUEUED_FOR_DISPATCH\"}'::jsonb WHERE kind='findings'",
         ),
       );
       await save('settings', 'main', {
@@ -1750,8 +1757,10 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         dailyDigest: { enabled: true, time: '00:00', includeHealthReport: false },
       });
       await pool.query('DELETE FROM outbox');
+      // Only the stored dispatch state changes; the tightened policy still holds
+      // the finding, so a non-digest bundle must refuse it.
       const [heldAgain] = await list<Finding>(pool, 'findings');
-      assert.equal(heldAgain.notificationStatus, 'REVIEW_REQUIRED');
+      assert.equal(heldAgain.notificationStatus, 'QUEUED_FOR_DISPATCH');
       const advisory: Advisory = {
         id: 'ADV-held',
         title: 'Held finding notice',

@@ -48,7 +48,7 @@ import { recoveryDue, recoveryAt, shouldStartAutomaticRun } from './feedRecovery
 import { ingestionWindow, type FeedCursor, OPENCVE_MAX_WINDOW_HOURS } from './ingestionState';
 import type { Requester } from './network';
 import type { Config } from './config';
-import { findingRevision, queueAdvisory, revision, type Job } from './delivery';
+import { enqueue, findingRevision, queueAdvisory, revision, type Job } from './delivery';
 import { bufferFindingsForDigest } from './digest';
 import { renderAdvisory } from './advisoryRender';
 import { HttpError } from './validation';
@@ -391,6 +391,24 @@ export async function regroupStaleAdvisory(
       const { cveRevisions, findingRevisions, findings: groupedFindings } = evidence.get(job.id)!;
       const included = groupedFindings.map(f => f.id);
       const body = await currentAdvisoryBody(db, currentAdvisoryView(replacement, groupedFindings), groupedFindings);
+      const payload = {
+        ...job.payload,
+        ...body,
+        cveIds: Array.from(new Set(groupedFindings.map(f => f.cveId))).sort(),
+        includedFindingIds: included,
+        cveRevisions: Object.fromEntries(groupedFindings.map(f => [f.cveId, revision(f.cve)])),
+        findingRevisions,
+        digestKey: isDigest ? `${job.payload.digestKey}:regrouped` : undefined,
+      };
+      // Preserve the failed attempt and its log. A deterministic rebuild key
+      // prevents the same failed job from creating multiple replacement sends.
+      if ((job as Job & { status?: string }).status === 'FAILED') {
+        const fingerprint = createHash('sha256').update(stableJson({
+          cveRevisions: payload.cveRevisions, findingRevisions, included,
+        })).digest('hex');
+        await enqueue(db, job.channel, job.target_id, replacement.id, payload,
+          `rebuild:${job.id}:${fingerprint}`, 'QUEUED', job.priority || 0);
+      } else {
       await db.query(
         `UPDATE outbox
             SET advisory_id=$2, payload=$3::jsonb, review_approved=false, status='QUEUED', attempts=0,
@@ -399,17 +417,13 @@ export async function regroupStaleAdvisory(
         [
           job.id,
           replacement.id,
-          JSON.stringify({
-            ...job.payload,
-            ...body,
-            cveIds: Array.from(new Set(groupedFindings.map((f) => f.cveId))).sort(),
-            includedFindingIds: included,
-            cveRevisions,
-            findingRevisions,
-            digestKey: isDigest ? `${job.payload.digestKey}:regrouped` : undefined,
-          }),
+          JSON.stringify(payload),
         ],
       );
+      }
+      for (const finding of groupedFindings) {
+        await put(db, 'findings', finding.id, { ...finding, advisoryId: replacement.id, notificationStatus: 'QUEUED_FOR_DISPATCH' });
+      }
     }
     await writeEvent(db, {
       category: 'EMAIL',

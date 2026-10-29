@@ -914,7 +914,7 @@ export async function deliverNext(
         // A first-pass send nobody approved yet is held for review; an approved
         // send that is still held keeps the stale-bundle recovery so the finding
         // returns to the review queue rather than being re-sent silently.
-        if (holdGated && !job.review_approved && job.channel === 'email') {
+        if (holdGated && !currentFindings.some(finding => finding.notificationStatus === 'QUEUED_FOR_DISPATCH') && !job.review_approved && job.channel === 'email') {
           routeToReview = true;
           throw new Error(
             `Some advisory findings require review: ${[...new Set(invalid)].join('; ')}.`,
@@ -1016,20 +1016,8 @@ export async function deliverNext(
       retryNotBefore = e.retryAt;
       emailProvider = e.provider;
     }
-    // Stale advisory: mark all sibling outbox jobs as FAILED and queue an
-    // immediate pipeline rebuild so the bundle is reconstructed from current
-    // inventory without operator intervention. The job currently being
-    // processed is excluded — the post-delivery bookkeeping finalizes it.
-    if (staleAdvisory && job.advisory_id) {
-      staleAdvisory = false;
-      try {
-        const { rebuildFromCurrentInventory } = await import('./pipeline');
-        await rebuildFromCurrentInventory(pool, job.advisory_id, error, { payloadRebuilt: legacyRebuilt });
-      } catch (rebuildError) {
-        errorInfo = describeError(rebuildError);
-      }
-    }
   }
+  let finalized = false;
   await transaction(pool, async (db) => {
     const current = await db.query('SELECT status,lock_token FROM outbox WHERE id=$1 FOR UPDATE', [job.id]);
     if (current.rows[0]?.lock_token !== job.lock_token) return;
@@ -1266,6 +1254,20 @@ export async function deliverNext(
       job.channel === 'email' ? 'EMAIL' : 'WEBHOOK',
       error ? 'WARNING' : 'INFO',
     );
+    finalized = true;
   });
+  if (finalized && staleAdvisory) {
+    try {
+      const { rebuildFromCurrentInventory } = await import('./pipeline');
+      await rebuildFromCurrentInventory(pool, job.advisory_id, error, { payloadRebuilt: legacyRebuilt });
+    } catch (rebuildError) {
+      await writeEvent(pool, {
+        category: 'EMAIL', level: 'ERROR', code: 'delivery.rebuild_failed',
+        message: 'Stale delivery was retained as failed; rebuilding could not complete',
+        context: { jobId: job.id, advisoryId: job.advisory_id, ...describeError(rebuildError) },
+      });
+    }
+  }
+
   return true;
 }

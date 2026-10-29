@@ -303,7 +303,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
           lastRecipients: recipients.length,
         });
 
-        const findingRows = await db.query<{ data: Finding }>(
+        const findingRows = await db.query<{ id: string; created_at: string; data: Finding }>(
           `SELECT data FROM records WHERE kind='findings' AND created_at > now() - interval '24 hours'`,
         );
         // A daily digest is a summary of the last 24 hours of *deliverable*
