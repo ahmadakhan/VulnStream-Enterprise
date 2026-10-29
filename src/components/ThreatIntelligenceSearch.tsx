@@ -279,6 +279,8 @@ export const ThreatIntelligenceSearch: React.FC = () => {
   const [totalResults, setTotalResults] = useState(0);
   const [executedSearch, setExecutedSearch] = useState<ExecutedSearch | null>(null);
   const [loading, setLoading] = useState(false);
+  const [searchExpanded, setSearchExpanded] = useState(true);
+  const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Result controls
@@ -417,6 +419,11 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     setPage(1);
   }, [resultQuery, severityFilter, kevOnly, evidenceFilter, sortKey, sortOrder]);
 
+  useEffect(() => {
+    if (loading || !results || searchExpanded) return;
+    resultsHeadingRef.current?.focus({ preventScroll: true });
+  }, [loading, results, searchExpanded]);
+
   const resetResultControls = () => {
     setResultQuery('');
     setSeverityFilter('ALL');
@@ -512,6 +519,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     const productName = effectiveProductName || product;
 
     setLoading(true);
+    setSearchExpanded(true);
     setError(null);
     setResults(null);
     setExecutedSearch(null);
@@ -532,6 +540,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
         limit: resultLimit,
         startDate: startDate || undefined,
       });
+      setSearchExpanded(Boolean(response.rateLimited));
       if (response.rateLimited) {
         setError(
           `NVD rate limit reached. NVD limits anonymous requests; wait before retrying${
@@ -562,6 +571,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
   const resetSearch = () => {
     searchSequence.current++;
     setLoading(false);
+    setSearchExpanded(true);
     setInspect(null);
     setVendorSelected('');
     setVendorQuery('');
@@ -783,7 +793,10 @@ export const ThreatIntelligenceSearch: React.FC = () => {
       </PageHeading>
 
       {/* Search parameters */}
-      <section className={`${panel} threat-search-form p-5 sm:p-6`} aria-labelledby="threat-search-heading">
+      <section
+        className={`${panel} threat-search-form ${searchExpanded ? 'is-expanded' : 'is-compact'} p-5 sm:p-6`}
+        aria-labelledby="threat-search-heading"
+      >
         <div className="threat-search-header">
           <div className="threat-section-title">
             <span className="threat-section-icon">
@@ -794,20 +807,72 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                 id="threat-search-heading"
                 className="text-sm font-semibold text-zinc-100 light:text-zinc-900"
               >
-                Investigate a product
+                {searchExpanded ? 'Investigate a product' : 'Current investigation'}
               </h2>
               <p className="mt-0.5 text-[11px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                Search the National Vulnerability Database by vendor and product.
+                {searchExpanded
+                  ? 'Search the National Vulnerability Database by vendor and product.'
+                  : 'Review the search scope or edit the parameters to investigate another product.'}
               </p>
             </div>
           </div>
-          <span className="threat-source-label">
-            <Database className="h-3.5 w-3.5" aria-hidden="true" />
-            NVD · On-demand search
-          </span>
+          <div className="threat-search-header-actions">
+            <span className="threat-source-label">
+              <Database className="h-3.5 w-3.5" aria-hidden="true" />
+              NVD · On-demand search
+            </span>
+            {executedSearch && !loading && (
+              <button
+                type="button"
+                className="ui-secondary threat-edit-search"
+                aria-expanded={searchExpanded}
+                aria-controls="threat-search-parameters"
+                onClick={() => {
+                  setSearchExpanded((value) => !value);
+                  if (!searchExpanded)
+                    requestAnimationFrame(() =>
+                      document.getElementById('threat-product')?.focus({ preventScroll: true }),
+                    );
+                }}
+              >
+                <SlidersHorizontal size={14} aria-hidden="true" />
+                {searchExpanded ? 'Hide parameters' : 'Edit search'}
+                <ChevronDown size={14} className={searchExpanded ? 'is-open' : ''} aria-hidden="true" />
+              </button>
+            )}
+          </div>
         </div>
 
+        {executedSearch && !searchExpanded && (
+          <div className="threat-query-summary">
+            <div className="threat-query-product">
+              <PackageSearch size={19} aria-hidden="true" />
+              <div>
+                <span>{executedSearch.vendorName}</span>
+                <strong>{executedSearch.productName}</strong>
+              </div>
+            </div>
+            <dl>
+              <div>
+                <dt>Result limit</dt>
+                <dd>{executedSearch.limit}</dd>
+              </div>
+              <div>
+                <dt>Published from</dt>
+                <dd>{executedSearch.startDate ? formatDate(executedSearch.startDate) : 'Any date'}</dd>
+              </div>
+            </dl>
+            {draftChanged && (
+              <p className="threat-query-draft">
+                <AlertCircle size={14} aria-hidden="true" />
+                Parameters changed. Edit search to run the updated query.
+              </p>
+            )}
+          </div>
+        )}
         <form
+          id="threat-search-parameters"
+          hidden={!searchExpanded}
           role="search"
           aria-label="Search vulnerability intelligence"
           onSubmit={(event) => {
@@ -1365,9 +1430,13 @@ export const ThreatIntelligenceSearch: React.FC = () => {
           <span className="mx-auto grid h-12 w-12 place-items-center rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-400 dark:text-zinc-500 light:text-zinc-600 light:border-zinc-300 light:bg-zinc-100">
             <Inbox className="h-5 w-5" aria-hidden="true" />
           </span>
-          <p className="mt-3 text-sm font-semibold text-zinc-200 light:text-zinc-800">
+          <h2
+            ref={resultsHeadingRef}
+            tabIndex={-1}
+            className="threat-empty-title mt-3 text-sm font-semibold text-zinc-200 light:text-zinc-800"
+          >
             No vulnerabilities matched this query
-          </p>
+          </h2>
           <p className="mx-auto mt-1 max-w-lg text-xs leading-relaxed text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
             NVD returned no CVEs for the selected vendor and product. Check the spelling, try the
             vendor&apos;s canonical product identifier, or try a broader product name.
@@ -1383,6 +1452,12 @@ export const ThreatIntelligenceSearch: React.FC = () => {
       {/* Results */}
       {results && results.length > 0 && summary && !loading && (
         <section className="space-y-4" aria-label="Threat intelligence results">
+          <div className="threat-overview-heading">
+            <h2>Investigation overview</h2>
+            <p>
+              Based on {results.length} returned {results.length === 1 ? 'record' : 'records'}
+            </p>
+          </div>
           <div className="threat-metrics grid grid-cols-2 gap-3 lg:grid-cols-4">
             <MetricCard
               label="Matches"
@@ -1419,7 +1494,11 @@ export const ThreatIntelligenceSearch: React.FC = () => {
               <div className="threat-results-heading flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="threat-results-title">
-                    <h2 className="text-sm font-semibold text-zinc-100 light:text-zinc-900">
+                    <h2
+                      ref={resultsHeadingRef}
+                      tabIndex={-1}
+                      className="threat-results-focus text-sm font-semibold text-zinc-100 light:text-zinc-900"
+                    >
                       Search results
                     </h2>
                     <span className="threat-results-count">{results.length} returned</span>
@@ -1639,6 +1718,13 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   </button>
                 )}
               </div>
+              <p className="threat-evidence-note">
+                <Crosshair size={14} aria-hidden="true" />
+                <span>
+                  Exact CPE matches reference product identifiers. Keyword matches need review for product
+                  applicability.
+                </span>
+              </p>
             </div>
 
             <div className="threat-desktop-results overflow-x-auto">
@@ -1847,6 +1933,19 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-2">
                       <SourceBadge source={hit.source} />
                       {hit.cve.cisaKev?.isKev && <KevBadge />}
+                    </div>
+                    <div className="threat-card-evidence">
+                      <span>Match evidence</span>
+                      {hit.matchingCpes.length ? (
+                        <>
+                          <code title={hit.matchingCpes[0]}>{hit.matchingCpes[0]}</code>
+                          {hit.matchingCpes.length > 1 && (
+                            <small>+{hit.matchingCpes.length - 1} additional identifiers</small>
+                          )}
+                        </>
+                      ) : (
+                        <p>Matched by keyword. Review product applicability.</p>
+                      )}
                     </div>
                     <dl>
                       <div>
