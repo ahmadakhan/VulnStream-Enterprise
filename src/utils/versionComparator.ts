@@ -186,8 +186,13 @@ function compareLegacy(left: string, right: string): number {
 /**
  * Returns -1 when v1 < v2, 0 when equal, and 1 when v1 > v2.
  *
- * Callers evaluating NVD intervals must first check `canCompareRange`; a
- * zero result for two different unrecognised strings is not proof of equality.
+ * A wildcard (`'*'`) is semantically "any version" and has no defined ordering,
+ * so this function returns 0 when either argument is a wildcard. This is only a
+ * safe terminal value: callers evaluating NVD intervals MUST first check
+ * `canCompareRange`, which returns false for wildcards so the range evaluator
+ * falls through to the "requires review" path instead of relying on a
+ * comparison result. Direct callers that bypass `canCompareRange` should treat
+ * a 0 return as "indeterminate" rather than "equal".
  */
 export function compareVersions(v1Str: string, v2Str: string): number {
   if (v1Str === v2Str) return 0;

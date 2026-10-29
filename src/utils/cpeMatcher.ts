@@ -25,21 +25,27 @@ export interface ParsedCPE {
 const cpeCache = new Map<string, ParsedCPE>();
 const MAX_CPE_CACHE_SIZE = 10000;
 
+function evictLRU(): void {
+  const first = cpeCache.keys().next().value;
+  if (first !== undefined) cpeCache.delete(first);
+}
+
 export function parseCPE23(cpeString: string): ParsedCPE {
   if (!cpeString || typeof cpeString !== 'string') {
     return createEmptyCPE(cpeString, false);
   }
 
   const cached = cpeCache.get(cpeString);
-  if (cached) return cached;
+  if (cached) {
+    cpeCache.delete(cpeString);
+    cpeCache.set(cpeString, cached);
+    return cached;
+  }
 
   const trimmed = cpeString.trim();
   if (!trimmed.startsWith('cpe:2.3:')) {
     const empty = createEmptyCPE(trimmed, false);
-    if (cpeCache.size >= MAX_CPE_CACHE_SIZE) {
-      const first = cpeCache.keys().next().value;
-      if (first !== undefined) cpeCache.delete(first);
-    }
+    if (cpeCache.size >= MAX_CPE_CACHE_SIZE) evictLRU();
     cpeCache.set(cpeString, empty);
     return empty;
   }
@@ -52,10 +58,7 @@ export function parseCPE23(cpeString: string): ParsedCPE {
     tokens.some((token) => !token || /(?<!\\)(?:\\\\)*\\$/.test(token))
   ) {
     const empty = createEmptyCPE(trimmed, false);
-    if (cpeCache.size >= MAX_CPE_CACHE_SIZE) {
-      const first = cpeCache.keys().next().value;
-      if (first !== undefined) cpeCache.delete(first);
-    }
+    if (cpeCache.size >= MAX_CPE_CACHE_SIZE) evictLRU();
     cpeCache.set(cpeString, empty);
     return empty;
   }
@@ -77,10 +80,7 @@ export function parseCPE23(cpeString: string): ParsedCPE {
     isValid: true,
   };
 
-  if (cpeCache.size >= MAX_CPE_CACHE_SIZE) {
-    const first = cpeCache.keys().next().value;
-    if (first !== undefined) cpeCache.delete(first);
-  }
+  if (cpeCache.size >= MAX_CPE_CACHE_SIZE) evictLRU();
   cpeCache.set(cpeString, result);
   return result;
 }
