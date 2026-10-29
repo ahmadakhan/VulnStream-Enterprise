@@ -230,8 +230,8 @@ export async function flushDueDigest(pool: pg.Pool): Promise<number> {
         }
 
         const advisory = buildDigestAdvisory(usable, settings);
-        const result = await queueDigestAdvisory(db, advisory, usable, (view) =>
-          renderAdvisory(template, view),
+        const result = await queueDigestAdvisory(db, advisory, usable, (view, batchFindings) =>
+          renderAdvisory(template, view, batchFindings),
         );
         const included = new Set(result.findingIds);
         if (result.jobs)

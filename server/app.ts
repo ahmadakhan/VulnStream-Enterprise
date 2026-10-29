@@ -1985,11 +1985,12 @@ export function createApp(
           prior = snapshot.alertedCves.find((c) => c.cveId === data.cveId),
           advisory = snapshot.advisories.find((a) => a.id === prior?.advisoryId);
         if (!advisory) throw new HttpError(404, 'No advisory found');
+        const resendFindings = snapshot.findings.filter((f) => advisory.findingIds.includes(f.id));
         await queueAdvisory(
           db,
           advisory,
-          snapshot.findings.filter((f) => advisory.findingIds.includes(f.id)),
-          renderAdvisory(snapshot.advisoryTemplate, advisory),
+          resendFindings,
+          renderAdvisory(snapshot.advisoryTemplate, advisory, resendFindings),
           randomUUID(),
         );
         await appendAudit(

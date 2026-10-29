@@ -66,6 +66,7 @@ export const DailyDigestView: React.FC = () => {
       timeZoneName: 'shortOffset',
     }).replace(',', ' |'),
   ).current;
+  const previewTimestamp = useRef(new Date().toISOString()).current;
   const [iframeHeight, setIframeHeight] = useState<number>(880);
   const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -164,6 +165,48 @@ export const DailyDigestView: React.FC = () => {
     [dailyDigestCustomization],
   );
 
+  const getRenderedHtml = useMemo(() => () => {
+    const source = isCustomTemplate && customTemplate ? customTemplate : dailyDigestTemplate;
+    const criticalCount = SAMPLE_FINDINGS.filter((f) => f.severity === 'CRITICAL').length;
+    const highCount = SAMPLE_FINDINGS.filter((f) => f.severity === 'HIGH').length;
+    const mediumCount = SAMPLE_FINDINGS.filter((f) => f.severity === 'MEDIUM').length;
+    const lowCount = SAMPLE_FINDINGS.filter((f) => f.severity === 'LOW').length;
+    return source
+      .replace(/{{report_generated}}/g, previewDate)
+      .replace(/{{finding_count}}/g, String(SAMPLE_FINDINGS.length))
+      .replace(/{{critical_count}}/g, String(criticalCount))
+      .replace(/{{high_count}}/g, String(highCount))
+      .replace(/{{medium_count}}/g, String(mediumCount))
+      .replace(/{{low_count}}/g, String(lowCount))
+      .replace(/{{asset_count}}/g, '5')
+      .replace(/{{advisory_title}}/g, 'Daily Vulnerability Digest')
+      .replace(/{{advisory_id}}/g, 'DAILY-PREVIEW')
+      .replace(/{{recipient_name}}/g, 'Team')
+      .replace(/{{severity_counts}}/g, '2 critical, 1 high, 1 medium, 1 low')
+      .replace(/{{dispatch_date}}/g, previewTimestamp)
+      .replace(/{{severity}}/g, 'HIGH')
+      .replace(/{{executive_summary}}/g, 'A total of <strong>5 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>1 Medium</strong>, and <strong>1 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.')
+      .replace(/{{findings_summary}}/g, findingsSummary)
+      .replace(/{{health_report}}/g, healthReport)
+      .replace(/{{critical_summary}}/g, digestSeveritySummary('CRITICAL', criticalCount, dailyDigestCustomization))
+      .replace(/{{high_summary}}/g, digestSeveritySummary('HIGH', highCount, dailyDigestCustomization))
+      .replace(/{{medium_summary}}/g, digestSeveritySummary('MEDIUM', mediumCount, dailyDigestCustomization))
+      .replace(/{{low_summary}}/g, digestSeveritySummary('LOW', lowCount, dailyDigestCustomization))
+      .replace(/{{critical_kpi}}/g, digestSeverityKpi('CRITICAL', criticalCount, dailyDigestCustomization))
+      .replace(/{{high_kpi}}/g, digestSeverityKpi('HIGH', highCount, dailyDigestCustomization))
+      .replace(/{{medium_kpi}}/g, digestSeverityKpi('MEDIUM', mediumCount, dailyDigestCustomization))
+      .replace(/{{low_kpi}}/g, digestSeverityKpi('LOW', lowCount, dailyDigestCustomization));
+  }, [
+    dailyDigestCustomization,
+    dailyDigestTemplate,
+    customTemplate,
+    isCustomTemplate,
+    findingsSummary,
+    healthReport,
+    previewDate,
+    previewTimestamp,
+  ]);
+
   // Dynamically sync iframe height to eliminate internal scrollbars and scroll trapping
   const syncIframeHeight = useCallback(() => {
     try {
@@ -189,7 +232,7 @@ export const DailyDigestView: React.FC = () => {
   useEffect(() => {
     const timer = setTimeout(syncIframeHeight, 100);
     return () => clearTimeout(timer);
-  }, [dailyDigestCustomization, previewDevice, dailyDigestTemplate, customTemplate, syncIframeHeight]);
+  }, [getRenderedHtml, previewDevice, syncIframeHeight]);
 
   const scrollToIframeTop = () => {
     try {
@@ -201,39 +244,6 @@ export const DailyDigestView: React.FC = () => {
     try {
       iframeRef.current?.contentWindow?.scrollTo({ top: 99999, behavior: 'smooth' });
     } catch {}
-  };
-
-  const getRenderedHtml = () => {
-    const source = isCustomTemplate && customTemplate ? customTemplate : dailyDigestTemplate;
-    const criticalCount = SAMPLE_FINDINGS.filter((f) => f.severity === 'CRITICAL').length;
-    const highCount = SAMPLE_FINDINGS.filter((f) => f.severity === 'HIGH').length;
-    const mediumCount = SAMPLE_FINDINGS.filter((f) => f.severity === 'MEDIUM').length;
-    const lowCount = SAMPLE_FINDINGS.filter((f) => f.severity === 'LOW').length;
-    return source
-      .replace(/{{report_generated}}/g, previewDate)
-      .replace(/{{finding_count}}/g, String(SAMPLE_FINDINGS.length))
-      .replace(/{{critical_count}}/g, String(criticalCount))
-      .replace(/{{high_count}}/g, String(highCount))
-      .replace(/{{medium_count}}/g, String(mediumCount))
-      .replace(/{{low_count}}/g, String(lowCount))
-      .replace(/{{asset_count}}/g, '5')
-      .replace(/{{advisory_title}}/g, 'Daily Vulnerability Digest')
-      .replace(/{{advisory_id}}/g, 'DAILY-PREVIEW')
-      .replace(/{{recipient_name}}/g, 'Team')
-      .replace(/{{severity_counts}}/g, '2 critical, 1 high, 1 medium, 1 low')
-      .replace(/{{dispatch_date}}/g, new Date().toISOString())
-      .replace(/{{severity}}/g, 'HIGH')
-      .replace(/{{executive_summary}}/g, 'A total of <strong>5 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>1 Medium</strong>, and <strong>1 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.')
-      .replace(/{{findings_summary}}/g, findingsSummary)
-      .replace(/{{health_report}}/g, healthReport)
-      .replace(/{{critical_summary}}/g, digestSeveritySummary('CRITICAL', criticalCount, dailyDigestCustomization))
-      .replace(/{{high_summary}}/g, digestSeveritySummary('HIGH', highCount, dailyDigestCustomization))
-      .replace(/{{medium_summary}}/g, digestSeveritySummary('MEDIUM', mediumCount, dailyDigestCustomization))
-      .replace(/{{low_summary}}/g, digestSeveritySummary('LOW', lowCount, dailyDigestCustomization))
-      .replace(/{{critical_kpi}}/g, digestSeverityKpi('CRITICAL', criticalCount, dailyDigestCustomization))
-      .replace(/{{high_kpi}}/g, digestSeverityKpi('HIGH', highCount, dailyDigestCustomization))
-      .replace(/{{medium_kpi}}/g, digestSeverityKpi('MEDIUM', mediumCount, dailyDigestCustomization))
-      .replace(/{{low_kpi}}/g, digestSeverityKpi('LOW', lowCount, dailyDigestCustomization));
   };
 
   const handleDownloadHtml = () => {

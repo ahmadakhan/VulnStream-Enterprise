@@ -42,6 +42,7 @@ export async function currentAdvisoryBody(db: Db, view: Advisory, findings: Find
   const html = renderAdvisory(
     compileCustomizedTemplate(template?.templateCustomization || DEFAULT_TEMPLATE_CUSTOMIZATION),
     view,
+    findings,
   );
   return advisoryEmail(
     view,

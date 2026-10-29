@@ -1,4 +1,4 @@
-import type { Advisory, ReviewEdits } from '../src/types/index.ts';
+import type { Advisory, Finding, ReviewEdits } from '../src/types/index.ts';
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: '#ef4444',
@@ -44,10 +44,16 @@ export interface AdvisoryFieldValidation {
  * findings in the combined advisory), so the rendered HTML can never disclose a
  * finding that the recipient is not subscribed to.
  *
- * Throws if any required advisory field is empty, preventing emails with
- * missing content from being queued for delivery.
- */
-export function renderAdvisory(template: string, advisory: Advisory): string {
+  * Throws if any required advisory field is empty, preventing emails with
+  * missing content from being queued for delivery.
+  *
+  * `findings`, when provided, supplies each CVE's own severity and CVSS score
+  * for the {{cve_details}} block. Without it, every CVE badge falls back to
+  * the advisory's single aggregate severity (its highest-ranked finding),
+  * which is correct for the overall advisory badge but misrepresents any
+  * lower-severity CVE bundled alongside a higher one.
+  */
+export function renderAdvisory(template: string, advisory: Advisory, findings?: Finding[]): string {
   const validation = validateAdvisoryFields(advisory);
   if (!validation.valid) {
     throw new Error(
@@ -86,26 +92,40 @@ export function renderAdvisory(template: string, advisory: Advisory): string {
       )
       .join(', '),
     cve_details: advisory.cveIds
-      .map(
-        (cve: string) =>
-          `<p style="margin-top:0;">
+      .map((cve: string) => {
+        // Multiple findings can share a CVE (one per matched asset); use the
+        // highest-ranked severity among them so the badge never understates
+        // risk for this specific CVE.
+        const cveFindings = findings?.filter((f) => f.cveId === cve) || [];
+        const ranks: Advisory['severity'][] = ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+        const severity = cveFindings.reduce(
+          (current, f) =>
+            ranks.indexOf(f.cve.cvss.severity) > ranks.indexOf(current) ? f.cve.cvss.severity : current,
+          (cveFindings.length ? 'UNKNOWN' : advisory.severity) as Advisory['severity'],
+        );
+        const score = cveFindings.find((f) => f.cve.cvss.severity === severity)?.cve.cvss.score;
+        const vendorLink =
+          cveFindings.find((f) => f.cve.remediation?.vendorAdvisoryRef)?.cve.remediation?.vendorAdvisoryRef ||
+          advisory.vendorLink ||
+          '';
+        return `<p style="margin-top:0;">
 <strong>${escape(cve)}</strong>
 </p>
 <ul style="margin:0;padding-left:18px;">
 <li>
     Severity:
-    <span style="background:${SEVERITY_COLORS[advisory.severity] || SEVERITY_COLORS.UNKNOWN};color:#ffffff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold;">
-        ${advisory.severity}
+    <span style="background:${SEVERITY_COLORS[severity] || SEVERITY_COLORS.UNKNOWN};color:#ffffff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold;">
+        ${severity}${typeof score === 'number' ? ` (CVSS ${score.toFixed(1)})` : ''}
     </span>
 </li>
 <li>
     Vendor Advisory:
-    <a href="${escape(advisory.vendorLink || '')}" target="_blank" rel="noopener noreferrer">
+    <a href="${escape(vendorLink)}" target="_blank" rel="noopener noreferrer">
         View Source
     </a>
 </li>
-</ul>`,
-      )
+</ul>`;
+      })
       .join('\n'),
     mitigation_steps: `<ul>
 <li>Review and limit administrative access to trusted networks.</li>

@@ -1390,7 +1390,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
                 db,
                 advisory,
                 batch,
-                renderAdvisory(snapshot.advisoryTemplate, advisory),
+                renderAdvisory(snapshot.advisoryTemplate, advisory, batch),
               );
               notificationsQueued += count;
               advisoriesQueued += count ? 1 : 0;

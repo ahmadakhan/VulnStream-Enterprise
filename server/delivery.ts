@@ -622,7 +622,7 @@ export async function queueDigestAdvisory(
   db: Db,
   advisory: Advisory,
   findings: Finding[],
-  render?: (advisory: Advisory) => string | undefined,
+  render?: (advisory: Advisory, findings: Finding[]) => string | undefined,
   dispatchKey?: string,
 ): Promise<DigestQueueResult> {
   const recipients = (await list<EmailRecipient>(db, 'recipients')).filter((recipient) => recipient.enabled);
@@ -656,7 +656,7 @@ export async function queueDigestAdvisory(
     const recipient = recipients.find((candidate) => candidate.id === recipientId)!;
     const view = digestView(union, batch);
     const payload = {
-      ...advisoryEmail(view, render?.(view), batch.map(findingDetail)),
+      ...advisoryEmail(view, render?.(view, batch), batch.map(findingDetail)),
       cveIds: view.cveIds,
       includedFindingIds: batch.map((finding) => finding.id),
       findingRevisions: Object.fromEntries(batch.map((finding) => [finding.id, findingRevision(finding)])),
@@ -684,7 +684,7 @@ export async function queueDigestAdvisory(
   for (const [hookId, batch] of webhookBatches) {
     const view = digestView(union, batch);
     const payload = {
-      ...advisoryEmail(view, render?.(view), batch.map(findingDetail)),
+      ...advisoryEmail(view, render?.(view, batch), batch.map(findingDetail)),
       cveIds: view.cveIds,
       includedFindingIds: batch.map((finding) => finding.id),
       findingRevisions: Object.fromEntries(batch.map((finding) => [finding.id, findingRevision(finding)])),
