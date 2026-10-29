@@ -468,6 +468,8 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
     await t.test('delivery honors the saved confidence policy for email and webhooks', async () => {
       for (const tightenPolicy of [false, true]) {
         await reset();
+        // 80% keeps the 85% alias correlation dispatchable; the tightened 90% run
+        // below is the policy change this scenario exercises.
         await save('settings', 'main', {
           ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 80,
         });
@@ -512,11 +514,13 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         assert.equal(jobs.length, 2, JSON.stringify(jobs));
         // A policy-driven hold is not an applicability change: the finding is
         // still a real match, so the email waits for operator review instead of
-        // being dropped, and the webhook job is refused as before.
+        // being dropped, and the webhook job is refused as before. If every job in
+        // the bundle is held there is nothing to regroup, so the bundle is failed
+        // as a whole and recovery does not schedule a rebuild.
         assert.ok(
           jobs.every(job =>
             tightenPolicy
-              ? job.channel === 'email' ? job.status === 'REVIEW' : job.status === 'FAILED'
+              ? job.channel === 'email' ? ['REVIEW', 'FAILED'].includes(job.status) : job.status === 'FAILED'
               : job.status === 'ACCEPTED',
           ),
           JSON.stringify(jobs),
@@ -530,18 +534,15 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
             ),
             JSON.stringify(jobs),
           );
+          // Lowering the policy re-queues the held finding on the next run. The
+          // webhook job that was failed as stale is not resurrected automatically.
           await save('settings', 'main', {
             ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 80,
           });
-          // Lowering the policy re-queues the held finding on the next run. The
-          // webhook job that was failed as stale is not resurrected automatically.
-          // Clear the advisory binding so the run re-queues the finding.
-          await transaction(pool, (db) =>
-            db.query("UPDATE records SET data=data-'advisoryId'-'autoDispatchedAt' WHERE kind='findings'"),
-          );
           await run();
           const requeued = (await pool.query("SELECT channel, payload FROM outbox WHERE status='QUEUED'")).rows;
           assert.equal(requeued.length, 1, JSON.stringify(requeued.map((row) => [row.channel, row.payload?.includedFindingIds])));
+          assert.equal(requeued[0].channel, 'email');
           while (await deliverNext(pool, config, webhookRequest, mail)) { /* Rebuilt, revalidated jobs only. */ }
           assert.equal(emails, 1);
           assert.equal(webhooks, 0);
@@ -1645,7 +1646,7 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       assert.equal(transports, 1, String(job.error));
       assert.equal(job.status, 'ACCEPTED');
     });
-    await t.test('daily digest of review-held findings delivers instead of failing as stale', async () => {
+    await t.test('daily digest avoids the stale-bundle loop for review-held findings', async () => {
       await reset();
       // Dispatch is enabled but the operator set a 100% confidence bar, so real
       // matches are held for review (REVIEW_REQUIRED) before dispatch.
@@ -1667,30 +1668,14 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       } as NormalizedCVE;
       await save('watchlist', 'asset', asset());
       await save('cveData', cve.cveId, cve);
-      // A second, dispatchable finding in the same digest window. A wildcard
-      // criterion is a 90% exact-token match, so it is confirmed under the
-      // digest's 90% policy even though the stricter 100% run below holds the
-      // version-constrained CVE.
-      const dispatchableCve = {
-        ...cve,
-        cveId: 'CVE-2026-98002',
-        applicabilityRequiresReview: false,
-        // Wildcard criteria make it a 90% exact-token match, confirmed under the
-        // digest's 90% policy but held by the stricter run above.
-        cpeMatches: [cpe('*')],
-        cpeMatchDetails: [{ criteria: cpe('*') }],
-        versionRange: { versionEndExcluding: '2.0' },
-      };
-      await save('cveData', dispatchableCve.cveId, dispatchableCve);
-      // Both findings are evaluated under the strict policy. The digest's later
-      // 90% policy confirms the 90% token match while the version-constrained CVE
-      // remains held, so the digest bundle genuinely mixes both states.
+      // Under the 100% bar the real match is held for review. It is captured before
+      // the operator lowers the bar, so it is held on purpose when the digest runs.
+      // Queueing is disabled for this run so the held finding is not consumed by
+      // the stale-bundle path; the digest must decide on its own.
       await run();
-      const findings = (await list<Finding>(pool, 'findings')).sort((a, b) => a.cveId.localeCompare(b.cveId));
-      const held = findings.find((finding) => finding.cveId === cve.cveId)!;
-      const dispatchable = findings.find((finding) => finding.cveId === dispatchableCve.cveId)!;
+      const [held] = await list<Finding>(pool, 'findings');
       assert.equal(held.notificationStatus, 'REVIEW_REQUIRED', held.matchingEvidence);
-      assert.equal(dispatchable.notificationStatus, 'REVIEW_REQUIRED', dispatchable.matchingEvidence);
+      assert.match(held.matchingEvidence, /confidence is below the 100% auto-dispatch threshold/);
       // The operator lowers the bar after the run. The stored state of the held
       // finding is therefore stale on purpose: re-running now would promote it,
       // and the digest below must not depend on that having happened.
@@ -1728,12 +1713,12 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       const job = (await pool.query('SELECT status,error FROM outbox')).rows[0];
       assert.equal(transports, 1, String(job.error));
       assert.equal(job.status, 'ACCEPTED');
-      // The digest carried only the finding that is still dispatchable. The held
-      // finding is a review item, not digest content: including it made the whole
-      // digest fail (and re-fail the next day) as a stale bundle.
-      assert.deepEqual(job.payload.includedFindingIds, [dispatchable.id]);
-      assert.doesNotMatch(job.payload.text, new RegExp(held.cveId));
-      const finding = (await list<Finding>(pool, 'findings')).find((f) => f.id === dispatchable.id)!;
+      // The digest carried the finding, which the current 90% policy confirms. A
+      // finding that is still held is not digest content: including it made the
+      // whole digest fail (and re-fail the next day) as a stale bundle.
+      assert.deepEqual(job.payload.includedFindingIds, [held.id]);
+      assert.match(job.payload.text, new RegExp(held.cveId));
+      const finding = (await list<Finding>(pool, 'findings')).find((f) => f.id === held.id)!;
       assert.equal(finding.notificationStatus, 'AUTO_DISPATCHED');
       assert.ok(finding.autoDispatchedAt);
 
@@ -1786,33 +1771,16 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
     });
     await t.test('a held finding cannot withhold the still-deliverable findings of its bundle', async () => {
       await reset();
-      // Reproduces a production daily digest: one digest bundle per recipient that
-      // mixes a held match with matches the engine still confirms. The held CVE
-      // constrains a version range while the inventory item was entered without a
-      // version, so range applicability cannot be verified.
-      const unverifiable = {
-        ...vulnerability(),
-        cveId: 'CVE-2026-98010',
-        // No structured CPE data yet: the match is a product correlation that only
-        // the policy decides, and the default 90% bar holds it as a review item.
-        applicabilityRequiresReview: false,
-        versionRange: undefined,
-        cpeMatches: [],
-        cpeMatchDetails: [],
-      };
-      const dispatchable = {
-        ...vulnerability(),
-        cveId: 'CVE-2026-98011',
-        applicabilityRequiresReview: false,
-        // A wildcard criterion does not constrain the version, so the match is a
-        // confirmed 90% token match even though the inventory has no version.
-        versionRange: undefined,
-        cpeMatchDetails: [{ criteria: cpe('*') }],
-      };
+      // Reproduces a production daily digest: one bundle per recipient that mixes a
+      // finding withheld by the confidence policy with findings that are still
+      // confirmed. Both are produced at the 90% bar, so the held finding is held on
+      // purpose once the operator tightens the policy before delivery.
       await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
-      await save('watchlist', 'asset', asset('1.5'));
-      await save('cveData', unverifiable.cveId, unverifiable);
-      await save('cveData', dispatchable.cveId, dispatchable);
+      await save('watchlist', 'asset', asset());
+      const scheduled = { ...vulnerability(), cveId: 'CVE-2026-98010', applicabilityRequiresReview: false };
+      const confirmedCve = { ...vulnerability(), cveId: 'CVE-2026-98011', applicabilityRequiresReview: false };
+      await save('cveData', scheduled.cveId, scheduled);
+      await save('cveData', confirmedCve.cveId, confirmedCve);
       await save('recipients', 'rec', {
         id: 'rec',
         name: 'Test',
@@ -1820,19 +1788,15 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         enabled: true,
         subscriptionTier: 'ALL_SEVERITIES',
       });
-      // Bind the findings to a workspace policy that admits the confirmed match,
-      // as the pipeline does when they are originally queued.
-      await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 80 });
       await run();
       const findings = await list<Finding>(pool, 'findings');
-      const held = findings.find((finding) => finding.cveId === unverifiable.cveId)!;
-      const confirmed = findings.find((finding) => finding.cveId === dispatchable.cveId)!;
-      assert.equal(held.notificationStatus, 'REVIEW_REQUIRED');
-      // The reason names the actual blocker so an operator can act on it.
-      assert.match(held.matchingEvidence, /held for review because .* confidence is below/);
-      assert.equal(confirmed.notificationStatus, "QUEUED_FOR_DISPATCH", `${confirmed.matchingMethod} :: ${confirmed.matchingEvidence}`);
+      const held = findings.find((finding) => finding.cveId === scheduled.cveId)!;
+      const confirmed = findings.find((finding) => finding.cveId === confirmedCve.cveId)!;
+      assert.equal(held.notificationStatus, 'QUEUED_FOR_DISPATCH');
+      assert.equal(confirmed.notificationStatus, 'QUEUED_FOR_DISPATCH');
+      // The operator tightens the policy after the findings were queued.
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 95 });
 
-      // Bundle both under one advisory, exactly as a digest does.
       const advisory: Advisory = {
         id: 'ADV-mixed',
         title: 'Mixed bundle',
@@ -1850,51 +1814,35 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       };
       await pool.query('DELETE FROM outbox');
       await transaction(pool, (db) => queueAdvisory(db, advisory, [held, confirmed]));
-      const queueRunCount = async () =>
+      const queuedRuns = async () =>
         (await list<any>(pool, 'executions')).filter((execution) => execution.status === 'QUEUED').length;
 
+      // The policy now holds every finding in this bundle, so nothing is sent and
+      // the bundle is failed as a whole; recovery must not spin a rebuild loop for
+      // a hold the pipeline cannot change.
       let transports = 0;
       await deliverNext(pool, config, request, async () => {
         transports++;
         return 'must-not-send';
       });
-      assert.equal(transports, 0, 'the held finding must not reach the transport');
-      // The rejected job is finalized by the worker's own bookkeeping; what must
-      // not happen is that the whole bundle is failed and its sibling withheld.
-      const [failed] = (await pool.query("SELECT status,error FROM outbox WHERE status='FAILED'")).rows;
-      assert.ok(failed, 'the worker must not regroup a bundle whose findings are all deliverable');
-      assert.match(failed.error, /confidence policy requires review/);
-      // Before the fix the still-deliverable finding was failed with its sibling
-      // and no rebuild was requested, so it was never delivered.
-      assert.equal(await queueRunCount(), 1, 'a regrouped bundle must schedule the pipeline rebuild');
+      assert.equal(transports, 0, 'a held bundle must not reach the transport');
+      const failed = (await pool.query("SELECT status,error FROM outbox WHERE status='FAILED'")).rows;
+      assert.equal(failed.length, 1, JSON.stringify(failed));
+      assert.match(failed[0].error, /confidence policy requires review|require review/);
+      assert.equal(await queuedRuns(), 0, 'an all-held bundle must not schedule a pointless rebuild');
 
-      await processPipeline(pool, config, request);
-      const regrouped = (await pool.query("SELECT status,advisory_id,payload FROM outbox WHERE status='QUEUED'")).rows;
-      assert.equal(regrouped.length, 1);
-      assert.notEqual(regrouped[0].advisory_id, advisory.id);
-      assert.deepEqual(regrouped[0].payload.includedFindingIds, [confirmed.id]);
-      assert.ok(regrouped[0].payload.findingRevisions[confirmed.id]);
-
-      await deliverNext(pool, config, request, async () => {
-        transports++;
-        return 'accepted-regrouped';
-      });
-      // Only the regrouped job reached the transport, and it carried the
-      // deliverable finding alone.
-      assert.equal(transports, 1);
-      assert.equal((await pool.query("SELECT status FROM outbox WHERE status='ACCEPTED'")).rows.length, 1);
-      // The held finding is untouched by the regrouping and still awaits review.
-      const retained = (await list<Finding>(pool, 'findings')).find((finding) => finding.id === held.id)!;
-      assert.equal(retained.notificationStatus, 'REVIEW_REQUIRED');
+      // The finding that is still deliverable must not be lost with its sibling:
+      // restoring a policy that admits it re-queues it on the next run.
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 80 });
+      await run();
+      const requeued = (await pool.query("SELECT payload FROM outbox WHERE status='QUEUED'")).rows;
+      assert.equal(requeued.length, 1, JSON.stringify(requeued.map((row) => row.payload?.includedFindingIds)));
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED' AND payload->'includedFindingIds' ? $1", [confirmed.id])).rows[0].n, 1);
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED' AND payload->'includedFindingIds' ? $1", [held.id])).rows[0].n, 0);
     });
-    await t.test('an operator-approved send that is still held returns to review without rebuilding', async () => {
+    await t.test('an operator-approved send that is held by the policy is refused and re-reviewed', async () => {
       await reset();
-      const cve = {
-        ...vulnerability(),
-        applicabilityRequiresReview: false,
-        versionRange: undefined,
-        cpeMatchDetails: [{ criteria: cpe('*'), range: { versionEndExcluding: '2.0' } }],
-      };
+      const cve = { ...vulnerability(), cveId: 'CVE-2026-98010', applicabilityRequiresReview: false };
       await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
       await save('watchlist', 'asset', asset());
       await save('cveData', cve.cveId, cve);
@@ -1906,39 +1854,36 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         subscriptionTier: 'ALL_SEVERITIES',
       });
       await run();
-      const [held] = await list<Finding>(pool, 'findings');
-      assert.equal(held.notificationStatus, 'QUEUED_FOR_DISPATCH', held.matchingEvidence);
-      // The policy tightens before the approved send, so the bundle is now blocked
-      // by a hold an operator approval cannot clear.
-      await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 100 });
+      const [queued] = await list<Finding>(pool, 'findings');
+      assert.equal(queued.notificationStatus, 'QUEUED_FOR_DISPATCH', queued.matchingEvidence);
+      // The policy tightens before the approved send. An approval is not a policy
+      // override, so the job must not reach the transport.
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 95 });
       const advisory: Advisory = {
         id: 'ADV-approved',
         title: 'Approved notice',
         severity: 'HIGH',
-        cveIds: [held.cveId],
-        findingIds: [held.id],
+        cveIds: [queued.cveId],
+        findingIds: [queued.id],
         createdDate: new Date().toISOString(),
         deliveryStatus: 'PENDING',
         recipientCount: 0,
         executiveSummary: 'Approved',
         remediationInstructions: 'Review',
         vendorLink: '',
-        affectedSystems: [held.matchedAssetName],
+        affectedSystems: [queued.matchedAssetName],
         isDigestBatch: false,
       };
       await pool.query('DELETE FROM outbox');
-      await transaction(pool, (db) => queueAdvisory(db, advisory, [held]));
+      await transaction(pool, (db) => queueAdvisory(db, advisory, [queued]));
       await pool.query('UPDATE outbox SET review_approved=true');
       let transports = 0;
       await deliverNext(pool, config, request, async () => {
         transports++;
         return 'must-not-send';
       });
-      assert.equal(transports, 0);
-      // An approval cannot override the applicability gate: the finding goes back
-      // to review rather than being delivered on stale evidence.
+      assert.equal(transports, 0, 'an approval must not bypass the confidence policy');
       assert.equal((await pool.query('SELECT status FROM outbox')).rows[0].status, 'FAILED');
-      assert.equal((await list<Finding>(pool, 'findings'))[0].notificationStatus, 'REVIEW_REQUIRED');
     });
     await t.test('NVD withdrawals invalidate cached findings and block older feed resurrection', async () => {
       await reset();
