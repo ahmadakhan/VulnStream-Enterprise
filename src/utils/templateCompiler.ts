@@ -84,53 +84,114 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
   body,table,td,a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
   table,td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
   table { border-collapse:collapse; }
-  a { overflow-wrap:anywhere; word-break:break-word; }
+  a { overflow-wrap:anywhere; word-break:breakword; }
+  .ms-rteTableEvenCol-default { font-weight:700;color:${escapeHtml(config.headingColor)}; }
   @media only screen and (max-width:600px) {
     .outer { padding:16px 8px !important; }
-    .section { padding:24px 20px !important; }
-    .advisory-title { font-size:24px !important;line-height:32px !important; }
+    .ms-rteTableEvenCol-default { width:30% !important; }
   }
 </style>
 </head>
 <body style="margin:0;padding:0;background:${config.canvasBg};color:${config.fontColor};font-family:${escapeHtml(fontCss)};">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:${config.canvasBg};">
-<tr><td class="outer" align="center" style="padding:36px 16px;">
-<!--[if mso]><table role="presentation" width="680" align="center"><tr><td><![endif]-->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;max-width:680px;background:${config.cardBg};border:1px ${config.borderStyle} #cbd5e1;border-radius:${config.borderRadius};">
-${classificationBanner}
-<tr><td class="section" style="padding:32px;background:${config.headerBg};border-top:4px solid ${config.accentColor};">
-<p style="margin:0 0 20px;color:${headerMuted};font-size:11px;line-height:18px;font-weight:700;letter-spacing:2px;">VULNSTREAM / THREAT INTELLIGENCE</p>
-<p style="margin:0 0 12px;"><span style="display:inline-block;padding:5px 10px;background:#ffffff;color:#0f172a;font-size:11px;line-height:16px;letter-spacing:1px;font-weight:700;border-radius:4px;">{{severity}} PRIORITY</span></p>
-<h1 class="advisory-title" style="margin:0 0 16px;font-size:28px;line-height:36px;font-weight:700;letter-spacing:-.5px;color:${headerText};">{{advisory_title}}</h1>
-<p style="margin:0;font-size:12px;line-height:20px;color:${headerMuted};">{{advisory_id}}<br>Generated {{dispatch_date}}</p>
-</td></tr>
-<tr><td class="section" style="padding:28px 32px 24px;font-size:14px;line-height:24px;color:${config.fontColor};">
+<p>​​​​​​​​<br/></p>
+<table class="ms-rteTable-default" cellspacing="0" style="width:100%;">
+<tbody>
+
+<tr class="ms-rteTableEvenRow-default">
+<td class="ms-rteTableEvenCol-default" style="width:11%;">Vulnerability Name</td>
+<td class="ms-rteTableOddCol-default">
 ${stampHtml}
-${section('Executive summary')}
-<p style="margin:0;">{{executive_summary}}</p>
-</td></tr>
-<tr><td class="section" style="padding:24px 32px;border-top:1px solid #cbd5e1;font-size:14px;line-height:24px;color:${config.fontColor};">
-${section('Affected products &amp; assets')}
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;font-size:13px;line-height:22px;color:${config.fontColor};">
-<tr><td style="padding:0 0 6px;font-weight:700;color:${config.headingColor};">CVE identifiers</td></tr>
-<tr><td style="padding:0 0 16px;overflow-wrap:anywhere;">{{cve_ids}}</td></tr>
-<tr><td style="padding:0 0 6px;font-weight:700;color:${config.headingColor};">Monitored inventory</td></tr>
-<tr><td style="padding:0;white-space:pre-line;">{{affected_systems}}</td></tr>
+{{advisory_title}}
+</td>
+</tr>
+
+<tr class="ms-rteTableOddRow-default">
+<td class="ms-rteTableEvenCol-default">CVE ID​​​​​</td>
+<td class="ms-rteTableOddCol-default">
+{{cve_id_links}}
+</td>
+</tr>
+
+<tr class="ms-rteTableEvenRow-default">
+<td class="ms-rteTableEvenCol-default">Severity</td>
+<td class="ms-rteTableOddCol-default">
+<font class="ms-rteForeColor-2"><strong>{{severity}}</strong></font>
+</td>
+</tr>
+
+<tr class="ms-rteTableOddRow-default">
+<td class="ms-rteTableEvenCol-default">Date of Release</td>
+<td class="ms-rteTableOddCol-default">{{dispatch_date}}</td>
+</tr>
+
+<tr class="ms-rteTableEvenRow-default">
+<td class="ms-rteTableEvenCol-default">Date of Update</td>
+<td class="ms-rteTableOddCol-default">{{dispatch_date}}</td>
+</tr>
+
+${classificationBanner}
+
+<tr class="ms-rteTableOddRow-default">
+<td class="ms-rteTableEvenCol-default">
+<a name="zero_day" id="zero_day"><span style="color:#f8f8f8;">Vulnerability Details</span></a>
+</td>
+<td class="ms-rteTableOddCol-default">
+{{cve_details}}
+</td>
+</tr>
+
+<tr class="ms-rteTableEvenRow-default">
+<td class="ms-rteTableEvenCol-default">Affected Products and Versions</td>
+<td class="ms-rteTableOddCol-default">
+<ul>
+{{affected_systems_html}}
+</ul>
+</td>
+</tr>
+
+<tr class="ms-rteTableOddRow-default">
+<td class="ms-rteTableEvenCol-default">
+<a name="fix_section" id="fix_section"><span style="color:#f8f8f8;">Fix</span></a>
+</td>
+<td class="ms-rteTableOddCol-default">
+<ol>
+<li><strong>Remediation:</strong> <div style="margin-top:8px;border-left:3px solid ${config.accentColor};padding:8px 0 8px 12px;white-space:pre-wrap;overflow-wrap:anywhere;">{{remediation_steps}}</div></li>
+</ol>
+<a href="{{vendor_link}}" target="_blank">Click for details</a>
+</td>
+</tr>
+
+<tr class="ms-rteTableEvenRow-default">
+<td class="ms-rteTableEvenCol-default">
+<a name="mitigation" id="mitigation"><span style="color:#f8f8f8;">Workaround/Temporary fix/Mitigation</span></a>
+</td>
+<td class="ms-rteTableOddCol-default">
+{{mitigation_steps}}
+</td>
+</tr>
+
+<tr class="ms-rteTableOddRow-default">
+<td class="ms-rteTableEvenCol-default">Resource</td>
+<td class="ms-rteTableOddCol-default">
+<ul>
+<li><a href="{{vendor_link}}" target="_blank">Vendor Security Advisory</a></li>
+</ul>
+</td>
+</tr>
+
+<tr class="ms-rteTableEvenRow-default">
+<td class="ms-rteTableEvenCol-default">Honeywell Recommended Action</td>
+<td class="ms-rteTableOddCol-default">
+{{recommended_actions}}
+</td>
+</tr>
+
+</tbody>
 </table>
-</td></tr>
-<tr><td class="section" style="padding:24px 32px;border-top:1px solid #cbd5e1;font-size:14px;line-height:24px;color:${config.fontColor};">
-${section('Recommended response')}
-<div style="border-left:3px solid ${config.accentColor};padding:8px 0 8px 18px;white-space:pre-wrap;overflow-wrap:anywhere;">{{remediation_steps}}</div>
-<p style="margin:20px 0 4px;font-size:12px;font-weight:700;color:${config.headingColor};">SOURCE ADVISORY</p>
-<a href="{{vendor_link}}" style="color:${config.accentColor};font-size:13px;line-height:22px;text-decoration:underline;">{{vendor_link}}</a>
-</td></tr>
-<tr><td class="section" style="padding:20px 32px;border-top:1px solid #cbd5e1;font-size:11px;line-height:18px;color:${config.fontColor};">
-<p style="margin:0 0 8px;font-weight:700;">BA Threat Intel · Security Operations</p>
-<p style="margin:0;">Generated from monitored inventory and threat intelligence. Validate applicability and follow your approved change process before remediation.</p>
-</td></tr>
-</table>
-<!--[if mso]></td></tr></table><![endif]-->
-</td></tr></table>
+<br/>
+<br/>
+<br/>
+<br/>
 </body>
 </html>`;
 }

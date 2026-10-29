@@ -106,11 +106,16 @@ export const AdvisoryTemplateView: React.FC = () => {
         'Example content for checking layout. This is not a vulnerability assessment or a delivery record.',
       )
       .replace(/{{cve_ids}}/g, 'Example CVE identifier')
+      .replace(/{{cve_id_links}}/g, '<a href="https://nvd.nist.gov/vuln/detail/EXAMPLE-CVE" target="_blank">Example CVE identifier</a>')
       .replace(/{{affected_systems}}/g, 'Example inventory asset')
+      .replace(/{{affected_systems_html}}/g, '<li>Example inventory asset 1</li>\n<li>Example inventory asset 2</li>')
+      .replace(/{{cve_details}}/g, '<div>\n<span>Example CVE-2026-0001</span><br/>\n<span>Example vulnerability title</span>\n</div>\n<ul>\n<li><strong>Severity:</strong> High</li>\n<li><strong>Impact:</strong> Example impact description.</li>\n</ul>')
       .replace(
         /{{remediation_steps}}/g,
         'Review the applicable vendor advisory and test remediation through your change process.',
       )
+      .replace(/{{mitigation_steps}}/g, 'Review and limit administrative access. Monitor for anomalous activity.')
+      .replace(/{{recommended_actions}}/g, '<ul>\n<li>Inventory all affected systems.</li>\n<li>Apply vendor patches immediately.</li>\n<li>Validate functionality after remediation.</li>\n</ul>')
       .replace(/{{vendor_link}}/g, 'https://example.com');
 
   const handleSave = async () => {

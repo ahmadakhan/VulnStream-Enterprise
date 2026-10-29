@@ -17,12 +17,29 @@ export function renderAdvisory(template: string, advisory: Advisory): string {
     severity: advisory.severity,
     advisory_id: advisory.id,
     advisory_title: advisory.title,
-    dispatch_date: new Date().toISOString(),
+    dispatch_date: new Date().toUTCString(),
     executive_summary: advisory.executiveSummary,
     cve_ids: advisory.cveIds.join(', '),
     affected_systems: advisory.affectedSystems.join('\n'),
+    affected_systems_html: advisory.affectedSystems.map((sys: string) => `<li>${escape(sys)}</li>`).join('\n'),
     remediation_steps: advisory.remediationInstructions,
     vendor_link: advisory.vendorLink || '',
+    cve_id_links: advisory.cveIds
+      .map((cve: string) => `<a href="https://nvd.nist.gov/vuln/detail/${escape(cve)}" target="_blank">${escape(cve)}</a>`)
+      .join(', '),
+    cve_details: '',
+    mitigation_steps: advisory.remediationInstructions,
+    recommended_actions: '',
   };
-  return template.replace(/{{([a-z_]+)}}/g, (_, key) => escape(values[key] || ''));
+  const rawHtmlTokens = new Set([
+    'cve_id_links',
+    'cve_details',
+    'affected_systems_html',
+    'mitigation_steps',
+    'recommended_actions',
+  ]);
+  return template.replace(/{{([a-z_]+)}}/g, (_, key) => {
+    if (rawHtmlTokens.has(key)) return values[key] || '';
+    return escape(values[key] || '');
+  });
 }
