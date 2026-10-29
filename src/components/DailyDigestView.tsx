@@ -33,7 +33,6 @@ const SAMPLE_HEALTH: DigestHealth = {
 export const DailyDigestView: React.FC = () => {
   const {
     dailyDigestTemplate,
-    settings,
     dailyDigestCustomization,
     updateDailyDigestCustomization,
     sendTestDailyDigestEmail,
@@ -119,15 +118,14 @@ export const DailyDigestView: React.FC = () => {
 
   const getRenderedHtml = () =>
     dailyDigestTemplate
-      .replace(/{{severity}}/g, 'HIGH')
-      .replace(/{{advisory_id}}/g, `${settings.advisoryPrefix}DAILY-PREVIEW`)
-      .replace(/{{advisory_title}}/g, 'Daily Vulnerability Digest — preview')
-      .replace(/{{dispatch_date}}/g, previewDate)
+      .replace(/{{report_generated}}/g, previewDate)
       .replace(/{{finding_count}}/g, String(SAMPLE_FINDINGS.length))
-      .replace(/{{severity_counts}}/g, '2 critical, 1 high')
+      .replace(/{{critical_count}}/g, '2')
+      .replace(/{{high_count}}/g, '1')
+      .replace(/{{asset_count}}/g, '3')
+      .replace(/{{executive_summary}}/g, 'A total of <strong>3 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong> and <strong>1 High</strong> severity findings. Immediate review and remediation of critical vulnerabilities is recommended in accordance with established vulnerability management procedures and organizational SLAs.')
       .replace(/{{findings_summary}}/g, findingsSummary)
-      .replace(/{{health_report}}/g, healthReport)
-      .replace(/{{recipient_name}}/g, 'Daily Summary');
+      .replace(/{{health_report}}/g, healthReport);
 
   const handleDownloadHtml = () => {
     const blob = new Blob([getRenderedHtml()], { type: 'text/html' });
@@ -617,15 +615,14 @@ export const DailyDigestView: React.FC = () => {
               Click to Copy:
             </span>
             {[
-              '{{advisory_id}}',
-              '{{advisory_title}}',
-              '{{severity}}',
-              '{{dispatch_date}}',
+              '{{report_generated}}',
               '{{finding_count}}',
-              '{{severity_counts}}',
+              '{{critical_count}}',
+              '{{high_count}}',
+              '{{asset_count}}',
+              '{{executive_summary}}',
               '{{findings_summary}}',
               '{{health_report}}',
-              '{{recipient_name}}',
             ].map((token) => (
               <button
                 key={token}

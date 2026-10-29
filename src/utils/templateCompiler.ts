@@ -302,7 +302,6 @@ function normalizeDigestConfig(config: TemplateCustomization): TemplateCustomiza
 
 export function compileDailyDigestTemplate(config: TemplateCustomization): string {
   config = normalizeDigestConfig(config);
-  const fontCss = getFontFamilyCss(config.fontFamily);
   const headerHex = config.headerBg.slice(1);
   const expanded = headerHex.length === 3 ? [...headerHex].map((ch) => ch + ch).join('') : headerHex;
   const luminance = [0, 2, 4]
@@ -312,7 +311,7 @@ export function compileDailyDigestTemplate(config: TemplateCustomization): strin
   const headerText = luminance > 0.179 ? '#0f172a' : '#ffffff';
   const headerMuted = luminance > 0.179 ? '#334155' : '#cbd5e1';
   const stampHtml = config.showStamp
-    ? `<p style="margin:0 0 12px;font-size:11px;line-height:18px;letter-spacing:1.5px;font-weight:700;color:${config.badgeStampColor};">${config.badgeStampText}</p>`
+    ? `<p style="margin:0 0 8px;font-size:11px;line-height:18px;letter-spacing:1.5px;font-weight:700;color:${config.badgeStampColor};">${config.badgeStampText}</p>`
     : '';
   const classificationBanner = config.showClassificationBanner
     ? `<tr><td style="padding:12px 28px;background:${config.canvasBg};color:${config.fontColor};font-size:10px;line-height:16px;letter-spacing:1px;text-align:center;">${config.classificationText}</td></tr>`
@@ -320,107 +319,379 @@ export function compileDailyDigestTemplate(config: TemplateCustomization): strin
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>Daily vulnerability digest</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="x-apple-disable-message-reformatting">
+<title>Daily Vulnerability Digest</title>
+
 <style>
-  body,table,td,a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
-  table,td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
-  table { border-collapse:collapse; }
-  a { overflow-wrap:anywhere; word-break:breakword; }
-  @media only screen and (max-width:600px) {
-    .outer { padding:16px 8px !important; }
-    .section { padding:24px 20px !important; }
-    .digest-title { font-size:22px !important;line-height:28px !important; }
-  }
+body{
+    margin:0;
+    padding:0;
+    background:${config.canvasBg};
+    font-family:${digestEscapeHtml(getFontFamilyCss(config.fontFamily))};
+}
+table{
+    border-collapse:collapse;
+}
+img{
+    border:0;
+    display:block;
+}
+@media only screen and (max-width:600px){
+    .container{
+        width:100% !important;
+    }
+    .stack{
+        display:block !important;
+        width:100% !important;
+    }
+    .mobile-padding{
+        padding:20px !important;
+    }
+    .title{
+        font-size:22px !important;
+        line-height:28px !important;
+    }
+}
 </style>
 </head>
-<body style="margin:0;padding:0;background:${config.canvasBg};color:${config.fontColor};font-family:${digestEscapeHtml(fontCss)};">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:${config.canvasBg};">
-<tr><td class="outer" align="center" style="padding:36px 16px;">
-<!--[if mso]><table role="presentation" width="680" align="center"><tr><td><![endif]-->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;max-width:680px;background:${config.cardBg};border:1px ${config.borderStyle} #cbd5e1;border-radius:${config.borderRadius};">
+
+<body>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${config.canvasBg}">
+<tr>
+<td align="center" style="padding:24px 12px;">
+
+<table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0" class="container" style="width:680px;max-width:680px;background:${config.cardBg};border:1px solid #e2e8f0;">
+
 ${classificationBanner}
- <tr><td class="section" style="padding:20px 32px;background:${config.headerBg};border-top:4px solid ${config.accentColor};">
- <p style="margin:0 0 12px;color:${headerMuted};font-size:10px;line-height:14px;font-weight:700;letter-spacing:2px;">VULNSTREAM / THREAT INTELLIGENCE</p>
- <p style="margin:0 0 6px;"><span style="display:inline-block;padding:4px 10px;background:#ffffff;color:#0f172a;font-size:10px;line-height:14px;letter-spacing:1px;font-weight:700;border-radius:4px;">{{severity}}</span></p>
- <h1 class="digest-title" style="margin:0 0 8px;font-size:24px;line-height:30px;font-weight:700;letter-spacing:-.25px;color:${headerText};">Daily Vulnerability Digest</h1>
- <p style="margin:0;font-size:11px;line-height:18px;color:${headerMuted};">{{advisory_id}}<br>Date: {{dispatch_date}}</p>
- </td></tr>
-<tr><td class="section" style="padding:28px 32px 24px;font-size:14px;line-height:24px;color:${config.fontColor};">
-${stampHtml}
-<h2 style="margin:0 0 12px;color:${config.headingColor};font-size:16px;line-height:24px;font-weight:700;">Findings at a glance</h2>
-<p style="margin:0 0 16px;font-size:14px;line-height:22px;color:${config.fontColor};">{{finding_count}} finding(s) reported today. {{severity_counts}}</p>
-{{findings_summary}}
-{{health_report}}
-</td></tr>
-<tr><td class="section" style="padding:20px 32px;border-top:1px solid #cbd5e1;font-size:11px;line-height:18px;color:${config.fontColor};">
-<p style="margin:0 0 8px;font-weight:700;">BA Threat Intel · Daily Digest</p>
-<p style="margin:0;">A daily summary of monitored vulnerability activity and operational health. Validate applicability and follow your approved change process before remediation. Sent to {{recipient_name}}.</p>
-</td></tr>
+
+    <!-- HEADER -->
+    <tr>
+        <td bgcolor="${config.headerBg}" style="padding:20px 32px;border-top:4px solid ${config.accentColor};">
+
+            ${stampHtml}
+            <div style="font-size:10px;font-weight:bold;letter-spacing:1.5px;color:${headerMuted};margin-bottom:8px;">
+                THREAT INTELLIGENCE &amp; VULNERABILITY MANAGEMENT
+            </div>
+
+            <div class="title" style="font-size:24px;line-height:30px;font-weight:bold;color:${headerText};margin-bottom:6px;">
+                Daily Vulnerability Digest
+            </div>
+
+            <div style="font-size:12px;line-height:18px;color:${headerMuted};">
+                Report Generated: {{report_generated}}
+            </div>
+
+        </td>
+    </tr>
+
+    <!-- SUMMARY BAR -->
+    <tr>
+        <td style="padding:12px 32px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                    <td style="font-size:12px;color:#334155;">
+                        <strong>Total Findings:</strong> {{finding_count}}
+                    </td>
+
+                    <td style="font-size:12px;color:#dc2626;" align="center">
+                        <strong>Critical:</strong> {{critical_count}}
+                    </td>
+
+                    <td style="font-size:12px;color:#ea580c;" align="right">
+                        <strong>High:</strong> {{high_count}}
+                    </td>
+                </tr>
+            </table>
+
+        </td>
+    </tr>
+
+    <!-- EXECUTIVE SUMMARY -->
+    <tr>
+        <td class="mobile-padding" style="padding:28px 32px;">
+
+            <div style="font-size:11px;font-weight:bold;letter-spacing:1.5px;color:${config.accentColor};margin-bottom:8px;">
+                EXECUTIVE SUMMARY
+            </div>
+
+            <h2 style="margin:0 0 12px 0;font-size:20px;color:${config.headingColor};">
+                Vulnerability Overview
+            </h2>
+
+            <p style="margin:0;font-size:14px;line-height:24px;color:#475569;">
+                {{executive_summary}}
+            </p>
+
+        </td>
+    </tr>
+
+    <!-- KPI DASHBOARD -->
+    <tr>
+        <td style="padding:0 32px 28px 32px;">
+
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+
+                <tr>
+
+                    <td width="25%" align="center" bgcolor="#f8fafc" style="padding:16px;border:1px solid #e2e8f0;">
+                        <div style="font-size:24px;font-weight:bold;color:#0f172a;">{{finding_count}}</div>
+                        <div style="font-size:11px;color:#64748b;">TOTAL FINDINGS</div>
+                    </td>
+
+                    <td width="25%" align="center" bgcolor="#fef2f2" style="padding:16px;border:1px solid #e2e8f0;">
+                        <div style="font-size:24px;font-weight:bold;color:#dc2626;">{{critical_count}}</div>
+                        <div style="font-size:11px;color:#64748b;">CRITICAL</div>
+                    </td>
+
+                    <td width="25%" align="center" bgcolor="#fff7ed" style="padding:16px;border:1px solid #e2e8f0;">
+                        <div style="font-size:24px;font-weight:bold;color:#ea580c;">{{high_count}}</div>
+                        <div style="font-size:11px;color:#64748b;">HIGH</div>
+                    </td>
+
+                    <td width="25%" align="center" bgcolor="#eff6ff" style="padding:16px;border:1px solid #e2e8f0;">
+                        <div style="font-size:24px;font-weight:bold;color:#2563eb;">{{asset_count}}</div>
+                        <div style="font-size:11px;color:#64748b;">ASSETS</div>
+                    </td>
+
+                </tr>
+
+            </table>
+
+        </td>
+    </tr>
+
+    <!-- FINDINGS -->
+    <tr>
+        <td class="mobile-padding" style="padding:0 32px 28px 32px;">
+
+            <h2 style="margin:0 0 16px;font-size:18px;color:#0f172a;">
+                Vulnerability Findings
+            </h2>
+
+            {{findings_summary}}
+
+        </td>
+    </tr>
+
+    <!-- PLATFORM HEALTH -->
+    <tr>
+        <td class="mobile-padding" style="padding:0 32px 32px 32px;">
+
+            <h2 style="margin:0 0 16px;font-size:18px;color:#0f172a;">
+                Platform Health Status
+            </h2>
+
+            {{health_report}}
+
+        </td>
+    </tr>
+
+    <!-- FOOTER -->
+    <tr>
+        <td style="padding:24px 32px;background:#fafafa;border-top:1px solid #e2e8f0;">
+
+            <div style="font-size:13px;font-weight:bold;color:#0f172a;margin-bottom:8px;">
+                BA Threat Intelligence
+            </div>
+
+            <div style="font-size:12px;line-height:20px;color:#64748b;">
+                This digest provides a consolidated view of newly identified vulnerabilities and platform
+                health status. Prioritize remediation activities according to asset criticality,
+                business impact, and established vulnerability management SLAs. All implementation
+                and remediation activities should follow approved change management procedures.
+            </div>
+
+        </td>
+    </tr>
+
 </table>
-<!--[if mso]></td></tr></table><![endif]-->
-</td></tr></table>
+
+</td>
+</tr>
+</table>
+
 </body>
 </html>`;
 }
-
 export function renderDailyFindingSummary(findings: DigestFinding[], config: TemplateCustomization): string {
   const safe = normalizeDigestConfig(config);
-  const fontCss = getFontFamilyCss(safe.fontFamily);
   if (!findings.length) {
-    return `<p style="margin:0;font-family:${digestEscapeHtml(fontCss)};font-size:12px;line-height:20px;color:${safe.fontColor};">No findings in the last 24 hours.</p>`;
+    return `<p style="margin:0;font-size:12px;line-height:20px;color:${safe.fontColor};">No findings in the last 24 hours.</p>`;
   }
   const bySeverity: Record<string, DigestFinding[]> = {};
   for (const finding of findings) (bySeverity[finding.severity] ||= []).push(finding);
-  const parts = (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'] as const)
-    .filter((s) => bySeverity[s]?.length)
-    .map((s) => {
-      const items = bySeverity[s];
+  const ordered = (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'] as const).filter(
+    (s) => bySeverity[s]?.length,
+  );
+  const severityStyle: Record<string, { bg: string; border: string; text: string }> = {
+    CRITICAL: { bg: '#fef2f2', border: '#dc2626', text: '#b91c1c' },
+    HIGH: { bg: '#fff7ed', border: '#ea580c', text: '#c2410c' },
+    MEDIUM: { bg: '#fffbeb', border: '#d97706', text: '#a16207' },
+    LOW: { bg: '#f0fdf4', border: '#16a34a', text: '#166534' },
+    UNKNOWN: { bg: '#f8fafc', border: '#94a3b8', text: '#475569' },
+  };
+  return ordered
+    .map((severity, index) => {
+      const items = bySeverity[severity];
+      const style = severityStyle[severity] || severityStyle.UNKNOWN;
+      const marginBottom = index < ordered.length - 1 ? ' style="margin-bottom:18px;"' : '';
       const list = items
         .slice(0, 25)
         .map(
           (f) =>
-            `<li style="margin-bottom:2px"><strong>${digestEscapeHtml(f.cveId)}</strong> — ${digestEscapeHtml(f.assetName)}${f.vendor ? ` (${digestEscapeHtml(f.vendor)})` : ''}</li>`,
+            `<strong>${digestEscapeHtml(f.cveId)}</strong> — ${digestEscapeHtml(f.assetName)}${f.vendor ? ` (${digestEscapeHtml(f.vendor)})` : ''}`,
         )
-        .join('');
-      const extra = items.length > 25 ? `<li style="color:#71717a">…and ${items.length - 25} more</li>` : '';
-      return `<h3 style="margin:16px 0 4px;font-family:${digestEscapeHtml(fontCss)};font-size:13px;font-weight:600;color:${safe.headingColor};">${s} (${items.length})</h3><ul style="font-family:${digestEscapeHtml(fontCss)};font-size:11px;line-height:20px;color:${safe.fontColor};margin:0 0 8px;padding-left:18px;list-style:disc">${list}${extra}</ul>`;
-    });
-  return parts.join('');
+        .join('<br>');
+      const extra = items.length > 25 ? `<br><span style="color:#71717a;">…and ${items.length - 25} more</span>` : '';
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"${marginBottom}>
+    <tr>
+        <td bgcolor="${style.bg}" style="padding:12px 16px;border-left:4px solid ${style.border};">
+            <strong style="color:${style.text};font-size:13px;">${severity} (${items.length})</strong>
+        </td>
+    </tr>
+
+    <tr>
+        <td style="padding:14px 16px;border:1px solid #e2e8f0;font-size:13px;color:#334155;line-height:22px;">
+            ${list}${extra}
+        </td>
+    </tr>
+</table>`;
+    })
+    .join('\n');
 }
 
 export function renderDailyHealthReport(health: DigestHealth | null, config: TemplateCustomization): string {
   if (!health) return '';
   const safe = normalizeDigestConfig(config);
-  const fontCss = getFontFamilyCss(safe.fontFamily);
-  const bodyRows = health.backlog
-    .map(
-      (row) =>
-        `<tr><td style="padding:4px 8px;border:1px solid #27272a;font-family:${digestEscapeHtml(fontCss)};font-size:11px;">${digestEscapeHtml(row.status)}</td><td style="padding:4px 8px;border:1px solid #27272a;font-family:${digestEscapeHtml(fontCss)};font-size:11px;">${row.count}</td></tr>`,
-    )
-    .join('');
-  const nextDelivery = health.nextScheduledAttempt
-    ? new Date(health.nextScheduledAttempt).toISOString()
-    : 'none pending';
-  const workerAge =
+  const workerStatusLabel: Record<string, string> = {
+    HEALTHY: 'Healthy',
+    DISABLED: 'Disabled',
+    STALE: 'Stale',
+    NOT_OBSERVED: 'Not observed',
+  };
+  const workerStatusColor: Record<string, string> = {
+    HEALTHY: '#16a34a',
+    DISABLED: '#64748b',
+    STALE: '#ea580c',
+    NOT_OBSERVED: '#64748b',
+  };
+  const workerLabel = workerStatusLabel[health.workerStatus] || health.workerStatus;
+  const workerColor = workerStatusColor[health.workerStatus] || '#64748b';
+  const dbLabel = health.database === 'connected' ? `Operational (${health.databaseLatencyMs} ms)` : 'Degraded';
+  const dbColor = health.database === 'connected' ? '#16a34a' : '#dc2626';
+  const heartbeatLabel =
     health.workerHeartbeatAgeSeconds !== null
-      ? ` · ${health.workerHeartbeatAgeSeconds}s since heartbeat`
-      : '';
-  return `<h2 style="margin:24px 0 8px;font-family:${digestEscapeHtml(fontCss)};font-size:16px;font-weight:600;color:${safe.headingColor};">Operational health check</h2><table style="font-family:${digestEscapeHtml(fontCss)};font-size:11px;border-collapse:collapse;width:100%;margin-bottom:16px;color:${safe.fontColor};"><tr><td style="padding:4px 8px;border:1px solid #27272a">${digestEscapeHtml(health.database)} (${health.databaseLatencyMs} ms)</td></tr><tr><td style="padding:4px 8px;border:1px solid #27272a">Delivery worker</td><td style="padding:4px 8px;border:1px solid #27272a">${digestEscapeHtml(health.workerStatus)}${workerAge}</td></tr><tr><td style="padding:4px 8px;border:1px solid #27272a">Next scheduled delivery</td><td style="padding:4px 8px;border:1px solid #27272a">${digestEscapeHtml(nextDelivery)}</td></tr><tr><td style="padding:4px 8px;border:1px solid #27272a">Outbox backlog</td><td style="padding:4px 8px;border:1px solid #27272a">${bodyRows || 'idle'}</td></tr><tr><td style="padding:4px 8px;border:1px solid #27272a">Checked at</td><td style="padding:4px 8px;border:1px solid #27272a">${new Date(health.checkedAt).toISOString()}</td></tr></table>`;
+      ? `${health.workerHeartbeatAgeSeconds} seconds ago`
+      : 'N/A';
+  const pendingCount = health.backlog
+    .filter((b) => ['QUEUED', 'SENDING', 'REVIEW'].includes(b.status))
+    .reduce((sum, b) => sum + b.count, 0);
+  const processedCount = health.backlog
+    .filter((b) => ['ACCEPTED', 'FAILED'].includes(b.status))
+    .reduce((sum, b) => sum + b.count, 0);
+  const deliveryQueueLabel = `${pendingCount} Pending | ${processedCount} Processed`;
+  const formatHealthDate = (iso: string): string => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'UTC',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date(iso));
+    const day = parts.find((p) => p.type === 'day')?.value || '';
+    const month = parts.find((p) => p.type === 'month')?.value || '';
+    const year = parts.find((p) => p.type === 'year')?.value || '';
+    const hour = parts.find((p) => p.type === 'hour')?.value || '';
+    const minute = parts.find((p) => p.type === 'minute')?.value || '';
+    return `${day} ${month} ${year} ${hour}:${minute} UTC`;
+  };
+  const nextDigest = health.nextScheduledAttempt
+    ? formatHealthDate(health.nextScheduledAttempt)
+    : 'none pending';
+  const lastCheck = formatHealthDate(health.checkedAt);
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+
+                <tr bgcolor="#f8fafc">
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-weight:bold;font-size:12px;">
+                        Component
+                    </td>
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-weight:bold;font-size:12px;">
+                        Status
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-size:12px;">
+                        Platform Connectivity
+                    </td>
+                    <td style="padding:10px;border:1px solid #e2e8f0;color:${dbColor};font-size:12px;">
+                        ${dbLabel}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-size:12px;">
+                        Notification Service
+                    </td>
+                    <td style="padding:10px;border:1px solid #e2e8f0;color:${workerColor};font-size:12px;">
+                        ${workerLabel}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-size:12px;">
+                        Last Heartbeat
+                    </td>
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-size:12px;">
+                        ${digestEscapeHtml(heartbeatLabel)}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-size:12px;">
+                        Delivery Queue
+                    </td>
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-size:12px;">
+                        ${digestEscapeHtml(deliveryQueueLabel)}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-size:12px;">
+                        Next Scheduled Digest
+                    </td>
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-size:12px;">
+                        ${digestEscapeHtml(nextDigest)}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-size:12px;">
+                        Last Health Check
+                    </td>
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-size:12px;">
+                        ${digestEscapeHtml(lastCheck)}
+                    </td>
+                </tr>
+
+            </table>`;
 }
 
 export function renderDailyDigest(config: TemplateCustomization, parts: DailyDigestParts): string {
   const template = compileDailyDigestTemplate(config);
   return template
-    .replace(/{{severity}}/g, digestEscapeHtml(parts.severity))
-    .replace(/{{advisory_id}}/g, digestEscapeHtml(parts.advisory_id))
-    .replace(/{{advisory_title}}/g, digestEscapeHtml(parts.advisory_title))
-    .replace(/{{dispatch_date}}/g, digestEscapeHtml(parts.dispatch_date))
+    .replace(/{{report_generated}}/g, digestEscapeHtml(parts.report_generated))
     .replace(/{{finding_count}}/g, String(parts.finding_count))
-    .replace(/{{severity_counts}}/g, digestEscapeHtml(parts.severity_counts || '—'))
+    .replace(/{{critical_count}}/g, String(parts.critical_count))
+    .replace(/{{high_count}}/g, String(parts.high_count))
+    .replace(/{{asset_count}}/g, String(parts.asset_count))
+    .replace(/{{executive_summary}}/g, parts.executive_summary)
     .replace(/{{findings_summary}}/g, parts.findings_summary)
-    .replace(/{{health_report}}/g, parts.health_report)
-    .replace(/{{recipient_name}}/g, digestEscapeHtml(parts.recipient_name));
+    .replace(/{{health_report}}/g, parts.health_report);
 }

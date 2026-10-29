@@ -134,6 +134,28 @@ const countSeverities = (findings: Finding[]): Record<string, number> => {
   return counts;
 };
 
+const formatReportGenerated = (date: Date, timezone: string): string => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'shortOffset',
+  }).formatToParts(date);
+  const day = parts.find((p) => p.type === 'day')?.value || '';
+  const month = parts.find((p) => p.type === 'month')?.value || '';
+  const year = parts.find((p) => p.type === 'year')?.value || '';
+  const hour = parts.find((p) => p.type === 'hour')?.value || '';
+  const minute = parts.find((p) => p.type === 'minute')?.value || '';
+  const tz = parts.find((p) => p.type === 'timeZoneName')?.value || '';
+  return `${day} ${month} ${year} | ${hour}:${minute} ${tz}`;
+};
+
+const formatExecutiveSummary = (total: number, critical: number, high: number): string =>
+  `A total of <strong>${total} ${total === 1 ? 'vulnerability' : 'vulnerabilities'}</strong> were identified during the latest monitoring cycle, including <strong>${critical} ${critical === 1 ? 'Critical' : 'Critical'}</strong> and <strong>${high} ${high === 1 ? 'High' : 'High'}</strong> severity findings. Immediate review and remediation of critical vulnerabilities is recommended in accordance with established vulnerability management procedures and organizational SLAs.`;
+
 interface HealthSnapshot {
   database: 'connected' | 'degraded';
   databaseLatencyMs: number;
@@ -370,6 +392,11 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
           if (!included.length && !health) continue;
           const view = buildDailyDigestAdvisory(included, settings, todayKey);
           const severityCounts = countSeverities(included);
+          const criticalCount = severityCounts.CRITICAL ?? 0;
+          const highCount = severityCounts.HIGH ?? 0;
+          const uniqueAssets = new Set(included.map((finding) => finding.matchedAssetName));
+          const reportGenerated = formatReportGenerated(new Date(), timezone);
+          const executiveSummary = formatExecutiveSummary(included.length, criticalCount, highCount);
           const parts: DailyDigestParts = {
             advisory_id: view.id,
             advisory_title: view.title,
@@ -388,6 +415,11 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
             ),
             health_report: healthReportHtml,
             recipient_name: recipient.name || recipient.email,
+            critical_count: criticalCount,
+            high_count: highCount,
+            asset_count: uniqueAssets.size,
+            executive_summary: executiveSummary,
+            report_generated: reportGenerated,
           };
           const html = renderDailyDigest(dailyConfig, parts);
           const payload = {

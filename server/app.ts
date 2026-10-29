@@ -1581,6 +1581,15 @@ export function createApp(
           ],
           checkedAt: new Date().toISOString(),
         };
+        const severityCounts = { CRITICAL: 2, HIGH: 1, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
+        const reportGenerated = new Date().toLocaleString('en-GB', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        const executiveSummary = `A total of <strong>3 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong> and <strong>1 High</strong> severity findings. Immediate review and remediation of critical vulnerabilities is recommended in accordance with established vulnerability management procedures and organizational SLAs.`;
         const parts: DailyDigestParts = {
           advisory_id: `${data.settings.advisoryPrefix}DAILY-PREVIEW`,
           advisory_title: 'Daily Vulnerability Digest — preview',
@@ -1591,6 +1600,11 @@ export function createApp(
           findings_summary: renderDailyFindingSummary(sampleFindings, dailyConfig),
           health_report: renderDailyHealthReport(sampleHealth, dailyConfig),
           recipient_name: email,
+          critical_count: severityCounts.CRITICAL,
+          high_count: severityCounts.HIGH,
+          asset_count: new Set(sampleFindings.map((f) => f.assetName)).size,
+          executive_summary: executiveSummary,
+          report_generated: reportGenerated,
         };
         const html = renderDailyDigest(dailyConfig, parts);
         const testAdvisory: Advisory = {
