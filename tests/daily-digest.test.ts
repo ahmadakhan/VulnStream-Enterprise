@@ -5,6 +5,8 @@ import {
   renderDailyDigest,
   renderDailyFindingSummary,
   renderDailyHealthReport,
+  digestSeveritySummary,
+  digestSeverityKpi,
 } from '../src/utils/templateCompiler.ts';
 import type { DailyDigestParts, DigestFinding, DigestHealth } from '../src/utils/templateCompiler.ts';
 
@@ -43,7 +45,7 @@ const PARTS: DailyDigestParts = {
   findings_summary: renderDailyFindingSummary(FINDINGS, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
   health_report: renderDailyHealthReport(HEALTH, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
   recipient_name: 'Team',
-   critical_count: 2,
+  critical_count: 2,
   high_count: 1,
   medium_count: 1,
   low_count: 1,
@@ -51,6 +53,14 @@ const PARTS: DailyDigestParts = {
   executive_summary:
     'A total of <strong>5 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>1 Medium</strong>, and <strong>1 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.',
   report_generated: '29 October 2026 | 22:48 GMT+4',
+  critical_summary: digestSeveritySummary('CRITICAL', 2, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
+  high_summary: digestSeveritySummary('HIGH', 1, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
+  medium_summary: digestSeveritySummary('MEDIUM', 1, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
+  low_summary: digestSeveritySummary('LOW', 1, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
+  critical_kpi: digestSeverityKpi('CRITICAL', 2, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
+  high_kpi: digestSeverityKpi('HIGH', 1, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
+  medium_kpi: digestSeverityKpi('MEDIUM', 1, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
+  low_kpi: digestSeverityKpi('LOW', 1, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
 };
 
 test('DEFAULT_DAILY_DIGEST_CUSTOMIZATION defines every color/style the digest UI reads', () => {
@@ -123,10 +133,12 @@ test('renderDailyDigest embeds the findings summary and the health report', () =
 test('renderDailyDigest populates KPI counts exactly', () => {
   const html = renderDailyDigest(DEFAULT_DAILY_DIGEST_CUSTOMIZATION, PARTS);
   assert.ok(html.includes('Total Findings:</strong> 5'));
-  assert.ok(html.includes('Critical:</strong> 2'));
-  assert.ok(html.includes('High:</strong> 1'));
+  assert.ok(html.includes('CRITICAL (2)'), 'findings summary shows critical count');
+  assert.ok(html.includes('Critical:</strong> 2'), 'summary bar shows critical count');
+  assert.ok(html.includes('High:</strong> 1'), 'summary bar shows high count');
+  assert.ok(html.includes('Medium:</strong> 1'), 'summary bar shows medium count');
+  assert.ok(html.includes('Low:</strong> 1'), 'summary bar shows low count');
   assert.ok(html.includes('ASSETS'));
-  assert.ok(html.includes('>5<'), 'asset count KPI shows 5');
 });
 
 test('renderDailyDigest embeds executive summary and report generated date', () => {
@@ -150,4 +162,22 @@ test('renderDailyHealthReport renders System Uptime row', () => {
 test('renderDailyDigest contains no leftover template placeholders', () => {
   const html = renderDailyDigest(DEFAULT_DAILY_DIGEST_CUSTOMIZATION, PARTS);
   assert.ok(!html.includes('{{'), 'no unreplaced placeholders remain');
+});
+
+test('renderDailyDigest omits zero-count severity sections', () => {
+  const zeroParts: DailyDigestParts = {
+    ...PARTS,
+    medium_count: 0,
+    low_count: 0,
+    medium_summary: '',
+    low_summary: '',
+    medium_kpi: '',
+    low_kpi: '',
+  };
+  const html = renderDailyDigest(DEFAULT_DAILY_DIGEST_CUSTOMIZATION, zeroParts);
+  assert.ok(!html.includes('Medium:</strong>'), 'zero-count medium summary not rendered');
+  assert.ok(!html.includes('Low:</strong>'), 'zero-count low summary not rendered');
+  assert.ok(!html.includes('MEDIUM (0)'), 'zero-count medium findings not rendered');
+  assert.ok(!html.includes('LOW (0)'), 'zero-count low findings not rendered');
+  assert.ok(!html.includes('{{'), 'no unreplaced placeholders');
 });

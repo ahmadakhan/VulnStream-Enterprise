@@ -379,6 +379,14 @@ export interface DailyDigestParts {
   asset_count: number;
   executive_summary: string;
   report_generated: string;
+  critical_summary: string;
+  high_summary: string;
+  medium_summary: string;
+  low_summary: string;
+  critical_kpi: string;
+  high_kpi: string;
+  medium_kpi: string;
+  low_kpi: string;
 }
 
 const digestEscapeHtml = (value: string) =>
@@ -505,21 +513,10 @@ ${classificationBanner}
                         <strong>Total Findings:</strong> {{finding_count}}
                     </td>
 
-                    <td style="font-size:12px;color:#dc2626;" align="center">
-                        <strong>Critical:</strong> {{critical_count}}
-                    </td>
-
-                    <td style="font-size:12px;color:#ea580c;" align="center">
-                        <strong>High:</strong> {{high_count}}
-                    </td>
-
-                    <td style="font-size:12px;color:#ca8a04;" align="center">
-                        <strong>Medium:</strong> {{medium_count}}
-                    </td>
-
-                    <td style="font-size:12px;color:#16a34a;" align="right">
-                        <strong>Low:</strong> {{low_count}}
-                    </td>
+                    {{critical_summary}}
+                    {{high_summary}}
+                    {{medium_summary}}
+                    {{low_summary}}
                 </tr>
             </table>
 
@@ -558,15 +555,10 @@ ${classificationBanner}
                         <div style="font-size:11px;color:#64748b;">TOTAL FINDINGS</div>
                     </td>
 
-                    <td width="25%" align="center" bgcolor="#fef2f2" style="padding:16px;border:1px solid #e2e8f0;">
-                        <div style="font-size:24px;font-weight:bold;color:#dc2626;">{{critical_count}}</div>
-                        <div style="font-size:11px;color:#64748b;">CRITICAL</div>
-                    </td>
-
-                    <td width="25%" align="center" bgcolor="#fff7ed" style="padding:16px;border:1px solid #e2e8f0;">
-                        <div style="font-size:24px;font-weight:bold;color:#ea580c;">{{high_count}}</div>
-                        <div style="font-size:11px;color:#64748b;">HIGH</div>
-                    </td>
+                    {{critical_kpi}}
+                    {{high_kpi}}
+                    {{medium_kpi}}
+                    {{low_kpi}}
 
                     <td width="25%" align="center" bgcolor="#eff6ff" style="padding:16px;border:1px solid #e2e8f0;">
                         <div style="font-size:24px;font-weight:bold;color:#2563eb;">{{asset_count}}</div>
@@ -813,6 +805,48 @@ export function renderDailyHealthReport(health: DigestHealth | null, config: Tem
             </table>`;
 }
 
+const SEVERITY_KPI: Record<string, { label: string; color: string; bg: string }> = {
+  CRITICAL: { label: 'CRITICAL', color: '#dc2626', bg: '#fef2f2' },
+  HIGH: { label: 'HIGH', color: '#ea580c', bg: '#fff7ed' },
+  MEDIUM: { label: 'MEDIUM', color: '#ca8a04', bg: '#fefce8' },
+  LOW: { label: 'LOW', color: '#16a34a', bg: '#ecfdf5' },
+};
+
+const SEVERITY_TITLE: Record<string, string> = {
+  CRITICAL: 'Critical',
+  HIGH: 'High',
+  MEDIUM: 'Medium',
+  LOW: 'Low',
+};
+
+export const digestSeveritySummary = (
+  severity: string,
+  count: number,
+  config: TemplateCustomization,
+): string => {
+  if (count === 0) return '';
+  const safe = normalizeDigestConfig(config);
+  const sev = SEVERITY_KPI[severity] ?? { label: severity, color: safe.fontColor, bg: '#f8fafc' };
+  const color = severity === 'CRITICAL' ? '#dc2626' : severity === 'HIGH' ? '#ea580c' : severity === 'MEDIUM' ? '#ca8a04' : '#16a34a';
+  return `<td style="font-size:12px;color:${color};" align="center">
+    <strong>${SEVERITY_TITLE[severity] ?? severity}:</strong> ${count}
+</td>`;
+};
+
+export const digestSeverityKpi = (
+  severity: string,
+  count: number,
+  config: TemplateCustomization,
+): string => {
+  if (count === 0) return '';
+  const safe = normalizeDigestConfig(config);
+  const sev = SEVERITY_KPI[severity] ?? { label: severity, color: safe.fontColor, bg: '#f8fafc' };
+  return `<td width="25%" align="center" bgcolor="${sev.bg}" style="padding:16px;border:1px solid #e2e8f0;">
+    <div style="font-size:24px;font-weight:bold;color:${sev.color};">${count}</div>
+    <div style="font-size:11px;color:#64748b;">${sev.label}</div>
+</td>`;
+};
+
 export function renderDailyDigest(config: TemplateCustomization, parts: DailyDigestParts): string {
   const template = compileDailyDigestTemplate(config);
   return template
@@ -825,5 +859,13 @@ export function renderDailyDigest(config: TemplateCustomization, parts: DailyDig
     .replace(/{{asset_count}}/g, String(parts.asset_count))
     .replace(/{{executive_summary}}/g, parts.executive_summary)
     .replace(/{{findings_summary}}/g, parts.findings_summary)
-    .replace(/{{health_report}}/g, parts.health_report);
+    .replace(/{{health_report}}/g, parts.health_report)
+    .replace(/{{critical_summary}}/g, parts.critical_summary || '')
+    .replace(/{{high_summary}}/g, parts.high_summary || '')
+    .replace(/{{medium_summary}}/g, parts.medium_summary || '')
+    .replace(/{{low_summary}}/g, parts.low_summary || '')
+    .replace(/{{critical_kpi}}/g, parts.critical_kpi || '')
+    .replace(/{{high_kpi}}/g, parts.high_kpi || '')
+    .replace(/{{medium_kpi}}/g, parts.medium_kpi || '')
+    .replace(/{{low_kpi}}/g, parts.low_kpi || '');
 }
