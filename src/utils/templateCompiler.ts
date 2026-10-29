@@ -313,11 +313,16 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
                 BA Threat Intelligence
             </div>
 
-            <div style="font-size:12px;line-height:20px;color:#64748b;">
+             <div style="font-size:12px;line-height:20px;color:#64748b;">
                 This advisory was generated from monitored inventory, vendor security notifications,
                 and threat intelligence sources. Evaluate applicability to your environment before
                 implementing remediation actions. All remediation activities should follow approved
                 operational and change management procedures.
+            </div>
+
+            <div style="margin-top:12px;font-size:12px;line-height:20px;color:#64748b;">
+                For questions or additional information, contact:
+                <a href="mailto:DL-HBS-Cyber-Operations@HoneywellProd.onmicrosoft.com" style="color:${config.accentColor};text-decoration:underline;">DL-HBS-Cyber-Operations@HoneywellProd.onmicrosoft.com</a>
             </div>
 
         </td>
@@ -609,11 +614,16 @@ ${classificationBanner}
                 BA Threat Intelligence
             </div>
 
-            <div style="font-size:12px;line-height:20px;color:#64748b;">
+             <div style="font-size:12px;line-height:20px;color:#64748b;">
                 This digest provides a consolidated view of newly identified vulnerabilities and platform
                 health status. Prioritize remediation activities according to asset criticality,
                 business impact, and established vulnerability management SLAs. All implementation
                 and remediation activities should follow approved change management procedures.
+            </div>
+
+            <div style="margin-top:12px;font-size:12px;line-height:20px;color:#64748b;">
+                For questions or additional information, contact:
+                <a href="mailto:DL-HBS-Cyber-Operations@HoneywellProd.onmicrosoft.com" style="color:${config.accentColor};text-decoration:underline;">DL-HBS-Cyber-Operations@HoneywellProd.onmicrosoft.com</a>
             </div>
 
         </td>
