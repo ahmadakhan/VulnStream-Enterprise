@@ -168,6 +168,39 @@ export async function queueRun(
     { locks: ['pipeline-queue'] },
   );
 }
+/**
+ * Rebuild a stale advisory bundle from current inventory.
+ *
+ * Called by the delivery worker when it detects that a queued advisory's
+ * findings are no longer applicable. Marks all sibling outbox jobs for the
+ * advisory as FAILED so the pipeline's stale-bundle detection
+ * (`staleBundles` in `processPipeline`) can rebuild the bundle from current
+ * matches, and queues an immediate pipeline run so recovery is not delayed
+ * until the next scheduled tick.
+ *
+ * The job currently being processed by the delivery worker is excluded:
+ * the worker's post-delivery bookkeeping will finalize it (including email
+ * log updates) in its own transaction.
+ */
+export async function rebuildFromCurrentInventory(
+  pool: pg.Pool,
+  advisoryId: string,
+  reason: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE outbox
+       SET status='FAILED', error=$1, next_attempt=now(),
+           locked_at=NULL, lock_token=NULL, updated_at=now()
+     WHERE advisory_id=$2 AND status IN ('QUEUED','SENDING')
+       AND id <> (
+         SELECT id FROM outbox
+          WHERE advisory_id=$2 AND status='SENDING' AND lock_token IS NOT NULL
+          ORDER BY next_attempt FOR UPDATE SKIP LOCKED LIMIT 1
+       )`,
+    [reason, advisoryId],
+  );
+  await queueRun(pool, 24, 'delivery-rebuild');
+}
 class PipelineStopped extends Error {
   constructor() {
     super('Pipeline stopped by operator; uncommitted results discarded');

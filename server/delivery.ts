@@ -755,6 +755,9 @@ export async function deliverNext(
   // marked ACCEPTED and the alert would be re-sent on every retry.
   let declaredCveIds: string[] = [];
   let declaredFindingIds: string[] = [];
+  // Set when the revalidation detects a stale advisory bundle so the catch
+  // block can trigger an immediate rebuild instead of a hard permanent failure.
+  let staleAdvisory = false;
   try {
     if (!retryPolicy.enabled && job.attempts > 1 && job.channel === 'email' && !job.review_approved) {
       permanent = true;
@@ -862,11 +865,13 @@ export async function deliverNext(
       }
       // The queued payload contains the complete advisory. Sending it after any
       // finding becomes stale would disclose or act on invalidated inventory.
-      // Fail the bundle so the next pipeline can rebuild it from current matches.
+      // Mark the bundle as stale and trigger an immediate rebuild instead of
+      // surfacing this as a hard error that requires operator intervention.
       if (invalid.length) {
         permanent = true;
+        staleAdvisory = true;
         throw new Error(
-          `Some advisory findings are no longer applicable; rebuild from current inventory. Reason: ${[...new Set(invalid)].join('; ')}. Run the pipeline to rebuild the advisory before retrying.`,
+          `Some advisory findings are no longer applicable; rebuild from current inventory. Reason: ${[...new Set(invalid)].join('; ')}.`,
         );
       }
     }
@@ -958,6 +963,19 @@ export async function deliverNext(
       permanent = e.status >= 400 && e.status < 500 && ![408, 429].includes(e.status);
       retryNotBefore = e.retryAt;
       emailProvider = e.provider;
+    }
+    // Stale advisory: mark all sibling outbox jobs as FAILED and queue an
+    // immediate pipeline rebuild so the bundle is reconstructed from current
+    // inventory without operator intervention. The job currently being
+    // processed is excluded — the post-delivery bookkeeping finalizes it.
+    if (staleAdvisory && job.advisory_id) {
+      staleAdvisory = false;
+      try {
+        const { rebuildFromCurrentInventory } = await import('./pipeline');
+        await rebuildFromCurrentInventory(pool, job.advisory_id, error);
+      } catch (rebuildError) {
+        errorInfo = describeError(rebuildError);
+      }
     }
   }
   await transaction(pool, async (db) => {
