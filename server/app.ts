@@ -86,7 +86,15 @@ import type {
   ThreatAnalytics,
   CpeMatchSimulation,
 } from '../src/types/index.ts';
-import { DEFAULT_TEMPLATE_CUSTOMIZATION } from '../src/utils/templateCompiler.ts';
+import {
+  DEFAULT_DAILY_DIGEST_CUSTOMIZATION,
+  renderDailyDigest,
+  renderDailyFindingSummary,
+  renderDailyHealthReport,
+  type DailyDigestParts,
+  type DigestFinding,
+  type DigestHealth,
+} from '../src/utils/templateCompiler.ts';
 function publicState(data: AppState): AppState {
   return {
     ...data,
@@ -1481,6 +1489,93 @@ export function createApp(
     }),
   );
   app.post(
+    '/api/test-daily-digest',
+    requireRole('ADMIN'),
+    asyncRoute(async (req, res) => {
+      const { email } = z.object({ email: z.email().max(254) }).parse(req.body);
+      const id = await transaction(pool, async (db) => {
+        const emailConfig =
+          (await getForUpdate<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
+        if (!emailIsConfigured(emailConfig, config))
+          throw new HttpError(409, 'Configure an email provider in Settings before sending a test');
+        const data = await state(db);
+        const dailyConfig = data.dailyDigestCustomization || DEFAULT_DAILY_DIGEST_CUSTOMIZATION;
+        const sampleFindings: DigestFinding[] = [
+          { cveId: 'CVE-2026-0001', severity: 'CRITICAL', assetName: 'edge-router-01', vendor: 'VendorX' },
+          { cveId: 'CVE-2026-0002', severity: 'CRITICAL', assetName: 'auth-service' },
+          { cveId: 'CVE-2026-0003', severity: 'HIGH', assetName: 'portal-web' },
+        ];
+        const sampleHealth: DigestHealth = {
+          database: 'connected',
+          databaseLatencyMs: 12,
+          workerStatus: 'HEALTHY',
+          workerHeartbeatAgeSeconds: 4,
+          nextScheduledAttempt: new Date(Date.now() + 86400000).toISOString(),
+          backlog: [
+            { status: 'QUEUED', count: 0 },
+            { status: 'ACCEPTED', count: 12 },
+          ],
+          checkedAt: new Date().toISOString(),
+        };
+        const parts: DailyDigestParts = {
+          advisory_id: `${data.settings.advisoryPrefix}DAILY-PREVIEW`,
+          advisory_title: 'Daily Vulnerability Digest — preview',
+          dispatch_date: new Date().toISOString(),
+          severity: 'HIGH',
+          finding_count: sampleFindings.length,
+          severity_counts: '2 critical, 1 high',
+          findings_summary: renderDailyFindingSummary(sampleFindings, dailyConfig),
+          health_report: renderDailyHealthReport(sampleHealth, dailyConfig),
+          recipient_name: email,
+        };
+        const html = renderDailyDigest(dailyConfig, parts);
+        const testAdvisory: Advisory = {
+          id: parts.advisory_id,
+          title: parts.advisory_title,
+          severity: 'HIGH',
+          cveIds: ['CVE-2026-0001', 'CVE-2026-0002'],
+          findingIds: [],
+          createdDate: new Date().toISOString(),
+          deliveryStatus: 'PENDING',
+          recipientCount: 1,
+          executiveSummary: 'Preview of the daily digest template. This is not a live vulnerability advisory.',
+          affectedSystems: ['Example inventory asset'],
+          remediationInstructions: 'Preview only; no remediation action is required.',
+        };
+        const id = await enqueue(
+          db,
+          'email',
+          'test',
+          'TEST',
+          {
+            ...advisoryEmail(testAdvisory, html),
+            recipientEmail: email,
+            cveIds: testAdvisory.cveIds,
+            dailyDigest: true,
+          },
+          randomUUID(),
+        );
+        await appendAudit(
+          db,
+          'Test daily digest queued',
+          `Delivery ${id}`,
+          req.operator!.username,
+          'EMAIL',
+          'INFO',
+          req.ip || '',
+        );
+        return id;
+      });
+      res
+        .status(202)
+        .json({
+          success: true,
+          message: 'Daily digest test queued. Check the delivery log for provider acceptance.',
+          id,
+        });
+    }),
+  );
+  app.post(
     '/api/retention/run',
     requireRole('ADMIN'),
     asyncRoute(async (req, res) => {
@@ -1751,8 +1846,9 @@ export function createApp(
         'webhook.save',
         'webhook.delete',
         'webhook.toggle',
-        'settings.save',
-        'template.save',
+         'settings.save',
+         'template.save',
+         'dailyDigestTemplate.save',
         'email.configure',
         'alias.save',
         'alias.delete',

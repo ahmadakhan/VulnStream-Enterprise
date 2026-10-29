@@ -19,6 +19,7 @@ import { AlertedCVEsView } from './components/AlertedCVEsView';
 import { ThreatFeedsView } from './components/ThreatFeedsView';
 import { RecipientsView } from './components/RecipientsView';
 import { AdvisoryTemplateView } from './components/AdvisoryTemplateView';
+import { DailyDigestView } from './components/DailyDigestView';
 import { EmailHistoryView } from './components/EmailHistoryView';
 import { EmailQueueView } from './components/EmailQueueView';
 import { OperationalLogsView } from './components/OperationalLogsView';
@@ -57,6 +58,7 @@ export const MainContent: React.FC = () => {
       {activeTab === 'feeds' && <ThreatFeedsView />}
       {activeTab === 'recipients' && <RecipientsView />}
       {activeTab === 'template' && <AdvisoryTemplateView />}
+      {activeTab === 'daily-digest' && <DailyDigestView />}
       {activeTab === 'emails' && <EmailHistoryView />}
       {activeTab === 'email-queue' && <EmailQueueView />}
       {activeTab === 'logs' && <OperationalLogsView />}

@@ -30,7 +30,7 @@ import type {
   ThreatAnalytics,
   CpeMatchSimulation,
 } from '../types';
-import { compileCustomizedTemplate } from '../utils/templateCompiler';
+import { compileCustomizedTemplate, compileDailyDigestTemplate, DEFAULT_DAILY_DIGEST_CUSTOMIZATION } from '../utils/templateCompiler';
 
 const SESSION_RENEW_THRESHOLD_SEC = 60;
 
@@ -52,6 +52,7 @@ function useApplication() {
   });
   const [clock, setClock] = useState(Date.now()),
     [draft, setDraft] = useState<TemplateCustomization | null>(null),
+    [dailyDigestDraft, setDailyDigestDraft] = useState<TemplateCustomization | null>(null),
     [refreshVersion, setRefreshVersion] = useState(0),
     [pending, setPending] = useState(0);
   const sessionRef = useRef(session);
@@ -250,6 +251,7 @@ function useApplication() {
       setSession(null);
       setSnapshot(emptyState());
       setDraft(null);
+      setDailyDigestDraft(null);
     });
   const requestPasswordReset = (username: string) =>
     safely(
@@ -289,7 +291,8 @@ function useApplication() {
       return result;
     });
   const activeExecution = snapshot.executions.find((e) => ['RUNNING', 'QUEUED'].includes(e.status));
-  const customization = draft || snapshot.templateCustomization;
+   const customization = draft || snapshot.templateCustomization;
+   const dailyDigestCustomization = dailyDigestDraft || snapshot.dailyDigestCustomization || DEFAULT_DAILY_DIGEST_CUSTOMIZATION;
   return {
     ...snapshot,
     activeTab,
@@ -521,12 +524,26 @@ function useApplication() {
       if (success) setDraft(null);
       return success;
     },
-    setAdvisoryTemplate: (advisoryTemplate: string) => save('template.save', { advisoryTemplate }),
-    sendTestEmail: async (email: string) =>
-      (await call<{ success: boolean; message: string }>('/test-email', { email })) || {
-        success: false,
-        message: 'Test could not be queued; see the error banner.',
-      },
+     setAdvisoryTemplate: (advisoryTemplate: string) => save('template.save', { advisoryTemplate }),
+     dailyDigestCustomization,
+     dailyDigestTemplate: dailyDigestDraft ? compileDailyDigestTemplate(dailyDigestDraft) : snapshot.dailyDigestTemplate,
+     updateDailyDigestCustomization: (update: Partial<TemplateCustomization>) =>
+       setDailyDigestDraft((prev) => ({ ...dailyDigestCustomization, ...prev, ...update })),
+     saveDailyDigestTemplate: async () => {
+       const success = await save('dailyDigestTemplate.save', { dailyDigestCustomization });
+       if (success) setDailyDigestDraft(null);
+       return success;
+     },
+     sendTestEmail: async (email: string) =>
+       (await call<{ success: boolean; message: string }>('/test-email', { email })) || {
+         success: false,
+         message: 'Test could not be queued; see the error banner.',
+       },
+     sendTestDailyDigestEmail: async (email: string) =>
+       (await call<{ success: boolean; message: string }>('/test-daily-digest', { email })) || {
+         success: false,
+         message: 'Test could not be queued; see the error banner.',
+       },
     updateSettings: (settings: Partial<AppSettings>) => save('settings.save', settings),
     configureEmailProvider: (configuration: EmailConfiguration) => save('email.configure', configuration),
     // Audit events are recorded by server operations, never accepted as client claims.

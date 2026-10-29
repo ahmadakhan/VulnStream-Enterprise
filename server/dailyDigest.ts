@@ -5,12 +5,14 @@ import { enqueue, findingRevision, revision, recipientAllows } from './delivery'
 import { advisoryEmail } from './advisoryEmail';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { buildAliasMap } from '../src/utils/cpeMatcher';
-import { renderAdvisory } from './advisoryRender';
 import { resolveTimezone as resolveSettingsTimezone } from '../src/utils/dateTime';
 import { DEFAULT_SETTINGS } from '../shared/state';
 import {
-  DEFAULT_TEMPLATE_CUSTOMIZATION,
-  compileCustomizedTemplate,
+  DEFAULT_DAILY_DIGEST_CUSTOMIZATION,
+  renderDailyDigest,
+  renderDailyFindingSummary,
+  renderDailyHealthReport,
+  type DailyDigestParts,
 } from '../src/utils/templateCompiler';
 import type {
   Advisory,
@@ -77,15 +79,12 @@ const parseTime = (value: string | undefined): { hour: number; minute: number } 
   return { hour: Number.isFinite(h) ? h : 9, minute: Number.isFinite(m) ? m : 0 };
 };
 
-async function readTemplate(db: Db): Promise<string> {
-  const row = await get<{ templateCustomization?: TemplateCustomization }>(db, 'template', 'main');
-  return (row?.templateCustomization && compileCustomizedTemplate(row.templateCustomization)) ||
-    compileCustomizedTemplate(DEFAULT_TEMPLATE_CUSTOMIZATION);
+async function readDailyDigestConfig(db: Db): Promise<TemplateCustomization> {
+  const row = await get<{ dailyDigestCustomization?: TemplateCustomization }>(db, 'template', 'main');
+  return row?.dailyDigestCustomization || DEFAULT_DAILY_DIGEST_CUSTOMIZATION;
 }
 
 const severityRank = (s: Advisory['severity']) => SEVERITY_RANK.indexOf(s);
-const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 
 const buildDailyDigestAdvisory = (
   findings: Finding[],
@@ -100,8 +99,7 @@ const buildDailyDigestAdvisory = (
         : severity,
     'UNKNOWN',
   );
-  const severityCounts: Record<string, number> = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
-  for (const finding of findings) severityCounts[finding.cve.cvss.severity] = (severityCounts[finding.cve.cvss.severity] ?? 0) + 1;
+  const severityCounts = countSeverities(findings);
   return {
     id: `${settings.advisoryPrefix}DAILY_${dateKey.replace(/-/g, '')}`,
     title: `Daily Vulnerability Digest — ${dateKey}`,
@@ -132,6 +130,12 @@ const formatSeverityCounts = (counts: Record<string, number>) =>
     .filter(([, n]) => n > 0)
     .map(([s, n]) => `${n} ${s.toLowerCase()}`)
     .join(', ');
+
+const countSeverities = (findings: Finding[]): Record<string, number> => {
+  const counts: Record<string, number> = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
+  for (const finding of findings) counts[finding.cve.cvss.severity] = (counts[finding.cve.cvss.severity] ?? 0) + 1;
+  return counts;
+};
 
 interface HealthSnapshot {
   database: 'connected' | 'degraded';
@@ -189,45 +193,6 @@ async function computeHealth(db: Db, workerEnabled: boolean, workerHeartbeat: st
   };
 }
 
-const renderHealthReport = (health: HealthSnapshot): string => `
-  <h2 style="margin:24px 0 8px;font-family:Arial,sans-serif;font-size:16px;font-weight:600;color:#e4e4e7">Operational health check</h2>
-  <table style="font-family:Arial,sans-serif;font-size:12px;border-collapse:collapse;width:100%;margin-bottom:16px">
-    <tr><td style="padding:4px 8px;border:1px solid #27272a">Database</td><td style="padding:4px 8px;border:1px solid #27272a">${health.database} (${health.databaseLatencyMs} ms)</td></tr>
-    <tr><td style="padding:4px 8px;border:1px solid #27272a">Delivery worker</td><td style="padding:4px 8px;border:1px solid #27272a">${health.workerStatus}${health.workerHeartbeatAgeSeconds !== null ? ` · ${health.workerHeartbeatAgeSeconds}s since heartbeat` : ''}</td></tr>
-    <tr><td style="padding:4px 8px;border:1px solid #27272a">Next scheduled delivery</td><td style="padding:4px 8px;border:1px solid #27272a">${health.nextScheduledAttempt ? new Date(health.nextScheduledAttempt).toISOString() : 'none pending'}</td></tr>
-    <tr><td style="padding:4px 8px;border:1px solid #27272a">Outbox backlog</td><td style="padding:4px 8px;border:1px solid #27272a">${health.backlog.map((b) => `${b.count} ${b.status}`).join(', ') || 'idle'}</td></tr>
-    <tr><td style="padding:4px 8px;border:1px solid #27272a">Checked at</td><td style="padding:4px 8px;border:1px solid #27272a">${new Date(health.checkedAt).toISOString()}</td></tr>
-  </table>`;
-
-const renderFindingsSummary = (findings: Finding[]): string => {
-  if (!findings.length)
-    return '<p style="font-family:Arial,sans-serif;font-size:12px;color:#a1a1aa">No findings in the last 24 hours.</p>';
-  const bySeverity: Record<string, Finding[]> = {};
-  for (const finding of findings)
-    (bySeverity[finding.cve.cvss.severity] ||= []).push(finding);
-  const sections = (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'] as const)
-    .filter((s) => bySeverity[s]?.length)
-    .map(
-      (s) =>
-        `<h3 style="margin:16px 0 4px;font-family:Arial,sans-serif;font-size:13px;font-weight:600;color:#e4e4e7">${s} (${bySeverity[s].length})</h3><ul style="font-family:Arial,sans-serif;font-size:11px;color:#d4d4d8;margin:0 0 8px;padding-left:18px;list-style:disc">
-          ${bySeverity[s]
-            .slice(0, 25)
-            .map(
-              (f) =>
-                `<li style="margin-bottom:2px"><strong>${escapeHtml(f.cveId)}</strong> — ${escapeHtml(f.matchedAssetName)}${f.matchedAssetVendor ? ` (${escapeHtml(f.matchedAssetVendor)})` : ''}</li>`,
-            )
-            .join('')}
-          ${bySeverity[s].length > 25 ? `<li style="color:#71717a">…and ${bySeverity[s].length - 25} more</li>` : ''}
-        </ul>`,
-    )
-    .join('');
-  return `<h2 style="margin:24px 0 8px;font-family:Arial,sans-serif;font-size:16px;font-weight:600;color:#e4e4e7">Findings summary</h2>${sections}`;
-};
-
-const appendDailySections = (html: string, findings: Finding[], health: HealthSnapshot | null): string => {
-  const extra = `${renderFindingsSummary(findings)}${health ? renderHealthReport(health) : ''}`;
-  return html.includes('</body>') ? html.replace(/<\/body>/i, `${extra}</body>`) : `${html}${extra}`;
-};
 
 /**
  * Runs the daily digest job. Returns the number of transport jobs queued (0 when
@@ -354,7 +319,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
           return [{ ...f, ...match, id: f.id }];
         });
 
-        const template = await readTemplate(db);
+        const dailyConfig = await readDailyDigestConfig(db);
         const advisory = buildDailyDigestAdvisory(findings, settings, todayKey);
         const heldForReview = findingRows.rows.filter(
           (r) => r.data?.cveId && r.data.notificationStatus === 'REVIEW_REQUIRED',
@@ -363,6 +328,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
         const health = daily.includeHealthReport
           ? await computeHealth(db, settings.schedulerEnabled, worker?.heartbeat ?? null)
           : null;
+        const healthReportHtml = health ? renderDailyHealthReport(health, dailyConfig) : '';
         // No findings and no health report means there is nothing to email. Skip
         // enqueueing to avoid deliverNext rejecting an empty advisory as stale
         // and triggering a futile pipeline rebuild every day.
@@ -381,7 +347,27 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
           const included = findings.filter(finding => recipientAllows(recipient, finding));
           if (!included.length && !health) continue;
           const view = buildDailyDigestAdvisory(included, settings, todayKey);
-          const html = appendDailySections(renderAdvisory(template, view), included, health);
+          const severityCounts = countSeverities(included);
+          const parts: DailyDigestParts = {
+            advisory_id: view.id,
+            advisory_title: view.title,
+            dispatch_date: new Date().toISOString(),
+            severity: view.severity,
+            finding_count: included.length,
+            severity_counts: formatSeverityCounts(severityCounts),
+            findings_summary: renderDailyFindingSummary(
+              included.map((finding) => ({
+                cveId: finding.cveId,
+                severity: finding.cve.cvss.severity,
+                assetName: finding.matchedAssetName,
+                vendor: finding.matchedAssetVendor,
+              })),
+              dailyConfig,
+            ),
+            health_report: healthReportHtml,
+            recipient_name: recipient.name || recipient.email,
+          };
+          const html = renderDailyDigest(dailyConfig, parts);
           const payload = {
             ...advisoryEmail(view, html),
             cveIds: view.cveIds,
@@ -397,6 +383,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
               included.map((finding) => [finding.cveId, revision(finding.cve)]),
             ),
             digestKey: `daily:${todayKey}`,
+            dailyDigest: true,
           };
           if (
             await enqueue(

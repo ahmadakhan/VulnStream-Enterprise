@@ -18,7 +18,12 @@ import type {
   IntelligenceMatch,
   AliasEntry,
 } from '../src/types/index.ts';
-import { DEFAULT_TEMPLATE_CUSTOMIZATION, compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
+import {
+  DEFAULT_TEMPLATE_CUSTOMIZATION,
+  DEFAULT_DAILY_DIGEST_CUSTOMIZATION,
+  compileCustomizedTemplate,
+  compileDailyDigestTemplate,
+} from '../src/utils/templateCompiler.ts';
 export const DEFAULT_EMAIL_CONFIG: EmailConfiguration = {
   provider: 'SMTP', fromEmail: '', fromName: 'BA Threat Intel', apiKey: '',
   apiEndpoint: '', apiHeaderKey: 'Authorization', apiAuthPrefix: 'Bearer', apiSourceDomain: '',
@@ -142,9 +147,11 @@ export interface AppState {
   emailConfig: EmailConfiguration;
   intelligenceArticles: IntelligenceArticle[];
   intelligenceMatches: IntelligenceMatch[];
-  templateCustomization: TemplateCustomization;
-  advisoryTemplate: string;
-  aliases: AliasEntry[];
+   templateCustomization: TemplateCustomization;
+   advisoryTemplate: string;
+   dailyDigestCustomization: TemplateCustomization;
+   dailyDigestTemplate: string;
+   aliases: AliasEntry[];
   /** Exact row counts for every collection, independent of the returned slice. */
   counts: CollectionCounts;
   /** Aggregates computed server-side so bounded slices cannot skew KPI cards. */
@@ -172,8 +179,10 @@ export const emptyState = (): AppState => ({
   aliases: [],
   settings: structuredClone(DEFAULT_SETTINGS),
   emailConfig: { ...DEFAULT_EMAIL_CONFIG },
-  templateCustomization: { ...DEFAULT_TEMPLATE_CUSTOMIZATION },
-  advisoryTemplate: compileCustomizedTemplate(DEFAULT_TEMPLATE_CUSTOMIZATION),
+   templateCustomization: { ...DEFAULT_TEMPLATE_CUSTOMIZATION },
+   advisoryTemplate: compileCustomizedTemplate(DEFAULT_TEMPLATE_CUSTOMIZATION),
+   dailyDigestCustomization: { ...DEFAULT_DAILY_DIGEST_CUSTOMIZATION },
+   dailyDigestTemplate: compileDailyDigestTemplate(DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
   counts: zeroCounts(),
   summary: { activeFindings: 0, criticalFindings: 0, kevFindings: 0, deliveredEmails: 0 },
 });

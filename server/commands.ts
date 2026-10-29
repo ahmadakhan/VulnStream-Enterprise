@@ -20,7 +20,10 @@ import { encrypt, randomToken } from './secrets.ts';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
 import { emailConfigSchema } from './validation.ts';
 import { emailEndpoint } from './emailProviders.ts';
-import { compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
+import {
+  compileCustomizedTemplate,
+  compileDailyDigestTemplate,
+} from '../src/utils/templateCompiler.ts';
 import type { Config } from './config';
 import { isSmtpEmailProvider, type AliasEntry, type AppSettings, type Finding, type EmailConfiguration, type WatchListItem } from '../src/types/index.ts';
 
@@ -366,9 +369,19 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     );
   } else if (action === 'template.save') {
     const input = z.object({ templateCustomization: templateSchema }).parse(data);
+    const existing = (await getForUpdate<any>(db, 'template', 'main')) || {};
     await put(db, 'template', 'main', {
+      ...existing,
       templateCustomization: input.templateCustomization,
       advisoryTemplate: compileCustomizedTemplate(input.templateCustomization),
+    });
+  } else if (action === 'dailyDigestTemplate.save') {
+    const input = z.object({ dailyDigestCustomization: templateSchema }).parse(data);
+    const existing = (await getForUpdate<any>(db, 'template', 'main')) || {};
+    await put(db, 'template', 'main', {
+      ...existing,
+      dailyDigestCustomization: input.dailyDigestCustomization,
+      dailyDigestTemplate: compileDailyDigestTemplate(input.dailyDigestCustomization),
     });
   } else if (action === 'finding.status') {
     const input = z

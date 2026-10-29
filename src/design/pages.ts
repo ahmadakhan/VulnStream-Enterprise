@@ -14,12 +14,14 @@ import {
   Inbox,
   Archive,
   FileCode2,
-  Cpu,
-  Tags,
-  Settings,
-  Search,
-  BarChart3,
-  ScanLine,
+   Cpu,
+   Tags,
+   Settings,
+   Search,
+   BarChart3,
+   ScanLine,
+   CalendarDays,
+
 } from 'lucide-react';
 
 /** One source of truth for page identity, headings, and workspace breadcrumbs. */
@@ -37,8 +39,9 @@ export const pages = {
   'alerted-cves': { section: 'Autonomous pipeline', title: 'Sent notification history', icon: Bell },
   feeds: { section: 'Autonomous pipeline', title: 'Threat feeds', icon: Radio },
   recipients: { section: 'Autonomous pipeline', title: 'Recipients & webhooks', icon: Users },
-  template: { section: 'Autonomous pipeline', title: 'Email template studio', icon: FileCode },
-  emails: { section: 'Autonomous pipeline', title: 'Delivery log', icon: Mail },
+   template: { section: 'Autonomous pipeline', title: 'Email template studio', icon: FileCode },
+   'daily-digest': { section: 'Autonomous pipeline', title: 'Daily digest', icon: CalendarDays },
+   emails: { section: 'Autonomous pipeline', title: 'Delivery log', icon: Mail },
   'email-queue': { section: 'Autonomous pipeline', title: 'Email queue', icon: Inbox },
   archive: { section: 'Archive & retention', title: 'Archives & retention', icon: Archive },
   logs: { section: 'System & audit', title: 'Audit trail', icon: FileCode2 },
