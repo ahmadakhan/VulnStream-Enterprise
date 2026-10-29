@@ -1349,6 +1349,20 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           isDigestBatch,
         };
       };
+      // The confidence policy gates *automatic* dispatch. With automatic dispatch
+      // disabled the finding is still recorded and remains eligible for delivery
+      // through an explicit operator action (review approval or a manually
+      // assembled advisory), so it must not be replaced by an advisory-bound
+      // delivery here — that would consume the finding and block the release.
+      if (!settings.autoDispatchEnabled && pending.length) {
+        await writeEvent(db, {
+          category: 'MATCHING',
+          code: 'matching.dispatch_held_by_policy',
+          message: 'Findings held for review by the workspace confidence policy',
+          runId: execution!.id,
+          context: { findings: pending.length },
+        });
+      }
       if (settings.autoDispatchEnabled && pending.length) {
         if (settings.digestBatchingEnabled) {
           // flushes the window into one recipient-specific combined email, so a

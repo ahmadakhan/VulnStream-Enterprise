@@ -382,7 +382,13 @@ export function matchCPE(
   vulnCpeStr: string,
   versionRange?: NvdVersionRange,
   aliases?: CpeAliasOptions,
-): { matched: boolean; viaAlias?: boolean; reason?: string } {
+  /**
+   * The inventory entry does not assert a version (wildcard or missing). The
+   * product identity still matches, but a version-constrained advisory criterion
+   * cannot be proven, so the caller must treat the result as review evidence.
+   */
+  unverifiedVersion = false,
+): { matched: boolean; viaAlias?: boolean; reason?: string; unverifiedVersion?: boolean } {
   const asset = parseCPE23(assetCpeStr);
   const vuln = parseCPE23(vulnCpeStr);
 
@@ -425,8 +431,11 @@ export function matchCPE(
     if (!matchComponent(asset[field], vuln[field])) return { matched: false, reason: `${field} mismatch` };
   }
 
-  if (!matchComponent(asset.version, vuln.version))
+  if (!matchComponent(asset.version, vuln.version) && !unverifiedVersion)
     return { matched: false, reason: 'Version token mismatch' };
+
+  // An unasserted inventory version is reported as unverified, never as agreement.
+  if (unverifiedVersion) return { matched: true, viaAlias, unverifiedVersion: true };
 
   // Version matching: If explicit NVD version interval provided, evaluate interval
   if (
@@ -740,10 +749,27 @@ export function matchesWatchlistItem(
       assetProduct,
     );
     for (const vulnCpe of vulnCpeMatches) {
-      const matchRes = matchCPE(assetCpe, vulnCpe, versionRange, {
-        vendorAliases: customVendorAliases,
-        productAliases: customProductAliases,
-      });
+      // An inventory CPE with a wildcard version (or none at all) asserts nothing
+      // about the release. A version-constrained advisory criterion can therefore
+      // only be a review candidate, never a confirmed match. Treating the wildcard
+      // as agreement let an unversioned asset pass as an exact token match.
+      const assetParsed = parseCPE23(assetCpe);
+      const assetVersionUnasserted =
+        assetParsed.isValid &&
+        (!assetParsed.version || assetParsed.version === '*' || hasUnescapedCpeWildcard(assetParsed.version));
+      const vulnParsed = parseCPE23(vulnCpe);
+      const vulnConstrainsVersion =
+        vulnParsed.isValid && vulnParsed.version !== '*' && vulnParsed.version !== '-' && !hasUnescapedCpeWildcard(vulnParsed.version);
+      const matchRes = matchCPE(
+        assetCpe,
+        vulnCpe,
+        versionRange,
+        {
+          vendorAliases: customVendorAliases,
+          productAliases: customProductAliases,
+        },
+        assetVersionUnasserted && vulnConstrainsVersion,
+      );
       if (matchRes.matched) {
         const asset = parseCPE23(assetCpe);
         const vuln = parseCPE23(vulnCpe);
@@ -800,7 +826,8 @@ export function matchesWatchlistItem(
               'other',
             ] as const
           ).some((field) => hasUnescapedCpeWildcard(asset[field]));
-        const requiresReview = rangeNeedsReview || contextNeedsReview || genericIdentity;
+        const requiresReview =
+          rangeNeedsReview || contextNeedsReview || genericIdentity || Boolean(matchRes.unverifiedVersion);
         retain({
           matched: true,
           method: versionRange ? 'STRICT_CPE_INTERVAL' : 'STRICT_CPE',

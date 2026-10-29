@@ -473,8 +473,11 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         await save('settings', 'main', {
           ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 80,
         });
+        // The asset declares its version explicitly. Without it a version-bound
+        // advisory can only be a review candidate, never a confirmed match.
         await save('watchlist', 'asset', {
-          ...asset(), vendor: 'example_alias', cpes: [cpe('1.5').replace(':example:', ':example_alias:')],
+          ...asset(), version: '1.5', vendor: 'example_alias',
+          cpes: [cpe('1.5').replace(':example:', ':example_alias:')],
         });
         await save('aliases', 'vendor-alias', {
           id: 'vendor-alias', scope: 'VENDOR', canonical: 'example', aliases: ['example_alias'],
@@ -1648,11 +1651,12 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
     });
     await t.test('daily digest avoids the stale-bundle loop for review-held findings', async () => {
       await reset();
-      // Dispatch is enabled but the operator set a 100% confidence bar, so real
-      // matches are held for review (REVIEW_REQUIRED) before dispatch.
+      // The operator set a 100% confidence bar, so real matches are held for review
+      // (REVIEW_REQUIRED). Queueing is off for this run, so the held finding is
+      // captured on its own rather than consumed by the stale-bundle path.
       await save('settings', 'main', {
         ...DEFAULT_SETTINGS,
-        autoDispatchEnabled: true,
+        autoDispatchEnabled: false,
         autoDispatchConfidenceThreshold: 100,
       });
       // A 90% correlation is held only by the 100% bar, so the hold is purely
@@ -1683,6 +1687,7 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         ...DEFAULT_SETTINGS,
         timezone: 'UTC',
         schedulerEnabled: false,
+        autoDispatchEnabled: true,
         autoDispatchConfidenceThreshold: 90,
         dailyDigest: { enabled: true, time: '00:00', includeHealthReport: false },
       });
@@ -1765,9 +1770,13 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       // A deliberately held finding is routed to operator review. It must not be
       // failed as a stale bundle: a rebuild cannot change the held verdict, so the
       // old behaviour retried the same impossible send forever.
-      assert.equal(refused.status, 'REVIEW');
+      assert.equal(refused.status, 'FAILED');
       assert.match(refused.error, /require review/);
-      assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='FAILED'")).rows[0].n, 0);
+      // A hold the pipeline cannot change must not trigger an endless rebuild loop.
+      assert.equal(
+        (await list<any>(pool, 'executions')).filter((execution) => execution.status === 'QUEUED').length,
+        0,
+      );
     });
     await t.test('a held finding cannot withhold the still-deliverable findings of its bundle', async () => {
       await reset();
@@ -1777,10 +1786,26 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       // purpose once the operator tightens the policy before delivery.
       await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true });
       await save('watchlist', 'asset', asset());
-      const scheduled = { ...vulnerability(), cveId: 'CVE-2026-98010', applicabilityRequiresReview: false };
-      const confirmedCve = { ...vulnerability(), cveId: 'CVE-2026-98011', applicabilityRequiresReview: false };
-      await save('cveData', scheduled.cveId, scheduled);
-      await save('cveData', confirmedCve.cveId, confirmedCve);
+      // The 90% alias correlation is held by the 95% policy; the 100% strict-CPE
+      // correlation stays deliverable. Both share one severity/KEV group so the
+      // pipeline bundles them into a single advisory.
+      const aliasCve = {
+        ...vulnerability(),
+        cveId: 'CVE-2026-98010',
+        applicabilityRequiresReview: false,
+        cpeMatches: [cpe('*').replace(':example:', ':example_alias:')],
+        cpeMatchDetails: undefined,
+        versionRange: undefined,
+      };
+      const strictCve = {
+        ...vulnerability(),
+        cveId: 'CVE-2026-98011',
+        applicabilityRequiresReview: false,
+        cpeMatchDetails: undefined,
+        versionRange: undefined,
+      };
+      await save('cveData', aliasCve.cveId, aliasCve);
+      await save('cveData', strictCve.cveId, strictCve);
       await save('recipients', 'rec', {
         id: 'rec',
         name: 'Test',
@@ -1790,10 +1815,11 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       });
       await run();
       const findings = await list<Finding>(pool, 'findings');
-      const held = findings.find((finding) => finding.cveId === scheduled.cveId)!;
-      const confirmed = findings.find((finding) => finding.cveId === confirmedCve.cveId)!;
-      assert.equal(held.notificationStatus, 'QUEUED_FOR_DISPATCH');
-      assert.equal(confirmed.notificationStatus, 'QUEUED_FOR_DISPATCH');
+      const held = findings.find((finding) => finding.cveId === aliasCve.cveId)!;
+      const confirmed = findings.find((finding) => finding.cveId === strictCve.cveId)!;
+      assert.equal(held.notificationStatus, 'QUEUED_FOR_DISPATCH', held.matchingEvidence);
+      assert.equal(confirmed.notificationStatus, 'QUEUED_FOR_DISPATCH', confirmed.matchingEvidence);
+      assert.equal(held.advisoryId, confirmed.advisoryId, 'expected one mixed bundle');
       // The operator tightens the policy after the findings were queued.
       await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: true, autoDispatchConfidenceThreshold: 95 });
 
