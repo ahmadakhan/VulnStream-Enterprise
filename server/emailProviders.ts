@@ -100,10 +100,13 @@ export async function sendProviderEmail(
     'X-BA-Threat-Intel-Delivery-ID': job.id,
     'Auto-Submitted': 'auto-generated',
   };
+  const oneClickUnsubscribe = /^https?:\/\//i.test(config.unsubscribeUrl || '');
   const unsubscribeHeader = config.unsubscribeUrl
     ? {
         'List-Unsubscribe': config.unsubscribeUrl,
-        'List-Unsubscribe-Post': 'List-Unsafe',
+        ...(oneClickUnsubscribe
+          ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
+          : {}),
       }
     : {};
   const pdfBase64 = attachment ? attachment.content.toString('base64') : undefined;
@@ -136,6 +139,14 @@ export async function sendProviderEmail(
       'h:Message-Id': `<${job.id}@${config.fromEmail.split('@')[1]}>`,
       'h:Auto-Submitted': 'auto-generated',
       'o:require-tls': 'yes',
+      ...(config.unsubscribeUrl
+        ? {
+            'h:List-Unsubscribe': config.unsubscribeUrl,
+            ...(oneClickUnsubscribe
+              ? { 'h:List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
+              : {}),
+          }
+        : {}),
       ...(config.replyTo ? { 'Reply-To': config.replyTo } : {}),
       ...(html ? { html } : {}),
     };
@@ -183,6 +194,14 @@ export async function sendProviderEmail(
       Headers: [
         { Name: 'X-BA-Threat-Intel-Delivery-ID', Value: job.id },
         { Name: 'Auto-Submitted', Value: 'auto-generated' },
+        ...(config.unsubscribeUrl
+          ? [
+              { Name: 'List-Unsubscribe', Value: config.unsubscribeUrl },
+              ...(oneClickUnsubscribe
+                ? [{ Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' }]
+                : []),
+            ]
+          : []),
       ],
     });
   } else if (config.provider === 'MAILJET_API') {
@@ -208,6 +227,14 @@ export async function sendProviderEmail(
           Headers: [
             { Name: 'X-BA-Threat-Intel-Delivery-ID', Value: job.id },
             { Name: 'Auto-Submitted', Value: 'auto-generated' },
+            ...(config.unsubscribeUrl
+              ? [
+                  { Name: 'List-Unsubscribe', Value: config.unsubscribeUrl },
+                  ...(oneClickUnsubscribe
+                    ? [{ Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' }]
+                    : []),
+                ]
+              : []),
           ],
         },
       ],

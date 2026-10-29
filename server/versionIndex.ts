@@ -5,6 +5,7 @@ import {
   DEFAULT_PRODUCT_ALIASES,
   DEFAULT_VENDOR_ALIASES,
   aliasGroupKeys,
+  normalizeAliasToken,
   parseCPE23,
 } from '../src/utils/cpeMatcher.ts';
 
@@ -72,7 +73,13 @@ const aliasKeys = (
   base: Record<string, string[]>,
   aliases: Record<string, string[]> = {},
 ): string[] => [
-  ...new Set([value.toLowerCase(), ...aliasGroupKeys(value, base, aliases)]),
+  ...new Set([
+    value.toLowerCase(),
+    // The matcher's alias path ignores punctuation, so `widget_pro` joins
+    // `widget-pro`. Index the normalized token or the pushdown drops the pair.
+    normalizeAliasToken(value),
+    ...aliasGroupKeys(value, base, aliases),
+  ]),
 ];
 
 function cpeIdentities(cpe: string, options: MatchIndexOptions): string[] {
@@ -159,7 +166,12 @@ function cveIndexRows(cve: NormalizedCVE, options: MatchIndexOptions): CveIndexR
     ? cve.cpeMatchDetails.map((detail, index) => ({
         id: `cpe-${index}`,
         criteria: detail.criteria,
-        range: detail.range || cve.versionRange,
+        // A per-detail criterion without bounds means "any version of this
+        // product"; the product-level range must not leak onto it. This mirrors
+        // the pipeline's applicabilitySets, so the index cannot exclude a pair
+        // the matcher would accept.
+        range:
+          detail.range && Object.values(detail.range).some(Boolean) ? detail.range : undefined,
       }))
     : cve.cpeMatches.map((criteria, index) => ({
         id: `cpe-${index}`,
@@ -196,13 +208,59 @@ interface AssetIndexRow {
   version: bigint | null;
 }
 
+function purlVersion(purl: string): string | null {
+  const match = /^pkg:([a-z][a-z0-9.+-]*)\/([^?#]+)/.exec(purl.trim());
+  if (!match) return null;
+  const path = match[2];
+  const at = path.lastIndexOf('@');
+  const versionAt = at > path.indexOf('/') + 1 ? at : -1;
+  return versionAt > 0 ? path.slice(versionAt + 1) : null;
+}
+
+/**
+ * Derives one conservative version ordinal for an asset row.
+ *
+ * The asset index has a single ordinal, but an inventory entry can carry
+ * several CPEs and PURLs with different versions. Using the declared
+ * `asset.version` blindly would let the SQL pushdown drop a pair whose matching
+ * CPE or package is inside the advisory range but whose declared version
+ * differs. Only a version every concrete identifier agrees on is safe to use
+ * for exclusion; anything ambiguous becomes NULL, which the query treats as
+ * "cannot exclude".
+ */
+function assetVersionOrdinal(asset: WatchListItem): bigint | null {
+  const declared = versionOrdinal(asset.version);
+  const ordinals: bigint[] = [];
+  for (const cpe of asset.cpes) {
+    const parsed = parseCPE23(cpe);
+    if (!parsed.isValid) continue;
+    if (/[?*]/.test(parsed.vendor) || /[?*]/.test(parsed.product)) return null;
+    if (!parsed.version || parsed.version === '*' || parsed.version === '-') return null;
+    const ordinal = versionOrdinal(parsed.version);
+    if (ordinal === null) return null;
+    ordinals.push(ordinal);
+  }
+  for (const purl of asset.purls ?? []) {
+    const version = purlVersion(purl);
+    if (!version) return null;
+    const ordinal = versionOrdinal(version);
+    if (ordinal === null) return null;
+    ordinals.push(ordinal);
+  }
+  if (!ordinals.length) return declared;
+  const first = ordinals[0];
+  if (ordinals.some((ordinal) => ordinal !== first)) return null;
+  if (declared !== null && declared !== first) return null;
+  return first;
+}
+
 function assetIndexRows(assets: WatchListItem[], options: MatchIndexOptions): AssetIndexRow[] {
   return assets
     .filter((asset) => asset.active)
     .map((asset) => ({
       assetId: asset.id,
       identities: assetIdentities(asset, options),
-      version: versionOrdinal(asset.version),
+      version: assetVersionOrdinal(asset),
     }));
 }
 

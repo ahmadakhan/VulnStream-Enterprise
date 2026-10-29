@@ -1,5 +1,4 @@
 import { readFileSync, existsSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 const _envPath = join(process.cwd(), '.env');
@@ -96,13 +95,13 @@ const app = createApp(pool, config, request, {
 });
 /**
  * Start listening on `port`, retrying up to `maxAttempts` times when the port
- * is already in use. On EADDRINUSE the process holding the port is killed
- * (it is invariably a stale dev-server instance from an ungraceful shutdown or
- * a `tsx watch` restart race), then the listen is retried after a short delay.
- * This makes `npm run dev:server` robust without requiring a separate pre-start
- * step on every `tsx watch` restart.
+ * is already in use (for example a `tsx watch` restart race). The process that
+ * holds the port is never terminated: it may be an unrelated service or another
+ * healthy instance, so after the retries are exhausted the failure names the
+ * conflicting port and is left for the operator to resolve.
  */
 async function listenWithRetry(port: number, host: string, maxAttempts = 5): Promise<Server> {
+  let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const server = createServer(app);
     try {
@@ -119,25 +118,18 @@ async function listenWithRetry(port: number, host: string, maxAttempts = 5): Pro
     } catch (error: unknown) {
       const code = (error as NodeJS.ErrnoException)?.code;
       if (code !== 'EADDRINUSE') throw error;
-      if (attempt === maxAttempts) throw error;
-      let pids = '';
-      try {
-        pids = execSync(`lsof -ti:${port}`, { stdio: ['pipe', 'pipe', 'pipe'] })
-          .toString()
-          .trim();
-      } catch {}
-      if (pids) {
-        console.log(JSON.stringify({ event: 'port_conflict.resolve', port, attempt, pids }));
-        for (const pid of pids.split('\n').filter(Boolean)) {
-          try {
-            process.kill(Number(pid), 'SIGKILL');
-          } catch {}
-        }
-      }
+      lastError = error;
+      if (attempt === maxAttempts) break;
       await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
     }
   }
-  throw new Error('listenWithRetry: unreachable');
+  const error = new Error(
+    `Port ${port} is already in use on ${host} (EADDRINUSE) after ${maxAttempts} attempts. ` +
+      'Stop the process using this port or configure a different PORT; no process was terminated.',
+  );
+  (error as NodeJS.ErrnoException).code = 'EADDRINUSE';
+  (error as Error & { cause?: unknown }).cause = lastError;
+  throw error;
 }
 const server = await listenWithRetry(config.PORT, '0.0.0.0');
 server.requestTimeout = 30000;

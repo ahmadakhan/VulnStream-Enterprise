@@ -101,6 +101,47 @@ test('operator alias keys cannot pollute object prototypes', () => {
   assert.equal(({} as Record<string, unknown>).polluted, undefined);
 });
 
+test('punctuation-only product variants reach the pipeline candidate prefilter', () => {
+  // The matcher treats `widget_pro` and `widget-pro` as the same identity by
+  // normalizing punctuation. The candidate index must index that normalized key
+  // too, or the pair is dropped before the matcher can run.
+  const record = {
+    ...structuredClone(INITIAL_NORMALIZED_CVES[0]),
+    cveId: 'CVE-2026-70003',
+    cpeMatches: [cpe('example', 'widget-pro', '1.5')],
+    cpeMatchDetails: [{ criteria: cpe('example', 'widget-pro', '1.5') }],
+    versionRange: undefined,
+    purls: undefined,
+    vex: undefined,
+    vexStatements: [],
+    sourceFeeds: [],
+    exploitationSources: [],
+    cisaKev: { isKev: false },
+    exploitStatus: 'None' as const,
+    applicabilityRequiresReview: false,
+  };
+  const asset: WatchListItem = {
+    id: 'asset-punctuation',
+    vendor: 'example',
+    product: 'widget_pro',
+    version: '1.5',
+    cpes: [cpe('example', 'widget_pro', '1.5')],
+    assetTag: 'WIDGET-01',
+    ownerGroup: 'test',
+    active: true,
+    createdAt: '2026-10-25T00:00:00.000Z',
+  };
+
+  const finding = runVulnerabilityPipeline([], [record], [asset], [], [], {
+    ...DEFAULT_SETTINGS,
+    scopeHours: 0,
+  }).newFindings[0];
+
+  assert.ok(finding, 'a punctuation-only product variant must reach the matcher');
+  assert.equal(finding.matchingMethod, 'VENDOR_PRODUCT_ALIAS');
+  assert.equal(finding.notificationStatus, 'REVIEW_REQUIRED');
+});
+
 test('built-in vendor aliases reach the pipeline candidate prefilter', () => {
   const vendorCpe = cpe('msft', 'windows_server_2022', '1.0');
   const record = {

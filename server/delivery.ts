@@ -227,7 +227,16 @@ export const advisoryRevision = (advisory: Advisory, findings: Finding[]) =>
           vendorLink: advisory.vendorLink ?? '',
         },
         findings: findings
-          .map((finding) => [finding.id, findingRevision(finding)])
+          .map((finding) => [
+            finding.id,
+            findingRevision(finding),
+            // A CVE evidence change (affected CPEs, version range, remediation,
+            // severity) alters the delivered advisory even when the finding row
+            // itself is unchanged. `revision` excludes enrichment noise, so this
+            // honours the documented dedupe contract without churn on feed
+            // refreshes.
+            revision(finding.cve),
+          ])
           .sort(([left], [right]) => left.localeCompare(right)),
       }),
     )
@@ -423,7 +432,11 @@ export function createMailSender(
         'X-BA-Threat-Intel-Delivery-ID': job.id,
         'Auto-Submitted': 'auto-generated',
         'List-Unsubscribe': saved.unsubscribeUrl || `<mailto:${fromEmail}?subject=unsubscribe>`,
-        'List-Unsubscribe-Post': 'List-Unsafe',
+        // RFC 8058 one-click is only valid for an HTTP(S) unsubscribe URL. A
+        // mailto fallback is handled by the mail client, not an HTTP POST.
+        ...(saved.unsubscribeUrl && /^https?:\/\//i.test(saved.unsubscribeUrl)
+          ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
+          : {}),
       },
       ...(attachment ? { attachments: [attachment] } : {}),
     });

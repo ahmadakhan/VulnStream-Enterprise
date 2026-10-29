@@ -136,6 +136,60 @@ test('advisory PDF attachment is encoded per provider', async () => {
   }
 });
 
+test('unsubscribe headers use RFC 8058 one-click semantics for every provider', async () => {
+  const unsubscribeUrl = 'https://example.invalid/unsubscribe?token=test-token';
+  for (const provider of ['API', 'SENDGRID', 'MAILGUN', 'POSTMARK', 'MAILJET_API'] as const) {
+    const config = {
+      ...configuration(provider),
+      apiEndpoint: 'https://api.example.invalid/send',
+      unsubscribeUrl,
+      ...(provider === 'MAILJET_API' ? { mailjetApiSecret: 'secret' } : {}),
+    };
+    let capturedBody = '';
+    await sendProviderEmail(config, token, job, async (_url, options) => {
+      capturedBody = options?.body || '';
+      if (provider === 'SENDGRID')
+        return { status: 202, headers: { 'x-message-id': 'id' }, body: '' };
+      if (provider === 'POSTMARK')
+        return { status: 200, headers: {}, body: JSON.stringify({ ErrorCode: 0, MessageID: 'id' }) };
+      if (provider === 'MAILJET_API')
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({ Messages: [{ To: [{ MessageID: 'id' }], ID: 'fallback' }] }),
+        };
+      return { status: 200, headers: {}, body: JSON.stringify({ id: 'id' }) };
+    });
+    assert.ok(capturedBody.includes(unsubscribeUrl), `${provider} must carry the unsubscribe URL`);
+    assert.ok(
+      capturedBody.includes('List-Unsubscribe-Post'),
+      `${provider} must carry the one-click marker`,
+    );
+    assert.match(
+      capturedBody,
+      provider === 'MAILGUN'
+        ? /h:List-Unsubscribe-Post[\s\S]*List-Unsubscribe=One-Click/
+        : /List-Unsubscribe=One-Click/,
+      `${provider} must use the RFC 8058 one-click value`,
+    );
+    assert.ok(!capturedBody.includes('List-Unsafe'), `${provider} must not emit the invalid value`);
+  }
+});
+
+test('a mailto unsubscribe address never advertises RFC 8058 one-click', async () => {
+  const config = {
+    ...configuration('MAILGUN'),
+    unsubscribeUrl: 'mailto:unsubscribe@example.invalid?subject=unsubscribe',
+  };
+  let capturedBody = '';
+  await sendProviderEmail(config, token, job, async (_url, options) => {
+    capturedBody = options?.body || '';
+    return { status: 200, headers: {}, body: JSON.stringify({ id: 'id' }) };
+  });
+  assert.ok(capturedBody.includes('h:List-Unsubscribe'));
+  assert.ok(!capturedBody.includes('List-Unsubscribe-Post'));
+});
+
 test('MAILJET_API uses Basic auth with decrypted token and secret', async () => {
   const mailjetSecret = 'test-mailjet-secret';
   const config = { ...configuration('MAILJET_API'), mailjetApiSecret: mailjetSecret };

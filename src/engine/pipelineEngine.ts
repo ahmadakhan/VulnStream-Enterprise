@@ -20,6 +20,7 @@ import {
   aliasGroupKeys,
   buildAliasMap,
   matchesWatchlistItem,
+  normalizeAliasToken,
   parseCPE23,
 } from '../utils/cpeMatcher';
 import { deriveInventoryAliases } from '../utils/aliasLifecycle';
@@ -202,17 +203,26 @@ export function runVulnerabilityPipeline(
   // Build alias-expanded indices so assets are candidates when their vendor
   // or product differs from a CVE's by an alias rather than a canonical name.
   // Built-in aliases are included: the matcher accepts them, so the candidate
-  // prefilter must not drop the pair before it can be evaluated.
+  // prefilter must not drop the pair before it can be evaluated. Punctuation
+  // variants are accepted by the matcher's normalizer (`widget_pro` versus
+  // `widget-pro`), so the normalized token is indexed alongside every spelling.
   const aliasVendorKeys = (v: string): string[] =>
     !v
       ? [v]
-      : [...new Set([v.toLowerCase(), ...aliasGroupKeys(v, DEFAULT_VENDOR_ALIASES, effectiveVendorAliases)])];
+      : [
+          ...new Set([
+            v.toLowerCase(),
+            normalizeAliasToken(v),
+            ...aliasGroupKeys(v, DEFAULT_VENDOR_ALIASES, effectiveVendorAliases),
+          ]),
+        ];
   const aliasProductKeys = (p: string): string[] =>
     !p
       ? [p]
       : [
           ...new Set([
             p.toLowerCase(),
+            normalizeAliasToken(p),
             ...aliasGroupKeys(p, DEFAULT_PRODUCT_ALIASES, effectiveProductAliases),
           ]),
         ];

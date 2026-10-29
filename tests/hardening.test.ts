@@ -14,7 +14,7 @@ import {
 import { applyCommand } from '../server/commands.ts';
 import { loadConfig } from '../server/config.ts';
 import { queryCollection } from '../server/collections.ts';
-import { queueAdvisory } from '../server/delivery.ts';
+import { advisoryRevision, queueAdvisory } from '../server/delivery.ts';
 import {
   buildCandidatePairs,
   syncMatchIndex,
@@ -110,6 +110,25 @@ test('version ordinals encode only provably ordered numeric versions', () => {
   assert.ok(versionOrdinal('1.10')! < versionOrdinal('2.0')!);
   assert.equal(versionOrdinal('1.2'), versionOrdinal('1.2.0'));
   assert.equal(versionOrdinal('10000'), null, 'components above the packing base stay unbounded');
+});
+
+test('advisory revision changes when CVE evidence changes but not for enrichment', () => {
+  const base = cve('CVE-2026-70001', { description: 'original evidence' });
+  const notice = advisory('adv-revision');
+  const original = advisoryRevision(notice, [finding(base)]);
+
+  // Same finding row, changed CVE content: this must be a new advisory revision
+  // so the documented dedupe contract redelivers materially changed evidence.
+  const changed = cve(base.cveId, { description: 'revised evidence' });
+  assert.notEqual(original, advisoryRevision(notice, [finding(changed)]));
+
+  // Enrichment-only changes are deliberately excluded from the content revision.
+  const enriched: NormalizedCVE = {
+    ...base,
+    sourceFeeds: ['feed-a', 'feed-b'],
+    modifiedDate: '2026-10-29T00:00:00.000Z',
+  };
+  assert.equal(original, advisoryRevision(notice, [finding(enriched)]));
 });
 
 test('enterprise hardening invariants', { skip: !database }, async (t) => {
@@ -658,6 +677,54 @@ test('enterprise hardening invariants', { skip: !database }, async (t) => {
       await syncMatchIndex(pool, [aliased], [microsoft]);
       const pairs = await buildCandidatePairs(pool);
       assert.deepEqual([...(pairs.get('CVE-2026-71501') ?? [])], ['asset-ms']);
+    });
+
+    await t.test('per-CPE criteria do not borrow the product-level version range', async () => {
+      await reset();
+      // The detail criterion has no bounds, meaning "any version of this
+      // product". The CVE-level range belongs to a different criterion and must
+      // not exclude the 2.5 inventory item from the candidate superset.
+      const outOfProductRange = watch('asset-out', '2.5');
+      const detailOnly = cve('CVE-2026-73001', {
+        cpeMatches: [cpe('*')],
+        versionRange: { versionEndExcluding: '2.0' },
+        cpeMatchDetails: [{ criteria: cpe('*') }],
+      });
+      await syncMatchIndex(pool, [detailOnly], [outOfProductRange]);
+      const pairs = await buildCandidatePairs(pool);
+      assert.deepEqual([...(pairs.get('CVE-2026-73001') ?? [])], ['asset-out']);
+    });
+
+    await t.test('punctuation-only identities are expanded in the candidate index', async () => {
+      await reset();
+      const asset = watch('asset-punctuation', '1.5', {
+        product: 'widget_pro',
+        cpes: [cpe('1.5', 'example', 'widget_pro')],
+      });
+      const advisoryCve = cve('CVE-2026-73002', {
+        cpeMatches: [cpe('1.5', 'example', 'widget-pro')],
+        cpeMatchDetails: [{ criteria: cpe('1.5', 'example', 'widget-pro') }],
+      });
+      await syncMatchIndex(pool, [advisoryCve], [asset]);
+      const pairs = await buildCandidatePairs(pool);
+      assert.deepEqual([...(pairs.get('CVE-2026-73002') ?? [])], ['asset-punctuation']);
+    });
+
+    await t.test('assets with conflicting identifier versions stay unbounded', async () => {
+      await reset();
+      // The same inventory row has CPEs for 1.0 and 2.0. A single ordinal cannot
+      // represent both, so the index must keep the row unbounded and let the
+      // matcher decide instead of dropping the 2.0 candidate.
+      const multiVersion = watch('asset-multi', '1.0', {
+        cpes: [cpe('1.0'), cpe('2.0')],
+      });
+      const exactTwo = cve('CVE-2026-73003', {
+        cpeMatches: [cpe('2.0')],
+        cpeMatchDetails: [{ criteria: cpe('2.0') }],
+      });
+      await syncMatchIndex(pool, [exactTwo], [multiVersion]);
+      const pairs = await buildCandidatePairs(pool);
+      assert.deepEqual([...(pairs.get('CVE-2026-73003') ?? [])], ['asset-multi']);
     });
 
     await t.test('multi-criterion CVEs keep every index row across a refresh', async () => {

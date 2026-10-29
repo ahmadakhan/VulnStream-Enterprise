@@ -128,41 +128,6 @@ function createEmptyCPE(raw: string, isValid: boolean): ParsedCPE {
   };
 }
 
-function cpeComponentPattern(value: string): { regex: RegExp; hasWildcard: boolean; literal: string } {
-  let source = '';
-  let literal = '';
-  let escaped = false;
-  let hasWildcard = false;
-  let wildcardCount = 0;
-  for (const char of value.toLowerCase()) {
-    if (escaped) {
-      source += char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      literal += char;
-      escaped = false;
-    } else if (char === '\\') {
-      escaped = true;
-    } else if (char === '*') {
-      wildcardCount++;
-      if (wildcardCount > 10) {
-        throw new Error('CPE component contains too many wildcards, potential ReDoS');
-      }
-      source += '.*';
-      hasWildcard = true;
-    } else if (char === '?') {
-      wildcardCount++;
-      if (wildcardCount > 10) {
-        throw new Error('CPE component contains too many wildcards, potential ReDoS');
-      }
-      source += '.';
-      hasWildcard = true;
-    } else {
-      source += char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      literal += char;
-    }
-  }
-  return { regex: new RegExp(`^${source}$`, 'i'), hasWildcard, literal };
-}
-
 type GlobToken = { type: 'star' } | { type: 'any' } | { type: 'literal'; value: string };
 
 function globTokens(value: string): GlobToken[] {
@@ -226,21 +191,52 @@ function globIntersects(leftValue: string, rightValue: string): boolean {
   return visit(0, 0);
 }
 
+function hasUnescapedCpeWildcard(value: string): boolean {
+  if (value === '*') return false;
+  let escaped = false;
+  for (const char of value) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (char === '*' || char === '?') return true;
+  }
+  return false;
+}
+
+/** Unescapes CPE 2.3 component escapes for a plain literal comparison. */
+function cpeLiteral(value: string): string {
+  let result = '';
+  let escaped = false;
+  for (const char of value.toLowerCase()) {
+    if (escaped) {
+      result += char;
+      escaped = false;
+    } else if (char === '\\') {
+      escaped = true;
+    } else {
+      result += char;
+    }
+  }
+  return result;
+}
+
 function matchComponent(assetAttr: string, vulnAttr: string): boolean {
   if (assetAttr === '*' || vulnAttr === '*') return true;
   if (assetAttr === '-' && vulnAttr === '-') return true;
   if (assetAttr === '-' || vulnAttr === '-') return false;
 
-  const asset = cpeComponentPattern(assetAttr);
-  const vuln = cpeComponentPattern(vulnAttr);
-  if (asset.hasWildcard && vuln.hasWildcard) return globIntersects(assetAttr, vulnAttr);
-  if (vuln.hasWildcard) return vuln.regex.test(asset.literal);
-  if (asset.hasWildcard) return asset.regex.test(vuln.literal);
-  return asset.literal === vuln.literal;
-}
-
-function hasUnescapedCpeWildcard(value: string): boolean {
-  return value !== '*' && cpeComponentPattern(value).hasWildcard;
+  // Wildcard components are compared as glob languages. Building a RegExp with
+  // one `.*` per wildcard allows catastrophic backtracking on hostile values,
+  // so the memoized intersection check handles every wildcard pair instead.
+  if (hasUnescapedCpeWildcard(assetAttr) || hasUnescapedCpeWildcard(vulnAttr)) {
+    return globIntersects(assetAttr, vulnAttr);
+  }
+  return cpeLiteral(assetAttr) === cpeLiteral(vulnAttr);
 }
 
 function escapeCpeToken(value: string): string {
@@ -500,7 +496,20 @@ export const DEFAULT_PRODUCT_ALIASES: Record<string, string[]> = {
   express: ['expressjs'],
 };
 
-const normalizeAliasToken = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+/**
+ * Normalizes an alias token without erasing meaningful identity characters.
+ *
+ * CPE vendors/products commonly use `_`, `-`, `.` and whitespace as formatting
+ * separators, so those are removed. Other symbols are significant: `c++` and
+ * `c` are different products, and distinct non-Latin names must not collapse to
+ * an empty token (which previously made every CJK-only identity compare equal).
+ */
+export const normalizeAliasToken = (value: string) =>
+  value
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\\(.)/g, '$1')
+    .replace(/[\s._-]+/g, '');
 
 /**
  * Returns every spelling in the alias group that contains `value`.
@@ -567,16 +576,19 @@ export function matchVendorWithAliases(
 ): boolean {
   if (matchComponent(assetVendor, vulnVendor)) return true;
 
-  const a = assetVendor.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const v = vulnVendor.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const a = normalizeAliasToken(assetVendor);
+  const v = normalizeAliasToken(vulnVendor);
 
+  // Punctuation-only identities carry no comparable name. Treating two empty
+  // normalizations as equal would make unrelated symbols (or scripts) match.
+  if (!a || !v) return false;
   if (a === v) return true;
 
   // Check aliases (built-in baseline + any operator-managed custom aliases)
   for (const [canonical, aliases] of Object.entries(
     mergeAliasTables(DEFAULT_VENDOR_ALIASES, customAliases),
   )) {
-    const group = [canonical, ...aliases].map((s) => s.replace(/[^a-z0-9]/g, ''));
+    const group = [canonical, ...aliases].map(normalizeAliasToken);
     if (group.includes(a) && group.includes(v)) return true;
   }
 
@@ -590,15 +602,16 @@ export function matchProductWithAliases(
 ): boolean {
   if (matchComponent(assetProduct, vulnProduct)) return true;
 
-  const a = assetProduct.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const v = vulnProduct.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const a = normalizeAliasToken(assetProduct);
+  const v = normalizeAliasToken(vulnProduct);
 
+  if (!a || !v) return false;
   if (a === v) return true;
 
   for (const [canonical, aliases] of Object.entries(
     mergeAliasTables(DEFAULT_PRODUCT_ALIASES, customAliases),
   )) {
-    const group = [canonical, ...aliases].map((s) => s.replace(/[^a-z0-9]/g, ''));
+    const group = [canonical, ...aliases].map(normalizeAliasToken);
     if (group.includes(a) && group.includes(v)) return true;
   }
 
@@ -871,16 +884,42 @@ export function matchesWatchlistItem(
   const normVendor = assetVendor.toLowerCase().trim();
   const normProduct = assetProduct.toLowerCase().trim();
   // The alias path is the last structured option before free text. Evaluate the
-  // advisory's version interval against the inventory version when one is known
-  // so an alias cannot create a finding for an explicitly unaffected release.
-  const assetVersion =
-    (assetVersionInput || '').trim() ||
-    assetCpes
-      .map((cpe) => parseCPE23(cpe))
-      .find((parsed) => parsed.isValid && parsed.version && parsed.version !== '*' && parsed.version !== '-')
-      ?.version ||
-    '';
+  // advisory's version interval against every inventory version when known so an
+  // alias cannot create a finding for explicitly unaffected releases, while one
+  // affected instance of a multi-CPE inventory row is still enough to match.
+  const versionCandidates = new Set<string>();
+  const declaredVersion = (assetVersionInput || '').trim();
+  if (declaredVersion) versionCandidates.add(declaredVersion);
+  for (const cpe of assetCpes) {
+    const parsed = parseCPE23(cpe);
+    if (
+      parsed.isValid &&
+      parsed.version &&
+      parsed.version !== '*' &&
+      parsed.version !== '-'
+    )
+      versionCandidates.add(parsed.version);
+  }
+  const assetVersions = [...versionCandidates];
   const rangeHasBounds = Boolean(versionRange && Object.values(versionRange).some(Boolean));
+  const comparableVersions =
+    rangeHasBounds && versionRange
+      ? assetVersions.filter((version) => canCompareRange(version, versionRange))
+      : [];
+  const inRangeVersions =
+    rangeHasBounds && versionRange
+      ? comparableVersions.filter((version) => isVersionInNvdRange(version, versionRange).inRange)
+      : [];
+  // Exclude only when every known version is comparable and provably outside.
+  // One unparseable identifier means applicability still needs review.
+  const allVersionsProvablyOutside =
+    Boolean(
+      rangeHasBounds &&
+        versionRange &&
+        assetVersions.length > 0 &&
+        comparableVersions.length === assetVersions.length &&
+        inRangeVersions.length === 0,
+    );
 
   // A CPE mismatch is only allowed to fall through when it concerns the
   // vendor/product names. If the structured identity is the same and a CPE
@@ -893,21 +932,30 @@ export function matchesWatchlistItem(
       matchVendorWithAliases(asset.vendor, vuln.vendor, customVendorAliases)) &&
     (matchComponent(asset.product, vuln.product) ||
       matchProductWithAliases(asset.product, vuln.product, customProductAliases));
-  const cpeIdentityExcluded = assetCpes.some((assetCpe) => {
-    // Resolve a generic inventory CPE with the same inventory fields used by
-    // the strict comparison so its version/platform cannot be attributed to an
-    // unrelated advisory product.
-    const asset = parseCPE23(
-      resolveGenericCpeIdentity(assetCpe, assetVendor, assetProduct).cpe,
-    );
-    if (!asset.isValid) return false;
-    return vulnCpeMatches.some((vulnCpe) => {
+  // Resolve generic inventory CPEs with the same inventory fields used by the
+  // strict comparison so their version/platform cannot be attributed to an
+  // unrelated advisory product.
+  const resolvedAssetCpes = assetCpes
+    .map((cpe) => parseCPE23(resolveGenericCpeIdentity(cpe, assetVendor, assetProduct).cpe))
+    .filter((parsed) => parsed.isValid);
+  // The exclusion is authoritative only when *every* same-identity pair
+  // conflicts. One inventory CPE with a different (or wildcard) version must not
+  // suppress the fallback when another CPE of the same identity is compatible.
+  let sawSameIdentity = false;
+  let compatibleSameIdentity = false;
+  for (const asset of resolvedAssetCpes) {
+    for (const vulnCpe of vulnCpeMatches) {
       const vuln = parseCPE23(vulnCpe);
-      if (!vuln.isValid || !sameStructuredIdentity(asset, vuln)) return false;
-      return cpeCriterionConflict(asset, vuln);
-    });
-  });
-  if (assetCpes.length > 0 && cpeIdentityExcluded) {
+      if (!vuln.isValid || !sameStructuredIdentity(asset, vuln)) continue;
+      sawSameIdentity = true;
+      if (!cpeCriterionConflict(asset, vuln)) {
+        compatibleSameIdentity = true;
+        break;
+      }
+    }
+    if (compatibleSameIdentity) break;
+  }
+  if (resolvedAssetCpes.length > 0 && sawSameIdentity && !compatibleSameIdentity) {
     return {
       matched: false,
       method: 'NONE',
@@ -915,10 +963,6 @@ export function matchesWatchlistItem(
       evidence: 'Structured CPE criteria explicitly excluded the inventory version or platform',
     };
   }
-
-  const resolvedAssetCpes = assetCpes
-    .map((cpe) => parseCPE23(resolveGenericCpeIdentity(cpe, assetVendor, assetProduct).cpe))
-    .filter((parsed) => parsed.isValid);
 
   for (const vulnCpe of vulnCpeMatches) {
     const parsedVuln = parseCPE23(vulnCpe);
@@ -939,10 +983,12 @@ export function matchesWatchlistItem(
           continue;
         let applicabilityRequiresReview = rangeHasBounds;
         let versionVerified = false;
-        if (rangeHasBounds && versionRange && assetVersion) {
-          if (canCompareRange(assetVersion, versionRange)) {
-            if (!isVersionInNvdRange(assetVersion, versionRange).inRange) continue;
+        let matchedVersion: string | undefined;
+        if (rangeHasBounds && versionRange) {
+          if (allVersionsProvablyOutside) continue;
+          if (inRangeVersions.length) {
             versionVerified = true;
+            matchedVersion = inRangeVersions[0];
             applicabilityRequiresReview = false;
           }
         }
@@ -952,7 +998,7 @@ export function matchesWatchlistItem(
           confidence: 85,
           matchedCpe: vulnCpe,
           evidence: versionVerified
-            ? `Resolved via Enterprise Alias Thesaurus (${normVendor}/${normProduct} -> ${parsedVuln.vendor}/${parsedVuln.product}); inventory version ${assetVersion} is inside the advisory range (85% confidence)`
+            ? `Resolved via Enterprise Alias Thesaurus (${normVendor}/${normProduct} -> ${parsedVuln.vendor}/${parsedVuln.product}); inventory version ${matchedVersion} is inside the advisory range (85% confidence)`
             : `Resolved via Enterprise Alias Thesaurus (${normVendor}/${normProduct} -> ${parsedVuln.vendor}/${parsedVuln.product}) (85% confidence)`,
           applicabilityRequiresReview,
         };
@@ -969,14 +1015,8 @@ export function matchesWatchlistItem(
     containsIdentityWords(fullText, normProduct)
   ) {
     // Do not let the text fallback re-admit a release that the advisory range
-    // explicitly excludes when the inventory version is comparable.
-    if (
-      rangeHasBounds &&
-      versionRange &&
-      assetVersion &&
-      canCompareRange(assetVersion, versionRange) &&
-      !isVersionInNvdRange(assetVersion, versionRange).inRange
-    )
+    // explicitly excludes when every inventory version is comparable.
+    if (rangeHasBounds && allVersionsProvablyOutside)
       return { matched: false, method: 'NONE', confidence: 0, evidence: 'Version outside advisory range' };
     return {
       matched: true,

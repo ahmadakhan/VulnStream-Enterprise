@@ -49,6 +49,47 @@ test('disjoint component wildcards never match each other', () => {
   assert.equal(matchCPE(pattern('1.2*'), pattern('1.*')).matched, true);
   assert.equal(matchCPE(pattern('1.?'), pattern('1.2')).matched, true);
 });
+test('pathological wildcard counts are matched without a regex backtracking crash', () => {
+  const pattern = (version: string) => `cpe:2.3:a:vendor:widget:${version}:*:*:*:*:*:*:*`;
+  const manyStars = '*'.repeat(64);
+  assert.doesNotThrow(() => matchCPE(pattern('1.2.3'), pattern(manyStars)));
+  assert.equal(matchCPE(pattern('1.2.3'), pattern(manyStars)).matched, true);
+  assert.equal(matchCPE(pattern('1.2.3'), pattern('?'.repeat(64))).matched, false);
+  assert.equal(matchCPE(pattern('1.2.3'), pattern('1.' + '?'.repeat(3))).matched, true);
+});
+test('one conflicting CPE does not suppress a compatible CPE of the same identity', () => {
+  const pattern = (version: string) => `cpe:2.3:a:vendor:widget:${version}:*:*:*:*:*:*:*`;
+  // A wildcard-version entry of the same identity remains compatible even when
+  // another inventory CPE pins a version outside the advisory criterion.
+  const result = matchesWatchlistItem(
+    [pattern('1.0'), pattern('*')],
+    'vendor',
+    'widget',
+    [pattern('2.0')],
+    't',
+    'd',
+  );
+  assert.equal(result.matched, true);
+  assert.equal(result.applicabilityRequiresReview, true);
+});
+test('text fallback evaluates every known inventory version', () => {
+  const pattern = (version: string, vendor = 'vendor', product = 'widget') =>
+    `cpe:2.3:a:${vendor}:${product}:${version}:*:*:*:*:*:*:*`;
+  // The first CPE is outside the advisory range, but the second instance of the
+  // same inventory row is inside it. The fallback must not exclude the product
+  // merely because it read only the first version.
+  const result = matchesWatchlistItem(
+    [pattern('2.0'), pattern('1.0')],
+    'vendor',
+    'widget',
+    [pattern('1.0', 'other', 'unrelated')],
+    'Vendor widget security notice',
+    'A flaw affects the vendor widget product.',
+    { versionEndExcluding: '1.5' },
+  );
+  assert.equal(result.matched, true);
+  assert.equal(result.method, 'VENDOR_PRODUCT_FALLBACK');
+});
 test('non-intersecting wildcard asset version does not match a concrete vuln version', () => {
   // An asset wildcard like 2.* describes the 2.x release line; it must not
   // match a vulnerability whose CPE pins version 1.5. Before the strict CPE

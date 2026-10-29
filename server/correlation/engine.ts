@@ -108,7 +108,12 @@ const canonicalPhrase = (value: string): string => {
 const phraseMatches = (left: string, right: string): boolean => {
   if (!left || !right) return false;
   if (left === right) return true;
-  return left.endsWith(` ${right}`) || right.endsWith(` ${left}`);
+  return (
+    left.endsWith(` ${right}`) ||
+    right.endsWith(` ${left}`) ||
+    left.startsWith(`${right} `) ||
+    right.startsWith(`${left} `)
+  );
 };
 
 const entityKey = (vendor: string, product: string) => `${vendor.toLowerCase()}:${product.toLowerCase()}`;

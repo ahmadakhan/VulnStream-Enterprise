@@ -55,7 +55,7 @@ const calendarDateKey = (timezone: string, now: number): string =>
     timeZone: timezone,
     year: 'numeric',
     month: '2-digit',
-    day: 'numeric',
+    day: '2-digit',
   }).format(now);
 
 const wallClock = (timezone: string, now: number): { hour: number; minute: number } => {
@@ -157,8 +157,9 @@ async function computeHealth(
     database = 'degraded';
   }
   const databaseLatencyMs = Math.round(performance.now() - start);
-  const workerHeartbeatAgeSeconds = workerHeartbeat
-    ? Math.max(0, Math.floor((Date.now() - new Date(workerHeartbeat).getTime()) / 1000))
+  const heartbeatMs = workerHeartbeat ? Date.parse(workerHeartbeat) : NaN;
+  const workerHeartbeatAgeSeconds = Number.isFinite(heartbeatMs)
+    ? Math.max(0, Math.floor((Date.now() - heartbeatMs) / 1000))
     : null;
   const workerStatus: HealthSnapshot['workerStatus'] = !workerEnabled
     ? 'DISABLED'
@@ -167,22 +168,31 @@ async function computeHealth(
       : workerHeartbeatAgeSeconds > 90
         ? 'STALE'
         : 'HEALTHY';
-  const deliveryQueue = (
-    await db.query<{
-      nextScheduledAttempt: string | null;
-      expiredLeases: number;
-    }>(
-      `SELECT
-         min(next_attempt) FILTER (WHERE status='QUEUED' AND next_attempt>now()) AS "nextScheduledAttempt",
-         count(*) FILTER (WHERE status='SENDING' AND locked_at<now()-interval '2 minutes')::int AS "expiredLeases"
-       FROM outbox WHERE status IN ('QUEUED','SENDING')`,
-    )
-  ).rows[0];
-  const backlog = (
-    await db.query<{ status: string; count: number }>(
-      `SELECT status,count(*)::int AS count FROM outbox WHERE status IN ('QUEUED','SENDING','FAILED','REVIEW') GROUP BY status`,
-    )
-  ).rows;
+  // The health report is secondary. A transient queue-table/query failure must
+  // not abort the whole daily digest after the day has already been claimed, or
+  // the findings would never be delivered.
+  let deliveryQueue: { nextScheduledAttempt: string | null } | undefined;
+  let backlog: { status: string; count: number }[] = [];
+  try {
+    deliveryQueue = (
+      await db.query<{
+        nextScheduledAttempt: string | null;
+        expiredLeases: number;
+      }>(
+        `SELECT
+           min(next_attempt) FILTER (WHERE status='QUEUED' AND next_attempt>now()) AS "nextScheduledAttempt",
+           count(*) FILTER (WHERE status='SENDING' AND locked_at<now()-interval '2 minutes')::int AS "expiredLeases"
+         FROM outbox WHERE status IN ('QUEUED','SENDING')`,
+      )
+    ).rows[0];
+    backlog = (
+      await db.query<{ status: string; count: number }>(
+        `SELECT status,count(*)::int AS count FROM outbox WHERE status IN ('QUEUED','SENDING','FAILED','REVIEW') GROUP BY status`,
+      )
+    ).rows;
+  } catch {
+    database = 'degraded';
+  }
   return {
     database,
     databaseLatencyMs,
