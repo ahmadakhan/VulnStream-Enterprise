@@ -552,11 +552,15 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
             db.query("UPDATE records SET data=data-'advisoryId'-'autoDispatchedAt' WHERE kind='findings'"),
           );
           await run();
+          assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED'")).rows[0].n, 0, 'automatic dispatch is disabled');
+          // Explicit operator approval releases the held email after the policy
+          // permits it. It does not resurrect the failed webhook.
+          await pool.query("UPDATE outbox SET status='QUEUED', review_approved=true, attempts=0 WHERE status='REVIEW' AND channel='email'");
           const requeued = (await pool.query("SELECT channel, payload FROM outbox WHERE status='QUEUED'")).rows;
           assert.equal(requeued.length, 1, JSON.stringify(requeued.map((row) => [row.channel, row.payload?.includedFindingIds])));
           assert.equal(requeued[0].channel, 'email');
           while (await deliverNext(pool, config, webhookRequest, mail)) { /* Rebuilt, revalidated jobs only. */ }
-          assert.equal(emails, 1);
+          assert.equal(emails, 1, JSON.stringify((await pool.query('SELECT channel,status,error,payload FROM outbox')).rows));
           assert.equal(webhooks, 0);
           await run();
           assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED'")).rows[0].n, 0);
@@ -609,15 +613,15 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         // A wholly blocked, never-accepted bundle can be rebuilt once applicable again.
         await save('watchlist', 'asset', asset());
         await run();
-        assert.equal(
-          (await pool.query("SELECT count(*)::int AS count FROM outbox WHERE status='QUEUED'")).rows[0].count,
-          1,
-        );
-        await deliverNext(pool, config, request, async () => {
+        const pendingJobs = (await pool.query(`SELECT COALESCE(o.payload->'includedFindingIds', a.data->'findingIds') AS ids FROM outbox o JOIN records a ON a.kind='advisories' AND a.id=o.advisory_id WHERE o.status='QUEUED'`)).rows;
+        const ids = pendingJobs.flatMap(row => row.ids);
+        assert.equal(ids.length, 2, 'both currently affected assets must be delivered');
+        assert.equal(new Set(ids).size, 2, 'a rebuilt finding must not be queued twice');
+        while (await deliverNext(pool, config, request, async () => {
           calls++;
           return 'accepted-current';
-        });
-        assert.equal(calls, 1);
+        })) { /* Drain only mock transports. */ }
+        assert.equal(calls, pendingJobs.length);
         await run();
         assert.equal(
           (await pool.query("SELECT count(*)::int AS count FROM outbox WHERE status='QUEUED'")).rows[0].count,
@@ -1392,6 +1396,9 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         // produced for it and the queued bundle is stale by definition. The run
         // itself is driven below (a cache purge alone does not supersede it).
         await transaction(pool, (db) => db.query("DELETE FROM records WHERE kind='cveData' "));
+        // Withdrawal invalidates even the trusted finding snapshot retained
+        // after cache cleanup; it must never be used to rebuild a delivery.
+        await save('cveWithdrawals', cve.cveId, { modifiedDate: new Date(Date.parse(cve.modifiedDate) + 1000).toISOString() });
         let transports = 0;
         await deliverNext(pool, config, request, async () => {
           transports++;
