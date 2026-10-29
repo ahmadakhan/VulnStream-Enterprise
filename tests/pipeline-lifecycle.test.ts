@@ -1488,10 +1488,11 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       await run();
       const [held] = await list<Finding>(pool, 'findings');
       assert.equal(held.notificationStatus, 'REVIEW_REQUIRED');
-      // The operator later lowers the bar, so revalidation now confirms the same
-      // finding; the digest must still ship it instead of being failed as
-      // "current applicability or confidence policy requires review".
-
+      // The operator later lowers the bar. Revalidation now confirms the finding,
+      // yet its stored notification state is still REVIEW_REQUIRED because the
+      // pipeline has not run since the change — exactly the state that used to
+      // fail the digest with "current applicability or confidence policy
+      // requires review".
       await save('settings', 'main', {
         ...DEFAULT_SETTINGS,
         timezone: 'UTC',
@@ -1523,16 +1524,25 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         true,
       );
       const job = (await pool.query('SELECT status,error FROM outbox')).rows[0];
+      console.log('DBGDJOB', JSON.stringify(job), 'calls', transports, 'held', (await list<Finding>(pool,'findings')).map(f=>f.notificationStatus));
       assert.equal(transports, 1, String(job.error));
       assert.equal(job.status, 'ACCEPTED');
 
-      // The delivery above released the finding for dispatch. Re-hold it, so the
-      // next check proves the digest exemption is what let it through.
+      // The delivery above released the finding for dispatch. Re-hold it, and
+      // put the confidence bar back up so revalidation also holds it, proving the
+      // digest exemption did not weaken the per-finding applicability gate.
       await transaction(pool, (db) =>
         db.query(
           "UPDATE records SET data=data||'{\"notificationStatus\":\"REVIEW_REQUIRED\"}'::jsonb WHERE kind='findings'",
         ),
       );
+      await save('settings', 'main', {
+        ...DEFAULT_SETTINGS,
+        timezone: 'UTC',
+        schedulerEnabled: false,
+        autoDispatchConfidenceThreshold: 100,
+        dailyDigest: { enabled: true, time: '00:00', includeHealthReport: false },
+      });
       await pool.query('DELETE FROM outbox');
       const [finding] = await list<Finding>(pool, 'findings');
       assert.equal(finding.notificationStatus, 'REVIEW_REQUIRED');
