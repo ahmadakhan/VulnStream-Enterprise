@@ -1502,7 +1502,7 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         await save('settings', 'main', {
           ...DEFAULT_SETTINGS,
           timezone,
-          dailyDigest: { enabled: true, time: '00:00', includeHealthReport: false },
+          dailyDigest: { enabled: true, time: '00:00', includeHealthReport: true },
         });
         await save('recipients', 'rec', {
           id: 'rec',
@@ -1523,6 +1523,47 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         );
         assert.match(job.payload.subject, new RegExp(expectedKey));
       }
+    });
+    await t.test('an empty daily digest is skipped, a health-only one delivers', async () => {
+      const configure = async (includeHealthReport: boolean, timezone?: string) => {
+        await reset();
+        await save('settings', 'main', {
+          ...DEFAULT_SETTINGS,
+          timezone,
+          dailyDigest: { enabled: true, time: '00:00', includeHealthReport },
+        });
+        await save('recipients', 'rec', {
+          id: 'rec',
+          name: 'Test',
+          email: 'test@example.invalid',
+          enabled: true,
+          dailyDigest: true,
+          deliveryGroup: 'SECURITY_TEAM',
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+      };
+
+      // Nothing to report and no health section: queue nothing rather than an
+      // empty advisory that the delivery worker must reject as stale.
+      await configure(false);
+      assert.equal(await runDailyDigest(pool), 0);
+      assert.equal((await pool.query('SELECT count(*)::int AS n FROM outbox')).rows[0].n, 0);
+
+      // With the health section enabled the digest has real content, so an
+      // otherwise finding-less bundle must still deliver.
+      await configure(true);
+      assert.equal(await runDailyDigest(pool), 1);
+      let transports = 0;
+      assert.equal(
+        await deliverNext(pool, config, request, async () => {
+          transports++;
+          return 'mock-accepted';
+        }),
+        true,
+      );
+      const job = (await pool.query('SELECT status,error FROM outbox')).rows[0];
+      assert.equal(transports, 1, String(job.error));
+      assert.equal(job.status, 'ACCEPTED');
     });
     await t.test('daily digest of review-held findings delivers instead of failing as stale', async () => {
       await reset();

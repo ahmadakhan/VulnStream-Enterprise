@@ -820,9 +820,12 @@ export async function deliverNext(
         );
       }
     }
-    if (advisory && !declaredFindingIds.length) {
+    if (advisory && !declaredFindingIds.length && !job.payload.digestKey) {
       // Nothing in this bundle can still be delivered; recover through the same
       // current-inventory rebuild path instead of a bare operator-facing error.
+      // A bundle keyed as a digest carries its own content revision per CVE, so
+      // it is validated below like any other payload even when it references no
+      // findings (a consolidated digest view can legitimately be a summary).
       permanent = true;
       staleAdvisory = true;
       throw new Error('Advisory has no findings; rebuild from current inventory before delivery');

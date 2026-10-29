@@ -315,6 +315,19 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
         const health = daily.includeHealthReport
           ? await computeHealth(db, settings.schedulerEnabled, worker?.heartbeat ?? null)
           : null;
+        // No findings and no health report means there is nothing to email. Skip
+        // enqueueing to avoid deliverNext rejecting an empty advisory as stale
+        // and triggering a futile pipeline rebuild every day.
+        if (!findings.length && !health) {
+          await writeEvent(db, {
+            category: 'EMAIL',
+            level: 'INFO',
+            code: 'digest.daily.no_findings',
+            message: 'Daily digest skipped: no findings in the last 24 hours and health report disabled',
+            context: { date: todayKey },
+          });
+          return 0;
+        }
         const html = appendDailySections(renderAdvisory(template, advisory), findings, health);
 
         let jobs = 0;
