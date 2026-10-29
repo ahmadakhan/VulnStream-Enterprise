@@ -1580,6 +1580,8 @@ export function createApp(
             { status: 'ACCEPTED', count: 12 },
           ],
           checkedAt: new Date().toISOString(),
+          systemUptime: '5 Days 3 Hours',
+          systemUptimePercentage: 99.98,
         };
         const severityCounts = { CRITICAL: 2, HIGH: 1, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
         const reportGenerated = new Date().toLocaleString('en-GB', {
@@ -1589,7 +1591,7 @@ export function createApp(
           hour: '2-digit',
           minute: '2-digit',
         });
-        const executiveSummary = `A total of <strong>3 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong> and <strong>1 High</strong> severity findings. Immediate review and remediation of critical vulnerabilities is recommended in accordance with established vulnerability management procedures and organizational SLAs.`;
+        const executiveSummary = `A total of <strong>3 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>0 Medium</strong>, and <strong>0 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.`;
         const parts: DailyDigestParts = {
           advisory_id: `${data.settings.advisoryPrefix}DAILY-PREVIEW`,
           advisory_title: 'Daily Vulnerability Digest — preview',

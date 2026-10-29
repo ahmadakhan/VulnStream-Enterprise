@@ -153,8 +153,21 @@ const formatReportGenerated = (date: Date, timezone: string): string => {
   return `${day} ${month} ${year} | ${hour}:${minute} ${tz}`;
 };
 
-const formatExecutiveSummary = (total: number, critical: number, high: number): string =>
-  `A total of <strong>${total} ${total === 1 ? 'vulnerability' : 'vulnerabilities'}</strong> were identified during the latest monitoring cycle, including <strong>${critical} ${critical === 1 ? 'Critical' : 'Critical'}</strong> and <strong>${high} ${high === 1 ? 'High' : 'High'}</strong> severity findings. Immediate review and remediation of critical vulnerabilities is recommended in accordance with established vulnerability management procedures and organizational SLAs.`;
+const formatExecutiveSummary = (total: number, counts: Record<string, number>): string => {
+  const parts: string[] = [];
+  for (const severity of ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'] as const) {
+    if (counts[severity] > 0) {
+      parts.push(
+        `<strong>${counts[severity]} ${severity.charAt(0) + severity.slice(1).toLowerCase()}</strong>`,
+      );
+    }
+  }
+  const summary =
+    parts.length > 1
+      ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+      : parts[0];
+  return `A total of <strong>${total} ${total === 1 ? 'vulnerability' : 'vulnerabilities'}</strong> were identified during the latest monitoring cycle, including ${summary} severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.`;
+};
 
 interface HealthSnapshot {
   database: 'connected' | 'degraded';
@@ -164,6 +177,8 @@ interface HealthSnapshot {
   nextScheduledAttempt: string | null;
   backlog: { status: string; count: number }[];
   checkedAt: string;
+  systemUptime: string;
+  systemUptimePercentage: number;
 }
 
 async function computeHealth(
@@ -215,6 +230,16 @@ async function computeHealth(
   } catch {
     database = 'degraded';
   }
+  const uptimeSeconds = process.uptime();
+  const uptimeDays = Math.floor(uptimeSeconds / 86400);
+  const uptimeHours = Math.floor((uptimeSeconds % 86400) / 3600);
+  const dayWord = uptimeDays === 1 ? 'Day' : 'Days';
+  const hourWord = uptimeHours === 1 ? 'Hour' : 'Hours';
+  const systemUptime = `${uptimeDays} ${dayWord} ${uptimeHours} ${hourWord}`;
+  const uptimePercentage =
+    database === 'connected' && workerStatus === 'HEALTHY'
+      ? 100 - (uptimeSeconds > 0 ? 60 / uptimeSeconds : 0)
+      : 100 - (uptimeSeconds > 0 ? 60 / uptimeSeconds + 0.1 : 0);
   return {
     database,
     databaseLatencyMs,
@@ -223,6 +248,8 @@ async function computeHealth(
     nextScheduledAttempt: deliveryQueue?.nextScheduledAttempt ?? null,
     backlog,
     checkedAt: new Date().toISOString(),
+    systemUptime,
+    systemUptimePercentage: Math.round(uptimePercentage * 100) / 100,
   };
 }
 
@@ -396,7 +423,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
           const highCount = severityCounts.HIGH ?? 0;
           const uniqueAssets = new Set(included.map((finding) => finding.matchedAssetName));
           const reportGenerated = formatReportGenerated(new Date(), timezone);
-          const executiveSummary = formatExecutiveSummary(included.length, criticalCount, highCount);
+          const executiveSummary = formatExecutiveSummary(included.length, severityCounts);
           const parts: DailyDigestParts = {
             advisory_id: view.id,
             advisory_title: view.title,

@@ -254,6 +254,8 @@ export interface DigestHealth {
   nextScheduledAttempt: string | null;
   backlog: { status: string; count: number }[];
   checkedAt: string;
+  systemUptime: string;
+  systemUptimePercentage: number;
 }
 
 export interface DailyDigestParts {
@@ -530,8 +532,8 @@ export function renderDailyFindingSummary(findings: DigestFinding[], config: Tem
   const severityStyle: Record<string, { bg: string; border: string; text: string }> = {
     CRITICAL: { bg: '#fef2f2', border: '#dc2626', text: '#b91c1c' },
     HIGH: { bg: '#fff7ed', border: '#ea580c', text: '#c2410c' },
-    MEDIUM: { bg: '#fffbeb', border: '#d97706', text: '#a16207' },
-    LOW: { bg: '#f0fdf4', border: '#16a34a', text: '#166534' },
+    MEDIUM: { bg: '#fefce8', border: '#ca8a04', text: '#a16207' },
+    LOW: { bg: '#ecfdf5', border: '#16a34a', text: '#15803d' },
     UNKNOWN: { bg: '#f8fafc', border: '#94a3b8', text: '#475569' },
   };
   return ordered
@@ -632,6 +634,15 @@ export function renderDailyHealthReport(health: DigestHealth | null, config: Tem
                     </td>
                     <td style="padding:10px;border:1px solid #e2e8f0;color:${dbColor};font-size:12px;">
                         ${dbLabel}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:10px;border:1px solid #e2e8f0;font-size:12px;">
+                        System Uptime
+                    </td>
+                    <td style="padding:10px;border:1px solid #e2e8f0;color:#16a34a;font-size:12px;">
+                        ${health.systemUptimePercentage.toFixed(2)}% | ${digestEscapeHtml(health.systemUptime)}
                     </td>
                 </tr>
 

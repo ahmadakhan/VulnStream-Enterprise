@@ -15,6 +15,8 @@ const SAMPLE_FINDINGS: DigestFinding[] = [
   { cveId: 'CVE-2026-0001', severity: 'CRITICAL', assetName: 'edge-router-01', vendor: 'VendorX' },
   { cveId: 'CVE-2026-0002', severity: 'CRITICAL', assetName: 'auth-service' },
   { cveId: 'CVE-2026-0003', severity: 'HIGH', assetName: 'portal-web' },
+  { cveId: 'CVE-2026-0004', severity: 'MEDIUM', assetName: 'internal-api' },
+  { cveId: 'CVE-2026-0005', severity: 'LOW', assetName: 'monitoring-agent' },
 ];
 
 const SAMPLE_HEALTH: DigestHealth = {
@@ -28,6 +30,8 @@ const SAMPLE_HEALTH: DigestHealth = {
     { status: 'ACCEPTED', count: 12 },
   ],
   checkedAt: '2026-10-29T08:00:00.000Z',
+  systemUptime: '187 Days 14 Hours',
+  systemUptimePercentage: 99.98,
 };
 
 export const DailyDigestView: React.FC = () => {
@@ -56,7 +60,8 @@ export const DailyDigestView: React.FC = () => {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-    }),
+      timeZoneName: 'shortOffset',
+    }).replace(',', ' |'),
   ).current;
   const [iframeHeight, setIframeHeight] = useState<number>(880);
   const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
@@ -122,8 +127,8 @@ export const DailyDigestView: React.FC = () => {
       .replace(/{{finding_count}}/g, String(SAMPLE_FINDINGS.length))
       .replace(/{{critical_count}}/g, '2')
       .replace(/{{high_count}}/g, '1')
-      .replace(/{{asset_count}}/g, '3')
-      .replace(/{{executive_summary}}/g, 'A total of <strong>3 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong> and <strong>1 High</strong> severity findings. Immediate review and remediation of critical vulnerabilities is recommended in accordance with established vulnerability management procedures and organizational SLAs.')
+      .replace(/{{asset_count}}/g, '5')
+      .replace(/{{executive_summary}}/g, 'A total of <strong>5 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>1 Medium</strong>, and <strong>1 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.')
       .replace(/{{findings_summary}}/g, findingsSummary)
       .replace(/{{health_report}}/g, healthReport);
 

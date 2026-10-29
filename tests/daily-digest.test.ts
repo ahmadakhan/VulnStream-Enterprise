@@ -14,6 +14,8 @@ const FINDINGS: DigestFinding[] = [
   { cveId: 'CVE-2026-0001', severity: 'CRITICAL', assetName: 'edge-router-01', vendor: 'VendorX' },
   { cveId: 'CVE-2026-0002', severity: 'CRITICAL', assetName: 'auth-service' },
   { cveId: 'CVE-2026-0003', severity: 'HIGH', assetName: 'portal-web' },
+  { cveId: 'CVE-2026-0004', severity: 'MEDIUM', assetName: 'internal-api' },
+  { cveId: 'CVE-2026-0005', severity: 'LOW', assetName: 'monitoring-agent' },
 ];
 
 const HEALTH: DigestHealth = {
@@ -27,6 +29,8 @@ const HEALTH: DigestHealth = {
     { status: 'ACCEPTED', count: 12 },
   ],
   checkedAt: '2026-10-29T08:00:00.000Z',
+  systemUptime: '187 Days 14 Hours',
+  systemUptimePercentage: 99.98,
 };
 
 const PARTS: DailyDigestParts = {
@@ -35,15 +39,15 @@ const PARTS: DailyDigestParts = {
   dispatch_date: '2026-10-29T10:00:00.000Z',
   severity: 'HIGH',
   finding_count: FINDINGS.length,
-  severity_counts: '2 critical, 1 high',
+  severity_counts: '2 critical, 1 high, 1 medium, 1 low',
   findings_summary: renderDailyFindingSummary(FINDINGS, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
   health_report: renderDailyHealthReport(HEALTH, DEFAULT_DAILY_DIGEST_CUSTOMIZATION),
   recipient_name: 'Team',
   critical_count: 2,
   high_count: 1,
-  asset_count: 3,
+  asset_count: 5,
   executive_summary:
-    'A total of <strong>3 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong> and <strong>1 High</strong> severity findings. Immediate review and remediation of critical vulnerabilities is recommended in accordance with established vulnerability management procedures and organizational SLAs.',
+    'A total of <strong>5 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>1 Medium</strong>, and <strong>1 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.',
   report_generated: '29 October 2026 | 22:48 GMT+4',
 };
 
@@ -62,6 +66,8 @@ test('renderDailyFindingSummary returns HTML containing each finding CVE', () =>
   assert.ok(html.length > 0);
   assert.ok(html.includes('CVE-2026-0001'));
   assert.ok(html.includes('CVE-2026-0003'));
+  assert.ok(html.includes('CVE-2026-0004'));
+  assert.ok(html.includes('CVE-2026-0005'));
 });
 
 test('renderDailyFindingSummary reports "no findings" when the list is empty', () => {
@@ -73,9 +79,13 @@ test('renderDailyFindingSummary groups findings by severity with count headers',
   const html = renderDailyFindingSummary(FINDINGS, DEFAULT_DAILY_DIGEST_CUSTOMIZATION);
   assert.ok(html.includes('CRITICAL (2)'));
   assert.ok(html.includes('HIGH (1)'));
+  assert.ok(html.includes('MEDIUM (1)'));
+  assert.ok(html.includes('LOW (1)'));
   assert.ok(html.includes('edge-router-01 (VendorX)'));
   assert.ok(html.includes('auth-service'));
   assert.ok(html.includes('portal-web'));
+  assert.ok(html.includes('internal-api'));
+  assert.ok(html.includes('monitoring-agent'));
 });
 
 test('renderDailyHealthReport returns HTML containing the database status', () => {
@@ -110,19 +120,29 @@ test('renderDailyDigest embeds the findings summary and the health report', () =
 
 test('renderDailyDigest populates KPI counts exactly', () => {
   const html = renderDailyDigest(DEFAULT_DAILY_DIGEST_CUSTOMIZATION, PARTS);
-  assert.ok(html.includes('Total Findings:</strong> 3'));
+  assert.ok(html.includes('Total Findings:</strong> 5'));
   assert.ok(html.includes('Critical:</strong> 2'));
   assert.ok(html.includes('High:</strong> 1'));
   assert.ok(html.includes('ASSETS'));
-  assert.ok(html.includes('>3<'), 'asset count KPI shows 3');
+  assert.ok(html.includes('>5<'), 'asset count KPI shows 5');
 });
 
 test('renderDailyDigest embeds executive summary and report generated date', () => {
   const html = renderDailyDigest(DEFAULT_DAILY_DIGEST_CUSTOMIZATION, PARTS);
   assert.ok(html.includes('Report Generated: 29 October 2026 | 22:48 GMT+4'));
   assert.ok(html.includes('Vulnerability Overview'));
-  assert.ok(html.includes('<strong>3 vulnerabilities</strong>'));
+  assert.ok(html.includes('<strong>5 vulnerabilities</strong>'));
   assert.ok(html.includes('<strong>2 Critical</strong>'));
+  assert.ok(html.includes('<strong>1 High</strong>'));
+  assert.ok(html.includes('<strong>1 Medium</strong>'));
+  assert.ok(html.includes('<strong>1 Low</strong>'));
+});
+
+test('renderDailyHealthReport renders System Uptime row', () => {
+  const html = renderDailyHealthReport(HEALTH, DEFAULT_DAILY_DIGEST_CUSTOMIZATION);
+  assert.ok(html.includes('System Uptime'));
+  assert.ok(html.includes('99.98%'));
+  assert.ok(html.includes('187 Days 14 Hours'));
 });
 
 test('renderDailyDigest contains no leftover template placeholders', () => {
