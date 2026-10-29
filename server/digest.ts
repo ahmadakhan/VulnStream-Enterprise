@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import { DEFAULT_TEMPLATE_CUSTOMIZATION, compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
+import { formatAdvisoryId } from '../src/utils/executionName.ts';
 import type { Advisory, AppSettings, Finding, TemplateCustomization } from '../src/types/index.ts';
 import {
   get,
@@ -110,7 +110,7 @@ const buildDigestAdvisory = (findings: Finding[], settings: AppSettings): Adviso
   const cveIds = Array.from(new Set(findings.map((finding) => finding.cveId))).sort();
   const rank = ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
   return {
-    id: settings.advisoryPrefix + randomUUID(),
+    id: formatAdvisoryId(settings.advisoryPrefix),
     title: `Vulnerability digest: ${cveIds.slice(0, 3).join(', ')}${cveIds.length > 3 ? ` (+${cveIds.length - 3} more)` : ''}`,
     severity: findings.reduce(
       (severity, finding) =>

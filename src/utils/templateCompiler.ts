@@ -102,12 +102,12 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
 <!--[if mso]><table role="presentation" width="680" align="center"><tr><td><![endif]-->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;max-width:680px;background:${config.cardBg};border:1px ${config.borderStyle} #cbd5e1;border-radius:${config.borderRadius};">
 ${classificationBanner}
-<tr><td class="section" style="padding:32px;background:${config.headerBg};border-top:4px solid ${config.accentColor};">
-<p style="margin:0 0 20px;color:${headerMuted};font-size:11px;line-height:18px;font-weight:700;letter-spacing:2px;">VULNSTREAM / THREAT INTELLIGENCE</p>
-<p style="margin:0 0 12px;"><span style="display:inline-block;padding:5px 10px;background:#ffffff;color:#0f172a;font-size:11px;line-height:16px;letter-spacing:1px;font-weight:700;border-radius:4px;">{{severity}} PRIORITY</span></p>
-<h1 class="advisory-title" style="margin:0 0 16px;font-size:28px;line-height:36px;font-weight:700;letter-spacing:-.5px;color:${headerText};">{{advisory_title}}</h1>
-<p style="margin:0;font-size:12px;line-height:20px;color:${headerMuted};">{{advisory_id}}<br>Generated {{dispatch_date}}</p>
-</td></tr>
+ <tr><td class="section" style="padding:20px 32px;background:${config.headerBg};border-top:4px solid ${config.accentColor};">
+ <p style="margin:0 0 12px;color:${headerMuted};font-size:10px;line-height:14px;font-weight:700;letter-spacing:2px;">VULNSTREAM / THREAT INTELLIGENCE</p>
+ <p style="margin:0 0 6px;"><span style="display:inline-block;padding:4px 10px;background:#ffffff;color:#0f172a;font-size:10px;line-height:14px;letter-spacing:1px;font-weight:700;border-radius:4px;">{{severity}}</span></p>
+ <h1 class="advisory-title" style="margin:0 0 8px;font-size:24px;line-height:30px;font-weight:700;letter-spacing:-.25px;color:${headerText};">{{advisory_title}}</h1>
+ <p style="margin:0;font-size:11px;line-height:18px;color:${headerMuted};">{{advisory_id}}<br>Date: {{dispatch_date}}</p>
+ </td></tr>
 <tr><td class="section" style="padding:24px 32px;font-size:14px;line-height:24px;color:${config.fontColor};">
 ${stampHtml}
 <p>​​​​​​​​<br/></p>
@@ -320,12 +320,12 @@ export function compileDailyDigestTemplate(config: TemplateCustomization): strin
 <!--[if mso]><table role="presentation" width="680" align="center"><tr><td><![endif]-->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;max-width:680px;background:${config.cardBg};border:1px ${config.borderStyle} #cbd5e1;border-radius:${config.borderRadius};">
 ${classificationBanner}
-<tr><td class="section" style="padding:32px;background:${config.headerBg};border-top:4px solid ${config.accentColor};">
-<p style="margin:0 0 20px;color:${headerMuted};font-size:11px;line-height:18px;font-weight:700;letter-spacing:2px;">VULNSTREAM / THREAT INTELLIGENCE</p>
-<p style="margin:0 0 12px;"><span style="display:inline-block;padding:5px 10px;background:#ffffff;color:#0f172a;font-size:11px;line-height:16px;letter-spacing:1px;font-weight:700;border-radius:4px;">{{severity}} PRIORITY</span></p>
-<h1 class="digest-title" style="margin:0 0 16px;font-size:26px;line-height:34px;font-weight:700;letter-spacing:-.5px;color:${headerText};">Daily Vulnerability Digest</h1>
-<p style="margin:0;font-size:12px;line-height:20px;color:${headerMuted};">{{advisory_id}}<br>Generated {{dispatch_date}}</p>
-</td></tr>
+ <tr><td class="section" style="padding:20px 32px;background:${config.headerBg};border-top:4px solid ${config.accentColor};">
+ <p style="margin:0 0 12px;color:${headerMuted};font-size:10px;line-height:14px;font-weight:700;letter-spacing:2px;">VULNSTREAM / THREAT INTELLIGENCE</p>
+ <p style="margin:0 0 6px;"><span style="display:inline-block;padding:4px 10px;background:#ffffff;color:#0f172a;font-size:10px;line-height:14px;letter-spacing:1px;font-weight:700;border-radius:4px;">{{severity}}</span></p>
+ <h1 class="digest-title" style="margin:0 0 8px;font-size:24px;line-height:30px;font-weight:700;letter-spacing:-.25px;color:${headerText};">Daily Vulnerability Digest</h1>
+ <p style="margin:0;font-size:11px;line-height:18px;color:${headerMuted};">{{advisory_id}}<br>Date: {{dispatch_date}}</p>
+ </td></tr>
 <tr><td class="section" style="padding:28px 32px 24px;font-size:14px;line-height:24px;color:${config.fontColor};">
 ${stampHtml}
 <h2 style="margin:0 0 12px;color:${config.headingColor};font-size:16px;line-height:24px;font-weight:700;">Findings at a glance</h2>

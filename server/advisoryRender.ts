@@ -30,10 +30,12 @@ export function renderAdvisory(template: string, advisory: Advisory): string {
     severity: advisory.severity,
     advisory_id: advisory.id,
     advisory_title: advisory.title,
-    dispatch_date: new Date().toLocaleDateString('en-GB', {
+    dispatch_date: new Date().toLocaleString('en-GB', {
       day: 'numeric',
       month: 'long',
       year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
     }),
     executive_summary: advisory.executiveSummary,
     cve_ids: advisory.cveIds.join(', '),

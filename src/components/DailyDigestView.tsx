@@ -50,7 +50,15 @@ export const DailyDigestView: React.FC = () => {
 
   // Enterprise Live Rendering & Scroll Management
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const previewDate = useRef(new Date().toUTCString()).current;
+  const previewDate = useRef(
+    new Date().toLocaleString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+  ).current;
   const [iframeHeight, setIframeHeight] = useState<number>(880);
   const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
   const [zoomLevel, setZoomLevel] = useState<number>(100);

@@ -1,6 +1,6 @@
 import { describeError, writeEvent } from './events';
 import { mergeArticles, matchIntelligence } from '../src/utils/intelligenceMatcher';
-import { formatExecutionName } from '../src/utils/executionName';
+import { formatExecutionName, formatAdvisoryId } from '../src/utils/executionName';
 import type pg from 'pg';
 import { randomUUID, createHash } from 'node:crypto';
 import {
@@ -363,7 +363,7 @@ export async function regroupStaleAdvisory(
     const isDigest = Boolean(jobs[0].payload.digestKey) && jobs.every((job) => job.payload.digestKey === jobs[0].payload.digestKey);
     const replacement: Advisory = {
       ...currentAdvisoryView(advisory, [...new Map(regroup.flatMap(job => evidence.get(job.id)!.findings.map(f => [f.id, f] as const))).values()]),
-      id: settings.advisoryPrefix + randomUUID(),
+      id: formatAdvisoryId(settings.advisoryPrefix),
       createdDate: new Date().toISOString(),
       deliveryStatus: 'PENDING',
     };
@@ -1322,7 +1322,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
         const cveIds = Array.from(new Set(batch.map((finding) => finding.cveId))).sort();
         const rank = ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
         return {
-          id: settings.advisoryPrefix + randomUUID(),
+          id: formatAdvisoryId(settings.advisoryPrefix),
           title: `Vulnerability ${isDigestBatch ? 'digest' : 'notice'}: ${cveIds.slice(0, 3).join(', ')}${cveIds.length > 3 ? ` (+${cveIds.length - 3} more)` : ''}`,
           severity: batch.reduce(
             (s, f) => (rank.indexOf(f.cve.cvss.severity) > rank.indexOf(s) ? f.cve.cvss.severity : s),

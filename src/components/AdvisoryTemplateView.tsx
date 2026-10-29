@@ -26,7 +26,20 @@ export const AdvisoryTemplateView: React.FC = () => {
   // Enterprise Live Rendering & Scroll Management
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const previewDate = useRef(
-    new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
+    new Date().toLocaleString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+  ).current;
+  const previewId = useRef(
+    `${settings.advisoryPrefix}${new Date().toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).replace(new RegExp(' ', 'g'), '')}-PREVIEW`,
   ).current;
   const [iframeHeight, setIframeHeight] = useState<number>(880);
   const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
@@ -100,7 +113,7 @@ export const AdvisoryTemplateView: React.FC = () => {
   const getRenderedHtml = () =>
     advisoryTemplate
       .replace(/{{severity}}/g, 'HIGH')
-      .replace(/{{advisory_id}}/g, `${settings.advisoryPrefix}PREVIEW-EXAMPLE`)
+      .replace(/{{advisory_id}}/g, previewId)
       .replace(/{{advisory_title}}/g, 'Example advisory — template preview only')
       .replace(/{{dispatch_date}}/g, previewDate)
       .replace(
