@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ingestionWindow, SYNC_OVERLAP_MS } from '../server/ingestionState';
+import { ingestionWindow, SYNC_OVERLAP_MS, OPENCVE_MAX_WINDOW_HOURS } from '../server/ingestionState';
 import { ingestFeed } from '../server/ingestion';
 import { MITRE_DELTA_URL } from '../server/mitre';
 import { loadConfig } from '../server/config.ts';
@@ -39,6 +39,14 @@ test('bootstrap is bounded and checkpoints catch up without gaps in bounded dail
   assert.equal(window.end.getTime() - window.start.getTime(), 24 * 3600000);
   assert.equal(window.hasMore, true);
   assert.equal(ingestionWindow(24, { cursor: new Date(now + 3600000).toISOString() }, now).incremental, false);
+});
+test('OpenCVE uses a reduced incremental window cap to stay under the 500-CVE limit', () => {
+  const now = Date.parse('2026-10-22T00:00:00Z');
+  const checkpoint = now - 72 * 3600000;
+  const window = ingestionWindow(2880, { cursor: new Date(checkpoint).toISOString() }, now, OPENCVE_MAX_WINDOW_HOURS);
+  assert.equal(window.start.getTime(), checkpoint - SYNC_OVERLAP_MS);
+  assert.equal(window.end.getTime() - window.start.getTime(), OPENCVE_MAX_WINDOW_HOURS * 3600000);
+  assert.equal(window.incremental, true);
 });
 test('NVD requests only changes since its checkpoint and reports the frozen end watermark', async () => {
   const cursor = new Date(Date.now() - 3600000).toISOString();
@@ -107,6 +115,20 @@ test('OpenCVE lists changed records but does not fetch unchanged details within 
   const second = await ingestFeed(source, 24, request, config, sleep, [], undefined, first.syncState);
   assert.equal(details, 1);
   assert.equal(second.count, 0);
+});
+test('OpenCVE uses a reduced 3-hour incremental window to stay under the 500-CVE cap', async () => {
+  const source = { ...feed('OPENCVE_API'), authType: 'BEARER' as const, authSecretKey: encrypt('test-token', config.ENCRYPTION_KEY, 'feed:source') };
+  const cursorDate = new Date(Date.now() - 60000);
+  const date = new Date(Date.now() - 30000).toISOString();
+  const request = async (raw: string) => {
+    const url = new URL(raw);
+    if (url.pathname.endsWith('/cves')) {
+      return response({ count: 1, next: null, results: [{ cve_id: 'CVE-2026-98001', updated_at: date }] });
+    }
+    return response({ cve_id: 'CVE-2026-98001', created_at: date, updated_at: date, description: 'Example vulnerability' });
+  };
+  const result = await ingestFeed(source, 2880, request, config, sleep, [], undefined, { cursor: cursorDate.toISOString() });
+  assert.equal(result.count, 1);
 });
 test('EPSS reuses recent scores, queries newly matching CVEs, and refreshes on expiry', async () => {
   let calls = 0;

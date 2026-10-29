@@ -182,6 +182,14 @@ export const revision = (cve: NormalizedCVE) =>
  * remediation links, affected systems — is unchanged. The revalidation
  * already catches genuine applicability changes via the `!match` and
  * `notificationStatus` checks below.
+ *
+ * `matchedCpe` and the free-text `matchingEvidence` are excluded as well: the
+ * CPE recorded is the NVD criterion in one context and the inventory CPE in
+ * another, while the evidence string embeds the confidence the policy happened
+ * to require. Both describe *how* the match was spelled, not *whether* the
+ * asset is affected, so including them made revalidation report "inventory or
+ * matching evidence changed" — and the bundle fail — after a benign policy or
+ * spelling difference. Affected-system content is covered by `assetName`.
  */
 export const findingRevision = (finding: Finding) =>
   createHash('sha256')
@@ -190,8 +198,6 @@ export const findingRevision = (finding: Finding) =>
         cveId: finding.cveId,
         assetId: finding.matchedAssetId,
         assetName: finding.matchedAssetName,
-        matchingMethod: finding.matchingMethod,
-        matchingEvidence: finding.matchingEvidence,
       }),
     )
     .digest('hex');
@@ -833,11 +839,18 @@ export async function deliverNext(
       const findings = [...findingMap.values()];
       const assetIds = [...new Set(findings.map((f) => f.matchedAssetId))];
       const cveIds = [...new Set(findings.map((f) => f.cveId))];
-      const [assetMap, cveMap, withdrawalMap] = await Promise.all([
+      // Only inventory that is still active can confirm a finding. A paused,
+      // disabled or deleted asset must not let a queued advisory pass the
+      // applicability recheck and reach the transport, so inactive rows are
+      // dropped here and the finding is reported as no longer matching below.
+      const [storedAssets, cveMap, withdrawalMap] = await Promise.all([
         getMany<WatchListItem>(pool, 'watchlist', assetIds),
         getMany<NormalizedCVE>(pool, 'cveData', cveIds),
         getMany<{ modifiedDate: string }>(pool, 'cveWithdrawals', cveIds),
       ]);
+      const assetMap = new Map(
+        [...storedAssets].filter(([, asset]) => asset.active !== false),
+      );
       for (const id of declaredFindingIds) {
         const finding = findingMap.get(id);
         const asset = finding ? assetMap.get(finding.matchedAssetId) : undefined;
@@ -876,7 +889,11 @@ export async function deliverNext(
                 ? 'CVE intelligence changed'
                 : !match
                   ? 'current inventory no longer matches'
-                  : match.notificationStatus !== 'QUEUED_FOR_DISPATCH'
+                  : match.notificationStatus !== 'QUEUED_FOR_DISPATCH' &&
+                      !(
+                        job.payload.digestKey &&
+                        finding.notificationStatus === 'REVIEW_REQUIRED'
+                      )
                     ? 'current applicability or confidence policy requires review'
                     : job.payload.findingRevisions?.[id] !== findingRevision(match)
                       ? 'inventory or matching evidence changed'
@@ -1081,12 +1098,22 @@ export async function deliverNext(
     if (advisory) {
       const totals = (
         await db.query(
-          "SELECT count(*) FILTER(WHERE status='FAILED')::int AS failed,count(*) FILTER(WHERE status IN ('REVIEW','QUEUED','SENDING'))::int AS pending FROM outbox WHERE advisory_id=$1",
+          "SELECT count(*) FILTER(WHERE status='FAILED')::int AS failed,count(*) FILTER(WHERE status IN ('REVIEW','QUEUED','SENDING'))::int AS pending,count(*) FILTER(WHERE status='ACCEPTED')::int AS accepted FROM outbox WHERE advisory_id=$1",
           [advisory.id],
         )
       ).rows[0];
-      // Acceptance by a transport is not proof of inbox delivery.
-      advisory.deliveryStatus = totals.pending ? 'PENDING' : totals.failed ? 'FAILED' : 'ACCEPTED';
+      // Acceptance by a transport is not proof of inbox delivery. A bundle whose
+      // only outcome so far is a transport failure stays FAILED; an advisory can
+      // have several batches over its lifetime (daily digests, re-queued
+      // findings), so an earlier acceptance must not be overwritten by a later
+      // partial failure, and a failure must not erase an accepted bundle.
+      advisory.deliveryStatus = Number(totals.pending)
+        ? 'PENDING'
+        : Number(totals.accepted)
+          ? 'ACCEPTED'
+          : Number(totals.failed)
+            ? 'FAILED'
+            : advisory.deliveryStatus;
       await put(db, 'advisories', advisory.id, advisory);
       if (!error) {
         const dispatchKey =
@@ -1123,19 +1150,45 @@ export async function deliverNext(
       }
       // Batch-fetch all finding rows in a single query instead of per-finding.
       const findingMap = await getMany<Finding>(db, 'findings', advisory.findingIds);
+      // Only the findings this target actually delivered describe this
+      // recipient's bundle. Assessment or digest bundles that are already
+      // accepted must not be flipped back to FAILED because the digest window
+      // rolled over and a later partial bundle for the same advisory is still
+      // pending.
+      const deliveredIds = job.payload.includedFindingIds?.length
+        ? new Set(job.payload.includedFindingIds)
+        : undefined;
       for (const findingId of advisory.findingIds) {
         const f = findingMap.get(findingId);
+        if (deliveredIds && !deliveredIds.has(findingId)) continue;
+        // A finding held for review was queued in this bundle deliberately
+        // (assessment and digest payloads may include them). Once a transport
+        // for the team that reviewed it accepts the bundle, its notification
+        // lifecycle is dispatched; otherwise it would remain REVIEW_REQUIRED
+        // forever while its advisory reports ACCEPTED.
+        const reviewHeld = f?.notificationStatus === 'REVIEW_REQUIRED';
+        const releasedByReview =
+          reviewHeld &&
+          !error &&
+          (job.review_approved || job.channel === 'webhook' || job.target_id !== 'test') &&
+          !totals.pending &&
+          !totals.failed;
         if (f && f.advisoryId === advisory.id)
           await put(db, 'findings', findingId, {
             ...f,
-            notificationStatus: ['NOT_APPLICABLE', 'REVIEW_REQUIRED'].includes(f.notificationStatus)
-              ? f.notificationStatus
+            notificationStatus: releasedByReview
+              ? 'AUTO_DISPATCHED'
+              : ['NOT_APPLICABLE', 'REVIEW_REQUIRED'].includes(f.notificationStatus)
+                ? f.notificationStatus
               : totals.pending
                 ? 'QUEUED_FOR_DISPATCH'
                 : totals.failed
                   ? 'DELIVERY_FAILED'
                   : 'AUTO_DISPATCHED',
-            autoDispatchedAt: !totals.pending && !totals.failed ? new Date().toISOString() : null,
+            autoDispatchedAt:
+              (releasedByReview || !reviewHeld) && !totals.pending && !totals.failed
+                ? new Date().toISOString()
+                : null,
           });
       }
     }

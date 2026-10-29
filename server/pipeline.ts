@@ -45,7 +45,7 @@ import { ingestFeed, type IngestContext } from './ingestion';
 import { bindClusterToCve, clusterSuppressedAssets } from './correlation/clusters.ts';
 import { refreshCandidatePairs } from './versionIndex';
 import { recoveryDue, recoveryAt, shouldStartAutomaticRun } from './feedRecovery';
-import { ingestionWindow, type FeedCursor } from './ingestionState';
+import { ingestionWindow, type FeedCursor, OPENCVE_MAX_WINDOW_HOURS } from './ingestionState';
 import type { Requester } from './network';
 import type { Config } from './config';
 import { findingRevision, queueAdvisory, revision, type Job } from './delivery';
@@ -566,7 +566,8 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             const savedCursor = await get<FeedCursor>(pool, 'feedCursors', feed.id);
             const cursor = savedCursor?.fingerprint === sourceFingerprint(feed) ? savedCursor : undefined;
             if (['NVD_API', 'OPENCVE_API', 'MITRE_CVE', 'VULNCHECK_KEV'].includes(feed.type)) {
-              const window = ingestionWindow(execution!.scopeHours, cursor);
+              const maxWindow = feed.type === 'OPENCVE_API' ? OPENCVE_MAX_WINDOW_HOURS : 24;
+              const window = ingestionWindow(execution!.scopeHours, cursor, undefined, maxWindow);
               execution!.logs.push(
                 `Feed ${feed.id}: ${window.incremental ? 'incremental' : 'initial bounded'} sync ${window.start.toISOString()} to ${window.end.toISOString()}`,
               );

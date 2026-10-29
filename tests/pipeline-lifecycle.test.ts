@@ -1463,6 +1463,101 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       assert.equal(delivered.status, 'ACCEPTED');
       assert.equal(delivered.error, null);
     });
+    await t.test('daily digest of review-held findings delivers instead of failing as stale', async () => {
+      await reset();
+      // The operator set a 100% confidence bar, so every real match is held for
+      // review and its notificationStatus is REVIEW_REQUIRED.
+      await save('settings', 'main', {
+        ...DEFAULT_SETTINGS,
+        autoDispatchEnabled: false,
+        autoDispatchConfidenceThreshold: 100,
+      });
+      // No version bound: the match verifies the CPE tokens, so the held state
+      // comes only from the confidence bar.
+      const plain = vulnerability() as Partial<NormalizedCVE>;
+      delete plain.versionRange;
+      const cve: NormalizedCVE = {
+        ...plain,
+        cvss: { ...plain.cvss!, severity: 'MEDIUM', score: 5 },
+        cpeMatches: [cpe('*')],
+        cpeMatchDetails: [{ criteria: cpe('*') }],
+        cisaKev: { isKev: false },
+      } as NormalizedCVE;
+      await save('watchlist', 'asset', asset());
+      await save('cveData', cve.cveId, cve);
+      await run();
+      const [held] = await list<Finding>(pool, 'findings');
+      assert.equal(held.notificationStatus, 'REVIEW_REQUIRED');
+      // The operator later lowers the bar, so revalidation now confirms the same
+      // finding; the digest must still ship it instead of being failed as
+      // "current applicability or confidence policy requires review".
+
+      await save('settings', 'main', {
+        ...DEFAULT_SETTINGS,
+        timezone: 'UTC',
+        schedulerEnabled: false,
+        autoDispatchConfidenceThreshold: 90,
+        dailyDigest: { enabled: true, time: '00:00', includeHealthReport: false },
+      });
+      // The digest only sees findings created in the last 24 hours.
+      await transaction(pool, (db) =>
+        db.query("UPDATE records SET created_at=now() WHERE kind='findings'"),
+      );
+      await save('recipients', 'rec', {
+        id: 'rec',
+        name: 'Test',
+        email: 'test@example.invalid',
+        enabled: true,
+        dailyDigest: true,
+        deliveryGroup: 'SECURITY_TEAM',
+        subscriptionTier: 'ALL_SEVERITIES',
+      });
+      assert.equal(await runDailyDigest(pool), 1);
+
+      let transports = 0;
+      assert.equal(
+        await deliverNext(pool, config, request, async () => {
+          transports++;
+          return 'mock-accepted';
+        }),
+        true,
+      );
+      const job = (await pool.query('SELECT status,error FROM outbox')).rows[0];
+      assert.equal(transports, 1, String(job.error));
+      assert.equal(job.status, 'ACCEPTED');
+
+      // The same held finding is still refused on a non-digest bundle: the
+      // digest exemption must not weaken the per-finding applicability gate.
+      await pool.query('DELETE FROM outbox');
+      const [finding] = await list<Finding>(pool, 'findings');
+      assert.equal(finding.notificationStatus, 'REVIEW_REQUIRED');
+      const advisory: Advisory = {
+        id: 'ADV-held',
+        title: 'Held finding notice',
+        severity: 'HIGH',
+        cveIds: [finding.cveId],
+        findingIds: [finding.id],
+        createdDate: new Date().toISOString(),
+        deliveryStatus: 'PENDING',
+        recipientCount: 0,
+        executiveSummary: 'Held',
+        remediationInstructions: 'Review',
+        vendorLink: '',
+        affectedSystems: [finding.matchedAssetName],
+        isDigestBatch: false,
+      };
+      await transaction(pool, (db) => queueAdvisory(db, advisory, [finding]));
+      const before = transports;
+      await deliverNext(pool, config, request, async () => {
+        transports++;
+        return 'must-not-send';
+      });
+      const refused = (await pool.query('SELECT status,error FROM outbox')).rows[0];
+      console.log('DBGREFUSED', JSON.stringify(refused), before, transports);
+      assert.equal(transports, before, 'a review-held finding must not reach the transport');
+      assert.equal(refused.status, 'FAILED');
+      assert.match(refused.error, /requires review|no longer applicable/);
+    });
     await t.test('NVD withdrawals invalidate cached findings and block older feed resurrection', async () => {
       await reset();
       await save('watchlist', 'asset', asset());

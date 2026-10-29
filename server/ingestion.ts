@@ -1,6 +1,6 @@
 import type { ThreatFeed, NormalizedCVE, IntelligenceArticle } from '../src/types/index.ts';
 import { ingestMitre } from './mitre';
-import { ingestionWindow, recentRevisions, type IngestionState } from './ingestionState';
+import { ingestionWindow, recentRevisions, type IngestionState, OPENCVE_MAX_WINDOW_HOURS } from './ingestionState';
 import { parseSyndication, RSS_MAX_BYTES, RSS_USER_AGENT } from './rss';
 import type { Requester, RequestOptions, ResponseData } from './network';
 import { cveSchema } from './validation';
@@ -473,7 +473,7 @@ export async function ingestFeed(
   }
   if (feed.type === 'OPENCVE_API') {
     if (feed.authType !== 'BEARER') throw new Error('OpenCVE API v2 requires an organization Bearer token');
-    const { start, end, hasMore } = ingestionWindow(scopeHours, context);
+    const { start, end, hasMore } = ingestionWindow(scopeHours, context, Date.now(), OPENCVE_MAX_WINDOW_HOURS);
     const revisions = recentRevisions(context.revisions || {}, start);
     const base = new URL(feed.url);
     const listUrl = new URL(base);

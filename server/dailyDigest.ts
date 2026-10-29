@@ -297,9 +297,21 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
         const findingRows = await db.query<{ data: Finding }>(
           `SELECT data FROM records WHERE kind='findings' AND created_at > now() - interval '24 hours'`,
         );
+        // A daily digest is a summary of the last 24 hours, so it may include
+        // findings that are held for review or already dispatched; only findings
+        // that lost applicability are excluded. REVIEW_REQUIRED findings are
+        // therefore included, and the delivery worker accepts a review-flagged
+        // finding inside a digest as long as it still matches current inventory.
         const findings: Finding[] = findingRows.rows
           .map((r) => r.data)
-          .filter((f) => f && f.cveId && f.notificationStatus !== 'NOT_APPLICABLE');
+          .filter(
+            (f) =>
+              f &&
+              f.cveId &&
+              !['NOT_APPLICABLE', 'SUPPRESSED_VEX_NOT_AFFECTED', 'DELIVERY_FAILED'].includes(
+                f.notificationStatus,
+              ),
+          );
 
         const template = await readTemplate(db);
         const advisory = buildDailyDigestAdvisory(findings, settings, todayKey);
