@@ -13,13 +13,11 @@ export const Sidebar: React.FC = () => {
     setActiveTab,
     mobileNavOpen,
     setMobileNavOpen,
-    summary,
+    counts,
     watchlist,
     feeds,
     logout,
   } = useApp();
-
-  const activeFindingsCount = summary.activeFindings;
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)');
@@ -43,7 +41,7 @@ export const Sidebar: React.FC = () => {
       items: [
         { id: 'dashboard' },
         { id: 'watchlist', count: watchlist.length },
-        { id: 'findings', count: activeFindingsCount },
+        { id: 'findings', count: counts.findings },
         { id: 'threat-intelligence-search' },
         { id: 'threat-analytics' },
         { id: 'cpe-matcher' },
