@@ -85,6 +85,14 @@ export function renderAdvisory(template: string, advisory: Advisory, findings?: 
       .join('\n'),
     remediation_steps: advisory.remediationInstructions,
     vendor_link: advisory.vendorLink || '',
+    remediation_link:
+      findings?.find((f) => f.cve?.remediation?.patchUrl)?.cve?.remediation?.patchUrl ||
+      advisory.vendorLink ||
+      '',
+    references_link:
+      findings?.find((f) => f.cve?.remediation?.vendorAdvisoryRef)?.cve?.remediation?.vendorAdvisoryRef ||
+      advisory.vendorLink ||
+      '',
     cve_id_links: advisory.cveIds
       .map(
         (cve: string) =>

@@ -105,21 +105,23 @@ export const AdvisoryTemplateView: React.FC = () => {
      }
    };
 
-   const tokenList = [
-     '{{severity_header_badge}}',
-     '{{severity_badge}}',
-     '{{advisory_id}}',
-     '{{advisory_title}}',
-     '{{dispatch_date}}',
-     '{{executive_summary}}',
-     '{{cve_id_links}}',
-     '{{cve_details}}',
-     '{{affected_systems_html}}',
-     '{{remediation_steps}}',
-     '{{mitigation_steps}}',
-     '{{recommended_actions}}',
-     '{{vendor_link}}',
-   ];
+    const tokenList = [
+      '{{severity_header_badge}}',
+      '{{severity_badge}}',
+      '{{advisory_id}}',
+      '{{advisory_title}}',
+      '{{dispatch_date}}',
+      '{{executive_summary}}',
+      '{{cve_id_links}}',
+      '{{cve_details}}',
+      '{{affected_systems_html}}',
+      '{{remediation_steps}}',
+      '{{remediation_link}}',
+      '{{mitigation_steps}}',
+      '{{references_link}}',
+      '{{vendor_link}}',
+      '{{recommended_actions}}',
+    ];
 
    const handleInsertToken = (token: string) => {
      const el = editorRef;
@@ -245,8 +247,10 @@ export const AdvisoryTemplateView: React.FC = () => {
         /{{recommended_actions}}/g,
         '<ul>\n<li>Inventory all affected systems identified in this advisory.</li>\n<li>Apply vendor patches immediately following your change management process.</li>\n<li>Validate backup, restore, and operational functionality after remediation.</li>\n</ul>',
       )
-       .replace(/{{vendor_link}}/g, 'https://example.com');
-  };
+        .replace(/{{vendor_link}}/g, 'https://example.com')
+        .replace(/{{remediation_link}}/g, 'https://example.com/patch-guidance')
+        .replace(/{{references_link}}/g, 'https://example.com/vendor-advisory');
+    };
 
   const handleSave = async () => {
     if (!(await saveTemplate())) return;
@@ -736,7 +740,9 @@ export const AdvisoryTemplateView: React.FC = () => {
               '{{affected_systems_html}}',
               '{{cve_details}}',
               '{{remediation_steps}}',
+              '{{remediation_link}}',
               '{{mitigation_steps}}',
+              '{{references_link}}',
               '{{recommended_actions}}',
               '{{vendor_link}}',
             ].map((token) => (

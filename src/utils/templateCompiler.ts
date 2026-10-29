@@ -259,7 +259,7 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
                         </div>
 
                         <p style="margin:12px 0 0;">
-                            <a href="{{vendor_link}}" target="_blank">
+                            <a href="{{remediation_link}}" target="_blank">
                                 View Vendor Guidance
                             </a>
                         </p>
@@ -283,7 +283,7 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
                     <td style="padding:12px;border:1px solid #e2e8f0;">
                         <ul style="margin:0;padding-left:18px;">
                             <li>
-                                <a href="{{vendor_link}}" target="_blank">
+                                <a href="{{references_link}}" target="_blank">
                                     Vendor Security Advisory
                                 </a>
                             </li>

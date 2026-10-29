@@ -13,7 +13,7 @@
  * re-labelled with the subtest path so a flattened report is still diagnosable.
  */
 
-import { test as vitestTest } from 'vitest';
+import { test as vitestTest, describe as vitestDescribe, it as vitestIt, beforeAll as vitestBefore, afterAll as vitestAfter } from 'vitest';
 
 export interface NodeTestOptions {
   skip?: boolean | string;
@@ -113,5 +113,12 @@ export const test: TestApi = ((...args: TestArgs) => registerTest('run', ...args
 test.skip = (...args: TestArgs) => registerTest('skip', ...args);
 test.todo = (...args: TestArgs) => registerTest('todo', ...args);
 test.only = (...args: TestArgs) => registerTest('only', ...args);
+
+// Node:test aliases used by Mocha-style suites (describe/it/before/after).
+// Vitest maps these to vitest's describe/it/beforeAll/afterAll.
+export const describe = vitestDescribe;
+export const it = vitestIt;
+export const before = vitestBefore;
+export const after = vitestAfter;
 
 export default test;
