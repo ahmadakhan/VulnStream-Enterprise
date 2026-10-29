@@ -1,7 +1,7 @@
 import type pg from 'pg';
 import { get, list, put, transaction, schemaLockKey, type Db } from './db';
 import { writeEvent } from './events';
-import { enqueue, findingRevision, revision } from './delivery';
+import { enqueue, findingRevision, revision, recipientAllows } from './delivery';
 import { advisoryEmail } from './advisoryEmail';
 import { renderAdvisory } from './advisoryRender';
 import { resolveTimezone as resolveSettingsTimezone } from '../src/utils/dateTime';
@@ -79,6 +79,8 @@ async function readTemplate(db: Db): Promise<string> {
 }
 
 const severityRank = (s: Advisory['severity']) => SEVERITY_RANK.indexOf(s);
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 
 const buildDailyDigestAdvisory = (
   findings: Finding[],
@@ -207,7 +209,7 @@ const renderFindingsSummary = (findings: Finding[]): string => {
             .slice(0, 25)
             .map(
               (f) =>
-                `<li style="margin-bottom:2px"><strong>${f.cveId}</strong> — ${f.matchedAssetName}${f.matchedAssetVendor ? ` (${f.matchedAssetVendor})` : ''}</li>`,
+                `<li style="margin-bottom:2px"><strong>${escapeHtml(f.cveId)}</strong> — ${escapeHtml(f.matchedAssetName)}${f.matchedAssetVendor ? ` (${escapeHtml(f.matchedAssetVendor)})` : ''}</li>`,
             )
             .join('')}
           ${bySeverity[s].length > 25 ? `<li style="color:#71717a">…and ${bySeverity[s].length - 25} more</li>` : ''}
@@ -317,6 +319,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
             (f) =>
               f &&
               f.cveId &&
+              !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status) &&
               ![
                 'NOT_APPLICABLE',
                 'SUPPRESSED_VEX_NOT_AFFECTED',
@@ -347,23 +350,25 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
           });
           return 0;
         }
-        const html = appendDailySections(renderAdvisory(template, advisory), findings, health);
-
         let jobs = 0;
         for (const recipient of recipients) {
+          const included = findings.filter(finding => recipientAllows(recipient, finding));
+          if (!included.length && !health) continue;
+          const view = buildDailyDigestAdvisory(included, settings, todayKey);
+          const html = appendDailySections(renderAdvisory(template, view), included, health);
           const payload = {
-            ...advisoryEmail(advisory, html),
-            cveIds: advisory.cveIds,
+            ...advisoryEmail(view, html),
+            cveIds: view.cveIds,
             recipientEmail: recipient.email,
-            includedFindingIds: findings.map((finding) => finding.id),
+            includedFindingIds: included.map((finding) => finding.id),
             // Content-revision evidence, so the delivery worker can prove the
             // queued body still describes the current CVE cache instead of
             // rejecting it as a revision-less legacy payload.
             findingRevisions: Object.fromEntries(
-              findings.map((finding) => [finding.id, findingRevision(finding)]),
+              included.map((finding) => [finding.id, findingRevision(finding)]),
             ),
             cveRevisions: Object.fromEntries(
-              findings.map((finding) => [finding.cveId, revision(finding.cve)]),
+              included.map((finding) => [finding.cveId, revision(finding.cve)]),
             ),
             digestKey: `daily:${todayKey}`,
           };
@@ -375,6 +380,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
               advisory.id,
               payload,
               `daily:${todayKey}:email:${recipient.id}`,
+              recipient.deliveryGroup === 'EVERYONE' ? 'REVIEW' : 'QUEUED',
             )
           )
             jobs++;

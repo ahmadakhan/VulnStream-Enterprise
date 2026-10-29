@@ -1543,7 +1543,7 @@ export function createApp(
       const id = outboxId(req.params.id);
       await transaction(pool, async (db) => {
         const row = await db.query(
-          "UPDATE outbox SET status='QUEUED',review_approved=true,next_attempt=now(),error=NULL,updated_at=now() WHERE id=$1 AND channel='email' AND status='REVIEW' RETURNING advisory_id",
+          "UPDATE outbox SET status='QUEUED',review_approved=true,attempts=0,next_attempt=now(),error=NULL,locked_at=NULL,lock_token=NULL,updated_at=now() WHERE id=$1 AND channel='email' AND status='REVIEW' RETURNING advisory_id",
           [id],
         );
         if (!row.rowCount) throw new HttpError(409, 'Only notifications awaiting review can be approved');
@@ -1552,6 +1552,7 @@ export function createApp(
           await put(db, 'emailLogs', id, {
             ...log,
             status: 'QUEUED',
+            attemptCount: 0,
             nextRetryTime: new Date().toISOString(),
             errorMessage: undefined,
           });

@@ -773,14 +773,14 @@ export async function deliverNext(
   // job is routed to operator review instead of a permanent FAILED + rebuild.
   let holdGated = false;
   try {
-    if (!retryPolicy.enabled && job.attempts > 1 && job.channel === 'email' && !job.review_approved) {
+    if (!retryPolicy.enabled && job.attempts > 1 && job.channel === 'email') {
       permanent = true;
       throw new Error('Automatic email retry is disabled by the current settings');
     }
     // A review-held job consumes its first attempt before an operator approves
     // it. Approval is an explicit send, so it must not be blocked by a retry
     // budget of one; subsequent attempts follow the configured policy.
-    if (job.attempts > retryPolicy.maxAttempts && !job.review_approved) {
+    if (job.attempts > retryPolicy.maxAttempts) {
       permanent = true;
       throw new Error('Delivery retry budget exhausted after worker recovery');
     }
@@ -801,10 +801,8 @@ export async function deliverNext(
     // A digest job intentionally carries only the subset of the advisory that
     // this target may receive. Legacy and non-digest jobs omit these fields and
     // are validated against the whole advisory exactly as before.
-    declaredCveIds = job.payload.cveIds?.length ? job.payload.cveIds : advisory?.cveIds ?? [];
-    declaredFindingIds = job.payload.includedFindingIds?.length
-      ? job.payload.includedFindingIds
-      : advisory?.findingIds ?? [];
+    declaredCveIds = job.payload.cveIds ?? advisory?.cveIds ?? [];
+    declaredFindingIds = job.payload.includedFindingIds ?? advisory?.findingIds ?? [];
     if (advisory && declaredCveIds.some((id) => !job.payload.cveRevisions?.[id])) {
       // Jobs queued before content-revision evidence existed cannot be validated
       // against the advisory they describe. Rebuild the payload from the
@@ -815,7 +813,7 @@ export async function deliverNext(
       const { rebuildLegacyDeliveryPayload } = await import('./pipeline');
       if (await rebuildLegacyDeliveryPayload(pool, job)) {
         legacyRebuilt = true;
-        declaredCveIds = job.payload.cveIds?.length ? job.payload.cveIds : advisory.cveIds;
+        declaredCveIds = job.payload.cveIds ?? advisory.cveIds;
       }
       if (declaredCveIds.some((id) => !job.payload.cveRevisions?.[id])) {
         permanent = true;
@@ -900,11 +898,7 @@ export async function deliverNext(
                 ? 'CVE intelligence changed'
                 : !match
                   ? 'current inventory no longer matches'
-                  : match.notificationStatus !== 'QUEUED_FOR_DISPATCH' &&
-                      !(
-                        job.payload.digestKey &&
-                        finding.notificationStatus === 'REVIEW_REQUIRED'
-                      )
+                  : match.notificationStatus !== 'QUEUED_FOR_DISPATCH'
                     ? (holdGated = true) &&
                       'current applicability or confidence policy requires review'
                     : job.payload.findingRevisions?.[id] !== findingRevision(match)
@@ -1194,7 +1188,7 @@ export async function deliverNext(
       // accepted must not be flipped back to FAILED because the digest window
       // rolled over and a later partial bundle for the same advisory is still
       // pending.
-      const deliveredIds = job.payload.includedFindingIds?.length
+      const deliveredIds = job.payload.includedFindingIds !== undefined
         ? new Set(job.payload.includedFindingIds)
         : undefined;
       for (const findingId of deliveredIds ?? advisory.findingIds) {
