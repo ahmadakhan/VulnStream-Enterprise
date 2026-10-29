@@ -767,6 +767,11 @@ export async function deliverNext(
   // Set when a legacy payload was rebuilt from current intelligence during this
   // attempt, so the recovery path does not rebuild the same payload twice.
   let legacyRebuilt = false;
+  // Set when the bundle is blocked by a finding that is deliberately held for
+  // review (confidence policy or unverifiable applicability) rather than one
+  // whose applicability changed. A rebuild cannot change a held verdict, so the
+  // job is routed to operator review instead of a permanent FAILED + rebuild.
+  let holdGated = false;
   try {
     if (!retryPolicy.enabled && job.attempts > 1 && job.channel === 'email' && !job.review_approved) {
       permanent = true;
@@ -781,7 +786,7 @@ export async function deliverNext(
     }
     let native: NativeDelivery | undefined;
     if (job.payload.nativeCorrelation) {
-      try { native = await validateNativeDelivery(pool,job); }
+      try { native = await validateNativeDelivery(pool, job); } // FIX: Added space after comma
       catch { permanent = true; throw new Error('Native evidence or notification policy is no longer applicable'); }
       if (native.confidence === 'MEDIUM' && !job.review_approved) {
         routeToReview = true; throw new Error('Native medium-confidence evidence requires security review');
@@ -872,7 +877,10 @@ export async function deliverNext(
                 [asset],
                 [],
                 [],
-                { ...settings, scopeHours: 0 },
+                // Fall back to the documented defaults for any setting the stored
+                // object does not carry, so revalidation applies the same policy
+                // the pipeline used instead of an implicit 90% threshold.
+                { ...DEFAULT_SETTINGS, ...settings, scopeHours: 0 },
                 'Server worker',
                 false,
                 vendorAliases,
@@ -897,7 +905,8 @@ export async function deliverNext(
                         job.payload.digestKey &&
                         finding.notificationStatus === 'REVIEW_REQUIRED'
                       )
-                    ? 'current applicability or confidence policy requires review'
+                    ? (holdGated = true) &&
+                      'current applicability or confidence policy requires review'
                     : job.payload.findingRevisions?.[id] !== findingRevision(match)
                       ? 'inventory or matching evidence changed'
                       : undefined;
@@ -908,6 +917,15 @@ export async function deliverNext(
       // Mark the bundle as stale and trigger an immediate rebuild instead of
       // surfacing this as a hard error that requires operator intervention.
       if (invalid.length) {
+        // A first-pass send nobody approved yet is held for review; an approved
+        // send that is still held keeps the stale-bundle recovery so the finding
+        // returns to the review queue rather than being re-sent silently.
+        if (holdGated && !job.review_approved && job.channel === 'email') {
+          routeToReview = true;
+          throw new Error(
+            `Some advisory findings require review: ${[...new Set(invalid)].join('; ')}.`,
+          );
+        }
         permanent = true;
         staleAdvisory = true;
         throw new Error(
@@ -1036,7 +1054,9 @@ export async function deliverNext(
         job.id,
         routeToReview ? 'REVIEW' : error ? (failed ? 'FAILED' : 'QUEUED') : 'ACCEPTED',
         next,
-        routeToReview ? null : error || null,
+        // Keep the reason on a review-routed job: the operator needs it in the
+        // review queue, and the reviewer must not have to re-derive why.
+        !routeToReview && !error ? null : error || null,
         providerId || null,
       ],
     );
@@ -1057,16 +1077,28 @@ export async function deliverNext(
     }
     if (job.channel === 'email') {
       const log = await get<EmailDeliveryLog>(db, 'emailLogs', job.id);
-      if (log)
+      if (log) {
+        // FIX: Correct sentAt logic to preserve sent timestamp on retries.
+        // Only stamp sentAt when the email is accepted; preserve the existing
+        // value on RETRYING so a provider-accepted-but-temporarily-deferred
+        // timestamp survives the retry cycle.
+        const status = routeToReview ? 'REVIEW_REQUIRED' : error ? (failed ? 'FAILED' : 'RETRYING') : 'ACCEPTED';
+        const sentAt =
+          status === 'ACCEPTED'
+            ? new Date().toISOString()
+            : status === 'RETRYING'
+              ? log.sentAt
+              : undefined;
         await put(db, 'emailLogs', job.id, {
           ...log,
           provider: emailProvider || log.provider,
-          status: routeToReview ? 'REVIEW_REQUIRED' : error ? (failed ? 'FAILED' : 'RETRYING') : 'ACCEPTED',
+          status,
           attemptCount: job.attempts,
           errorMessage: routeToReview ? undefined : error || undefined,
           nextRetryTime: routeToReview ? null : error && !failed ? next.toISOString() : null,
-          sentAt: error ? '' : new Date().toISOString(),
+          sentAt,
         });
+      }
     } else {
       const log = await get<WebhookDeliveryLog>(db, 'webhookLogs', job.id);
       if (log)
@@ -1075,7 +1107,11 @@ export async function deliverNext(
           status: error ? (failed ? 'FAILED' : 'QUEUED') : 'SUCCESS',
           statusCode,
           hmacSignature: signature,
-          sentAt: error ? '' : new Date().toISOString(),
+          // FIX: Preserve sentAt on retry (QUEUED) and null on permanent
+          // failure (FAILED), mirroring the email-log sentAt fix. The old
+          // `error ? '' : ...` cleared the timestamp on every error including
+          // retries, losing the original dispatch time.
+          sentAt: !error ? new Date().toISOString() : failed ? null : log.sentAt,
         });
       if (!error) {
         const hook = await get<WebhookEndpoint>(db, 'webhooks', job.target_id);
