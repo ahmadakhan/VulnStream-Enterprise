@@ -154,8 +154,15 @@ export function runVulnerabilityPipeline(
   productAliases: Record<string, string[]> = {},
   candidatePairs?: Map<string, Set<string>>,
   aliasEntries: readonly AliasEntry[] = [],
+  /**
+   * Reference instant for timeline filtering and finding timestamps. The
+   * production pipeline passes nothing and gets wall-clock time; tests pin it so
+   * week-scoped window assertions stay deterministic instead of drifting out of
+   * range a few days after they are written.
+   */
+  evaluatedAt: Date = new Date(),
 ): PipelineRunResult {
-  const started = new Date(),
+  const started = evaluatedAt,
     known = new Set(existing.map((f) => `${normalizeCveId(f.cveId)}:${f.matchedAssetId}`));
   const newFindings: Finding[] = [];
   let processed = 0;
@@ -435,7 +442,7 @@ export function runVulnerabilityPipeline(
     id,
     name: formatExecutionName(id),
     startTime: started.toISOString(),
-    endTime: new Date().toISOString(),
+    endTime: started.toISOString(),
     status: 'COMPLETED',
     scopeHours: settings.scopeHours,
     phases: [

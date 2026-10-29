@@ -75,7 +75,7 @@ export interface EmailAttachment {
   filename: string;
   content: Buffer;
   contentType: string;
-};
+}
 export interface EmailRetryPolicy {
   /** When false, a transient failure becomes terminal after the first attempt. */
   enabled: boolean;
@@ -103,21 +103,11 @@ export function emailRetryPolicy(settings?: Partial<AppSettings> | null): EmailR
   );
   return {
     enabled: settings?.emailRetryEnabled ?? DEFAULT_SETTINGS.emailRetryEnabled,
-    maxAttempts: boundedInt(
-      settings?.emailRetryMaxAttempts,
-      DEFAULT_SETTINGS.emailRetryMaxAttempts,
-      1,
-      20,
-    ),
+    maxAttempts: boundedInt(settings?.emailRetryMaxAttempts, DEFAULT_SETTINGS.emailRetryMaxAttempts, 1, 20),
     initialDelayMinutes,
     maxDelayMinutes: Math.max(
       initialDelayMinutes,
-      boundedInt(
-        settings?.emailRetryMaxDelayMinutes,
-        DEFAULT_SETTINGS.emailRetryMaxDelayMinutes,
-        1,
-        10080,
-      ),
+      boundedInt(settings?.emailRetryMaxDelayMinutes, DEFAULT_SETTINGS.emailRetryMaxDelayMinutes, 1, 10080),
     ),
   };
 }
@@ -134,8 +124,9 @@ export const emailRetryDelayMs = (attempt: number, policy: EmailRetryPolicy) =>
 /** Human-readable schedule stored on the delivery log for operator visibility. */
 export const emailRetrySchedule = (policy: EmailRetryPolicy) =>
   policy.enabled
-    ? Array.from({ length: policy.maxAttempts }, (_, index) =>
-        `${Math.round(emailRetryDelayMs(index + 1, policy) / 60_000)}m`,
+    ? Array.from(
+        { length: policy.maxAttempts },
+        (_, index) => `${Math.round(emailRetryDelayMs(index + 1, policy) / 60_000)}m`,
       )
     : [];
 /**
@@ -365,7 +356,7 @@ export function createMailSender(
         disableFileAccess: true,
         disableUrlAccess: true,
       })
-     : null;
+    : null;
   return async (job) => {
     const saved = (db && (await get<EmailConfiguration>(db, 'emailConfig', 'main'))) || DEFAULT_EMAIL_CONFIG;
     if (!emailIsConfigured(saved, config)) throw new Error('Email provider is not configured');
@@ -397,6 +388,8 @@ export function createMailSender(
       }
     }
     const fromEmail = saved.fromEmail || config.SMTP_FROM;
+    if (!fromEmail) throw new Error('SMTP from address is not configured');
+    const fromDomain = fromEmail.split('@').pop() || 'localhost';
     const configuredSmtpHost = saved.smtpHost;
     const usesDeploymentSmtp = saved.provider === 'SMTP' && !configuredSmtpHost;
     const smtpPassword = usesDeploymentSmtp
@@ -417,17 +410,23 @@ export function createMailSender(
           disableFileAccess: true,
           disableUrlAccess: true,
         });
-    if (!smtpTransport || !fromEmail) throw new Error('SMTP is not configured');
+    if (!smtpTransport) throw new Error('SMTP is not configured');
     const result = await smtpTransport.sendMail({
       from: { address: fromEmail, name: saved.fromName },
+      ...(saved.replyTo ? { replyTo: saved.replyTo } : {}),
       to: job.payload.recipientEmail,
       subject: job.payload.subject,
       text: job.payload.text,
       html: job.payload.html,
-       messageId: `<${job.id}@${fromEmail.split('@').pop()}>`,
-       headers: { 'X-BA-Threat-Intel-Delivery-ID': job.id },
-       ...(attachment ? { attachments: [attachment] } : {}),
-     });
+      messageId: `<${job.id}@${fromDomain}>`,
+      headers: {
+        'X-BA-Threat-Intel-Delivery-ID': job.id,
+        'Auto-Submitted': 'auto-generated',
+        'List-Unsubscribe': saved.unsubscribeUrl || `<mailto:${fromEmail}?subject=unsubscribe>`,
+        'List-Unsubscribe-Post': 'List-Unsafe',
+      },
+      ...(attachment ? { attachments: [attachment] } : {}),
+    });
     if (
       !result.accepted?.some(
         (address) => String(address).toLowerCase() === job.payload.recipientEmail?.toLowerCase(),
@@ -611,9 +610,7 @@ export async function queueDigestAdvisory(
   render?: (advisory: Advisory) => string | undefined,
   dispatchKey?: string,
 ): Promise<DigestQueueResult> {
-  const recipients = (await list<EmailRecipient>(db, 'recipients')).filter(
-    (recipient) => recipient.enabled,
-  );
+  const recipients = (await list<EmailRecipient>(db, 'recipients')).filter((recipient) => recipient.enabled);
   const hooks = (await list<WebhookEndpoint>(db, 'webhooks')).filter((hook) => hook.enabled);
 
   const recipientBatches = new Map<string, Finding[]>();
@@ -631,8 +628,7 @@ export async function queueDigestAdvisory(
   for (const batch of [...recipientBatches.values(), ...webhookBatches.values()])
     for (const finding of batch) includedIds.add(finding.id);
   const included = findings.filter((finding) => includedIds.has(finding.id));
-  if (!included.length)
-    return { advisory, jobs: 0, findingIds: [], eligible: 0 };
+  if (!included.length) return { advisory, jobs: 0, findingIds: [], eligible: 0 };
 
   const union = digestView(advisory, included);
   const contentRevision = advisoryRevision(union, included);
@@ -645,19 +641,11 @@ export async function queueDigestAdvisory(
     const recipient = recipients.find((candidate) => candidate.id === recipientId)!;
     const view = digestView(union, batch);
     const payload = {
-      ...advisoryEmail(
-        view,
-        render?.(view),
-        batch.map(findingDetail),
-      ),
+      ...advisoryEmail(view, render?.(view), batch.map(findingDetail)),
       cveIds: view.cveIds,
       includedFindingIds: batch.map((finding) => finding.id),
-      findingRevisions: Object.fromEntries(
-        batch.map((finding) => [finding.id, findingRevision(finding)]),
-      ),
-      cveRevisions: Object.fromEntries(
-        batch.map((finding) => [finding.cveId, revision(finding.cve)]),
-      ),
+      findingRevisions: Object.fromEntries(batch.map((finding) => [finding.id, findingRevision(finding)])),
+      cveRevisions: Object.fromEntries(batch.map((finding) => [finding.cveId, revision(finding.cve)])),
       digestKey: stableDispatchKey,
       recipientEmail: recipient.email,
     };
@@ -681,19 +669,11 @@ export async function queueDigestAdvisory(
   for (const [hookId, batch] of webhookBatches) {
     const view = digestView(union, batch);
     const payload = {
-      ...advisoryEmail(
-        view,
-        render?.(view),
-        batch.map(findingDetail),
-      ),
+      ...advisoryEmail(view, render?.(view), batch.map(findingDetail)),
       cveIds: view.cveIds,
       includedFindingIds: batch.map((finding) => finding.id),
-      findingRevisions: Object.fromEntries(
-        batch.map((finding) => [finding.id, findingRevision(finding)]),
-      ),
-      cveRevisions: Object.fromEntries(
-        batch.map((finding) => [finding.cveId, revision(finding.cve)]),
-      ),
+      findingRevisions: Object.fromEntries(batch.map((finding) => [finding.id, findingRevision(finding)])),
+      cveRevisions: Object.fromEntries(batch.map((finding) => [finding.cveId, revision(finding.cve)])),
       digestKey: stableDispatchKey,
     };
     if (
@@ -792,10 +772,16 @@ export async function deliverNext(
     }
     let native: NativeDelivery | undefined;
     if (job.payload.nativeCorrelation) {
-      try { native = await validateNativeDelivery(pool, job); } // FIX: Added space after comma
-      catch { permanent = true; throw new Error('Native evidence or notification policy is no longer applicable'); }
+      try {
+        native = await validateNativeDelivery(pool, job);
+      } catch {
+        // FIX: Added space after comma
+        permanent = true;
+        throw new Error('Native evidence or notification policy is no longer applicable');
+      }
       if (native.confidence === 'MEDIUM' && !job.review_approved) {
-        routeToReview = true; throw new Error('Native medium-confidence evidence requires security review');
+        routeToReview = true;
+        throw new Error('Native medium-confidence evidence requires security review');
       }
     }
     const advisory = await get<Advisory>(pool, 'advisories', job.advisory_id);
@@ -860,9 +846,7 @@ export async function deliverNext(
         getMany<NormalizedCVE>(pool, 'cveData', cveIds),
         getMany<{ modifiedDate: string }>(pool, 'cveWithdrawals', cveIds),
       ]);
-      const assetMap = new Map(
-        [...storedAssets].filter(([, asset]) => asset.active !== false),
-      );
+      const assetMap = new Map([...storedAssets].filter(([, asset]) => asset.active !== false));
       for (const id of declaredFindingIds) {
         const finding = findingMap.get(id);
         const asset = finding ? assetMap.get(finding.matchedAssetId) : undefined;
@@ -900,13 +884,14 @@ export async function deliverNext(
             ? 'a finding was resolved or dismissed'
             : cve && withdrawal && Date.parse(cve.modifiedDate) <= Date.parse(withdrawal.modifiedDate)
               ? 'a CVE was withdrawn'
-              : cve && job.payload.cveRevisions?.[cve.cveId] && job.payload.cveRevisions[cve.cveId] !== revision(cve)
+              : cve &&
+                  job.payload.cveRevisions?.[cve.cveId] &&
+                  job.payload.cveRevisions[cve.cveId] !== revision(cve)
                 ? 'CVE intelligence changed'
                 : !match
                   ? 'current inventory no longer matches'
                   : match.notificationStatus !== 'QUEUED_FOR_DISPATCH'
-                    ? (holdGated = true) &&
-                      'current applicability or confidence policy requires review'
+                    ? (holdGated = true) && 'current applicability or confidence policy requires review'
                     : job.payload.findingRevisions?.[id] !== findingRevision(match)
                       ? 'inventory or matching evidence changed'
                       : undefined;
@@ -920,11 +905,14 @@ export async function deliverNext(
         // A first-pass send nobody approved yet is held for review; an approved
         // send that is still held keeps the stale-bundle recovery so the finding
         // returns to the review queue rather than being re-sent silently.
-        if (holdGated && !currentFindings.some(finding => finding.notificationStatus === 'QUEUED_FOR_DISPATCH') && !job.review_approved && job.channel === 'email') {
+        if (
+          holdGated &&
+          !currentFindings.some((finding) => finding.notificationStatus === 'QUEUED_FOR_DISPATCH') &&
+          !job.review_approved &&
+          job.channel === 'email'
+        ) {
           routeToReview = true;
-          throw new Error(
-            `Some advisory findings require review: ${[...new Set(invalid)].join('; ')}.`,
-          );
+          throw new Error(`Some advisory findings require review: ${[...new Set(invalid)].join('; ')}.`);
         }
         permanent = true;
         staleAdvisory = true;
@@ -941,7 +929,8 @@ export async function deliverNext(
           throw new Error('Recipient removed, changed, or disabled');
         }
         if (native && rec.subscriptionTier !== 'ALL_SEVERITIES') {
-          permanent = true; throw new Error('Recipient subscription no longer permits unscored intelligence');
+          permanent = true;
+          throw new Error('Recipient subscription no longer permits unscored intelligence');
         }
         if (advisory && !currentFindings.every((finding) => recipientAllows(rec, finding))) {
           permanent = true;
@@ -962,7 +951,8 @@ export async function deliverNext(
         throw new Error('Webhook removed or disabled');
       }
       if (native && (native.confidence !== 'HIGH' || !hook.events.includes('ALL'))) {
-        permanent = true; throw new Error('Webhook subscription does not permit native intelligence');
+        permanent = true;
+        throw new Error('Webhook subscription does not permit native intelligence');
       }
       if (advisory && !currentFindings.every((finding) => webhookAllows(hook, finding))) {
         permanent = true;
@@ -1030,12 +1020,8 @@ export async function deliverNext(
     const failed =
         !!error &&
         !routeToReview &&
-        (permanent ||
-          !retryPolicy.enabled ||
-          job.attempts >= retryPolicy.maxAttempts),
-      next = new Date(
-        Math.max(retryNotBefore, Date.now() + emailRetryDelayMs(job.attempts, retryPolicy)),
-      );
+        (permanent || !retryPolicy.enabled || job.attempts >= retryPolicy.maxAttempts),
+      next = new Date(Math.max(retryNotBefore, Date.now() + emailRetryDelayMs(job.attempts, retryPolicy)));
     await db.query(
       'UPDATE outbox SET status=$2,next_attempt=$3,error=$4,provider_id=$5,locked_at=NULL,lock_token=NULL,updated_at=now() WHERE id=$1',
       [
@@ -1070,13 +1056,15 @@ export async function deliverNext(
         // Only stamp sentAt when the email is accepted; preserve the existing
         // value on RETRYING so a provider-accepted-but-temporarily-deferred
         // timestamp survives the retry cycle.
-        const status = routeToReview ? 'REVIEW_REQUIRED' : error ? (failed ? 'FAILED' : 'RETRYING') : 'ACCEPTED';
+        const status = routeToReview
+          ? 'REVIEW_REQUIRED'
+          : error
+            ? failed
+              ? 'FAILED'
+              : 'RETRYING'
+            : 'ACCEPTED';
         const sentAt =
-          status === 'ACCEPTED'
-            ? new Date().toISOString()
-            : status === 'RETRYING'
-              ? log.sentAt
-              : undefined;
+          status === 'ACCEPTED' ? new Date().toISOString() : status === 'RETRYING' ? log.sentAt : undefined;
         await put(db, 'emailLogs', job.id, {
           ...log,
           provider: emailProvider || log.provider,
@@ -1143,9 +1131,7 @@ export async function deliverNext(
             : advisory.deliveryStatus;
       await put(db, 'advisories', advisory.id, advisory);
       if (!error) {
-        const dispatchKey =
-          job.payload.digestKey ??
-          job.dedupe_key.split(':email:')[0].split(':webhook:')[0];
+        const dispatchKey = job.payload.digestKey ?? job.dedupe_key.split(':email:')[0].split(':webhook:')[0];
         const dispatchIds = declaredCveIds.map((cveId) => `${cveId}:${dispatchKey}`);
         const priorAlerts = await getMany<AlertedCVE>(db, 'alertedCves', declaredCveIds);
         const priorDispatches = await getMany(db, 'alertDispatches', dispatchIds);
@@ -1157,7 +1143,11 @@ export async function deliverNext(
           // it. Non-digest jobs retain the original content-revision key.
           const same =
             prior?.lastDispatchKey === dispatchKey || !!priorDispatches.get(`${cveId}:${dispatchKey}`);
-          await put(db, 'alertDispatches', `${cveId}:${dispatchKey}`, { cveId, dispatchKey, acceptedAt: now });
+          await put(db, 'alertDispatches', `${cveId}:${dispatchKey}`, {
+            cveId,
+            dispatchKey,
+            acceptedAt: now,
+          });
           await put(db, 'alertedCves', cveId, {
             cveId,
             firstAlertedAt: prior?.firstAlertedAt || now,
@@ -1182,9 +1172,8 @@ export async function deliverNext(
       // accepted must not be flipped back to FAILED because the digest window
       // rolled over and a later partial bundle for the same advisory is still
       // pending.
-      const deliveredIds = job.payload.includedFindingIds !== undefined
-        ? new Set(job.payload.includedFindingIds)
-        : undefined;
+      const deliveredIds =
+        job.payload.includedFindingIds !== undefined ? new Set(job.payload.includedFindingIds) : undefined;
       for (const findingId of deliveredIds ?? advisory.findingIds) {
         const f = findingMap.get(findingId);
         if (!f) continue;
@@ -1211,11 +1200,11 @@ export async function deliverNext(
               ? 'AUTO_DISPATCHED'
               : ['NOT_APPLICABLE', 'REVIEW_REQUIRED'].includes(f.notificationStatus)
                 ? f.notificationStatus
-              : totals.pending
-                ? 'QUEUED_FOR_DISPATCH'
-                : totals.failed
-                  ? 'DELIVERY_FAILED'
-                  : 'AUTO_DISPATCHED',
+                : totals.pending
+                  ? 'QUEUED_FOR_DISPATCH'
+                  : totals.failed
+                    ? 'DELIVERY_FAILED'
+                    : 'AUTO_DISPATCHED',
             autoDispatchedAt:
               (releasedByReview || !reviewHeld) && !totals.pending && !totals.failed
                 ? new Date().toISOString()
@@ -1268,7 +1257,9 @@ export async function deliverNext(
       await rebuildFromCurrentInventory(pool, job.advisory_id, error, { payloadRebuilt: legacyRebuilt });
     } catch (rebuildError) {
       await writeEvent(pool, {
-        category: 'EMAIL', level: 'ERROR', code: 'delivery.rebuild_failed',
+        category: 'EMAIL',
+        level: 'ERROR',
+        code: 'delivery.rebuild_failed',
         message: 'Stale delivery was retained as failed; rebuilding could not complete',
         context: { jobId: job.id, advisoryId: job.advisory_id, ...describeError(rebuildError) },
       });

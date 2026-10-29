@@ -6,10 +6,7 @@ export const idSchema = z
   .string()
   .min(1)
   .max(150)
-  .refine(
-    (value) => !/[\u0000-\u001f\u007f]/.test(value),
-    'Identifier must not contain control characters',
-  );
+  .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), 'Identifier must not contain control characters');
 const strings = z.array(z.string().max(2000)).max(100);
 const httpsUrl = z
   .url()
@@ -28,26 +25,37 @@ const referenceUrl = z.union([
       return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password;
     }, 'HTTP(S) reference URL without embedded credentials required'),
 ]);
-export const feedSchema = z.object({
-  name: shortText,
-  type: z.enum(FEED_TYPES),
-  url: httpsUrl.refine(
-    (s) =>
-      !Array.from(new URL(s).searchParams.keys()).some((key) =>
-        /token|password|passwd|secret|api.?key|access.?key|private.?key|signature|credential|(?:^|[_-])key(?:$|[_-])|(?:^|[_-])sig(?:$|[_-])/i.test(
-          key,
+export const feedSchema = z
+  .object({
+    name: shortText,
+    type: z.enum(FEED_TYPES),
+    url: httpsUrl.refine(
+      (s) =>
+        !Array.from(new URL(s).searchParams.keys()).some((key) =>
+          /token|password|passwd|secret|api.?key|access.?key|private.?key|signature|credential|(?:^|[_-])key(?:$|[_-])|(?:^|[_-])sig(?:$|[_-])/i.test(
+            key,
+          ),
         ),
-      ),
-    'Use the auth secret field rather than credentials in query parameters',
-  ),
-  authType: z.enum(['NONE', 'API_KEY', 'BEARER', 'BASIC']),
-  authSecretKey: z.string().max(4096).optional(),
-  rateLimitPerMin: z.number().int().min(1).max(600),
-  requestTimeoutSeconds: z.number().int().min(5).max(120).optional(),
-  recoveryDelayMinutes: z.number().int().min(1).max(60).default(5),
-  enabled: z.boolean(),
-  vendorSeed: z.boolean().default(false),
-}).refine(feed => feed.type !== 'MITRE_CVE' || (feed.authType === 'NONE' && feed.url === 'https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/deltaLog.json'), { message: 'MITRE CVE requires the official CVE List deltaLog.json URL and no authentication', path: ['url'] });
+      'Use the auth secret field rather than credentials in query parameters',
+    ),
+    authType: z.enum(['NONE', 'API_KEY', 'BEARER', 'BASIC']),
+    authSecretKey: z.string().max(4096).optional(),
+    rateLimitPerMin: z.number().int().min(1).max(600),
+    requestTimeoutSeconds: z.number().int().min(5).max(120).optional(),
+    recoveryDelayMinutes: z.number().int().min(1).max(60).default(5),
+    enabled: z.boolean(),
+    vendorSeed: z.boolean().default(false),
+  })
+  .refine(
+    (feed) =>
+      feed.type !== 'MITRE_CVE' ||
+      (feed.authType === 'NONE' &&
+        feed.url === 'https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/deltaLog.json'),
+    {
+      message: 'MITRE CVE requires the official CVE List deltaLog.json URL and no authentication',
+      path: ['url'],
+    },
+  );
 /** Bulk import shape: adds the stable identifier and the stored sync metadata. */
 export const feedImportSchema = z
   .array(
@@ -231,138 +239,249 @@ export const cveSchema = z.object({
     stepByStep: strings,
   }),
 });
-export const emailConfigSchema = z.object({
-  provider: z.enum(EMAIL_PROVIDERS),
-  fromEmail: z.union([z.email().max(254), z.literal('')]),
-  fromName: z.string().trim().max(100).regex(/^[^\r\n]*$/),
-  apiKey: z.string().trim().max(4096).regex(/^[^\r\n]*$/).default(''),
-  apiEndpoint: z.string().trim().max(2048).default(''),
-  apiHeaderKey: z.string().trim().max(100).regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/).default('Authorization'),
-  apiAuthPrefix: z.string().trim().max(40).regex(/^[A-Za-z0-9._~-]*$/).default('Bearer'),
-  apiSourceDomain: z.string().trim().max(253).regex(/^[a-zA-Z0-9.-]*$/).default(''),
-  smtpHost: z.string().trim().toLowerCase().max(253).regex(/^$|^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/).default(''),
-  smtpPort: z.number().int().min(1).max(65535).default(587),
-  smtpSecurity: z.enum(['IMPLICIT_TLS', 'STARTTLS']).default('STARTTLS'),
-  smtpUsername: z.string().trim().max(254).regex(/^[^\r\n]*$/).default(''),
-  smtpPassword: z.string().max(4096).regex(/^[^\r\n]*$/).default(''),
-  mailgunDomain: z.string().trim().toLowerCase().max(253).regex(/^$|^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/),
-  mailgunRegion: z.enum(['US', 'EU']),
-  mailtrapMode: z.enum(['LIVE', 'SANDBOX']),
-  mailtrapInboxId: z.string().max(20).regex(/^$|^[1-9]\d*$/),
-  postmarkMessageStream: z.string().trim().max(100).regex(/^[a-zA-Z0-9_-]+$/),
-  mailjetApiSecret: z.string().trim().max(4096).regex(/^[^\r\n]*$/).default(''),
-}).superRefine((value, ctx) => {
-  if (value.provider !== 'SMTP' && !value.fromEmail)
-    ctx.addIssue({ code: 'custom', path: ['fromEmail'], message: 'A verified sender email is required' });
-  if ((SMTP_EMAIL_PROVIDERS as readonly string[]).includes(value.provider)) {
-    if (!value.smtpHost)
-      ctx.addIssue({ code: 'custom', path: ['smtpHost'], message: 'SMTP host is required' });
-    const presetRequiresAuth = value.provider !== 'SMTP_CUSTOM';
-    if (presetRequiresAuth && !value.smtpUsername)
-      ctx.addIssue({ code: 'custom', path: ['smtpUsername'], message: 'SMTP username is required' });
-  }
-  if (value.provider === 'API') {
-    if (!value.apiEndpoint)
-      ctx.addIssue({ code: 'custom', path: ['apiEndpoint'], message: 'API endpoint is required' });
-    if (value.apiEndpoint) {
-      try {
-        const endpoint = new URL(value.apiEndpoint.replaceAll('{domain}', 'source-domain'));
-        if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || (endpoint.port && endpoint.port !== '443'))
-          throw new Error('invalid endpoint');
-      } catch {
-        ctx.addIssue({ code: 'custom', path: ['apiEndpoint'], message: 'Use an HTTPS URL on port 443 without URL credentials' });
-      }
+export const emailConfigSchema = z
+  .object({
+    provider: z.enum(EMAIL_PROVIDERS),
+    fromEmail: z.union([z.email().max(254), z.literal('')]),
+    fromName: z
+      .string()
+      .trim()
+      .max(100)
+      .regex(/^[^\r\n]*$/),
+    replyTo: z
+      .string()
+      .trim()
+      .max(254)
+      .regex(/^[^\r\n]*$/)
+      .default(''),
+    unsubscribeUrl: z
+      .string()
+      .trim()
+      .max(2048)
+      .regex(/^[^\r\n]*$/)
+      .default(''),
+    apiKey: z
+      .string()
+      .trim()
+      .max(4096)
+      .regex(/^[^\r\n]*$/)
+      .default(''),
+    apiEndpoint: z.string().trim().max(2048).default(''),
+    apiHeaderKey: z
+      .string()
+      .trim()
+      .max(100)
+      .regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/)
+      .default('Authorization'),
+    apiAuthPrefix: z
+      .string()
+      .trim()
+      .max(40)
+      .regex(/^[A-Za-z0-9._~-]*$/)
+      .default('Bearer'),
+    apiSourceDomain: z
+      .string()
+      .trim()
+      .max(253)
+      .regex(/^[a-zA-Z0-9.-]*$/)
+      .default(''),
+    smtpHost: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .max(253)
+      .regex(/^$|^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/)
+      .default(''),
+    smtpPort: z.number().int().min(1).max(65535).default(587),
+    smtpSecurity: z.enum(['IMPLICIT_TLS', 'STARTTLS']).default('STARTTLS'),
+    smtpUsername: z
+      .string()
+      .trim()
+      .max(254)
+      .regex(/^[^\r\n]*$/)
+      .default(''),
+    smtpPassword: z
+      .string()
+      .max(4096)
+      .regex(/^[^\r\n]*$/)
+      .default(''),
+    mailgunDomain: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .max(253)
+      .regex(/^$|^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/),
+    mailgunRegion: z.enum(['US', 'EU']),
+    mailtrapMode: z.enum(['LIVE', 'SANDBOX']),
+    mailtrapInboxId: z
+      .string()
+      .max(20)
+      .regex(/^$|^[1-9]\d*$/),
+    postmarkMessageStream: z
+      .string()
+      .trim()
+      .max(100)
+      .regex(/^[a-zA-Z0-9_-]+$/),
+    mailjetApiSecret: z
+      .string()
+      .trim()
+      .max(4096)
+      .regex(/^[^\r\n]*$/)
+      .default(''),
+  })
+  .superRefine((value, ctx) => {
+    if (value.provider !== 'SMTP' && !value.fromEmail)
+      ctx.addIssue({ code: 'custom', path: ['fromEmail'], message: 'A verified sender email is required' });
+    if ((SMTP_EMAIL_PROVIDERS as readonly string[]).includes(value.provider)) {
+      if (!value.smtpHost)
+        ctx.addIssue({ code: 'custom', path: ['smtpHost'], message: 'SMTP host is required' });
+      const presetRequiresAuth = value.provider !== 'SMTP_CUSTOM';
+      if (presetRequiresAuth && !value.smtpUsername)
+        ctx.addIssue({ code: 'custom', path: ['smtpUsername'], message: 'SMTP username is required' });
     }
-    if (value.apiEndpoint.includes('{domain}') && !value.apiSourceDomain)
-      ctx.addIssue({ code: 'custom', path: ['apiSourceDomain'], message: 'Source / Domain is required when the endpoint contains {domain}' });
-    if (['content-type', 'host', 'content-length', 'transfer-encoding', 'connection', 'user-agent', 'accept', 'accept-encoding'].includes(value.apiHeaderKey.toLowerCase()))
-      ctx.addIssue({ code: 'custom', path: ['apiHeaderKey'], message: 'This header name is reserved' });
-  }
-  if (value.provider === 'SMTP' && !value.smtpHost && (value.smtpUsername || value.smtpPassword))
-    ctx.addIssue({ code: 'custom', path: ['smtpHost'], message: 'Set an SMTP host to use custom SMTP credentials' });
-  if (value.provider === 'MAILGUN' && !value.mailgunDomain)
-    ctx.addIssue({ code: 'custom', path: ['mailgunDomain'], message: 'Mailgun sending domain is required' });
-  if (value.provider === 'MAILTRAP' && value.mailtrapMode === 'SANDBOX' && !value.mailtrapInboxId)
-    ctx.addIssue({ code: 'custom', path: ['mailtrapInboxId'], message: 'Mailtrap sandbox inbox ID is required' });
-});
-export const settingsSchema = z.object({
-  scopeHours: z.number().int().min(1).max(2880),
-  schedulerIntervalMinutes: z.number().int().min(5).max(10080),
-  schedulerEnabled: z.boolean(),
-  advisoryPrefix: z.string().regex(/^[A-Za-z0-9_-]{1,30}$/),
-  autoDispatchEnabled: z.boolean(),
-  autoDispatchConfidenceThreshold: z.number().int().min(0).max(100).default(90),
-  // Digest coalescing is opt-in so existing deployments keep their current behavior.
-  digestBatchingEnabled: z.boolean().default(false),
-  digestWindowMinutes: z.number().int().min(1).max(1440),
-  // Retries are on by default; one attempt disables automatic retry while
-  // keeping the initial delivery. Delays are bounded to avoid a runaway queue.
-  emailRetryEnabled: z.boolean().default(true),
-  emailRetryMaxAttempts: z.number().int().min(1).max(20).default(6),
-  emailRetryInitialDelayMinutes: z.number().int().min(1).max(1440).default(1),
-  emailRetryMaxDelayMinutes: z.number().int().min(1).max(10080).default(60),
-  webhookSigningSecret: z.literal(''),
-  authorityPrecedence: z.array(z.enum(['VENDOR_PSIRT', 'CISA_KEV', 'FIRST_EPSS', 'NVD_BATCH'])).max(4),
-  ssrfProtection: z.object({
-    blockPrivateIps: z.literal(true),
-    blockLoopback: z.literal(true),
-    allowRedirects: z.boolean().default(true),
-  }),
-  securityPolicy: z.object({
-    sessionTimeoutMins: z.number().int().min(5).max(60).default(30),
-    csrfProtection: z.literal(true),
-    minPasswordLen: z.number().int().min(14).max(128).default(14),
-    maxLoginAttempts: z.number().int().min(1).max(20).default(5),
-    lockoutMins: z.number().int().min(1).max(60).default(15),
-  }),
-  // Defaults to 'standard' so an older client that omits the field cannot
-  // silently switch an installation into high-volume forensic logging.
-  logVerbosity: z.enum(['standard', 'verbose']).default('standard'),
-  ntpConfig: z.object({
-    enabled: z.literal(false),
-    server: z.literal(''),
-    driftToleranceMs: z.number().min(0).max(1000),
-  }),
-  mailgunConfig: z.object({
-    enabled: z.literal(false),
-    apiKey: z.literal(''),
-    domain: z.literal(''),
-    fromEmail: z.literal(''),
-  }),
-  // Defaults keep settings stored before retention was configurable valid.
-       retentionConfig: z
-    .object({
-      enabled: z.boolean(),
-      retentionHours: z.number().int().min(1).max(8760),
-      cleanupIntervalMinutes: z.number().int().min(1).max(1440),
-      maxArchivedRecords: z.number().int().min(1000).max(1000000),
-      autoCleanup: z.boolean(),
-      retentionMode: z.enum(['strict', 'rolling', 'checkpoints']),
-    })
-    .default({
-      enabled: false,
-      retentionHours: 24,
-      cleanupIntervalMinutes: 60,
-      maxArchivedRecords: 10000,
-      autoCleanup: true,
-      retentionMode: 'rolling',
+    if (value.provider === 'API') {
+      if (!value.apiEndpoint)
+        ctx.addIssue({ code: 'custom', path: ['apiEndpoint'], message: 'API endpoint is required' });
+      if (value.apiEndpoint) {
+        try {
+          const endpoint = new URL(value.apiEndpoint.replaceAll('{domain}', 'source-domain'));
+          if (
+            endpoint.protocol !== 'https:' ||
+            endpoint.username ||
+            endpoint.password ||
+            (endpoint.port && endpoint.port !== '443')
+          )
+            throw new Error('invalid endpoint');
+        } catch {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['apiEndpoint'],
+            message: 'Use an HTTPS URL on port 443 without URL credentials',
+          });
+        }
+      }
+      if (value.apiEndpoint.includes('{domain}') && !value.apiSourceDomain)
+        ctx.addIssue({
+          code: 'custom',
+          path: ['apiSourceDomain'],
+          message: 'Source / Domain is required when the endpoint contains {domain}',
+        });
+      if (
+        [
+          'content-type',
+          'host',
+          'content-length',
+          'transfer-encoding',
+          'connection',
+          'user-agent',
+          'accept',
+          'accept-encoding',
+        ].includes(value.apiHeaderKey.toLowerCase())
+      )
+        ctx.addIssue({ code: 'custom', path: ['apiHeaderKey'], message: 'This header name is reserved' });
+    }
+    if (value.provider === 'SMTP' && !value.smtpHost && (value.smtpUsername || value.smtpPassword))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['smtpHost'],
+        message: 'Set an SMTP host to use custom SMTP credentials',
+      });
+    if (value.provider === 'MAILGUN' && !value.mailgunDomain)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['mailgunDomain'],
+        message: 'Mailgun sending domain is required',
+      });
+    if (value.provider === 'MAILTRAP' && value.mailtrapMode === 'SANDBOX' && !value.mailtrapInboxId)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['mailtrapInboxId'],
+        message: 'Mailtrap sandbox inbox ID is required',
+      });
+  });
+export const settingsSchema = z
+  .object({
+    scopeHours: z.number().int().min(1).max(2880),
+    schedulerIntervalMinutes: z.number().int().min(5).max(10080),
+    schedulerEnabled: z.boolean(),
+    advisoryPrefix: z.string().regex(/^[A-Za-z0-9_-]{1,30}$/),
+    autoDispatchEnabled: z.boolean(),
+    autoDispatchConfidenceThreshold: z.number().int().min(0).max(100).default(90),
+    // Digest coalescing is opt-in so existing deployments keep their current behavior.
+    digestBatchingEnabled: z.boolean().default(false),
+    digestWindowMinutes: z.number().int().min(1).max(1440),
+    // Retries are on by default; one attempt disables automatic retry while
+    // keeping the initial delivery. Delays are bounded to avoid a runaway queue.
+    emailRetryEnabled: z.boolean().default(true),
+    emailRetryMaxAttempts: z.number().int().min(1).max(20).default(6),
+    emailRetryInitialDelayMinutes: z.number().int().min(1).max(1440).default(1),
+    emailRetryMaxDelayMinutes: z.number().int().min(1).max(10080).default(60),
+    webhookSigningSecret: z.literal(''),
+    authorityPrecedence: z.array(z.enum(['VENDOR_PSIRT', 'CISA_KEV', 'FIRST_EPSS', 'NVD_BATCH'])).max(4),
+    ssrfProtection: z.object({
+      blockPrivateIps: z.literal(true),
+      blockLoopback: z.literal(true),
+      allowRedirects: z.boolean().default(true),
     }),
-  timezone: z.string().min(1).max(100).default('UTC'),
-  dailyDigest: z
-    .object({
-      enabled: z.boolean().default(true),
-      time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default('09:00'),
-      includeHealthReport: z.boolean().default(true),
-    })
-    .default({ enabled: true, time: '09:00', includeHealthReport: true }),
-}).superRefine((value, ctx) => {
-  if (value.emailRetryMaxDelayMinutes < value.emailRetryInitialDelayMinutes)
-    ctx.addIssue({
-      code: 'custom',
-      path: ['emailRetryMaxDelayMinutes'],
-      message: 'Maximum backoff must be at least the initial backoff',
-    });
-});
+    securityPolicy: z.object({
+      sessionTimeoutMins: z.number().int().min(5).max(60).default(30),
+      csrfProtection: z.literal(true),
+      minPasswordLen: z.number().int().min(14).max(128).default(14),
+      maxLoginAttempts: z.number().int().min(1).max(20).default(5),
+      lockoutMins: z.number().int().min(1).max(60).default(15),
+    }),
+    // Defaults to 'standard' so an older client that omits the field cannot
+    // silently switch an installation into high-volume forensic logging.
+    logVerbosity: z.enum(['standard', 'verbose']).default('standard'),
+    ntpConfig: z.object({
+      enabled: z.literal(false),
+      server: z.literal(''),
+      driftToleranceMs: z.number().min(0).max(1000),
+    }),
+    mailgunConfig: z.object({
+      enabled: z.literal(false),
+      apiKey: z.literal(''),
+      domain: z.literal(''),
+      fromEmail: z.literal(''),
+    }),
+    // Defaults keep settings stored before retention was configurable valid.
+    retentionConfig: z
+      .object({
+        enabled: z.boolean(),
+        retentionHours: z.number().int().min(1).max(8760),
+        cleanupIntervalMinutes: z.number().int().min(1).max(1440),
+        maxArchivedRecords: z.number().int().min(1000).max(1000000),
+        autoCleanup: z.boolean(),
+        retentionMode: z.enum(['strict', 'rolling', 'checkpoints']),
+      })
+      .default({
+        enabled: false,
+        retentionHours: 24,
+        cleanupIntervalMinutes: 60,
+        maxArchivedRecords: 10000,
+        autoCleanup: true,
+        retentionMode: 'rolling',
+      }),
+    timezone: z.string().min(1).max(100).default('UTC'),
+    dailyDigest: z
+      .object({
+        enabled: z.boolean().default(true),
+        time: z
+          .string()
+          .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+          .default('09:00'),
+        includeHealthReport: z.boolean().default(true),
+      })
+      .default({ enabled: true, time: '09:00', includeHealthReport: true }),
+  })
+  .superRefine((value, ctx) => {
+    if (value.emailRetryMaxDelayMinutes < value.emailRetryInitialDelayMinutes)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['emailRetryMaxDelayMinutes'],
+        message: 'Maximum backoff must be at least the initial backoff',
+      });
+  });
 export class HttpError extends Error {
   status: number;
   constructor(status: number, message: string) {

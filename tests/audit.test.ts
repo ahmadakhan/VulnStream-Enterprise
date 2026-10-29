@@ -585,6 +585,8 @@ test('pipeline scopeHours supports 1 / 2 / 3 / 4 week windows', () => {
       {},
       {},
       undefined,
+      [],
+      NOW_FOR_PIPELINE,
     );
 
     assert.equal(

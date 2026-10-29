@@ -678,6 +678,10 @@ export interface EmailConfiguration {
   provider: EmailProvider;
   fromEmail: string;
   fromName: string;
+  /** Optional reply-to address for operator feedback; omitted when blank. */
+  replyTo?: string;
+  /** Optional URL for the List-Unsubscribe header; defaults to a mailto link when blank. */
+  unsubscribeUrl?: string;
   /** Encrypted in storage; always blank in browser state. */
   apiKey: string;
   hasApiKey?: boolean;

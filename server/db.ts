@@ -105,8 +105,9 @@ export function indexStatements(sql: string): string[] {
 }
 
 const indexName = (statement: string): string | null =>
-  /CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\s+IF\s+NOT\s+EXISTS\s+"?([a-z0-9_]+)"?/i.exec(statement)?.[1] ??
-  null;
+  /CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\s+IF\s+NOT\s+EXISTS\s+"?([a-z0-9_]+)"?/i.exec(
+    statement,
+  )?.[1] ?? null;
 
 /**
  * Build the correlation indexes concurrently. Runs on its own connection, in
@@ -126,7 +127,9 @@ export async function applyIndexMigrations(pool: pg.Pool): Promise<void> {
     await client.query('SELECT set_config($1, current_schema(), false)', ['search_path']);
     // Serialize concurrent deploys of the same schema. Separate from the
     // migration lock because this runs outside that transaction.
-    await client.query('SELECT pg_advisory_lock(800005, hashtext(COALESCE(current_schema(), current_database())))');
+    await client.query(
+      'SELECT pg_advisory_lock(800005, hashtext(COALESCE(current_schema(), current_database())))',
+    );
     try {
       for (const file of await indexMigrationFiles()) {
         for (const statement of indexStatements(file.sql)) {
@@ -134,7 +137,9 @@ export async function applyIndexMigrations(pool: pg.Pool): Promise<void> {
         }
       }
     } finally {
-      await client.query('SELECT pg_advisory_unlock(800005, hashtext(COALESCE(current_schema(), current_database())))').catch(() => {});
+      await client
+        .query('SELECT pg_advisory_unlock(800005, hashtext(COALESCE(current_schema(), current_database())))')
+        .catch(() => {});
     }
   } catch (error) {
     failed = true;
@@ -195,7 +200,15 @@ async function buildIndex(client: pg.PoolClient, statement: string, file: string
       )
       .catch(() => ({ rows: [{ available: false }] }));
     if (!available.rows[0]?.available) {
-      console.warn(JSON.stringify({ level: 'warn', event: 'index.skipped', index: name, file, reason: 'gin_trgm_ops-unavailable' }));
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          event: 'index.skipped',
+          index: name,
+          file,
+          reason: 'gin_trgm_ops-unavailable',
+        }),
+      );
       return;
     }
   }
@@ -213,6 +226,26 @@ async function buildIndex(client: pg.PoolClient, statement: string, file: string
       if ((code === '55P03' || code === '40P01') && attempt < 2) {
         await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)));
         continue;
+      }
+      // An owner-managed table that does not exist in this schema is not an
+      // install defect. The correlation index set covers `assets`,
+      // `unstructured_advisories` and `vendor_product_aliases`, which the
+      // platform operator may provision separately (a fresh isolated schema —
+      // including every per-suite test schema — legitimately has none of them).
+      // Failing migration here aborted deploy/startup for an optional
+      // integration. Record the miss and let the preflight report the absent
+      // relation when a code path that needs it actually runs.
+      if (code === '42P01') {
+        console.warn(
+          JSON.stringify({
+            level: 'warn',
+            event: 'index.skipped',
+            index: name,
+            file,
+            reason: 'relation-absent',
+          }),
+        );
+        return;
       }
       throw Object.assign(new Error(`Index build failed (${file}, ${name ?? 'unnamed'}): ${code}`), {
         cause: error,
@@ -241,19 +274,26 @@ export async function migrate(pool: pg.Pool) {
     await client.query('SELECT pg_advisory_xact_lock(800004)');
     await client.query(`SELECT pg_advisory_xact_lock(800001, ${schemaLockKey})`);
     const nativeContract = await correlationPreflight(client);
-    if (!nativeContract.compatible) throw new Error('Protected correlation schema incompatible: '+nativeContract.issues.join('; '));
+    if (!nativeContract.compatible)
+      throw new Error('Protected correlation schema incompatible: ' + nativeContract.issues.join('; '));
     // Apply every migration file in the directory, in version order. A
     // hard-coded list silently skipped files whenever two shared a version
     // number (014 and 015 each did) and had to be edited for every new
     // migration. Reading the directory makes the file the source of truth.
     // On a brand-new database schema_migrations does not exist yet; 001 creates
-    // it. Probe first rather than letting the SELECT abort the transaction.
-    const exists = await client.query("SELECT to_regclass('schema_migrations') AS name");
+    // it. Probe the CURRENT schema only: `to_regclass('schema_migrations')`
+    // resolves through the whole search_path, so on a multi-tenant database a
+    // leftover row set in `public` made every tenant probe see "already at the
+    // latest version" and commit an empty schema — every later statement then
+    // failed with 42P01 and the tenant looked broken with no migration error.
+    const exists = await client.query(
+      "SELECT to_regclass(format('%I.schema_migrations', current_schema())) AS name",
+    );
     const appliedVersions = new Set<number>(
       exists.rows[0].name
-        ? (
-            await client.query<{ version: number }>('SELECT version FROM schema_migrations')
-          ).rows.map((row) => Number(row.version))
+        ? (await client.query<{ version: number }>(`SELECT version FROM ${exists.rows[0].name}`)).rows.map(
+            (row) => Number(row.version),
+          )
         : [],
     );
     for (const { version, name } of await migrationFiles()) {
@@ -295,7 +335,10 @@ export async function transaction<T>(
   const db = client || (await pool.connect());
   let failed = false;
   let connectionError: Error | undefined;
-  const onError = (error: Error) => { connectionError = error; failed = true; };
+  const onError = (error: Error) => {
+    connectionError = error;
+    failed = true;
+  };
   db.on('error', onError);
   try {
     await db.query('BEGIN');
@@ -366,17 +409,13 @@ export async function getMany<T>(db: Db, kind: string, ids: readonly string[]): 
  * other's changes without taking the installation-wide lock.
  */
 export async function getForUpdate<T>(db: Db, kind: string, id: string): Promise<T | undefined> {
-  return (
-    await db.query('SELECT data FROM records WHERE kind=$1 AND id=$2 FOR UPDATE', [kind, id])
-  ).rows[0]?.data;
+  return (await db.query('SELECT data FROM records WHERE kind=$1 AND id=$2 FOR UPDATE', [kind, id])).rows[0]
+    ?.data;
 }
 export async function list<T>(db: Db, kind: string, limit?: number): Promise<T[]> {
   const limitClause = limit && limit > 0 ? ` LIMIT ${limit}` : '';
   return (
-    await db.query(
-      `SELECT data FROM records WHERE kind=$1 ${recordOrder}${limitClause}`,
-      [kind],
-    )
+    await db.query(`SELECT data FROM records WHERE kind=$1 ${recordOrder}${limitClause}`, [kind])
   ).rows.map((row) => row.data);
 }
 export async function remove(db: Db, kind: string, id: string) {
@@ -402,8 +441,7 @@ export async function appendAudit(
   // all audit-append calls per schema, so a row lock here was redundant; dropping
   // it lets the least-privilege runtime role read the chain head with table SELECT
   // only and never requires UPDATE on the tamper-sensitive audit table.
-  const previous = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 1')).rows[0]
-    ?.data;
+  const previous = (await db.query('SELECT data FROM audit ORDER BY seq DESC LIMIT 1')).rows[0]?.data;
   const entry = chainAuditLogs(
     [
       {

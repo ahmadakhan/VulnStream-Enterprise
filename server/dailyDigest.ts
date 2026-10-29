@@ -75,7 +75,9 @@ const wallClock = (timezone: string, now: number): { hour: number; minute: numbe
 };
 
 const parseTime = (value: string | undefined): { hour: number; minute: number } => {
-  const [h, m] = String(value ?? '09:00').split(':').map(Number);
+  const [h, m] = String(value ?? '09:00')
+    .split(':')
+    .map(Number);
   return { hour: Number.isFinite(h) ? h : 9, minute: Number.isFinite(m) ? m : 0 };
 };
 
@@ -86,17 +88,11 @@ async function readDailyDigestConfig(db: Db): Promise<TemplateCustomization> {
 
 const severityRank = (s: Advisory['severity']) => SEVERITY_RANK.indexOf(s);
 
-const buildDailyDigestAdvisory = (
-  findings: Finding[],
-  settings: AppSettings,
-  dateKey: string,
-): Advisory => {
+const buildDailyDigestAdvisory = (findings: Finding[], settings: AppSettings, dateKey: string): Advisory => {
   const cveIds = Array.from(new Set(findings.map((finding) => finding.cveId))).sort();
   const severity = findings.reduce<Advisory['severity']>(
     (severity, finding) =>
-      severityRank(finding.cve.cvss.severity) > severityRank(severity)
-        ? finding.cve.cvss.severity
-        : severity,
+      severityRank(finding.cve.cvss.severity) > severityRank(severity) ? finding.cve.cvss.severity : severity,
     'UNKNOWN',
   );
   const severityCounts = countSeverities(findings);
@@ -133,7 +129,8 @@ const formatSeverityCounts = (counts: Record<string, number>) =>
 
 const countSeverities = (findings: Finding[]): Record<string, number> => {
   const counts: Record<string, number> = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
-  for (const finding of findings) counts[finding.cve.cvss.severity] = (counts[finding.cve.cvss.severity] ?? 0) + 1;
+  for (const finding of findings)
+    counts[finding.cve.cvss.severity] = (counts[finding.cve.cvss.severity] ?? 0) + 1;
   return counts;
 };
 
@@ -147,7 +144,11 @@ interface HealthSnapshot {
   checkedAt: string;
 }
 
-async function computeHealth(db: Db, workerEnabled: boolean, workerHeartbeat: string | null): Promise<HealthSnapshot> {
+async function computeHealth(
+  db: Db,
+  workerEnabled: boolean,
+  workerHeartbeat: string | null,
+): Promise<HealthSnapshot> {
   const start = performance.now();
   let database: HealthSnapshot['database'] = 'connected';
   try {
@@ -192,7 +193,6 @@ async function computeHealth(db: Db, workerEnabled: boolean, workerHeartbeat: st
     checkedAt: new Date().toISOString(),
   };
 }
-
 
 /**
  * Runs the daily digest job. Returns the number of transport jobs queued (0 when
@@ -273,7 +273,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
           lastRecipients: recipients.length,
         });
 
-        const findingRows = await db.query<{ id: string; created_at: string; data: Finding }>(
+        const findingRows = await db.query<{ data: Finding }>(
           `SELECT data FROM records WHERE kind='findings' AND created_at > now() - interval '24 hours'`,
         );
         // A daily digest is a summary of the last 24 hours of *deliverable*
@@ -290,32 +290,44 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
               f &&
               f.cveId &&
               !['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(f.status) &&
-              ![
-                'NOT_APPLICABLE',
-                'SUPPRESSED_VEX_NOT_AFFECTED',
-                'DELIVERY_FAILED',
-              ].includes(f.notificationStatus),
+              !['NOT_APPLICABLE', 'SUPPRESSED_VEX_NOT_AFFECTED', 'DELIVERY_FAILED'].includes(
+                f.notificationStatus,
+              ),
           );
 
         // Reassess against today's inventory and policy, including findings
         // held under an older threshold. Never treat a stored hold as approval.
-        const ids = [...new Set(candidates.map(f => f.cveId))];
+        const ids = [...new Set(candidates.map((f) => f.cveId))];
         const [cached, assets, withdrawals, aliases] = await Promise.all([
           getMany<NormalizedCVE>(db, 'cveData', ids),
-          getMany<WatchListItem>(db, 'watchlist', [...new Set(candidates.map(f => f.matchedAssetId))]),
+          getMany<WatchListItem>(db, 'watchlist', [...new Set(candidates.map((f) => f.matchedAssetId))]),
           getMany<{ modifiedDate: string }>(db, 'cveWithdrawals', ids),
           list<AliasEntry>(db, 'aliases'),
         ]);
-        const cves = new Map(candidates.map(f => [f.cveId, cached.get(f.cveId) || f.cve]));
-        const current = runVulnerabilityPipeline([], [...cves.values()], [...assets.values()], [], [],
-          { ...DEFAULT_SETTINGS, ...settings, scopeHours: 0 }, 'Daily digest', false,
-          buildAliasMap(aliases, 'VENDOR'), buildAliasMap(aliases, 'PRODUCT'), undefined, aliases).newFindings;
-        const matches = new Map(current.map(f => [`${f.cveId}:${f.matchedAssetId}`, f]));
-        const findings = candidates.flatMap(f => {
+        const cves = new Map(candidates.map((f) => [f.cveId, cached.get(f.cveId) || f.cve]));
+        const current = runVulnerabilityPipeline(
+          [],
+          [...cves.values()],
+          [...assets.values()],
+          [],
+          [],
+          { ...DEFAULT_SETTINGS, ...settings, scopeHours: 0 },
+          'Daily digest',
+          false,
+          buildAliasMap(aliases, 'VENDOR'),
+          buildAliasMap(aliases, 'PRODUCT'),
+          undefined,
+          aliases,
+        ).newFindings;
+        const matches = new Map(current.map((f) => [`${f.cveId}:${f.matchedAssetId}`, f]));
+        const findings = candidates.flatMap((f) => {
           const match = matches.get(`${f.cveId}:${f.matchedAssetId}`);
           const withdrawal = withdrawals.get(f.cveId);
-          if (match?.notificationStatus !== 'QUEUED_FOR_DISPATCH' ||
-              (withdrawal && Date.parse(match.cve.modifiedDate) <= Date.parse(withdrawal.modifiedDate))) return [];
+          if (
+            match?.notificationStatus !== 'QUEUED_FOR_DISPATCH' ||
+            (withdrawal && Date.parse(match.cve.modifiedDate) <= Date.parse(withdrawal.modifiedDate))
+          )
+            return [];
           return [{ ...f, ...match, id: f.id }];
         });
 
@@ -344,7 +356,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
         }
         let jobs = 0;
         for (const recipient of recipients) {
-          const included = findings.filter(finding => recipientAllows(recipient, finding));
+          const included = findings.filter((finding) => recipientAllows(recipient, finding));
           if (!included.length && !health) continue;
           const view = buildDailyDigestAdvisory(included, settings, todayKey);
           const severityCounts = countSeverities(included);

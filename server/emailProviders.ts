@@ -41,7 +41,8 @@ export function emailIsConfigured(
   config: EmailConfiguration,
   env: { SMTP_HOST: string; SMTP_FROM: string; EGRESS_ALLOWED_HOSTS?: string },
 ): boolean {
-  if (config.provider === 'SMTP' && !config.smtpHost) return !!env.SMTP_HOST && !!(config.fromEmail || env.SMTP_FROM);
+  if (config.provider === 'SMTP' && !config.smtpHost)
+    return !!env.SMTP_HOST && !!(config.fromEmail || env.SMTP_FROM);
   if (isSmtpEmailProvider(config.provider)) {
     const allowedHosts = (env.EGRESS_ALLOWED_HOSTS || '').split(',').map((host) => host.trim().toLowerCase());
     const needsAuth = config.provider !== 'SMTP_CUSTOM' && config.provider !== 'SMTP';
@@ -50,7 +51,7 @@ export function emailIsConfigured(
       !!config.smtpHost &&
       allowedHosts.includes(config.smtpHost.toLowerCase()) &&
       (!needsAuth || (!!config.smtpUsername && !!config.smtpPassword)) &&
-      (needsAuth || (!!config.smtpUsername === !!config.smtpPassword))
+      (needsAuth || !!config.smtpUsername === !!config.smtpPassword)
     );
   }
   return (
@@ -95,7 +96,16 @@ export async function sendProviderEmail(
       `${config.provider === 'API' ? config.apiAuthPrefix : 'Bearer'}${config.provider === 'API' && !config.apiAuthPrefix ? '' : ' '}${token}`,
   };
   const { subject, text, html, recipientEmail } = job.payload;
-  const deliveryHeader = { 'X-BA-Threat-Intel-Delivery-ID': job.id };
+  const deliveryHeader = {
+    'X-BA-Threat-Intel-Delivery-ID': job.id,
+    'Auto-Submitted': 'auto-generated',
+  };
+  const unsubscribeHeader = config.unsubscribeUrl
+    ? {
+        'List-Unsubscribe': config.unsubscribeUrl,
+        'List-Unsubscribe-Post': 'List-Unsafe',
+      }
+    : {};
   const pdfBase64 = attachment ? attachment.content.toString('base64') : undefined;
   const pdfFilename = attachment?.filename;
   const pdfContentType = attachment?.contentType ?? 'application/pdf';
@@ -107,8 +117,11 @@ export async function sendProviderEmail(
       subject,
       text,
       ...(html ? { html } : {}),
-      ...(attachment ? { attachments: [{ content: pdfBase64, type: pdfContentType, filename: pdfFilename }] } : {}),
-      headers: deliveryHeader,
+      ...(config.replyTo ? { reply_to: { email: config.replyTo } } : {}),
+      ...(attachment
+        ? { attachments: [{ content: pdfBase64, type: pdfContentType, filename: pdfFilename }] }
+        : {}),
+      headers: { ...deliveryHeader, ...unsubscribeHeader },
     });
   } else if (config.provider === 'MAILGUN') {
     const boundary = `vulnstream-${randomUUID()}`;
@@ -121,7 +134,9 @@ export async function sendProviderEmail(
       text,
       'h:X-BA-Threat-Intel-Delivery-ID': job.id,
       'h:Message-Id': `<${job.id}@${config.fromEmail.split('@')[1]}>`,
+      'h:Auto-Submitted': 'auto-generated',
       'o:require-tls': 'yes',
+      ...(config.replyTo ? { 'Reply-To': config.replyTo } : {}),
       ...(html ? { html } : {}),
     };
     let fieldsBody = Object.entries(fields)
@@ -131,7 +146,7 @@ export async function sendProviderEmail(
       )
       .join('');
     if (attachment) {
-      fieldsBody += `--${boundary}\r\nContent-Disposition: form-data; name="attachment"; filename="${pdfFilename}"\r\nContent-Type: ${pdfContentType}\r\nContent-Transfer-Encoding: base64\r\n\r\n${pdfBase64}\r\n`;
+      fieldsBody += `--${boundary}\r\nContent-Disposition: form-data; name="attachment"; filename="${attachment!.filename.replace(/"/g, '\\"')}"\r\nContent-Type: ${pdfContentType}\r\nContent-Transfer-Encoding: base64\r\n\r\n${pdfBase64}\r\n`;
     }
     body = fieldsBody + `--${boundary}--\r\n`;
   } else if (config.provider === 'SENDGRID') {
@@ -139,10 +154,15 @@ export async function sendProviderEmail(
       personalizations: [{ to: [{ email: recipientEmail }], custom_args: { delivery_id: job.id } }],
       from: { email: config.fromEmail, ...(config.fromName ? { name: config.fromName } : {}) },
       subject,
-      headers: deliveryHeader,
+      headers: { ...deliveryHeader, ...unsubscribeHeader },
+      ...(config.replyTo ? { reply_to: { email: config.replyTo } } : {}),
       content: [{ type: 'text/plain', value: text }, ...(html ? [{ type: 'text/html', value: html }] : [])],
       ...(attachment
-        ? { attachments: [{ content: pdfBase64, type: pdfContentType, filename: pdfFilename, disposition: 'attachment' }] }
+        ? {
+            attachments: [
+              { content: pdfBase64, type: pdfContentType, filename: pdfFilename, disposition: 'attachment' },
+            ],
+          }
         : {}),
     });
   } else if (config.provider === 'POSTMARK') {
@@ -153,11 +173,17 @@ export async function sendProviderEmail(
       To: recipientEmail,
       Subject: subject,
       TextBody: text,
+      ...(config.replyTo ? { ReplyTo: config.replyTo } : {}),
       ...(html ? { HtmlBody: html } : {}),
-      ...(attachment ? { Attachments: [{ Name: pdfFilename, Content: pdfBase64, ContentType: pdfContentType }] } : {}),
+      ...(attachment
+        ? { Attachments: [{ Name: pdfFilename, Content: pdfBase64, ContentType: pdfContentType }] }
+        : {}),
       MessageStream: config.postmarkMessageStream,
       Metadata: { delivery_id: job.id },
-      Headers: [{ Name: 'X-BA-Threat-Intel-Delivery-ID', Value: job.id }],
+      Headers: [
+        { Name: 'X-BA-Threat-Intel-Delivery-ID', Value: job.id },
+        { Name: 'Auto-Submitted', Value: 'auto-generated' },
+      ],
     });
   } else if (config.provider === 'MAILJET_API') {
     delete headers.Authorization;
@@ -171,6 +197,7 @@ export async function sendProviderEmail(
           Subject: subject,
           TextPart: text,
           HTMLPart: html,
+          ...(config.replyTo ? { ReplyTo: config.replyTo } : {}),
           ...(attachment
             ? {
                 Attachments: [
@@ -178,19 +205,25 @@ export async function sendProviderEmail(
                 ],
               }
             : {}),
-          Headers: [{ Name: 'X-BA-Threat-Intel-Delivery-ID', Value: job.id }],
+          Headers: [
+            { Name: 'X-BA-Threat-Intel-Delivery-ID', Value: job.id },
+            { Name: 'Auto-Submitted', Value: 'auto-generated' },
+          ],
         },
       ],
     });
   } else {
     body = JSON.stringify({
-      from: { email: config.fromEmail, name: config.fromName },
+      from: { email: config.fromEmail, ...(config.fromName ? { name: config.fromName } : {}) },
       to: [{ email: recipientEmail }],
       subject,
       text,
       ...(html ? { html } : {}),
-      ...(attachment ? { attachments: [{ content: pdfBase64, type: pdfContentType, name: pdfFilename }] } : {}),
-      headers: deliveryHeader,
+      ...(config.replyTo ? { reply_to: config.replyTo } : {}),
+      ...(attachment
+        ? { attachments: [{ content: pdfBase64, type: pdfContentType, name: pdfFilename }] }
+        : {}),
+      headers: { ...deliveryHeader, ...unsubscribeHeader },
     });
   }
   const response = await request(endpoint, {
@@ -221,8 +254,11 @@ export async function sendProviderEmail(
     if (requestId) return requestId;
     try {
       const accepted = JSON.parse(response.body);
-      return (typeof accepted.id === 'string' && accepted.id) ||
-        (typeof accepted.messageId === 'string' && accepted.messageId) || job.id;
+      return (
+        (typeof accepted.id === 'string' && accepted.id) ||
+        (typeof accepted.messageId === 'string' && accepted.messageId) ||
+        job.id
+      );
     } catch {
       return job.id;
     }
