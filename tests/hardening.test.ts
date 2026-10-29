@@ -177,10 +177,26 @@ test('enterprise hardening invariants', { skip: !database }, async (t) => {
       );
       assert.equal(await outboxCount(pool), 1);
 
-      // A material correlation change is a new revision and may be delivered.
-      const revised = [finding(value, { matchingEvidence: 'inventory was corrected' })];
+      // How a match was spelled or evidenced is not content either: a corrected
+      // evidence string or CPE spelling must not re-deliver the same advisory to
+      // the same recipient.
+      const respelled = [
+        finding(value, { matchingEvidence: 'inventory was corrected', matchedCpe: cpe('1.5') }),
+      ];
       assert.equal(
-        await transaction(pool, (db) => queueAdvisory(db, advisory('adv-4'), revised)),
+        await transaction(pool, (db) => queueAdvisory(db, advisory('adv-4'), respelled)),
+        0,
+      );
+      assert.equal(await outboxCount(pool), 1);
+
+      // A material correlation change (a different affected system) is a new
+      // revision and may be delivered.
+      const revised = [
+        finding(value, { matchedAssetId: 'asset-2', matchedAssetName: 'Widget 2.0' }),
+      ];
+      const revisedAdvisory = { ...advisory('adv-5'), affectedSystems: ['Widget 2.0'] };
+      assert.equal(
+        await transaction(pool, (db) => queueAdvisory(db, revisedAdvisory, revised)),
         1,
       );
       assert.equal(await outboxCount(pool), 2);
@@ -188,7 +204,7 @@ test('enterprise hardening invariants', { skip: !database }, async (t) => {
       // An explicit operator dispatch key still overrides content dedupe.
       assert.equal(
         await transaction(pool, (db) =>
-          queueAdvisory(db, advisory('adv-5'), findings, undefined, 'operator-resend'),
+          queueAdvisory(db, advisory('adv-6'), findings, undefined, 'operator-resend'),
         ),
         1,
       );
