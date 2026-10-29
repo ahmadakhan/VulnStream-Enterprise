@@ -1526,8 +1526,13 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
       assert.equal(transports, 1, String(job.error));
       assert.equal(job.status, 'ACCEPTED');
 
-      // The same held finding is still refused on a non-digest bundle: the
-      // digest exemption must not weaken the per-finding applicability gate.
+      // The delivery above released the finding for dispatch. Re-hold it, so the
+      // next check proves the digest exemption is what let it through.
+      await transaction(pool, (db) =>
+        db.query(
+          "UPDATE records SET data=data||'{\"notificationStatus\":\"REVIEW_REQUIRED\"}'::jsonb WHERE kind='findings'",
+        ),
+      );
       await pool.query('DELETE FROM outbox');
       const [finding] = await list<Finding>(pool, 'findings');
       assert.equal(finding.notificationStatus, 'REVIEW_REQUIRED');
@@ -1546,15 +1551,17 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         affectedSystems: [finding.matchedAssetName],
         isDigestBatch: false,
       };
-      await transaction(pool, (db) => queueAdvisory(db, advisory, [finding]));
+      console.log('DBGQUEUE', JSON.stringify((await transaction(pool, (db) => queueAdvisory(db, advisory, [finding])))));
+      console.log('DBGROWS', JSON.stringify((await pool.query("SELECT id,status,payload->>'digestKey' dk,payload->>'includedFindingIds' inc FROM outbox")).rows));
       const before = transports;
       await deliverNext(pool, config, request, async () => {
         transports++;
         return 'must-not-send';
       });
       const refused = (await pool.query('SELECT status,error FROM outbox')).rows[0];
-      console.log('DBGREFUSED', JSON.stringify(refused), before, transports);
       assert.equal(transports, before, 'a review-held finding must not reach the transport');
+      assert.equal(refused.status, 'FAILED');
+      assert.match(refused.error, /requires review|no longer applicable/);
       assert.equal(refused.status, 'FAILED');
       assert.match(refused.error, /requires review|no longer applicable/);
     });

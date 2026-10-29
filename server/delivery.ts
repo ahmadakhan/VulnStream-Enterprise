@@ -1158,9 +1158,9 @@ export async function deliverNext(
       const deliveredIds = job.payload.includedFindingIds?.length
         ? new Set(job.payload.includedFindingIds)
         : undefined;
-      for (const findingId of advisory.findingIds) {
+      for (const findingId of deliveredIds ?? advisory.findingIds) {
         const f = findingMap.get(findingId);
-        if (deliveredIds && !deliveredIds.has(findingId)) continue;
+        if (!f) continue;
         // A finding held for review was queued in this bundle deliberately
         // (assessment and digest payloads may include them). Once a transport
         // for the team that reviewed it accepts the bundle, its notification
@@ -1173,9 +1173,15 @@ export async function deliverNext(
           (job.review_approved || job.channel === 'webhook' || job.target_id !== 'test') &&
           !totals.pending &&
           !totals.failed;
-        if (f && f.advisoryId === advisory.id)
+        // Generated advisories (pipeline, digest, daily) are never bound to the
+        // findings they describe — only manually reviewed advisories set
+        // `advisoryId`. Gating this bookkeeping on that binding left every
+        // auto-queued finding marked QUEUED_FOR_DISPATCH after an accepted send,
+        // so it was re-queued and re-sent on the next pipeline run.
+        if (f.advisoryId === advisory.id || (!f.advisoryId && f.autoDispatchedAt))
           await put(db, 'findings', findingId, {
             ...f,
+            advisoryId: f.advisoryId ?? advisory.id,
             notificationStatus: releasedByReview
               ? 'AUTO_DISPATCHED'
               : ['NOT_APPLICABLE', 'REVIEW_REQUIRED'].includes(f.notificationStatus)
