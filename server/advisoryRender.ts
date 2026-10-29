@@ -88,16 +88,22 @@ export function renderAdvisory(template: string, advisory: Advisory): string {
     cve_details: advisory.cveIds
       .map(
         (cve: string) =>
-          `<div style="margin-bottom:12px;">
-<span><a href="https://nvd.nist.gov/vuln/detail/${escape(cve)}" target="_blank" rel="noopener noreferrer" style="font-family:monospace;font-weight:600;color:${SEVERITY_COLORS[advisory.severity] || SEVERITY_COLORS.UNKNOWN};text-decoration:underline;">${escape(cve)}</a></span>
-</div>
-<ul style="margin:0 0 8px;padding-left:18px;font-size:12px;line-height:20px;">
-<li style="margin-bottom:2px;"><strong>Severity:</strong> ${SEVERITY_BADGE(advisory.severity)}</li>
-<li style="margin-bottom:2px;"><strong>Vendor Advisory:</strong> ${
-            advisory.vendorLink
-              ? `<a href="${escape(advisory.vendorLink)}" target="_blank" rel="noopener noreferrer">View source</a>`
-              : '<span style="color:#94a3b8;">N/A</span>'
-          }</li>
+          `<p style="margin-top:0;">
+<strong>${escape(cve)}</strong>
+</p>
+<ul style="margin:0;padding-left:18px;">
+<li>
+    Severity:
+    <span style="background:${SEVERITY_COLORS[advisory.severity] || SEVERITY_COLORS.UNKNOWN};color:#ffffff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold;">
+        ${advisory.severity}
+    </span>
+</li>
+<li>
+    Vendor Advisory:
+    <a href="${escape(advisory.vendorLink || '')}" target="_blank" rel="noopener noreferrer">
+        View Source
+    </a>
+</li>
 </ul>`,
       )
       .join('\n'),
@@ -120,17 +126,15 @@ export function renderAdvisory(template: string, advisory: Advisory): string {
      severity_badge: SEVERITY_BADGE(advisory.severity),
      severity_header_badge: SEVERITY_BADGE(advisory.severity, ' SEVERITY'),
    };
-   const rawHtmlTokens = new Set([
-     'cve_id_links',
-     'cve_details',
-     'affected_systems_html',
-     'mitigation_steps',
-     'recommended_actions',
-     'audience_notice',
-     'reviewer_comment',
-     'severity_badge',
-     'severity_header_badge',
-   ]);
+  const rawHtmlTokens = new Set([
+    'cve_id_links',
+    'cve_details',
+    'affected_systems_html',
+    'mitigation_steps',
+    'recommended_actions',
+    'severity_badge',
+    'severity_header_badge',
+  ]);
   return template.replace(/{{([a-z_]+)}}/g, (_, key) => {
     if (rawHtmlTokens.has(key)) return values[key] || '';
     return escape(values[key] || '');

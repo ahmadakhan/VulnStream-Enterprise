@@ -140,6 +140,14 @@ export const AdvisoryTemplateView: React.FC = () => {
   const getRenderedHtml = () =>
     advisoryTemplate
       .replace(/{{severity}}/g, 'HIGH')
+      .replace(
+        /{{severity_badge}}/g,
+        '<span style="display:inline-block;padding:4px 10px;border-radius:4px;background:#f59e0b;color:#ffffff;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px;">HIGH</span>',
+      )
+      .replace(
+        /{{severity_header_badge}}/g,
+        '<span style="display:inline-block;padding:4px 10px;border-radius:4px;background:#f59e0b;color:#ffffff;font-size:11px;line-height:16px;font-weight:700;letter-spacing:0.5px;">HIGH SEVERITY</span>',
+      )
       .replace(/{{advisory_id}}/g, previewId)
       .replace(/{{advisory_title}}/g, 'Example advisory — template preview only')
       .replace(/{{dispatch_date}}/g, previewDate)
@@ -171,7 +179,12 @@ export const AdvisoryTemplateView: React.FC = () => {
         /{{recommended_actions}}/g,
         '<ul>\n<li>Inventory all affected systems identified in this advisory.</li>\n<li>Apply vendor patches immediately following your change management process.</li>\n<li>Validate backup, restore, and operational functionality after remediation.</li>\n</ul>',
       )
-      .replace(/{{vendor_link}}/g, 'https://example.com');
+       .replace(/{{vendor_link}}/g, 'https://example.com')
+       .replace(
+         /{{audience_notice}}/g,
+         'This advisory is being distributed to all recipients per the EVERYONE delivery policy.',
+       )
+       .replace(/{{reviewer_comment}}/g, '');
 
   const handleSave = async () => {
     if (!(await saveTemplate())) return;
@@ -190,6 +203,15 @@ export const AdvisoryTemplateView: React.FC = () => {
 
   const handleSendTest = async (e: React.FormEvent) => {
     e.preventDefault();
+    const rendered = getRenderedHtml();
+    const unrenderedTokens = rendered.match(/\{\{[a-z_]+\}\}/g);
+    if (unrenderedTokens && unrenderedTokens.length > 0) {
+      setTestResult({
+        success: false,
+        message: `Template has unrendered tokens in preview: ${[...new Set(unrenderedTokens)].join(', ')}. Check the HTML source or token list.`,
+      });
+      return;
+    }
     const res = await sendTestEmail(testEmail, testForceReview);
     setTestResult(res);
     if (res.success) {
@@ -640,7 +662,9 @@ export const AdvisoryTemplateView: React.FC = () => {
             <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono text-[11px] font-medium">
               Click to Copy:
             </span>
-            {[
+            {            [
+              '{{severity_header_badge}}',
+              '{{severity_badge}}',
               '{{advisory_id}}',
               '{{advisory_title}}',
               '{{severity}}',

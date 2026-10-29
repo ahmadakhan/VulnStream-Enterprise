@@ -84,21 +84,6 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
   table,td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
   table { border-collapse:collapse; }
   a { overflow-wrap:anywhere; word-break:break-word; }
-  .severity-badge {
-    display:inline-block;
-    padding:4px 10px;
-    border-radius:4px;
-    color:#ffffff;
-    font-size:11px;
-    line-height:16px;
-    font-weight:700;
-    letter-spacing:0.5px;
-  }
-  .severity-critical { background:#ef4444; }
-  .severity-high { background:#f59e0b; }
-  .severity-medium { background:#eab308; }
-  .severity-low { background:#10b981; }
-  .severity-unknown { background:#6b7280; }
   body{
     margin:0;
     padding:0;
@@ -134,7 +119,7 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
 <tr>
 <td align="center" style="padding:24px 12px;">
 
-<table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0" class="container" style="width:680px;max-width:680px;background:${config.cardBg};border:1px ${config.borderStyle} #e2e8f0;border-radius:${config.borderRadius};">
+<table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0" class="container" style="width:680px;max-width:680px;background:${config.cardBg};border:1px solid #e2e8f0;">
 
     ${classificationBanner}
 
@@ -315,28 +300,6 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
                     </td>
                 </tr>
 
-                <tr>
-                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
-                        Audience Notice
-                    </td>
-                    <td style="padding:12px;border:1px solid #e2e8f0;">
-                        <div style="margin-top:8px;padding:8px 12px;border-left:3px solid ${config.accentColor};background:#f0f9ff;font-size:12px;line-height:20px;">
-                            {{audience_notice}}
-                        </div>
-                    </td>
-                </tr>
-
-                <tr>
-                    <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
-                        Reviewer Comment
-                    </td>
-                    <td style="padding:12px;border:1px solid #e2e8f0;">
-                        <div style="margin-top:8px;padding:8px 12px;border-left:3px solid #f59e0b;background:#fffbeb;font-size:12px;line-height:20px;">
-                            {{reviewer_comment}}
-                        </div>
-                    </td>
-                </tr>
-
             </table>
 
         </td>
@@ -406,6 +369,8 @@ export interface DailyDigestParts {
   recipient_name: string;
   critical_count: number;
   high_count: number;
+  medium_count: number;
+  low_count: number;
   asset_count: number;
   executive_summary: string;
   report_generated: string;
@@ -511,7 +476,7 @@ ${classificationBanner}
 
             ${stampHtml}
             <div style="font-size:10px;font-weight:bold;letter-spacing:1.5px;color:${headerMuted};margin-bottom:8px;">
-                THREAT INTELLIGENCE &amp; VULNERABILITY MANAGEMENT
+                BA Cyber | THREAT INTELLIGENCE
             </div>
 
             <div class="title" style="font-size:24px;line-height:30px;font-weight:bold;color:${headerText};margin-bottom:6px;">
@@ -539,8 +504,16 @@ ${classificationBanner}
                         <strong>Critical:</strong> {{critical_count}}
                     </td>
 
-                    <td style="font-size:12px;color:#ea580c;" align="right">
+                    <td style="font-size:12px;color:#ea580c;" align="center">
                         <strong>High:</strong> {{high_count}}
+                    </td>
+
+                    <td style="font-size:12px;color:#ca8a04;" align="center">
+                        <strong>Medium:</strong> {{medium_count}}
+                    </td>
+
+                    <td style="font-size:12px;color:#16a34a;" align="right">
+                        <strong>Low:</strong> {{low_count}}
                     </td>
                 </tr>
             </table>
@@ -837,6 +810,8 @@ export function renderDailyDigest(config: TemplateCustomization, parts: DailyDig
     .replace(/{{finding_count}}/g, String(parts.finding_count))
     .replace(/{{critical_count}}/g, String(parts.critical_count))
     .replace(/{{high_count}}/g, String(parts.high_count))
+    .replace(/{{medium_count}}/g, String(parts.medium_count))
+    .replace(/{{low_count}}/g, String(parts.low_count))
     .replace(/{{asset_count}}/g, String(parts.asset_count))
     .replace(/{{executive_summary}}/g, parts.executive_summary)
     .replace(/{{findings_summary}}/g, parts.findings_summary)

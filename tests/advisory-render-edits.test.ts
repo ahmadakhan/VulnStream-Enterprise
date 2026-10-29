@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderAdvisory } from '../server/advisoryRender.ts';
+import { renderAdvisory, validateAdvisoryFields } from '../server/advisoryRender.ts';
 import { compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
 import type { Advisory } from '../src/types/index.ts';
 
@@ -19,33 +19,7 @@ const baseAdvisory: Advisory = {
   vendorLink: 'https://example.com/advisory/12345',
 };
 
-test('renderAdvisory without edits uses default audience notice', () => {
-  const template = compileCustomizedTemplate({
-    fontFamily: 'sans',
-    fontColor: '#334155',
-    headingColor: '#0f172a',
-    accentColor: '#2563eb',
-    canvasBg: '#f1f5f9',
-    cardBg: '#ffffff',
-    headerBg: '#0f172a',
-    badgeStampText: 'SECURITY OPERATIONS',
-    badgeStampColor: '#2563eb',
-    showStamp: true,
-    showClassificationBanner: false,
-    classificationText: '',
-    borderStyle: 'solid',
-    borderRadius: '12px',
-  });
-  const html = renderAdvisory(template, baseAdvisory);
-  assert.ok(html.includes('{{') === false, 'no unrendered tokens');
-  assert.ok(
-    html.includes('This advisory is being distributed to all recipients per the EVERYONE delivery policy.'),
-    'default audience notice should appear',
-  );
-  assert.ok(!html.includes('Reviewer note'), 'reviewer comment should not appear without edits');
-});
-
-test('renderAdvisory with edits renders audience notice and reviewer comment', () => {
+test('renderAdvisory does not render audience notice or reviewer comment rows', () => {
   const template = compileCustomizedTemplate({
     fontFamily: 'sans',
     fontColor: '#334155',
@@ -72,39 +46,128 @@ test('renderAdvisory with edits renders audience notice and reviewer comment', (
   };
   const html = renderAdvisory(template, advisory);
   assert.ok(!html.includes('{{'), 'no unrendered tokens');
-  assert.ok(html.includes('This is a broad-distribution advisory.'), 'custom audience notice should appear');
-  assert.ok(html.includes('Reviewed by security team'), 'reviewer comment should appear');
-  assert.ok(html.includes('by sec-op-1'), 'reviewer name should appear in comment');
+  assert.ok(!html.includes('Audience Notice'), 'audience notice row should not appear');
+  assert.ok(!html.includes('Reviewer Comment'), 'reviewer comment row should not appear');
+  assert.ok(!html.includes('This is a broad-distribution advisory.'), 'audience notice text should not appear');
+  assert.ok(!html.includes('Reviewed by security team'), 'reviewer comment text should not appear');
 });
 
-test('renderAdvisory with edits escapes XSS in audience notice and reviewer comment', () => {
-  const template = compileCustomizedTemplate({
-    fontFamily: 'sans',
-    fontColor: '#334155',
-    headingColor: '#0f172a',
-    accentColor: '#2563eb',
-    canvasBg: '#f1f5f9',
-    cardBg: '#ffffff',
-    headerBg: '#0f172a',
-    badgeStampText: 'SECURITY OPERATIONS',
-    badgeStampColor: '#2563eb',
-    showStamp: true,
-    showClassificationBanner: false,
-    classificationText: '',
-    borderStyle: 'solid',
-    borderRadius: '12px',
-  });
-  const advisory: Advisory = {
-    ...baseAdvisory,
-    edits: {
-      audienceNotice: '<img src=x onerror=alert(1)>',
-      reviewerComment: '<script>alert("xss")</script>',
-      reviewerName: 'test',
+test('renderAdvisory cve_details renders severity badge and vendor advisory link', () => {
+  const template = compileCustomizedTemplate(testCustomization);
+  const html = renderAdvisory(template, baseAdvisory);
+  assert.ok(html.includes('<strong>CVE-2026-12345</strong>'), 'CVE ID should be rendered as bold text');
+  assert.ok(html.includes('Vendor Advisory:'), 'vendor advisory label should appear');
+  assert.ok(html.includes('View Source'), 'view source link should use capitalized label');
+  assert.ok(html.includes('background:#ef4444'), 'severity badge should use CRITICAL color (#ef4444)');
+});
+
+test('renderAdvisory cve_details badge matches advisory severity', () => {
+  const template = compileCustomizedTemplate(testCustomization);
+  for (const { sev, color } of [
+    { sev: 'CRITICAL', color: '#ef4444' },
+    { sev: 'HIGH', color: '#f59e0b' },
+    { sev: 'MEDIUM', color: '#eab308' },
+    { sev: 'LOW', color: '#10b981' },
+    { sev: 'UNKNOWN', color: '#6b7280' },
+  ]) {
+    const html = renderAdvisory(template, { ...baseAdvisory, severity: sev as Advisory['severity'] });
+    assert.ok(html.includes(`background:${color}`), `cve_details badge for ${sev} should use ${color}`);
+  }
+});
+
+const testCustomization = {
+  fontFamily: 'sans',
+  fontColor: '#334155',
+  headingColor: '#0f172a',
+  accentColor: '#2563eb',
+  canvasBg: '#f1f5f9',
+  cardBg: '#ffffff',
+  headerBg: '#0f172a',
+  badgeStampColor: '#2563eb',
+  badgeStampText: 'SECURITY OPERATIONS',
+  showStamp: true,
+  showClassificationBanner: false,
+  classificationText: '',
+  borderStyle: 'solid',
+  borderRadius: '12px',
+} as const;
+
+test('renderAdvisory renders severity badges with correct colors for each severity level', () => {
+  const template = compileCustomizedTemplate(testCustomization);
+  for (const severity of ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN']) {
+    const html = renderAdvisory(template, { ...baseAdvisory, severity: severity as Advisory['severity'] });
+    assert.ok(!html.includes('{{'), `no unrendered tokens for severity ${severity}`);
+    assert.ok(
+      html.includes(`background:#${severity === 'CRITICAL' ? 'ef4444' : severity === 'HIGH' ? 'f59e0b' : severity === 'MEDIUM' ? 'eab308' : severity === 'LOW' ? '10b981' : '6b7280'}`),
+      `severity ${severity} badge should have correct color`,
+    );
+    assert.ok(html.includes(`${severity} SEVERITY`), `header badge should show "${severity} SEVERITY"`);
+    assert.ok(html.includes(`>${severity}<`), `details table badge should show "${severity}"`);
+  }
+});
+
+test('validateAdvisoryFields returns valid for complete advisory', () => {
+  const result = validateAdvisoryFields(baseAdvisory);
+  assert.equal(result.valid, true);
+  assert.equal(result.missingFields.length, 0);
+});
+
+test('validateAdvisoryFields detects empty required fields', () => {
+  const cases: { label: string; advisory: Partial<Advisory>; expected: string[] }[] = [
+    { label: 'empty id', advisory: { ...baseAdvisory, id: '' }, expected: ['id'] },
+    { label: 'empty title', advisory: { ...baseAdvisory, title: '' }, expected: ['title'] },
+    { label: 'empty executiveSummary', advisory: { ...baseAdvisory, executiveSummary: '' }, expected: ['executiveSummary'] },
+    { label: 'empty remediationInstructions', advisory: { ...baseAdvisory, remediationInstructions: '' }, expected: ['remediationInstructions'] },
+    { label: 'empty affectedSystems', advisory: { ...baseAdvisory, affectedSystems: [] }, expected: ['affectedSystems'] },
+    {
+      label: 'multiple empty fields',
+      advisory: { ...baseAdvisory, id: '', title: '', severity: '' as Advisory['severity'] },
+      expected: ['id', 'title', 'severity'],
     },
-  };
-  const html = renderAdvisory(template, advisory);
-  assert.ok(!html.includes('<img src=x'), 'XSS in audience notice should be escaped');
-  assert.ok(!html.includes('<script>'), 'XSS in reviewer comment should be escaped');
-  assert.ok(html.includes('&lt;img'), 'audience notice should be escaped');
-  assert.ok(html.includes('&lt;script&gt;'), 'reviewer comment should be escaped');
+  ];
+  for (const { label, advisory, expected } of cases) {
+    const result = validateAdvisoryFields(advisory as Advisory);
+    assert.equal(result.valid, false, `should be invalid: ${label}`);
+    assert.deepEqual(result.missingFields, expected, `missing fields should match: ${label}`);
+  }
+});
+
+test('renderAdvisory throws when required advisory fields are empty', () => {
+  const template = compileCustomizedTemplate(testCustomization);
+  assert.throws(
+    () => renderAdvisory(template, { ...baseAdvisory, id: '' }),
+    /Cannot render advisory email with empty required fields: id/,
+  );
+  assert.throws(
+    () => renderAdvisory(template, { ...baseAdvisory, title: '   ' }),
+    /Cannot render advisory email with empty required fields: title/,
+  );
+  assert.throws(
+    () => renderAdvisory(template, { ...baseAdvisory, executiveSummary: '' }),
+    /Cannot render advisory email with empty required fields: executiveSummary/,
+  );
+  assert.throws(
+    () => renderAdvisory(template, { ...baseAdvisory, remediationInstructions: '' }),
+    /Cannot render advisory email with empty required fields: remediationInstructions/,
+  );
+  assert.throws(
+    () => renderAdvisory(template, { ...baseAdvisory, affectedSystems: [] }),
+    /Cannot render advisory email with empty required fields: affectedSystems/,
+  );
+});
+
+test('renderAdvisory produces template matching the studio HTML structure', () => {
+  const template = compileCustomizedTemplate(testCustomization);
+  const html = renderAdvisory(template, baseAdvisory);
+  assert.ok(html.includes('THREAT INTELLIGENCE &amp; SECURITY OPERATIONS'), 'studio label should appear');
+  assert.ok(html.includes('Security Advisory'), 'static heading should appear');
+  assert.ok(html.includes('ADV-2026-001'), 'advisory id should be rendered');
+  assert.ok(html.includes('Test vulnerability advisory'), 'advisory title should be rendered');
+  assert.ok(html.includes('BA Threat Intelligence'), 'footer label should appear');
+  assert.ok(html.includes('EXECUTIVE SUMMARY'), 'executive summary section should appear');
+  assert.ok(html.includes('ADVISORY DETAILS'), 'advisory details section should appear');
+  assert.ok(html.includes('Vulnerability Name'), 'vulnerability name row should appear');
+  assert.ok(html.includes('Affected Products &amp; Versions'), 'affected products row should appear');
+  assert.ok(html.includes('Workaround / Mitigation'), 'mitigation row should appear');
+  assert.ok(html.includes('Recommended Action'), 'recommended action row should appear');
 });
