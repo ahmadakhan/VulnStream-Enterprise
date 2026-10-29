@@ -3,34 +3,34 @@
 <tbody>
 
 <tr class="ms-rteTableEvenRow-default">
-<td class="ms-rteTableEvenCol-default" style="width:11%;">Vulnerability ​​Name</td>
+<td class="ms-rteTableEvenCol-default" style="width:11%;">Vulnerability Name</td>
 <td class="ms-rteTableOddCol-default">
-The latest vulnerabilities affect Veeam Backup &amp; Replication 13.1.1.18 and earlier version 13.1 builds, Veeam Backup &amp; Replication 13.0.2.29 and earlier version 13.0 builds, and Veeam Agent for Linux 13.1.1.4 and earlier version 13.1 builds.
+{{advisory_title}}
 </td>
 </tr>
 
 <tr class="ms-rteTableOddRow-default">
 <td class="ms-rteTableEvenCol-default">CVE ID​​​​​</td>
 <td class="ms-rteTableOddCol-default">
-<a href="https://nvd.nist.gov/vuln/detail/CVE-2026-108142" target="_blank">CVE-2026-108142</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2026-108140" target="_blank">CVE-2026-108140</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2026-108141" target="_blank">CVE-2026-108141</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2026-105477" target="_blank">CVE-2026-105477</a>
+{{cve_id_links}}
 </td>
 </tr>
 
 <tr class="ms-rteTableEvenRow-default">
 <td class="ms-rteTableEvenCol-default">Severity</td>
 <td class="ms-rteTableOddCol-default">
-<font class="ms-rteForeColor-2"><strong>Critical</strong></font>
+{{severity_badge}}
 </td>
 </tr>
 
 <tr class="ms-rteTableOddRow-default">
 <td class="ms-rteTableEvenCol-default">Date of Release</td>
-<td class="ms-rteTableOddCol-default">28 October 2026</td>
+<td class="ms-rteTableOddCol-default">{{dispatch_date}}</td>
 </tr>
 
 <tr class="ms-rteTableEvenRow-default">
 <td class="ms-rteTableEvenCol-default">Date of Update</td>
-<td class="ms-rteTableOddCol-default">28 October 2026</td>
+<td class="ms-rteTableOddCol-default">{{dispatch_date}}</td>
 </tr>
 
 <tr class="ms-rteTableOddRow-default">
@@ -38,78 +38,14 @@ The latest vulnerabilities affect Veeam Backup &amp; Replication 13.1.1.18 and e
 <a name="zero_day" id="zero_day"><span style="color:#f8f8f8;">Vulnerability Details</span></a>
 </td>
 <td class="ms-rteTableOddCol-default">
-
-<div>
-<span class="ms-rteForeColor-3">CVE-2026-108142</span><br/>
-<span class="ms-rteThemeForeColor-1-1">Authorization Bypass on CDP Coordinator Service</span>
-</div>
-
-<ul>
-<li><strong>Severity:</strong> <span class="ms-rteForeColor-2">Critical</span>, CVSS v4.0 9.1.</li>
-<li><strong>Impact:</strong> An unauthenticated attacker may bypass authorization controls on the CDP Coordinator Service.</li>
-<li><strong>Affected Deployment Type:</strong> Windows-based Veeam Backup &amp; Replication and Veeam Software Appliance.</li>
-<li><strong>Affected:</strong> Veeam Backup &amp; Replication 13.1.1.18 and earlier 13.1 builds; Veeam Backup &amp; Replication 13.0.2.29 and earlier 13.0 builds.</li>
-<li><strong>Fixed:</strong> Veeam Backup &amp; Replication 13.1.2 (Build 13.1.2.57) and Veeam Backup &amp; Replication 13.0.3 (Build 13.0.3.63).</li>
-<li><strong>Source:</strong> <a href="https://www.veeam.com/kb4738" target="_blank">Veeam KB4738</a> — Reported through HackerOne.</li>
-<li><strong>Note:</strong> Older versions (12.x) are not affected.</li>
-</ul>
-
-<p>For vendor details, see <a href="https://www.veeam.com/kb4738" target="_blank">Veeam KB4738</a>.</p>
-
-<div>
-<span style="color:orange;">CVE-2026-108140</span><br/>
-<span class="ms-rteThemeForeColor-1-1">Arbitrary File Write through Relative Path Traversal</span>
-</div>
-
-<ul>
-<li><strong>Severity:</strong> <span class="ms-rteThemeForeColor-6-3">Medium</span>, CVSS v4.0 5.9.</li>
-<li><strong>Impact:</strong> An authenticated Restore Operator who controls a backed-up NAS share may write attacker-controlled files to arbitrary locations on the backup server through relative path traversal.</li>
-<li><strong>Affected Deployment Type:</strong> Windows-based Veeam Backup &amp; Replication and Veeam Software Appliance.</li>
-<li><strong>Affected:</strong> Veeam Backup &amp; Replication 13.1.1.18 and earlier 13.1 builds; Veeam Backup &amp; Replication 13.0.2.29 and earlier 13.0 builds.</li>
-<li><strong>Fixed:</strong> Veeam Backup &amp; Replication 13.1.2 (Build 13.1.2.57) and Veeam Backup &amp; Replication 13.0.3 (Build 13.0.3.63).</li>
-<li><strong>Source:</strong> <a href="https://www.veeam.com/kb4738" target="_blank">Veeam KB4738</a> — Reported through HackerOne.</li>
-</ul>
-
-<div>
-<span style="color:#f09609;">CVE-2026-108141</span><br/>
-<span class="ms-rteThemeForeColor-1-1">Arbitrary File Write through Relative Path Traversal</span>
-</div>
-
-<ul>
-<li><strong>Severity:</strong> <span class="ms-rteThemeForeColor-6-3">Medium</span>, CVSS v4.0 5.9.</li>
-<li><strong>Impact:</strong> An authenticated Restore Operator who controls a backed-up NAS share may write attacker-controlled files to arbitrary locations on the backup server through relative path traversal.</li>
-<li><strong>Affected Deployment Type:</strong> Windows-based Veeam Backup &amp; Replication and Veeam Software Appliance.</li>
-<li><strong>Affected:</strong> Veeam Backup &amp; Replication 13.1.1.18 and earlier 13.1 builds; Veeam Backup &amp; Replication 13.0.2.29 and earlier 13.0 builds.</li>
-<li><strong>Fixed:</strong> Veeam Backup &amp; Replication 13.1.2 (Build 13.1.2.57) and Veeam Backup &amp; Replication 13.0.3 (Build 13.0.3.63).</li>
-<li><strong>Source:</strong> <a href="https://www.veeam.com/kb4738" target="_blank">Veeam KB4738</a> — Reported through HackerOne.</li>
-</ul>
-
-<div>
-<span class="ms-rteThemeForeColor-7-3">CVE-2026-105477</span><br/>
-<span class="ms-rteThemeForeColor-1-1">Local Privilege Escalation in Veeam Agent for Linux</span>
-</div>
-
-<ul>
-<li><strong>Severity:</strong> <span class="ms-rteForeColor-2">High</span>, CVSS v4.0 7.3.</li>
-<li><strong>Impact:</strong> A local privilege escalation vulnerability affecting Veeam Agent for Linux installations managed by a Veeam Backup &amp; Replication instance.</li>
-<li><strong>Affected:</strong> Veeam Agent for Linux 13.1.1.4 and earlier 13.1 builds.</li>
-<li><strong>Fixed:</strong> Veeam Agent for Linux 13.1.2 (Build 13.1.2.11).</li>
-<li><strong>Source:</strong> <a href="https://www.veeam.com/kb4738" target="_blank">Veeam KB4738</a> — Reported through HackerOne.</li>
-<li><strong>Note:</strong> Older versions (13.0.x and 6.x) are not affected.</li>
-</ul>
-
+{{cve_details}}
 </td>
 </tr>
 
 <tr class="ms-rteTableEvenRow-default">
 <td class="ms-rteTableEvenCol-default">Affected Products and Versions</td>
 <td class="ms-rteTableOddCol-default">
-<ul>
-<li><strong>Veeam Backup &amp; Replication 13.1:</strong> Builds 13.1.1.18 and earlier.</li>
-<li><strong>Veeam Backup &amp; Replication 13.0:</strong> Builds 13.0.2.29 and earlier.</li>
-<li><strong>Veeam Software Appliance:</strong> Vulnerable affected deployments.</li>
-<li><strong>Veeam Agent for Linux:</strong> Version 13.1.1.4 and earlier 13.1 builds.</li>
-</ul>
+{{affected_systems_html}}
 </td>
 </tr>
 
@@ -118,13 +54,7 @@ The latest vulnerabilities affect Veeam Backup &amp; Replication 13.1.1.18 and e
 <a name="fix_section" id="fix_section"><span style="color:#f8f8f8;">Fix</span></a>
 </td>
 <td class="ms-rteTableOddCol-default">
-<ol>
-<li><strong>Veeam Backup &amp; Replication:</strong> Upgrade to version 13.1.2 (Build 13.1.2.57) or version 13.0.3 (Build 13.0.3.63).</li>
-<li><strong>Veeam Agent for Linux:</strong> Upgrade to version 13.1.2 (Build 13.1.2.11).</li>
-<li><strong>Validation:</strong> Verify CDP, backup, restore, replication, NAS backup, and agent-management functions after patching.</li>
-</ol>
-
-<a href="https://www.veeam.com/kb4738" target="_blank">Click for details</a>
+{{remediation_steps}}
 </td>
 </tr>
 
@@ -133,38 +63,21 @@ The latest vulnerabilities affect Veeam Backup &amp; Replication 13.1.1.18 and e
 <a name="mitigation" id="mitigation"><span style="color:#f8f8f8;">Workaround/Temporary fix/Mitigation</span></a>
 </td>
 <td class="ms-rteTableOddCol-default">
-<ul>
-<li>Restrict Veeam management interfaces to trusted administrative networks.</li>
-<li>Review and limit Restore Operator permissions.</li>
-<li>Monitor CDP Coordinator Service activity for unauthorized access attempts.</li>
-<li>Monitor NAS backup restore operations for suspicious file-write activity.</li>
-<li>Monitor Linux agents for privilege-escalation attempts.</li>
-<li>Temporary controls reduce risk but do not replace vendor updates.</li>
-</ul>
+{{mitigation_steps}}
 </td>
 </tr>
 
 <tr class="ms-rteTableOddRow-default">
 <td class="ms-rteTableEvenCol-default">Resource</td>
 <td class="ms-rteTableOddCol-default">
-<ul>
-<li><a href="https://www.veeam.com/kb4738" target="_blank">Veeam KB4738 — Security Update</a></li>
-<li><a href="https://www.veeam.com/kb2680" target="_blank">Veeam Backup &amp; Replication Version History</a></li>
-<li><a href="https://www.veeam.com/kb2681" target="_blank">Veeam Agent for Linux Version History</a></li>
-</ul>
+{{vendor_link}}
 </td>
 </tr>
 
 <tr class="ms-rteTableEvenRow-default">
 <td class="ms-rteTableEvenCol-default">Honeywell Recommended Action</td>
 <td class="ms-rteTableOddCol-default">
-<ul>
-<li>Inventory all Veeam Backup &amp; Replication servers, CDP deployments, and Veeam Agent for Linux installations.</li>
-<li>Immediately remediate systems affected by CVE-2026-108142 due to the critical authorization bypass vulnerability.</li>
-<li>Review Restore Operator role assignments and remove unnecessary privileges.</li>
-<li>Upgrade all affected Veeam Agent for Linux systems.</li>
-<li>Validate backup, restore, CDP, NAS backup, and replication functionality after remediation.</li>
-</ul>
+{{recommended_actions}}
 </td>
 </tr>
 
