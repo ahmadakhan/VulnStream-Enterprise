@@ -25,7 +25,9 @@ export const AdvisoryTemplateView: React.FC = () => {
 
   // Enterprise Live Rendering & Scroll Management
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const previewDate = useRef(new Date().toUTCString()).current;
+  const previewDate = useRef(
+    new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
+  ).current;
   const [iframeHeight, setIframeHeight] = useState<number>(880);
   const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -105,17 +107,24 @@ export const AdvisoryTemplateView: React.FC = () => {
         /{{executive_summary}}/g,
         'Example content for checking layout. This is not a vulnerability assessment or a delivery record.',
       )
-      .replace(/{{cve_ids}}/g, 'Example CVE identifier')
-      .replace(/{{cve_id_links}}/g, '<a href="https://nvd.nist.gov/vuln/detail/EXAMPLE-CVE" target="_blank">Example CVE identifier</a>')
-      .replace(/{{affected_systems}}/g, 'Example inventory asset')
+      .replace(/{{cve_id_links}}/g, '<a href="https://nvd.nist.gov/vuln/detail/CVE-2026-0001" target="_blank">CVE-2026-0001</a>, <a href="https://nvd.nist.gov/vuln/detail/CVE-2026-0002" target="_blank">CVE-2026-0002</a>')
       .replace(/{{affected_systems_html}}/g, '<li>Example inventory asset 1</li>\n<li>Example inventory asset 2</li>')
-      .replace(/{{cve_details}}/g, '<div>\n<span>Example CVE-2026-0001</span><br/>\n<span>Example vulnerability title</span>\n</div>\n<ul>\n<li><strong>Severity:</strong> High</li>\n<li><strong>Impact:</strong> Example impact description.</li>\n</ul>')
+      .replace(
+        /{{cve_details}}/g,
+        '<div>\n<span><a href="https://nvd.nist.gov/vuln/detail/CVE-2026-0001" target="_blank">CVE-2026-0001</a></span><br/>\n<span>Example advisory title</span>\n</div>\n<ul>\n<li><strong>Severity:</strong> HIGH</li>\n<li><strong>Source Advisory:</strong> <a href="https://example.com" target="_blank">View vendor advisory</a></li>\n</ul>',
+      )
       .replace(
         /{{remediation_steps}}/g,
         'Review the applicable vendor advisory and test remediation through your change process.',
       )
-      .replace(/{{mitigation_steps}}/g, 'Review and limit administrative access. Monitor for anomalous activity.')
-      .replace(/{{recommended_actions}}/g, '<ul>\n<li>Inventory all affected systems.</li>\n<li>Apply vendor patches immediately.</li>\n<li>Validate functionality after remediation.</li>\n</ul>')
+      .replace(
+        /{{mitigation_steps}}/g,
+        '<ul>\n<li>Review and limit administrative access to trusted networks.</li>\n<li>Monitor affected services for anomalous activity following the advisory window.</li>\n<li>Apply compensating controls if vendor patches are not yet deployable.</li>\n</ul>',
+      )
+      .replace(
+        /{{recommended_actions}}/g,
+        '<ul>\n<li>Inventory all affected systems identified in this advisory.</li>\n<li>Apply vendor patches immediately following your change management process.</li>\n<li>Validate backup, restore, and operational functionality after remediation.</li>\n</ul>',
+      )
       .replace(/{{vendor_link}}/g, 'https://example.com');
 
   const handleSave = async () => {
@@ -585,15 +594,18 @@ export const AdvisoryTemplateView: React.FC = () => {
             <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono text-[11px] font-medium">
               Click to Copy:
             </span>
-            {[
+            {            [
               '{{advisory_id}}',
               '{{advisory_title}}',
               '{{severity}}',
               '{{dispatch_date}}',
               '{{executive_summary}}',
-              '{{cve_ids}}',
-              '{{affected_systems}}',
+              '{{cve_id_links}}',
+              '{{affected_systems_html}}',
+              '{{cve_details}}',
               '{{remediation_steps}}',
+              '{{mitigation_steps}}',
+              '{{recommended_actions}}',
               '{{vendor_link}}',
             ].map((token) => (
               <button

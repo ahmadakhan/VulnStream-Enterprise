@@ -1,5 +1,8 @@
 # Pipeline and matching fixes — 21 October 2026
 
+> See also: [AUDIT-PIPELINE-2026-10-29.md](AUDIT-PIPELINE-2026-10-29.md) for pipeline
+> scheduling, cancellation and stale-bundle recovery fixes (29 October 2026).
+
 ## Corrected behavior
 
 - Every completed run reconciles active inventory against the entire cached CVE corpus. The selected time window controls feed ingestion; it no longer hides older cached vulnerabilities from newly registered assets.
@@ -32,3 +35,22 @@ The delivery worker labels why a queued advisory was rejected so the reason is v
 - `current inventory no longer matches` — no current asset/CVE pair; `rebuildFromCurrentInventory()` clears the advisory binding, `reconcileFindings` retains the finding as `NOT_APPLICABLE`, and it is not re-queued.
 - `current applicability or confidence policy requires review` — the finding still matches, but the workspace confidence policy now holds it as `REVIEW_REQUIRED` (for example the threshold was raised from 80% to 90% after the bundle was queued). The stale bundle fails, the sibling jobs fail with the same reason and an immediate pipeline run is queued. The run reconciles the finding to `REVIEW_REQUIRED` under the current policy; because it is neither `QUEUED_FOR_DISPATCH` nor `AUTO_DISPATCHED` it is **not** added to a new advisory and the delivery worker never calls the transport for it. Restoring a policy that admits the finding (or an operator ruling) makes the next run queue it again.
 - `CVE intelligence changed`, `a CVE was withdrawn`, `a finding was resolved or dismissed`, `inventory or matching evidence changed` — the bundle is stale for that specific reason; accepted or partially accepted advisories are never resent automatically.
+
+## Fixed (29 October 2026): strict CPE matching bypass for partial wildcard versions
+
+**Severity: High.** Commit `401eba4` added `hasUnescapedCpeWildcard(assetParsed.version)` to the `assetVersionUnasserted` check in `matchesWatchlistItem` (`src/utils/cpeMatcher.ts`). This set `unverifiedVersion=true` for **any** partial wildcard version (e.g., `2.*`), causing `matchCPE` to bypass the version token mismatch check — so an asset CPE version `2.*` incorrectly matched a vulnerability whose CPE pins version `1.5`. The result was a false-positive `REVIEW_REQUIRED` finding. When multiple assets shared a non-intersecting wildcard version, the same CVE appeared N times on the Vulnerabilities page, producing the reported "duplicate CVEs under review."
+
+The fix narrows `assetVersionUnasserted` to only cover truly missing (`-`) or literal `*` versions. Partial wildcards (`1.*`, `2.*`, `1.?`) now flow through `matchComponent`'s normal token comparison:
+
+- Non-intersecting (`2.*` vs `1.5`): `matchComponent` rejects via `globIntersects` → **no finding**.
+- Potentially intersecting (`1.*` vs `1.5`): `matchComponent` accepts → `contextNeedsReview` (via `hasUnescapedCpeWildcard` at line 832) holds it for review → `REVIEW_REQUIRED` (70%).
+- Literal `*` or missing `-`: `unverifiedVersion` bypass applies → `REVIEW_REQUIRED` (70%).
+
+The companion `hasUnescapedCpeWildcard` check in `contextNeedsReview` ensures overlapping wildcards are still correctly identified as review candidates. The evidence string for review findings without a version range no longer incorrectly states "(90% confidence)" — it now reads "(70% confidence)".
+
+### Regression tests
+
+- `non-intersecting wildcard asset version does not match a concrete vuln version` — verifies `matchCPE` and `matchesWatchlistItem` reject `2.*` vs `1.5` while accepting `1.*` vs `1.5` as `REVIEW_REQUIRED`.
+- `non-intersecting wildcard assets do not produce duplicate CVE findings` — verifies the pipeline produces zero findings when three assets with `2.*` face a CVE pinned to `1.5`.
+
+All 44 audit tests and 382 unit tests pass; TypeScript typecheck is clean.

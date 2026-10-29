@@ -17,19 +17,52 @@ export function renderAdvisory(template: string, advisory: Advisory): string {
     severity: advisory.severity,
     advisory_id: advisory.id,
     advisory_title: advisory.title,
-    dispatch_date: new Date().toUTCString(),
+    dispatch_date: new Date().toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    }),
     executive_summary: advisory.executiveSummary,
     cve_ids: advisory.cveIds.join(', '),
     affected_systems: advisory.affectedSystems.join('\n'),
-    affected_systems_html: advisory.affectedSystems.map((sys: string) => `<li>${escape(sys)}</li>`).join('\n'),
+    affected_systems_html: advisory.affectedSystems
+      .map((sys: string) => `<li>${escape(sys)}</li>`)
+      .join('\n'),
     remediation_steps: advisory.remediationInstructions,
     vendor_link: advisory.vendorLink || '',
     cve_id_links: advisory.cveIds
-      .map((cve: string) => `<a href="https://nvd.nist.gov/vuln/detail/${escape(cve)}" target="_blank">${escape(cve)}</a>`)
+      .map(
+        (cve: string) =>
+          `<a href="https://nvd.nist.gov/vuln/detail/${escape(cve)}" target="_blank">${escape(cve)}</a>`,
+      )
       .join(', '),
-    cve_details: '',
-    mitigation_steps: advisory.remediationInstructions,
-    recommended_actions: '',
+    cve_details: advisory.cveIds
+      .map(
+        (cve: string) =>
+          `<div>
+<span><a href="https://nvd.nist.gov/vuln/detail/${escape(cve)}" target="_blank">${escape(cve)}</a></span><br/>
+<span>${escape(advisory.title)}</span>
+</div>
+<ul>
+<li><strong>Severity:</strong> ${escape(advisory.severity)}</li>
+<li><strong>Source Advisory:</strong> ${
+            advisory.vendorLink
+              ? `<a href="${escape(advisory.vendorLink)}" target="_blank">View vendor advisory</a>`
+              : 'N/A'
+          }</li>
+</ul>`,
+      )
+      .join('\n'),
+    mitigation_steps: `<ul>
+<li>Review and limit administrative access to trusted networks.</li>
+<li>Monitor affected services for anomalous activity following the advisory window.</li>
+<li>Apply compensating controls if vendor patches are not yet deployable.</li>
+</ul>`,
+    recommended_actions: `<ul>
+<li>Inventory all affected systems identified in this advisory.</li>
+<li>Apply vendor patches immediately following your change management process.</li>
+<li>Validate backup, restore, and operational functionality after remediation.</li>
+</ul>`,
   };
   const rawHtmlTokens = new Set([
     'cve_id_links',

@@ -82,7 +82,7 @@
   flex-direction: column;
   min-height: 0;
 }
-.registration-body {
+.registration-body-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
   align-items: start;
@@ -565,7 +565,7 @@
   .ui-main .product-registration-dialog {
     max-height: calc(100dvh - 32px);
   }
-  .registration-body {
+  .registration-body-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 24px;
     padding: 24px;
@@ -616,7 +616,7 @@
     width: 30px;
     height: 30px;
   }
-  .registration-body {
+  .registration-body-grid {
     padding: 22px 18px;
   }
   .registration-section-heading {
@@ -662,4 +662,30 @@
     animation: none;
   }
 }
-.registration-body { min-width: 0; }
+.registration-body-grid {
+  min-width: 0;
+}
+
+.registration-form {
+  flex: 1;
+  overflow: hidden;
+}
+.registration-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.registration-body-grid {
+  overflow: visible;
+}
+.monitored-inventory-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+}
+.monitored-inventory-actions > button {
+  margin: 0;
+}

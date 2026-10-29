@@ -749,14 +749,18 @@ export function matchesWatchlistItem(
       assetProduct,
     );
     for (const vulnCpe of vulnCpeMatches) {
-      // An inventory CPE with a wildcard version (or none at all) asserts nothing
-      // about the release. A version-constrained advisory criterion can therefore
-      // only be a review candidate, never a confirmed match. Treating the wildcard
-      // as agreement let an unversioned asset pass as an exact token match.
+      // An inventory CPE with a missing or fully-wildcard version (`-`) asserts
+      // nothing about the release, so a version-constrained advisory criterion
+      // can only be a review candidate, never a confirmed match. The
+      // unverifiedVersion bypass must not apply to partial wildcards like
+      // `2.*` versus a concrete `1.5` — those describe different releases and
+      // matchComponent already rejects them, preventing false-positive
+      // REVIEW_REQUIRED findings that surface as duplicate CVEs on the
+      // Vulnerabilities page. Partial wildcards still reach the normal
+      // contextNeedsReview path via hasUnescapedCpeWildcard below.
       const assetParsed = parseCPE23(assetCpe);
       const assetVersionUnasserted =
-        assetParsed.isValid &&
-        (!assetParsed.version || assetParsed.version === '*' || hasUnescapedCpeWildcard(assetParsed.version));
+        assetParsed.isValid && (!assetParsed.version || assetParsed.version === '*');
       const vulnParsed = parseCPE23(vulnCpe);
       const vulnConstrainsVersion =
         vulnParsed.isValid && vulnParsed.version !== '*' && vulnParsed.version !== '-' && !hasUnescapedCpeWildcard(vulnParsed.version);
@@ -833,13 +837,15 @@ export function matchesWatchlistItem(
           method: versionRange ? 'STRICT_CPE_INTERVAL' : 'STRICT_CPE',
           confidence: requiresReview ? 70 : versionRange ? 100 : 90,
           matchedCpe: vulnCpe,
-          evidence: genericIdentity
-            ? 'Matched CPE product identity inferred from the inventory record; confirm the generic CPE is intended (70% confidence)'
-            : versionRange
-              ? requiresReview
-                ? 'Matched strict CPE 2.3 product identifiers; version or architecture applicability requires review'
-                : `Matched strict CPE 2.3 component tokens + verified in version interval [< ${versionRange.versionEndExcluding || versionRange.versionEndIncluding}] (100% confidence)`
-              : `Matched strict CPE 2.3 component tokens (90% confidence)`,
+            evidence: genericIdentity
+              ? 'Matched CPE product identity inferred from the inventory record; confirm the generic CPE is intended (70% confidence)'
+              : versionRange
+                ? requiresReview
+                  ? 'Matched strict CPE 2.3 product identifiers; version or architecture applicability requires review'
+                  : `Matched strict CPE 2.3 component tokens + verified in version interval [< ${versionRange.versionEndExcluding || versionRange.versionEndIncluding}] (100% confidence)`
+                : requiresReview
+                  ? 'Matched strict CPE 2.3 component tokens; review required (wildcard version or context) (70% confidence)'
+                  : 'Matched strict CPE 2.3 component tokens (90% confidence)',
           applicabilityRequiresReview: requiresReview,
         });
       }

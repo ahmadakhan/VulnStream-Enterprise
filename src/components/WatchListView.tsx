@@ -958,7 +958,7 @@ export const WatchListView: React.FC = () => {
             </div>
 
             {/* Buttons */}
-            <div className="flex items-center space-x-2">
+            <div className="monitored-inventory-actions flex items-center space-x-2">
               <button
                 onClick={handleExportJson}
                 className="text-xs px-3 py-1.5 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 dark:hover:bg-zinc-700 light:hover:bg-zinc-300 text-zinc-200 dark:text-zinc-200 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 font-medium transition flex items-center space-x-1"
@@ -1194,485 +1194,304 @@ export const WatchListView: React.FC = () => {
             </button>
           </header>
           <form onSubmit={handleSaveProduct} className="registration-form" aria-busy={savingProduct}>
-            <fieldset
-              className="registration-body"
-              disabled={savingProduct}
-              aria-label="Monitored product details"
-            >
-              <div className="registration-fields">
-                <section className="registration-section">
-                  <div className="registration-section-heading">
-                    <span aria-hidden="true">01</span>
-                    <div>
-                      <h3>Asset details</h3>
-                      <p>Required fields identify the system and the team responsible for it.</p>
-                    </div>
-                  </div>
-                  {/* Asset Tag & Custodian Group */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label
-                        htmlFor="registration-asset-tag"
-                        className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
-                      >
-                        Asset Tag / Host Prefix *
-                      </label>
-                      <input
-                        id="registration-asset-tag"
-                        type="text"
-                        required
-                        placeholder="e.g. CORP-APP-01"
-                        value={assetTagInput}
-                        onChange={(e) => setAssetTagInput(e.target.value)}
-                        className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="registration-owner-group"
-                        className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
-                      >
-                        Custodian Group *
-                      </label>
-                      <input
-                        id="registration-owner-group"
-                        type="text"
-                        required
-                        placeholder="e.g. SecOps-Core"
-                        value={ownerGroupInput}
-                        onChange={(e) => setOwnerGroupInput(e.target.value)}
-                        className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                </section>
-                <section className="registration-section">
-                  <div className="registration-section-heading">
-                    <span aria-hidden="true">02</span>
-                    <div>
-                      <h3>Vendor & products</h3>
-                      <p>Select one or more catalog products, or enter a custom product.</p>
-                    </div>
-                  </div>
-                  {/* Vendor Field with Quick Presets */}
-                  <div>
-                    <label
-                      htmlFor="registration-vendor"
-                      className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
-                    >
-                      Vendor Name *
-                    </label>
-                    <input
-                      id="registration-vendor"
-                      type="text"
-                      required
-                      placeholder="Search or enter a vendor, e.g. Microsoft"
-                      value={vendorInput}
-                      onChange={(e) => selectVendorQuick(e.target.value)}
-                      className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-medium focus:border-zinc-600 focus:outline-none"
-                    />
-
-                    {/* Popular Vendor Shortcuts */}
-                    <div className="registration-vendor-shortcuts flex flex-wrap gap-1.5 mt-2">
-                      <span className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono mr-1">
-                        Popular vendors
-                      </span>
-                      {[
-                        'Microsoft',
-                        'Cisco',
-                        'Fortinet',
-                        'VMware',
-                        'Veeam',
-                        'Palo Alto Networks',
-                        'Apache',
-                        'Red Hat',
-                        'Oracle',
-                        'Google',
-                        'F5',
-                        'Linux Foundation',
-                      ].map((v) => (
-                        <button
-                          key={v}
-                          type="button"
-                          onClick={() => selectVendorQuick(v)}
-                          className="px-2 py-0.5 rounded-lg text-[10px] font-mono bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 transition"
-                        >
-                          {v}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {/* Catalog Products for Vendor (MULTI-SELECT SUPPORT) */}
-                  {catalogProducts.length > 0 && (
-                    <div className="registration-catalog bg-zinc-950/70 dark:bg-zinc-950/70 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-[11px] text-zinc-300 dark:text-zinc-300 light:text-zinc-800 font-semibold flex items-center gap-1.5">
-                          <Package className="w-3.5 h-3.5 text-emerald-400" />
-                          {vendorInput} catalog
-                        </span>
-                        <span className="text-[10px] font-mono text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
-                          {selectedProductIds.length} selected
-                        </span>
+            <div className="registration-body">
+              <fieldset
+                className="registration-body-grid"
+                disabled={savingProduct}
+                aria-label="Monitored product details"
+              >
+                <div className="registration-fields">
+                  <section className="registration-section">
+                    <div className="registration-section-heading">
+                      <span aria-hidden="true">01</span>
+                      <div>
+                        <h3>Asset details</h3>
+                        <p>Required fields identify the system and the team responsible for it.</p>
                       </div>
-
+                    </div>
+                    {/* Asset Tag & Custodian Group */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label
+                          htmlFor="registration-asset-tag"
+                          className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
+                        >
+                          Asset Tag / Host Prefix *
+                        </label>
+                        <input
+                          id="registration-asset-tag"
+                          type="text"
+                          required
+                          placeholder="e.g. CORP-APP-01"
+                          value={assetTagInput}
+                          onChange={(e) => setAssetTagInput(e.target.value)}
+                          className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="registration-owner-group"
+                          className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
+                        >
+                          Custodian Group *
+                        </label>
+                        <input
+                          id="registration-owner-group"
+                          type="text"
+                          required
+                          placeholder="e.g. SecOps-Core"
+                          value={ownerGroupInput}
+                          onChange={(e) => setOwnerGroupInput(e.target.value)}
+                          className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  </section>
+                  <section className="registration-section">
+                    <div className="registration-section-heading">
+                      <span aria-hidden="true">02</span>
+                      <div>
+                        <h3>Vendor & products</h3>
+                        <p>Select one or more catalog products, or enter a custom product.</p>
+                      </div>
+                    </div>
+                    {/* Vendor Field with Quick Presets */}
+                    <div>
+                      <label
+                        htmlFor="registration-vendor"
+                        className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
+                      >
+                        Vendor Name *
+                      </label>
                       <input
-                        type="search"
-                        className="registration-catalog-query"
-                        aria-label="Filter catalog products"
-                        placeholder="Find a product in this catalog…"
-                        value={catalogQuery}
-                        onChange={(event) => setCatalogQuery(event.target.value)}
+                        id="registration-vendor"
+                        type="text"
+                        required
+                        placeholder="Search or enter a vendor, e.g. Microsoft"
+                        value={vendorInput}
+                        onChange={(e) => selectVendorQuick(e.target.value)}
+                        className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-medium focus:border-zinc-600 focus:outline-none"
                       />
-                      <div className="registration-catalog-options grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                        {catalogProducts
-                          .filter((prod) =>
+
+                      {/* Popular Vendor Shortcuts */}
+                      <div className="registration-vendor-shortcuts flex flex-wrap gap-1.5 mt-2">
+                        <span className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono mr-1">
+                          Popular vendors
+                        </span>
+                        {[
+                          'Microsoft',
+                          'Cisco',
+                          'Fortinet',
+                          'VMware',
+                          'Veeam',
+                          'Palo Alto Networks',
+                          'Apache',
+                          'Red Hat',
+                          'Oracle',
+                          'Google',
+                          'F5',
+                          'Linux Foundation',
+                        ].map((v) => (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => selectVendorQuick(v)}
+                            className="px-2 py-0.5 rounded-lg text-[10px] font-mono bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 text-zinc-300 dark:text-zinc-300 light:text-zinc-700 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 transition"
+                          >
+                            {v}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Catalog Products for Vendor (MULTI-SELECT SUPPORT) */}
+                    {catalogProducts.length > 0 && (
+                      <div className="registration-catalog bg-zinc-950/70 dark:bg-zinc-950/70 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-[11px] text-zinc-300 dark:text-zinc-300 light:text-zinc-800 font-semibold flex items-center gap-1.5">
+                            <Package className="w-3.5 h-3.5 text-emerald-400" />
+                            {vendorInput} catalog
+                          </span>
+                          <span className="text-[10px] font-mono text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
+                            {selectedProductIds.length} selected
+                          </span>
+                        </div>
+
+                        <input
+                          type="search"
+                          className="registration-catalog-query"
+                          aria-label="Filter catalog products"
+                          placeholder="Find a product in this catalog…"
+                          value={catalogQuery}
+                          onChange={(event) => setCatalogQuery(event.target.value)}
+                        />
+                        <div className="registration-catalog-options grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                          {catalogProducts
+                            .filter((prod) =>
+                              `${prod.name} ${prod.normalizedId} ${prod.description}`
+                                .toLowerCase()
+                                .includes(catalogQuery.toLowerCase().trim()),
+                            )
+                            .map((prod) => {
+                              const isSelected = selectedProductIds.includes(prod.normalizedId);
+                              return (
+                                <label
+                                  key={prod.normalizedId}
+                                  className={`registration-product-choice cursor-pointer p-2 rounded-lg border text-xs transition flex items-start space-x-2 select-none ${
+                                    isSelected
+                                      ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 border-zinc-600 dark:border-zinc-600 light:border-zinc-400 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-medium'
+                                      : 'bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:border-zinc-700'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleSelectProduct(prod)}
+                                    aria-label={prod.name}
+                                    className="mt-0.5 rounded border-zinc-700 dark:border-zinc-700 light:border-zinc-400 text-zinc-200 dark:text-zinc-200 light:text-zinc-800"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center justify-between">
+                                      <span className="truncate font-semibold">{prod.name}</span>
+                                      <span className="text-[9px] font-mono uppercase px-1 rounded bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                                        {prod.part === 'o' ? 'OS' : prod.part === 'h' ? 'HW' : 'APP'}
+                                      </span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 truncate mt-0.5">
+                                      {prod.description}
+                                    </div>
+                                  </div>
+                                </label>
+                              );
+                            })}
+                        </div>
+                        {catalogQuery &&
+                          !catalogProducts.some((prod) =>
                             `${prod.name} ${prod.normalizedId} ${prod.description}`
                               .toLowerCase()
                               .includes(catalogQuery.toLowerCase().trim()),
-                          )
-                          .map((prod) => {
-                            const isSelected = selectedProductIds.includes(prod.normalizedId);
-                            return (
-                              <label
-                                key={prod.normalizedId}
-                                className={`registration-product-choice cursor-pointer p-2 rounded-lg border text-xs transition flex items-start space-x-2 select-none ${
-                                  isSelected
-                                    ? 'bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 border-zinc-600 dark:border-zinc-600 light:border-zinc-400 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-medium'
-                                    : 'bg-zinc-900/60 dark:bg-zinc-900/60 light:bg-white border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 hover:border-zinc-700'
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() => toggleSelectProduct(prod)}
-                                  aria-label={prod.name}
-                                  className="mt-0.5 rounded border-zinc-700 dark:border-zinc-700 light:border-zinc-400 text-zinc-200 dark:text-zinc-200 light:text-zinc-800"
-                                />
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center justify-between">
-                                    <span className="truncate font-semibold">{prod.name}</span>
-                                    <span className="text-[9px] font-mono uppercase px-1 rounded bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-                                      {prod.part === 'o' ? 'OS' : prod.part === 'h' ? 'HW' : 'APP'}
-                                    </span>
-                                  </div>
-                                  <div className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 truncate mt-0.5">
-                                    {prod.description}
-                                  </div>
-                                </div>
-                              </label>
-                            );
-                          })}
+                          ) && (
+                            <p className="registration-helper" role="status">
+                              No catalog products match. Try another name or enter a custom product below.
+                            </p>
+                          )}
                       </div>
-                      {catalogQuery &&
-                        !catalogProducts.some((prod) =>
-                          `${prod.name} ${prod.normalizedId} ${prod.description}`
-                            .toLowerCase()
-                            .includes(catalogQuery.toLowerCase().trim()),
-                        ) && (
-                          <p className="registration-helper" role="status">
-                            No catalog products match. Try another name or enter a custom product below.
-                          </p>
-                        )}
-                    </div>
-                  )}
-                  {/* Custom Product Input Field */}
-                  <div>
-                    <label
-                      htmlFor="registration-custom-product"
-                      className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
-                    >
-                      Custom product name
-                    </label>
-                    <input
-                      id="registration-custom-product"
-                      type="text"
-                      placeholder="e.g. pan-os, custom-gateway, http_server"
-                      value={customProductInput}
-                      onChange={(e) => setCustomProductInput(e.target.value)}
-                      className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
-                    />
-                    <p className="registration-helper">
-                      Optional. Add a product that is not listed in the catalog.
-                    </p>
-                  </div>
-                </section>
-                <section className="registration-section">
-                  <div className="registration-section-heading">
-                    <span aria-hidden="true">03</span>
-                    <div>
-                      <h3>Version & platform</h3>
-                      <p>An exact installed version improves applicability matching.</p>
-                    </div>
-                  </div>
-                  {/* CPE Attributes (Part, Version, Target HW) */}
-                  <div className="grid grid-cols-3 gap-3">
+                    )}
+                    {/* Custom Product Input Field */}
                     <div>
                       <label
-                        htmlFor="registration-part"
+                        htmlFor="registration-custom-product"
                         className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
                       >
-                        CPE Part
+                        Custom product name
                       </label>
-                      <select
-                        id="registration-part"
-                        value={cpePart}
-                        onChange={(e) => setCpePart(e.target.value as any)}
+                      <input
+                        id="registration-custom-product"
+                        type="text"
+                        placeholder="e.g. pan-os, custom-gateway, http_server"
+                        value={customProductInput}
+                        onChange={(e) => setCustomProductInput(e.target.value)}
                         className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
-                      >
-                        <option value="a">Application (a)</option>
-                        <option value="o">Operating System (o)</option>
-                        <option value="h">Hardware Device (h)</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="registration-version"
-                        className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
-                      >
-                        Installed Version
-                      </label>
-                      <input
-                        id="registration-version"
-                        type="text"
-                        placeholder="* or exact e.g. 10.2.3"
-                        value={versionInput}
-                        onChange={(e) => setVersionInput(e.target.value)}
-                        className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
                       />
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="registration-architecture"
-                        className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
-                      >
-                        Target Arch
-                      </label>
-                      <input
-                        id="registration-architecture"
-                        type="text"
-                        placeholder="* or x86_64, aarch64"
-                        value={targetHwInput}
-                        onChange={(e) => setTargetHwInput(e.target.value)}
-                        className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                  {editingItem && (
-                    <div>
-                      <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
-                        CPE 2.3 Expression (editable)
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        aria-label="Editable CPE expression"
-                        value={cpeExpressionInput}
-                        onChange={(e) => setCpeExpressionInput(e.target.value)}
-                        aria-invalid={!parseCPE23(editedCpe()).isValid}
-                        className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
-                      />
-                      {!parseCPE23(editedCpe()).isValid && (
-                        <p className="mt-1 text-rose-400">Enter a valid CPE 2.3 expression before saving.</p>
-                      )}
-                      <p className="mt-1 text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
-                        Change the product fields or expression to update this asset. Select catalog products
-                        above to add separate monitored products.
+                      <p className="registration-helper">
+                        Optional. Add a product that is not listed in the catalog.
                       </p>
                     </div>
-                  )}
-
-                  {editingItem && additionalCpes.length > 0 && (
-                    <div className="rounded-xl border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 p-3 space-y-2">
-                      <div className="text-[11px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-                        Additional CPEs currently attached to this asset. Remove any that should not be
-                        monitored.
+                  </section>
+                  <section className="registration-section">
+                    <div className="registration-section-heading">
+                      <span aria-hidden="true">03</span>
+                      <div>
+                        <h3>Version & platform</h3>
+                        <p>An exact installed version improves applicability matching.</p>
                       </div>
-                      {additionalCpes.map((cpe, index) => (
-                        <div key={`${cpe}-${index}`} className="flex items-center gap-2">
-                          <code
-                            className="min-w-0 flex-1 truncate text-xs text-zinc-300 dark:text-zinc-300 light:text-zinc-700"
-                            title={cpe}
-                          >
-                            {cpe}
-                          </code>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setAdditionalCpes((current) =>
-                                current.filter((_, cpeIndex) => cpeIndex !== index),
-                              )
-                            }
-                            aria-label={`Remove additional CPE ${cpe}`}
-                            className="shrink-0 rounded-lg p-1 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 hover:text-rose-400 transition"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ))}
                     </div>
-                  )}
-
-                  {editingItem && (
-                    <div>
-                      <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
-                        Add Another Custom Product
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. internal_gateway"
-                        aria-label="Additional custom product"
-                        value={additionalProductInput}
-                        onChange={(e) => setAdditionalProductInput(e.target.value)}
-                        className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
-                      />
-                    </div>
-                  )}
-                  <p className="registration-helper">
-                    Use * when a version or architecture is unknown. Version-specific matches may require
-                    review.
-                  </p>
-                </section>
-                <section className="registration-section">
-                  <div className="registration-section-heading">
-                    <span aria-hidden="true">04</span>
-                    <div>
-                      <h3>Find dictionary entries</h3>
-                      <p>Look up published CPE identifiers for the selected vendor and product.</p>
-                    </div>
-                  </div>
-                  {/* NVD Verified CPE 2.3 Search */}
-                  <div className="registration-nvd space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="registration-subheading">NVD CPE dictionary</h3>
-                      <button
-                        type="button"
-                        onClick={handleNvdSearch}
-                        disabled={nvdLoading || !vendorInput.trim()}
-                        className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-sky-900/40 dark:bg-sky-900/40 light:bg-sky-100 border border-sky-800 dark:border-sky-800 light:border-sky-300 text-sky-300 dark:text-sky-300 light:text-sky-700 hover:bg-sky-900/60 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                      >
-                        {nvdLoading ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Search className="w-3 h-3" />
-                        )}
-                        {nvdLoading ? 'Searching...' : 'Search NVD'}
-                      </button>
-                    </div>
-
-                    {/* NVD Product Search Input */}
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 dark:text-zinc-500 light:text-zinc-600" />
-                      <input
-                        type="text"
-                        placeholder="e.g. backup_and_replication, one, agent"
-                        aria-label="Product to find in NVD"
-                        value={nvdSearchProduct}
-                        onChange={(e) => setNvdSearchProduct(e.target.value)}
-                        className="w-full pl-8 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2 text-[11px] text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
-                      />
-                    </div>
-
-                    <p className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
-                      Search the NIST dictionary for {vendorInput.trim() || 'vendor'}
-                      {nvdSearchProductTerm && ` / ${nvdSearchProductTerm}`}. Add matching entries to the
-                      product. Requests are subject to NVD rate limits.
-                    </p>
-                    {nvdError && (
-                      <div
-                        className="rounded-lg border border-rose-800 bg-rose-950/40 p-2 text-[10px] text-rose-300"
-                        role="alert"
-                      >
-                        {nvdError}
+                    {/* CPE Attributes (Part, Version, Target HW) */}
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label
+                          htmlFor="registration-part"
+                          className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
+                        >
+                          CPE Part
+                        </label>
+                        <select
+                          id="registration-part"
+                          value={cpePart}
+                          onChange={(e) => setCpePart(e.target.value as any)}
+                          className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
+                        >
+                          <option value="a">Application (a)</option>
+                          <option value="o">Operating System (o)</option>
+                          <option value="h">Hardware Device (h)</option>
+                        </select>
                       </div>
-                    )}
-                    {nvdResults.length > 0 && (
-                      <>
-                        {/* Results Filter */}
-                        <div className="relative">
-                          <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 dark:text-zinc-500 light:text-zinc-600" />
-                          <input
-                            type="text"
-                            placeholder="Filter results by CPE, vendor, product, or title..."
-                            aria-label="Filter NVD CPE results"
-                            value={nvdResultsFilter}
-                            onChange={(e) => setNvdResultsFilter(e.target.value)}
-                            className="w-full pl-8 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2 text-[11px] text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
-                          />
-                        </div>
-                        <div className="registration-nvd-results space-y-1.5 max-h-52 overflow-y-auto pr-1">
-                          {filteredNvdResults.map((r) => {
-                            const parsed = parseCPE23(r.cpeName);
-                            const hasVersionWildcard = parsed.version === '*' || parsed.version === '?';
-                            const hasArchWildcard = parsed.targetHw === '*' || parsed.targetHw === '?';
-                            return (
-                              <div
-                                key={r.cpeNameId || r.cpeName}
-                                className="registration-nvd-result bg-zinc-950/70 dark:bg-zinc-950/70 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 flex items-center justify-between"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  {r.title && <p className="registration-result-title">{r.title}</p>}
-                                  <code
-                                    className="block text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono truncate"
-                                    title={r.cpeName}
-                                  >
-                                    {r.cpeName}
-                                  </code>
-                                  <div className="text-[9px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 flex items-center gap-2 mt-0.5">
-                                    <span className="flex items-center gap-1">
-                                      {parsed.isValid ? (
-                                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                      ) : (
-                                        <AlertCircle className="w-3 h-3 text-rose-400" />
-                                      )}
-                                      <span>{parsed.isValid ? 'Valid CPE 2.3' : 'Invalid CPE'}</span>
-                                    </span>
-                                    <span className="text-zinc-600 dark:text-zinc-600 light:text-zinc-700">
-                                      ·
-                                    </span>
-                                    <span className="flex items-center gap-1">
-                                      <span className="px-1 py-0.25 rounded bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-[8px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-                                        ver:{' '}
-                                        {hasVersionWildcard ? `${parsed.version} (wildcard)` : parsed.version}
-                                      </span>
-                                    </span>
-                                    <span className="flex items-center gap-1">
-                                      {r.vendor} / {r.product} · part {r.part}
-                                    </span>
-                                    <span className="flex items-center gap-1">
-                                      arch{' '}
-                                      {hasArchWildcard
-                                        ? `${parsed.targetHw || '*'} (wildcard)`
-                                        : parsed.targetHw || '*'}
-                                    </span>
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => addNvdCpe(r.cpeName)}
-                                  disabled={!parsed.isValid}
-                                  aria-label={`Add NVD CPE ${r.cpeName}`}
-                                  className="shrink-0 ml-2 text-[10px] font-mono px-2 py-0.75 rounded bg-emerald-900/40 dark:bg-emerald-900/40 light:bg-emerald-100 border border-emerald-800 dark:border-emerald-800 light:border-emerald-300 text-emerald-300 dark:text-emerald-300 light:text-emerald-700 hover:bg-emerald-900/60"
-                                >
-                                  Add
-                                </button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        {filteredNvdResults.length === 0 && (
-                          <p className="registration-helper" role="status">
-                            No dictionary entries match this filter.
+                      <div>
+                        <label
+                          htmlFor="registration-version"
+                          className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
+                        >
+                          Installed Version
+                        </label>
+                        <input
+                          id="registration-version"
+                          type="text"
+                          placeholder="* or exact e.g. 10.2.3"
+                          value={versionInput}
+                          onChange={(e) => setVersionInput(e.target.value)}
+                          className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="registration-architecture"
+                          className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
+                        >
+                          Target Arch
+                        </label>
+                        <input
+                          id="registration-architecture"
+                          type="text"
+                          placeholder="* or x86_64, aarch64"
+                          value={targetHwInput}
+                          onChange={(e) => setTargetHwInput(e.target.value)}
+                          className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                    {editingItem && (
+                      <div>
+                        <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                          CPE 2.3 Expression (editable)
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          aria-label="Editable CPE expression"
+                          value={cpeExpressionInput}
+                          onChange={(e) => setCpeExpressionInput(e.target.value)}
+                          aria-invalid={!parseCPE23(editedCpe()).isValid}
+                          className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
+                        />
+                        {!parseCPE23(editedCpe()).isValid && (
+                          <p className="mt-1 text-rose-400">
+                            Enter a valid CPE 2.3 expression before saving.
                           </p>
                         )}
-                      </>
+                        <p className="mt-1 text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
+                          Change the product fields or expression to update this asset. Select catalog
+                          products above to add separate monitored products.
+                        </p>
+                      </div>
                     )}
-                    {selectedNvdCpes.length > 0 && (
-                      <div className="space-y-1">
-                        <div className="text-[10px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-                          Selected verified CPEs ({selectedNvdCpes.length}):
+
+                    {editingItem && additionalCpes.length > 0 && (
+                      <div className="rounded-xl border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 p-3 space-y-2">
+                        <div className="text-[11px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                          Additional CPEs currently attached to this asset. Remove any that should not be
+                          monitored.
                         </div>
-                        {selectedNvdCpes.map((cpe) => (
-                          <div key={cpe} className="flex items-center gap-2">
+                        {additionalCpes.map((cpe, index) => (
+                          <div key={`${cpe}-${index}`} className="flex items-center gap-2">
                             <code
                               className="min-w-0 flex-1 truncate text-xs text-zinc-300 dark:text-zinc-300 light:text-zinc-700"
                               title={cpe}
@@ -1681,156 +1500,343 @@ export const WatchListView: React.FC = () => {
                             </code>
                             <button
                               type="button"
-                              onClick={() => removeNvdCpe(cpe)}
-                              aria-label={`Remove verified CPE ${cpe}`}
+                              onClick={() =>
+                                setAdditionalCpes((current) =>
+                                  current.filter((_, cpeIndex) => cpeIndex !== index),
+                                )
+                              }
+                              aria-label={`Remove additional CPE ${cpe}`}
                               className="shrink-0 rounded-lg p-1 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 hover:text-rose-400 transition"
                             >
-                              <X className="h-3.5 w-3.5" />
+                              <X className="h-4 w-4" />
                             </button>
                           </div>
                         ))}
                       </div>
                     )}
-                  </div>
-                </section>
-                <details className="registration-advanced">
-                  <summary>
-                    Additional identifiers &amp; notes <span>Optional</span>
-                  </summary>
-                  <div>
-                    {/* Supply Chain PURL (Optional) */}
-                    <div>
-                      <label
-                        htmlFor="registration-purls"
-                        className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
-                      >
-                        Package URLs (PURL, Optional - One per line)
-                      </label>
-                      <textarea
-                        id="registration-purls"
-                        rows={2}
-                        placeholder="e.g. pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"
-                        value={purlInput}
-                        onChange={(e) => setPurlInput(e.target.value)}
-                        className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 font-mono text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
-                      />
-                    </div>
-                    {/* Operational Notes */}
-                    <div>
-                      <label
-                        htmlFor="registration-notes"
-                        className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
-                      >
-                        Deployment Notes
-                      </label>
-                      <input
-                        id="registration-notes"
-                        type="text"
-                        placeholder="e.g. Core production infrastructure; continuous zero-human matching"
-                        value={notesInput}
-                        onChange={(e) => setNotesInput(e.target.value)}
-                        className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                </details>
-              </div>
-              <aside className="registration-preview" aria-label="Registration identifier preview">
-                {/* DYNAMIC REAL-TIME STRICT CPE 2.3 EXPRESSIONS PREVIEW BOX */}
-                <div className="registration-cpe-preview bg-zinc-950/90 dark:bg-zinc-950/90 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-800 font-bold uppercase tracking-wider flex items-center gap-1.5">
-                      <Code className="w-3.5 h-3.5 text-sky-400" />
-                      CPE preview
-                    </span>
-                    <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-800/60">
-                      {generatedCpes.length} entries
-                    </span>
-                  </div>
 
-                  <div className="registration-cpe-list space-y-1.5 max-h-36 overflow-y-auto">
-                    {generatedCpes.map((item, idx) => (
-                      <div
-                        key={item.cpe}
-                        className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 font-mono text-xs flex items-center justify-between text-zinc-200 dark:text-zinc-200 light:text-zinc-800 shadow-sm"
-                      >
-                        <div className="truncate mr-2">
-                          <span className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 mr-1.5">
-                            [{item.product}]
-                          </span>
-                          <span className="text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold">
-                            {item.cpe}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (item.product === 'Custom') {
-                                setCustomAddedCpes((c) => c.filter((c2) => c2 !== item.cpe));
-                              } else {
-                                setRemovedAutoCpes((s) => {
-                                  const next = new Set(s);
-                                  next.add(item.cpe);
-                                  return next;
-                                });
-                              }
-                            }}
-                            aria-label={`Remove CPE ${item.cpe}`}
-                            className="rounded-lg p-0.75 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 hover:text-rose-400 transition"
-                            title={
-                              item.product === 'Custom' ? 'Remove custom CPE' : 'Remove auto-generated CPE'
-                            }
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                          <span className="text-[9px] font-mono uppercase bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-400 px-1.5 py-0.2 rounded shrink-0">
-                            {item.part}
-                          </span>
-                        </div>
+                    {editingItem && (
+                      <div>
+                        <label className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono">
+                          Add Another Custom Product
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. internal_gateway"
+                          aria-label="Additional custom product"
+                          value={additionalProductInput}
+                          onChange={(e) => setAdditionalProductInput(e.target.value)}
+                          className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
+                        />
                       </div>
-                    ))}
-                  </div>
-                  {!generatedCpes.length && (
-                    <div className="registration-preview-empty">
-                      <Code size={24} aria-hidden="true" />
-                      <p>Select a product to preview its CPE identifiers.</p>
+                    )}
+                    <p className="registration-helper">
+                      Use * when a version or architecture is unknown. Version-specific matches may require
+                      review.
+                    </p>
+                  </section>
+                  <section className="registration-section">
+                    <div className="registration-section-heading">
+                      <span aria-hidden="true">04</span>
+                      <div>
+                        <h3>Find dictionary entries</h3>
+                        <p>Look up published CPE identifiers for the selected vendor and product.</p>
+                      </div>
                     </div>
-                  )}
-                  <p className="registration-helper">
-                    Review these identifiers before saving. Dictionary entries are attached to the first
-                    product when registering several products.
-                  </p>
+                    {/* NVD Verified CPE 2.3 Search */}
+                    <div className="registration-nvd space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="registration-subheading">NVD CPE dictionary</h3>
+                        <button
+                          type="button"
+                          onClick={handleNvdSearch}
+                          disabled={nvdLoading || !vendorInput.trim()}
+                          className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-sky-900/40 dark:bg-sky-900/40 light:bg-sky-100 border border-sky-800 dark:border-sky-800 light:border-sky-300 text-sky-300 dark:text-sky-300 light:text-sky-700 hover:bg-sky-900/60 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                        >
+                          {nvdLoading ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Search className="w-3 h-3" />
+                          )}
+                          {nvdLoading ? 'Searching...' : 'Search NVD'}
+                        </button>
+                      </div>
+
+                      {/* NVD Product Search Input */}
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 dark:text-zinc-500 light:text-zinc-600" />
+                        <input
+                          type="text"
+                          placeholder="e.g. backup_and_replication, one, agent"
+                          aria-label="Product to find in NVD"
+                          value={nvdSearchProduct}
+                          onChange={(e) => setNvdSearchProduct(e.target.value)}
+                          className="w-full pl-8 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2 text-[11px] text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
+                        />
+                      </div>
+
+                      <p className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600">
+                        Search the NIST dictionary for {vendorInput.trim() || 'vendor'}
+                        {nvdSearchProductTerm && ` / ${nvdSearchProductTerm}`}. Add matching entries to the
+                        product. Requests are subject to NVD rate limits.
+                      </p>
+                      {nvdError && (
+                        <div
+                          className="rounded-lg border border-rose-800 bg-rose-950/40 p-2 text-[10px] text-rose-300"
+                          role="alert"
+                        >
+                          {nvdError}
+                        </div>
+                      )}
+                      {nvdResults.length > 0 && (
+                        <>
+                          {/* Results Filter */}
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 dark:text-zinc-500 light:text-zinc-600" />
+                            <input
+                              type="text"
+                              placeholder="Filter results by CPE, vendor, product, or title..."
+                              aria-label="Filter NVD CPE results"
+                              value={nvdResultsFilter}
+                              onChange={(e) => setNvdResultsFilter(e.target.value)}
+                              className="w-full pl-8 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2 text-[11px] text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono focus:border-zinc-600 focus:outline-none"
+                            />
+                          </div>
+                          <div className="registration-nvd-results space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                            {filteredNvdResults.map((r) => {
+                              const parsed = parseCPE23(r.cpeName);
+                              const hasVersionWildcard = parsed.version === '*' || parsed.version === '?';
+                              const hasArchWildcard = parsed.targetHw === '*' || parsed.targetHw === '?';
+                              return (
+                                <div
+                                  key={r.cpeNameId || r.cpeName}
+                                  className="registration-nvd-result bg-zinc-950/70 dark:bg-zinc-950/70 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 flex items-center justify-between"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    {r.title && <p className="registration-result-title">{r.title}</p>}
+                                    <code
+                                      className="block text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono truncate"
+                                      title={r.cpeName}
+                                    >
+                                      {r.cpeName}
+                                    </code>
+                                    <div className="text-[9px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 flex items-center gap-2 mt-0.5">
+                                      <span className="flex items-center gap-1">
+                                        {parsed.isValid ? (
+                                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                        ) : (
+                                          <AlertCircle className="w-3 h-3 text-rose-400" />
+                                        )}
+                                        <span>{parsed.isValid ? 'Valid CPE 2.3' : 'Invalid CPE'}</span>
+                                      </span>
+                                      <span className="text-zinc-600 dark:text-zinc-600 light:text-zinc-700">
+                                        ·
+                                      </span>
+                                      <span className="flex items-center gap-1">
+                                        <span className="px-1 py-0.25 rounded bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-[8px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                                          ver:{' '}
+                                          {hasVersionWildcard
+                                            ? `${parsed.version} (wildcard)`
+                                            : parsed.version}
+                                        </span>
+                                      </span>
+                                      <span className="flex items-center gap-1">
+                                        {r.vendor} / {r.product} · part {r.part}
+                                      </span>
+                                      <span className="flex items-center gap-1">
+                                        arch{' '}
+                                        {hasArchWildcard
+                                          ? `${parsed.targetHw || '*'} (wildcard)`
+                                          : parsed.targetHw || '*'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => addNvdCpe(r.cpeName)}
+                                    disabled={!parsed.isValid}
+                                    aria-label={`Add NVD CPE ${r.cpeName}`}
+                                    className="shrink-0 ml-2 text-[10px] font-mono px-2 py-0.75 rounded bg-emerald-900/40 dark:bg-emerald-900/40 light:bg-emerald-100 border border-emerald-800 dark:border-emerald-800 light:border-emerald-300 text-emerald-300 dark:text-emerald-300 light:text-emerald-700 hover:bg-emerald-900/60"
+                                  >
+                                    Add
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {filteredNvdResults.length === 0 && (
+                            <p className="registration-helper" role="status">
+                              No dictionary entries match this filter.
+                            </p>
+                          )}
+                        </>
+                      )}
+                      {selectedNvdCpes.length > 0 && (
+                        <div className="space-y-1">
+                          <div className="text-[10px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
+                            Selected verified CPEs ({selectedNvdCpes.length}):
+                          </div>
+                          {selectedNvdCpes.map((cpe) => (
+                            <div key={cpe} className="flex items-center gap-2">
+                              <code
+                                className="min-w-0 flex-1 truncate text-xs text-zinc-300 dark:text-zinc-300 light:text-zinc-700"
+                                title={cpe}
+                              >
+                                {cpe}
+                              </code>
+                              <button
+                                type="button"
+                                onClick={() => removeNvdCpe(cpe)}
+                                aria-label={`Remove verified CPE ${cpe}`}
+                                className="shrink-0 rounded-lg p-1 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 hover:text-rose-400 transition"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                  <details className="registration-advanced">
+                    <summary>
+                      Additional identifiers &amp; notes <span>Optional</span>
+                    </summary>
+                    <div>
+                      {/* Supply Chain PURL (Optional) */}
+                      <div>
+                        <label
+                          htmlFor="registration-purls"
+                          className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
+                        >
+                          Package URLs (PURL, Optional - One per line)
+                        </label>
+                        <textarea
+                          id="registration-purls"
+                          rows={2}
+                          placeholder="e.g. pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"
+                          value={purlInput}
+                          onChange={(e) => setPurlInput(e.target.value)}
+                          className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 font-mono text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
+                        />
+                      </div>
+                      {/* Operational Notes */}
+                      <div>
+                        <label
+                          htmlFor="registration-notes"
+                          className="block text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-1 font-mono"
+                        >
+                          Deployment Notes
+                        </label>
+                        <input
+                          id="registration-notes"
+                          type="text"
+                          placeholder="e.g. Core production infrastructure; continuous zero-human matching"
+                          value={notesInput}
+                          onChange={(e) => setNotesInput(e.target.value)}
+                          className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  </details>
                 </div>
-                <label htmlFor="registration-manual-cpe">Add a CPE expression</label>
-                {/* Custom CPE 2.3 Expression Input */}
-                <div className="registration-manual-cpe flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="e.g. cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*"
-                    id="registration-manual-cpe"
-                    value={customCpeInput}
-                    onChange={(e) => setCustomCpeInput(e.target.value)}
-                    className="flex-1 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono text-xs focus:border-zinc-600 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const trimmed = customCpeInput.trim();
-                      if (trimmed && parseCPE23(trimmed).isValid && !customAddedCpes.includes(trimmed)) {
-                        setCustomAddedCpes((c) => [...c, trimmed]);
-                        setCustomCpeInput('');
-                      }
-                    }}
-                    disabled={!customCpeInput.trim() || !parseCPE23(customCpeInput.trim()).isValid}
-                    className="shrink-0 px-3 py-1.5 rounded-xl bg-sky-900/40 dark:bg-sky-900/40 light:bg-sky-100 border border-sky-800 dark:border-sky-800 light:border-sky-300 text-sky-300 dark:text-sky-300 light:text-sky-700 font-mono text-xs hover:bg-sky-900/60 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                  >
-                    <Plus className="w-3 h-3" />
-                    Add
-                  </button>
-                </div>
-              </aside>
-            </fieldset>
+                <aside className="registration-preview" aria-label="Registration identifier preview">
+                  {/* DYNAMIC REAL-TIME STRICT CPE 2.3 EXPRESSIONS PREVIEW BOX */}
+                  <div className="registration-cpe-preview bg-zinc-950/90 dark:bg-zinc-950/90 light:bg-zinc-100 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-mono text-zinc-300 dark:text-zinc-300 light:text-zinc-800 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                        <Code className="w-3.5 h-3.5 text-sky-400" />
+                        CPE preview
+                      </span>
+                      <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-800/60">
+                        {generatedCpes.length} entries
+                      </span>
+                    </div>
+
+                    <div className="registration-cpe-list space-y-1.5 max-h-36 overflow-y-auto">
+                      {generatedCpes.map((item, idx) => (
+                        <div
+                          key={item.cpe}
+                          className="bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 font-mono text-xs flex items-center justify-between text-zinc-200 dark:text-zinc-200 light:text-zinc-800 shadow-sm"
+                        >
+                          <div className="truncate mr-2">
+                            <span className="text-[10px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 mr-1.5">
+                              [{item.product}]
+                            </span>
+                            <span className="text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-semibold">
+                              {item.cpe}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (item.product === 'Custom') {
+                                  setCustomAddedCpes((c) => c.filter((c2) => c2 !== item.cpe));
+                                } else {
+                                  setRemovedAutoCpes((s) => {
+                                    const next = new Set(s);
+                                    next.add(item.cpe);
+                                    return next;
+                                  });
+                                }
+                              }}
+                              aria-label={`Remove CPE ${item.cpe}`}
+                              className="rounded-lg p-0.75 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 hover:text-rose-400 transition"
+                              title={
+                                item.product === 'Custom' ? 'Remove custom CPE' : 'Remove auto-generated CPE'
+                              }
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                            <span className="text-[9px] font-mono uppercase bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 text-zinc-400 px-1.5 py-0.2 rounded shrink-0">
+                              {item.part}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {!generatedCpes.length && (
+                      <div className="registration-preview-empty">
+                        <Code size={24} aria-hidden="true" />
+                        <p>Select a product to preview its CPE identifiers.</p>
+                      </div>
+                    )}
+                    <p className="registration-helper">
+                      Review these identifiers before saving. Dictionary entries are attached to the first
+                      product when registering several products.
+                    </p>
+                  </div>
+                  <label htmlFor="registration-manual-cpe">Add a CPE expression</label>
+                  {/* Custom CPE 2.3 Expression Input */}
+                  <div className="registration-manual-cpe flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="e.g. cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*"
+                      id="registration-manual-cpe"
+                      value={customCpeInput}
+                      onChange={(e) => setCustomCpeInput(e.target.value)}
+                      className="flex-1 bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 font-mono text-xs focus:border-zinc-600 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const trimmed = customCpeInput.trim();
+                        if (trimmed && parseCPE23(trimmed).isValid && !customAddedCpes.includes(trimmed)) {
+                          setCustomAddedCpes((c) => [...c, trimmed]);
+                          setCustomCpeInput('');
+                        }
+                      }}
+                      disabled={!customCpeInput.trim() || !parseCPE23(customCpeInput.trim()).isValid}
+                      className="shrink-0 px-3 py-1.5 rounded-xl bg-sky-900/40 dark:bg-sky-900/40 light:bg-sky-100 border border-sky-800 dark:border-sky-800 light:border-sky-300 text-sky-300 dark:text-sky-300 light:text-sky-700 font-mono text-xs hover:bg-sky-900/60 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" />
+                      Add
+                    </button>
+                  </div>
+                </aside>
+              </fieldset>
+            </div>
             <footer className="registration-footer">
               <div className="registration-footer-summary">
                 <strong>{editingItem ? 'Review your changes' : 'Ready to register'}</strong>

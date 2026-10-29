@@ -49,6 +49,73 @@ test('disjoint component wildcards never match each other', () => {
   assert.equal(matchCPE(pattern('1.2*'), pattern('1.*')).matched, true);
   assert.equal(matchCPE(pattern('1.?'), pattern('1.2')).matched, true);
 });
+test('non-intersecting wildcard asset version does not match a concrete vuln version', () => {
+  // An asset wildcard like 2.* describes the 2.x release line; it must not
+  // match a vulnerability whose CPE pins version 1.5. Before the strict CPE
+  // fix the unverifiedVersion bypass short-circuited past globIntersects,
+  // producing false-positive REVIEW_REQUIRED findings that surfaced as
+  // duplicate CVEs on the Vulnerabilities page.
+  const pattern = (version: string) => `cpe:2.3:a:vendor:widget:${version}:*:*:*:*:*:*:*`;
+  assert.equal(matchCPE(pattern('2.*'), pattern('1.5')).matched, false);
+  assert.equal(matchCPE(pattern('1.*'), pattern('2.0')).matched, false);
+  // Overlapping wildcards still match at the token level.
+  assert.equal(matchCPE(pattern('1.*'), pattern('1.5')).matched, true);
+  // matchesWatchlistItem must not fabricate a finding for disjoint versions.
+  assert.equal(matchesWatchlistItem([pattern('2.*')], 'vendor', 'widget', [pattern('1.5')], 't', 'd').matched, false);
+  // A literal-wildcard version still reaches review, as the asset version is
+  // genuinely unasserted rather than a non-intersecting partial wildcard.
+  const wildcardStar = matchesWatchlistItem([cpe('*')], 'vendor', 'widget', [cpe('1.5')], 't', 'd');
+  assert.equal(wildcardStar.matched, true);
+  assert.equal(wildcardStar.confidence, 70);
+  assert.equal(wildcardStar.applicabilityRequiresReview, true);
+});
+test('non-intersecting wildcard assets do not produce duplicate CVE findings', () => {
+  // Multiple assets whose wildcard CPE versions cannot overlap the vuln
+  // version must not each yield a REVIEW_REQUIRED finding for the same CVE.
+  const { cve, settings } = fixture();
+  cve.cpeMatches = [cpe('1.5')];
+  cve.cpeMatchDetails = [];
+  cve.versionRange = undefined;
+  const assets = [
+    { ...fixture().asset, id: 'a1', assetTag: 'a1', cpes: [cpe('2.*')] },
+    { ...fixture().asset, id: 'a2', assetTag: 'a2', cpes: [cpe('2.*')] },
+    { ...fixture().asset, id: 'a3', assetTag: 'a3', cpes: [cpe('2.*')] },
+  ];
+  const result = runVulnerabilityPipeline([], [cve], assets as never, [], [], settings);
+  assert.equal(result.newFindings.length, 0);
+});
+test('pipeline correctly distinguishes non-intersecting, intersecting, and exact version matches', () => {
+  // Behavior matrix at the pipeline level:
+  //   2.* vs 1.5  → no finding (non-intersecting wildcard)
+  //   1.* vs 1.5  → REVIEW_REQUIRED (intersecting wildcard, version uncertain)
+  //   *   vs 1.5  → REVIEW_REQUIRED (literal star, version unasserted)
+  //   1.5 vs 1.5  → CONFIRMED (exact token match, auto-dispatch eligible)
+  const { cve, settings } = fixture();
+  cve.cpeMatches = [cpe('1.5')];
+  cve.cpeMatchDetails = [];
+  cve.versionRange = undefined;
+  const baseAsset = fixture().asset;
+  const makeAsset = (version: string) => ({
+    ...baseAsset,
+    id: `asset-${version}`,
+    assetTag: `asset-${version}`,
+    cpes: [cpe(version)],
+  });
+  for (const { version, expected, expectedStatus } of [
+    { version: '2.*', expected: 0, expectedStatus: undefined },
+    { version: '1.*', expected: 1, expectedStatus: 'REVIEW_REQUIRED' },
+    { version: '*', expected: 1, expectedStatus: 'REVIEW_REQUIRED' },
+    { version: '1.5', expected: 1, expectedStatus: undefined },
+  ]) {
+    const asset = makeAsset(version);
+    const result = runVulnerabilityPipeline([], [cve], [asset], [], [], settings);
+    assert.equal(result.newFindings.length, expected, `version ${version}: expected ${expected} findings`);
+    if (expectedStatus)
+      assert.equal(result.newFindings[0]?.notificationStatus, expectedStatus, `version ${version}: expected ${expectedStatus}`);
+    else if (expected === 1)
+      assert.notEqual(result.newFindings[0]?.notificationStatus, 'REVIEW_REQUIRED', `version ${version}: should not be REVIEW_REQUIRED`);
+  }
+});
 test('fallback cannot override a known version exclusion', () => {
   assert.equal(
     matchesWatchlistItem([cpe('3')], 'vendor', 'widget', [cpe('*')], 'vendor widget', '', {
