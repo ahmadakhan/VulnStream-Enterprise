@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { createPool, migrate, transaction, put, putMany, list, get } from '../server/db.ts';
+import { runDailyDigest } from '../server/dailyDigest';
 import { queueRun, processPipeline, rebuildFromCurrentInventory, stopRun } from '../server/pipeline';
 import { deliverNext, queueAdvisory, queueDigestAdvisory, type Job } from '../server/delivery';
 import { flushDueDigest } from '../server/digest';
@@ -1412,6 +1413,55 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
         (await pool.query('SELECT error FROM outbox WHERE id=$1', [sibling.id])).rows[0].error,
         'transport rejected',
       );
+    });
+    await t.test('daily digest jobs carry revision evidence and deliver without a legacy rebuild', async () => {
+      await reset();
+      const cve = vulnerability();
+      // A real pipeline-matched finding, so delivery revalidation reproduces
+      // the same CPE verdict the digest was built from.
+      await save('settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: false });
+      await save('watchlist', 'asset', asset());
+      await save('cveData', cve.cveId, cve);
+      await run();
+      const [matched] = await list<Finding>(pool, 'findings');
+      assert.equal(matched.notificationStatus, 'QUEUED_FOR_DISPATCH');
+      await save('settings', 'main', {
+        ...DEFAULT_SETTINGS,
+        timezone: 'UTC',
+        schedulerEnabled: false,
+        dailyDigest: { enabled: true, time: '00:00', includeHealthReport: false },
+      });
+      await save('recipients', 'rec', {
+        id: 'rec',
+        name: 'Test',
+        email: 'test@example.invalid',
+        enabled: true,
+        dailyDigest: true,
+        deliveryGroup: 'SECURITY_TEAM',
+        subscriptionTier: 'ALL_SEVERITIES',
+      });
+      assert.equal(await runDailyDigest(pool), 1);
+      const job = (await pool.query('SELECT payload FROM outbox')).rows[0];
+      assert.deepEqual(job.payload.cveIds, [cve.cveId]);
+      assert.ok(job.payload.cveRevisions[cve.cveId]);
+      assert.ok(job.payload.findingRevisions[matched.id]);
+      assert.match(job.payload.subject, /Daily Vulnerability Digest/);
+      assert.match(job.payload.text, /CVE-2026-98001/);
+      let transports = 0;
+      assert.equal(
+        await deliverNext(pool, config, request, async () => {
+          transports++;
+          return 'mock-accepted';
+        }),
+        true,
+      );
+      const delivered = (await pool.query('SELECT status,error FROM outbox')).rows[0];
+      // The digest payload carries revision evidence on its own, so delivery
+      // validates it directly instead of failing with the legacy-payload error
+      // and needing a rebuild.
+      assert.equal(transports, 1, String(delivered.error));
+      assert.equal(delivered.status, 'ACCEPTED');
+      assert.equal(delivered.error, null);
     });
     await t.test('NVD withdrawals invalidate cached findings and block older feed resurrection', async () => {
       await reset();
