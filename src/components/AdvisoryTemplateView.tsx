@@ -73,7 +73,7 @@ export const AdvisoryTemplateView: React.FC = () => {
   const [scrollMode, setScrollMode] = useState<'fit' | 'contained'>('fit');
   const [zoomLevel, setZoomLevel] = useState<number>(100);
    const [viewFormat, setViewFormat] = useState<'preview' | 'editor' | 'html'>('preview');
-   const [htmlSubView, setHtmlSubView] = useState<'rendered' | 'template'>('rendered');
+   const [htmlSubView, setHtmlSubView] = useState<'rendered' | 'template'>('template');
    const [isFullscreen, setIsFullscreen] = useState(false);
    const [copiedHtml, setCopiedHtml] = useState(false);
 
