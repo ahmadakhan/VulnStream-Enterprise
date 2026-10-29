@@ -2,11 +2,13 @@ import { PageHeading } from './PageHeading';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { copyText } from '../utils/clipboard';
-import { FileCode, Send, RotateCcw, CheckCircle2, AlertCircle, Copy, Check, X, Type, Palette, Stamp, Sliders, Smartphone, Monitor, Maximize2, Minimize2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Eye, Code2, Download, CalendarDays, Edit3, Split } from 'lucide-react';
+import { FileCode, Send, RotateCcw, CheckCircle2, AlertCircle, Copy, Check, X, Type, Palette, Stamp, Sliders, Smartphone, Monitor, Maximize2, Minimize2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Eye, Code2, Download, CalendarDays, Edit3 } from 'lucide-react';
 import {
   DEFAULT_DAILY_DIGEST_CUSTOMIZATION,
   renderDailyFindingSummary,
   renderDailyHealthReport,
+  digestSeveritySummary,
+  digestSeverityKpi,
   type DigestFinding,
   type DigestHealth,
 } from '../utils/templateCompiler';
@@ -100,13 +102,34 @@ export const DailyDigestView: React.FC = () => {
   };
 
   const handleResetCustomTemplate = () => {
-    setCustomTemplate('');
-    setIsCustomTemplate(false);
     setDailyDigestCustomTemplate(null);
-    setCustomTemplate(dailyDigestTemplate);
+    setIsCustomTemplate(false);
+    setCustomTemplate('');
   };
 
-  const tokenList = useMemo(() => ['{{report_generated}}', '{{finding_count}}', '{{critical_count}}', '{{high_count}}', '{{medium_count}}', '{{low_count}}', '{{asset_count}}', '{{executive_summary}}', '{{findings_summary}}', '{{health_report}}'], []);
+  const tokenList = useMemo(
+    () => [
+      '{{report_generated}}',
+      '{{finding_count}}',
+      '{{critical_count}}',
+      '{{high_count}}',
+      '{{medium_count}}',
+      '{{low_count}}',
+      '{{asset_count}}',
+      '{{executive_summary}}',
+      '{{findings_summary}}',
+      '{{health_report}}',
+      '{{critical_summary}}',
+      '{{high_summary}}',
+      '{{medium_summary}}',
+      '{{low_summary}}',
+      '{{critical_kpi}}',
+      '{{high_kpi}}',
+      '{{medium_kpi}}',
+      '{{low_kpi}}',
+    ],
+    [],
+  );
 
   const handleInsertToken = (token: string) => {
     const el = editorRef;
@@ -176,17 +199,29 @@ export const DailyDigestView: React.FC = () => {
 
   const getRenderedHtml = () => {
     const source = isCustomTemplate && customTemplate ? customTemplate : dailyDigestTemplate;
+    const criticalCount = SAMPLE_FINDINGS.filter((f) => f.severity === 'CRITICAL').length;
+    const highCount = SAMPLE_FINDINGS.filter((f) => f.severity === 'HIGH').length;
+    const mediumCount = SAMPLE_FINDINGS.filter((f) => f.severity === 'MEDIUM').length;
+    const lowCount = SAMPLE_FINDINGS.filter((f) => f.severity === 'LOW').length;
     return source
       .replace(/{{report_generated}}/g, previewDate)
       .replace(/{{finding_count}}/g, String(SAMPLE_FINDINGS.length))
-      .replace(/{{critical_count}}/g, String(SAMPLE_FINDINGS.filter((f) => f.severity === 'CRITICAL').length))
-      .replace(/{{high_count}}/g, String(SAMPLE_FINDINGS.filter((f) => f.severity === 'HIGH').length))
-      .replace(/{{medium_count}}/g, String(SAMPLE_FINDINGS.filter((f) => f.severity === 'MEDIUM').length))
-      .replace(/{{low_count}}/g, String(SAMPLE_FINDINGS.filter((f) => f.severity === 'LOW').length))
+      .replace(/{{critical_count}}/g, String(criticalCount))
+      .replace(/{{high_count}}/g, String(highCount))
+      .replace(/{{medium_count}}/g, String(mediumCount))
+      .replace(/{{low_count}}/g, String(lowCount))
       .replace(/{{asset_count}}/g, '5')
       .replace(/{{executive_summary}}/g, 'A total of <strong>5 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>1 Medium</strong>, and <strong>1 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.')
       .replace(/{{findings_summary}}/g, findingsSummary)
-      .replace(/{{health_report}}/g, healthReport);
+      .replace(/{{health_report}}/g, healthReport)
+      .replace(/{{critical_summary}}/g, digestSeveritySummary('CRITICAL', criticalCount, dailyDigestCustomization))
+      .replace(/{{high_summary}}/g, digestSeveritySummary('HIGH', highCount, dailyDigestCustomization))
+      .replace(/{{medium_summary}}/g, digestSeveritySummary('MEDIUM', mediumCount, dailyDigestCustomization))
+      .replace(/{{low_summary}}/g, digestSeveritySummary('LOW', lowCount, dailyDigestCustomization))
+      .replace(/{{critical_kpi}}/g, digestSeverityKpi('CRITICAL', criticalCount, dailyDigestCustomization))
+      .replace(/{{high_kpi}}/g, digestSeverityKpi('HIGH', highCount, dailyDigestCustomization))
+      .replace(/{{medium_kpi}}/g, digestSeverityKpi('MEDIUM', mediumCount, dailyDigestCustomization))
+      .replace(/{{low_kpi}}/g, digestSeverityKpi('LOW', lowCount, dailyDigestCustomization));
   };
 
   const handleDownloadHtml = () => {
@@ -685,18 +720,7 @@ export const DailyDigestView: React.FC = () => {
             <span className="text-zinc-500 dark:text-zinc-500 light:text-zinc-600 font-mono text-[11px] font-medium">
               Click to Copy:
             </span>
-            {            [
-              '{{report_generated}}',
-              '{{finding_count}}',
-              '{{critical_count}}',
-              '{{high_count}}',
-              '{{medium_count}}',
-              '{{low_count}}',
-              '{{asset_count}}',
-              '{{executive_summary}}',
-              '{{findings_summary}}',
-              '{{health_report}}',
-            ].map((token) => (
+            {tokenList.map((token) => (
               <button
                 key={token}
                 onClick={() => handleCopyToken(token)}
@@ -956,8 +980,9 @@ export const DailyDigestView: React.FC = () => {
                   {isCustomTemplate && (
                     <button
                       type="button"
-                      onClick={handleExitEditor}
+                      onClick={handleResetCustomTemplate}
                       className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded font-medium transition"
+                      title="Discard custom template and revert to generated one"
                     >
                       Discard Changes
                     </button>

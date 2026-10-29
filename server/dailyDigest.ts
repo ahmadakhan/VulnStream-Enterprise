@@ -13,6 +13,8 @@ import {
   renderDailyFindingSummary,
   renderDailyHealthReport,
   type DailyDigestParts,
+  digestSeveritySummary,
+  digestSeverityKpi,
 } from '../src/utils/templateCompiler';
 import type {
   Advisory,
@@ -427,30 +429,38 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
           const reportGenerated = formatReportGenerated(new Date(), timezone);
           const executiveSummary = formatExecutiveSummary(included.length, severityCounts);
           const parts: DailyDigestParts = {
-            advisory_id: view.id,
-            advisory_title: view.title,
-            dispatch_date: new Date().toISOString(),
-            severity: view.severity,
-            finding_count: included.length,
-            severity_counts: formatSeverityCounts(severityCounts),
-            findings_summary: renderDailyFindingSummary(
-              included.map((finding) => ({
-                cveId: finding.cveId,
-                severity: finding.cve.cvss.severity,
-                assetName: finding.matchedAssetName,
-                vendor: finding.matchedAssetVendor,
-              })),
-              dailyConfig,
-            ),
-            health_report: healthReportHtml,
-            recipient_name: recipient.name || recipient.email,
-            critical_count: criticalCount,
-            high_count: highCount,
-            medium_count: mediumCount,
-            low_count: lowCount,
-            asset_count: uniqueAssets.size,
-            executive_summary: executiveSummary,
-            report_generated: reportGenerated,
+             advisory_id: view.id,
+             advisory_title: view.title,
+             dispatch_date: new Date().toISOString(),
+             severity: view.severity,
+             finding_count: included.length,
+             severity_counts: formatSeverityCounts(severityCounts),
+             findings_summary: renderDailyFindingSummary(
+               included.map((finding) => ({
+                 cveId: finding.cveId,
+                 severity: finding.cve.cvss.severity,
+                 assetName: finding.matchedAssetName,
+                 vendor: finding.matchedAssetVendor,
+               })),
+               dailyConfig,
+             ),
+             health_report: healthReportHtml,
+             recipient_name: recipient.name || recipient.email,
+             critical_count: criticalCount,
+             high_count: highCount,
+             medium_count: mediumCount,
+             low_count: lowCount,
+             asset_count: uniqueAssets.size,
+             executive_summary: executiveSummary,
+             report_generated: reportGenerated,
+           critical_summary: digestSeveritySummary('CRITICAL', criticalCount, dailyConfig),
+           high_summary: digestSeveritySummary('HIGH', highCount, dailyConfig),
+           medium_summary: digestSeveritySummary('MEDIUM', mediumCount, dailyConfig),
+           low_summary: digestSeveritySummary('LOW', lowCount, dailyConfig),
+           critical_kpi: digestSeverityKpi('CRITICAL', criticalCount, dailyConfig),
+           high_kpi: digestSeverityKpi('HIGH', highCount, dailyConfig),
+           medium_kpi: digestSeverityKpi('MEDIUM', mediumCount, dailyConfig),
+           low_kpi: digestSeverityKpi('LOW', lowCount, dailyConfig),
           };
           const html = renderDailyDigest(dailyConfig, parts);
           const payload = {

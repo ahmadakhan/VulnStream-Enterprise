@@ -96,6 +96,8 @@ import {
   type DailyDigestParts,
   type DigestFinding,
   type DigestHealth,
+  digestSeveritySummary,
+  digestSeverityKpi,
 } from '../src/utils/templateCompiler.ts';
 function publicState(data: AppState): AppState {
   return {
@@ -1594,24 +1596,32 @@ export function createApp(
           minute: '2-digit',
         });
         const executiveSummary = `A total of <strong>5 vulnerabilities</strong> were identified during the latest monitoring cycle, including <strong>2 Critical</strong>, <strong>1 High</strong>, <strong>1 Medium</strong>, and <strong>1 Low</strong> severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.`;
-        const parts: DailyDigestParts = {
-          advisory_id: `${data.settings.advisoryPrefix}DAILY-PREVIEW`,
-          advisory_title: 'Daily Vulnerability Digest — preview',
-          dispatch_date: new Date().toISOString(),
-          severity: 'HIGH',
-          finding_count: sampleFindings.length,
-          severity_counts: '2 critical, 1 high',
-          findings_summary: renderDailyFindingSummary(sampleFindings, dailyConfig),
-          health_report: renderDailyHealthReport(sampleHealth, dailyConfig),
-          recipient_name: email,
-          critical_count: severityCounts.CRITICAL,
-          high_count: severityCounts.HIGH,
-          medium_count: severityCounts.MEDIUM,
-          low_count: severityCounts.LOW,
-          asset_count: new Set(sampleFindings.map((f) => f.assetName)).size,
-          executive_summary: executiveSummary,
-          report_generated: reportGenerated,
-        };
+         const parts: DailyDigestParts = {
+           advisory_id: `${data.settings.advisoryPrefix}DAILY-PREVIEW`,
+           advisory_title: 'Daily Vulnerability Digest — preview',
+           dispatch_date: new Date().toISOString(),
+           severity: 'HIGH',
+           finding_count: sampleFindings.length,
+           severity_counts: '2 critical, 1 high',
+           findings_summary: renderDailyFindingSummary(sampleFindings, dailyConfig),
+           health_report: renderDailyHealthReport(sampleHealth, dailyConfig),
+           recipient_name: email,
+           critical_count: severityCounts.CRITICAL,
+           high_count: severityCounts.HIGH,
+           medium_count: severityCounts.MEDIUM,
+           low_count: severityCounts.LOW,
+           asset_count: new Set(sampleFindings.map((f) => f.assetName)).size,
+           executive_summary: executiveSummary,
+           report_generated: reportGenerated,
+           critical_summary: digestSeveritySummary('CRITICAL', severityCounts.CRITICAL, dailyConfig),
+           high_summary: digestSeveritySummary('HIGH', severityCounts.HIGH, dailyConfig),
+           medium_summary: digestSeveritySummary('MEDIUM', severityCounts.MEDIUM, dailyConfig),
+           low_summary: digestSeveritySummary('LOW', severityCounts.LOW, dailyConfig),
+           critical_kpi: digestSeverityKpi('CRITICAL', severityCounts.CRITICAL, dailyConfig),
+           high_kpi: digestSeverityKpi('HIGH', severityCounts.HIGH, dailyConfig),
+           medium_kpi: digestSeverityKpi('MEDIUM', severityCounts.MEDIUM, dailyConfig),
+           low_kpi: digestSeverityKpi('LOW', severityCounts.LOW, dailyConfig),
+         };
         const html = renderDailyDigest(dailyConfig, parts);
         const testAdvisory: Advisory = {
           id: parts.advisory_id,
