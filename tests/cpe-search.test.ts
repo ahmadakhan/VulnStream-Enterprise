@@ -200,3 +200,69 @@ test('malformed JSON payloads cannot masquerade as zero matching CPEs', async ()
     );
   }
 });
+
+test('exact CPE verification queries cpeMatchString and excludes deprecated or different names', async () => {
+  const name = 'cpe:2.3:a:example:widget:1.0:*:*:*:*:*:*:*';
+  let requested = '';
+  const requester: Requester = async (url) => {
+    requested = url;
+    return {
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        totalResults: 3,
+        products: [
+          { cpe: { cpeName: name, cpeNameId: 'active-id', deprecated: false } },
+          { cpe: { cpeName: name, cpeNameId: 'deprecated-id', deprecated: true } },
+          { cpe: { cpeName: name.replace(':1.0:', ':2.0:'), deprecated: false } },
+        ],
+      }),
+    };
+  };
+  const result = await searchNvdCpes(requester, '', '', '', 200, name);
+  const url = new URL(requested);
+  assert.equal(url.searchParams.get('cpeMatchString'), name);
+  assert.equal(url.searchParams.has('keywordSearch'), false);
+  assert.deepEqual(
+    result.results.map((entry) => entry.cpeNameId),
+    ['active-id'],
+  );
+});
+
+test('normal CPE search never offers deprecated entries as verified selections', async () => {
+  const requester: Requester = async () => ({
+    status: 200,
+    headers: {},
+    body: JSON.stringify({
+      totalResults: 1,
+      products: [{ cpe: { cpeName: 'cpe:2.3:a:example:widget:1.0:*:*:*:*:*:*:*', deprecated: true } }],
+    }),
+  });
+  const result = await searchNvdCpes(requester, '', 'example', 'widget', 50);
+  assert.deepEqual(result.results, []);
+});
+
+test('dictionary IDs verify wildcard CPE names without relying on a truncated match page', async () => {
+  const name = 'cpe:2.3:a:example:widget:*:*:*:*:*:*:*:*';
+  const id = '00000000-0000-4000-8000-000000000001';
+  let requested = '';
+  const requester: Requester = async (url) => {
+    requested = url;
+    return {
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        totalResults: 1,
+        products: [{ cpe: { cpeName: name, cpeNameId: id, deprecated: false } }],
+      }),
+    };
+  };
+  const result = await searchNvdCpes(requester, '', '', '', 200, name, id);
+  const url = new URL(requested);
+  assert.equal(url.searchParams.get('cpeNameId'), id);
+  assert.equal(url.searchParams.has('cpeMatchString'), false);
+  assert.deepEqual(
+    result.results.map((entry) => entry.cpeName),
+    [name],
+  );
+});

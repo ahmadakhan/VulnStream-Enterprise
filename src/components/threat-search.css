@@ -40,7 +40,7 @@
 .threat-search-fields input,
 .threat-search-fields select,
 .threat-search-fields .threat-selected-vendor {
-  min-height: 46px;
+  min-height: 46px !important;
   font-size: 13px;
 }
 .threat-search-fields input[type='date'] {
@@ -291,12 +291,12 @@
   }
 }
 
-/* Keep all search parameters aligned, including the optional publication date. */
+/* Product selection leads; scope controls form a quieter second row. */
 .threat-search-page .threat-search-fields {
   grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
 }
 .threat-search-page .threat-search-fields > div {
-  grid-column: auto;
   min-width: 0;
 }
 .threat-search-page .threat-search-fields > div > label {
@@ -305,19 +305,82 @@
 .threat-search-page .threat-product-heading label {
   margin-bottom: 0;
 }
-.threat-search-page .threat-search-fields input[type='date'] {
+.threat-field-number {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 8px;
+  border-radius: 6px;
+  background: var(--threat-soft-accent);
+  color: var(--ui-accent);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.threat-search-options {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 20px;
+  padding: 20px;
+  border: 1px solid var(--ui-divider);
+  border-radius: 12px;
+  background: var(--ui-subtle);
+}
+.threat-scope-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.threat-scope-heading svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+  color: var(--ui-muted);
+}
+.threat-scope-heading h3 {
+  color: var(--ui-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.threat-scope-heading p {
+  margin-top: 5px;
+  color: var(--ui-muted);
+  font-size: 12px;
+}
+.threat-search-options label {
+  display: block;
+  margin-bottom: 8px;
+}
+.threat-search-options input[type='date'] {
   padding-left: 12px;
   font-variant-numeric: tabular-nums;
 }
+.threat-search-options > div {
+  min-width: 0;
+}
+.threat-search-options > div > p {
+  margin-top: 6px;
+  color: var(--ui-muted);
+  font-size: 11px;
+}
 @media (min-width: 768px) {
   .threat-search-page .threat-search-fields {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 22px;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr);
+  }
+  .threat-search-options {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr);
+  }
+  .threat-scope-heading {
+    grid-column: 1 / -1;
   }
 }
 @media (min-width: 1280px) {
-  .threat-search-page .threat-search-fields {
-    grid-template-columns: minmax(160px, 1fr) minmax(210px, 1.35fr) minmax(90px, 0.5fr) minmax(185px, 0.9fr);
+  .threat-search-options {
+    grid-template-columns: minmax(0, 1fr) 150px minmax(220px, 0.9fr);
+    align-items: start;
+  }
+  .threat-scope-heading {
+    grid-column: auto;
+    padding-top: 5px;
   }
 }
 
@@ -680,5 +743,215 @@
 @media (max-width: 374px) {
   .threat-result-controls {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.threat-search-page .threat-examples {
+  margin-top: 22px;
+}
+.threat-search-page .threat-examples > span {
+  font-size: 11px;
+}
+.threat-search-page .threat-examples button {
+  background: var(--ui-surface);
+}
+.threat-search-page .threat-examples button[aria-pressed='true'] {
+  color: var(--ui-accent);
+  border-color: color-mix(in srgb, var(--ui-accent) 40%, var(--ui-divider));
+  background: var(--threat-soft-accent);
+}
+.threat-search-page .threat-examples button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.threat-product-heading > div {
+  margin-bottom: 0;
+}
+.threat-search-page .threat-search-welcome {
+  background: linear-gradient(115deg, var(--threat-soft-accent), var(--ui-surface) 65%);
+}
+.threat-active-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-top: 16px;
+}
+.threat-active-filters > span {
+  margin-right: 3px;
+  color: var(--ui-muted);
+  font-size: 11px;
+}
+.threat-active-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--ui-divider);
+  border-radius: 7px;
+  background: var(--ui-subtle);
+  color: var(--ui-text);
+  font-size: 11px;
+}
+.threat-active-filters button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.threat-active-filters button svg {
+  flex-shrink: 0;
+  color: var(--ui-muted);
+}
+.threat-active-filters button:hover {
+  border-color: var(--ui-accent);
+  background: var(--threat-soft-accent);
+}
+.threat-search-page .threat-results-table tbody tr:hover {
+  background: var(--ui-subtle);
+}
+.threat-search-page .threat-result-card {
+  display: flex;
+  flex-direction: column;
+}
+.threat-result-card > button {
+  margin-top: auto;
+}
+.threat-search-page .threat-result-card h3 {
+  font-size: 14px;
+  font-weight: 550;
+}
+.threat-search-page .threat-detail-dialog {
+  background: var(--ui-surface);
+  border-color: var(--ui-border);
+}
+.threat-search-page .threat-detail-dialog > div:first-child {
+  padding: 24px;
+  background: var(--ui-subtle);
+}
+.threat-search-page .threat-detail-dialog > div:nth-child(2) {
+  padding: 24px;
+}
+.threat-search-page .threat-detail-dialog h2 {
+  font-size: 16px;
+  line-height: 1.6;
+}
+.threat-search-page .threat-detail-dialog dl {
+  gap: 20px;
+  padding: 20px;
+}
+.threat-key-dialog {
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  border: 1px solid var(--ui-border);
+  border-radius: 16px;
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  box-shadow: 0 24px 80px #0004;
+  outline: none;
+}
+.threat-key-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 24px;
+  border-bottom: 1px solid var(--ui-divider);
+}
+.threat-key-eyebrow {
+  color: var(--ui-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.threat-key-header h2 {
+  margin-top: 4px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.threat-key-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  border-radius: 8px;
+  color: var(--ui-muted);
+}
+.threat-key-close:hover {
+  background: var(--ui-subtle);
+}
+.threat-key-body {
+  padding: 24px;
+}
+.threat-key-body > p:first-child {
+  margin-bottom: 22px;
+  color: var(--ui-muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.threat-key-body label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 550;
+}
+.threat-key-body input {
+  border-color: var(--ui-border);
+  background: var(--ui-control);
+  color: var(--ui-text);
+}
+.threat-key-hint {
+  margin-top: 9px;
+  color: var(--ui-muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.threat-key-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 18px 24px;
+  border-top: 1px solid var(--ui-divider);
+  background: var(--ui-subtle);
+}
+.threat-key-feedback {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #f43f5e40;
+  border-radius: 8px;
+  color: var(--ui-text);
+  background: #f43f5e0d;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.threat-key-feedback.is-success {
+  border-color: #10b98140;
+  background: #10b9810d;
+}
+@media (max-width: 767px) {
+  .threat-search-options {
+    padding: 16px;
+    gap: 18px;
+  }
+  .threat-search-page .threat-detail-dialog > div:first-child,
+  .threat-search-page .threat-detail-dialog > div:nth-child(2) {
+    padding: 18px;
+  }
+  .threat-search-page .threat-examples {
+    gap: 8px;
+  }
+  .threat-search-page .threat-examples button {
+    flex: 1 1 auto;
+    justify-content: space-between;
+  }
+  .threat-search-actions > div:last-child {
+    gap: 8px;
+  }
+  .threat-search-actions > div:last-child .threat-search-submit {
+    flex-basis: 100%;
   }
 }

@@ -84,11 +84,19 @@ export async function searchNvdCpes(
   vendor: string,
   product: string,
   limit: number,
+  exactCpe?: string,
+  cpeNameId?: string,
 ): Promise<NvdCpeSearchResponse> {
   // NVD keywordSearch matches titles/reference text, not CPE component names.
   const keyword = `${vendor} ${product}`.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
   const pageSize = Math.min(Math.max(1, limit), 200);
   const url = buildCpeUrl(keyword, pageSize);
+  if (exactCpe) {
+    if (!parseCPE23(exactCpe).isValid) throw new Error('Invalid CPE 2.3 expression');
+    url.searchParams.delete('keywordSearch');
+    if (cpeNameId) url.searchParams.set('cpeNameId', cpeNameId);
+    else url.searchParams.set('cpeMatchString', exactCpe);
+  }
   const fetchPage = (key: string) =>
     request(url.href, {
       headers: { Accept: 'application/json', ...(key ? { apiKey: key } : {}) },
@@ -140,7 +148,8 @@ export async function searchNvdCpes(
   for (const entry of configurations) {
     const cpe = entry?.cpe || entry;
     const name = typeof cpe?.cpeName === 'string' ? cpe.cpeName : '';
-    if (!name) continue;
+    if (!name || cpe?.deprecated === true) continue;
+    if (exactCpe && name.toLowerCase() !== exactCpe.toLowerCase()) continue;
     const parsed = parseCPE23(name);
     if (!parsed.isValid) continue;
     const title =

@@ -34,7 +34,12 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Pagination } from './Pagination';
-import { editedWatchlistCpe } from '../utils/watchlist';
+import {
+  editedWatchlistCpe,
+  registrationAssetsFromCpes,
+  verifyRegistrationCpes,
+  dictionaryCpesForCandidate,
+} from '../utils/watchlist';
 import { CveLink } from './CveLink';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import './product-registration.css';
@@ -75,6 +80,8 @@ export const WatchListView: React.FC = () => {
     bulkImportWatchlist,
     simulateCorrelation,
     searchNvdCpes,
+    verifyNvdCpe,
+    saveRegisteredProducts,
     settings,
   } = useApp();
 
@@ -86,8 +93,10 @@ export const WatchListView: React.FC = () => {
   const [savingProduct, setSavingProduct] = useState(false);
   const [catalogQuery, setCatalogQuery] = useState('');
   const nvdSearchSequence = useRef(0);
+  const nvdDictionaryIds = useRef(new Map<string, string>());
   useEffect(() => {
     nvdSearchSequence.current++;
+    nvdDictionaryIds.current.clear();
   }, [showAddModal]);
   useEffect(
     () => () => {
@@ -102,6 +111,7 @@ export const WatchListView: React.FC = () => {
     null,
   );
   const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkImporting, setBulkImporting] = useState(false);
   const [editingItem, setEditingItem] = useState<WatchListItem | null>(null);
   const [deletingAsset, setDeletingAsset] = useState<WatchListItem | null>(null);
   const [togglingAssetId, setTogglingAssetId] = useState<string | null>(null);
@@ -139,6 +149,13 @@ export const WatchListView: React.FC = () => {
   const [nvdError, setNvdError] = useState<string | null>(null);
   const [selectedNvdCpes, setSelectedNvdCpes] = useState<string[]>([]);
   const [nvdResultsFilter, setNvdResultsFilter] = useState('');
+  useEffect(() => {
+    if (editingItem || !selectedNvdCpes.length) return;
+    const entries = selectedNvdCpes.map(parseCPE23);
+    setCpePart(entries[0].part as 'a' | 'o' | 'h');
+    setVersionInput(new Set(entries.map((entry) => entry.version)).size === 1 ? entries[0].version : '*');
+    setTargetHwInput(new Set(entries.map((entry) => entry.targetHw)).size === 1 ? entries[0].targetHw : '*');
+  }, [selectedNvdCpes, editingItem]);
 
   const [bulkJsonText, setBulkJsonText] = useState('');
   const [bulkFeedback, setBulkFeedback] = useState<{ imported: number; errors: string[] } | null>(null);
@@ -194,7 +211,13 @@ export const WatchListView: React.FC = () => {
     if (editingItem) {
       const cpe = editedCpe();
       const current = cpe
-        ? [{ product: 'Current product', cpe, part: parseCPE23(cpe).part as 'a' | 'o' | 'h' }]
+        ? dictionaryCpesForCandidate(cpe, selectedNvdCpes).map((entry) => ({
+            product: selectedNvdCpes.includes(entry)
+              ? 'NVD dictionary'
+              : 'Current product · pending verification',
+            cpe: entry,
+            part: parseCPE23(entry).part as 'a' | 'o' | 'h',
+          }))
         : [];
       const additions = selectedProductIds.flatMap((id) => {
         const product = catalogProducts.find((entry) => entry.normalizedId === id);
@@ -208,7 +231,11 @@ export const WatchListView: React.FC = () => {
         );
         return editingItem.cpes.includes(addedCpe)
           ? []
-          : [{ product: product.name, cpe: addedCpe, part: product.part }];
+          : dictionaryCpesForCandidate(addedCpe, selectedNvdCpes).map((entry) => ({
+              product: product.name,
+              cpe: entry,
+              part: product.part,
+            }));
       });
       const customAddition = additionalProductInput.trim()
         ? [
@@ -241,7 +268,9 @@ export const WatchListView: React.FC = () => {
       return [
         ...current,
         ...additions,
-        ...customAddition,
+        ...customAddition.flatMap((entry) =>
+          dictionaryCpesForCandidate(entry.cpe, selectedNvdCpes).map((cpe) => ({ ...entry, cpe })),
+        ),
         ...nvdAdditions,
         ...additionalCpes.map((cpe) => ({
           product: 'Existing identifier',
@@ -259,49 +288,17 @@ export const WatchListView: React.FC = () => {
           entries.findIndex((entry) => entry.cpe.toLowerCase() === item.cpe.toLowerCase()) === index,
       );
     }
-    const list: Array<{ product: string; cpe: string; part: 'a' | 'o' | 'h' }> = [];
-    const v = vendorInput.trim() || 'vendor';
-
-    if (selectedProductIds.length > 0) {
-      for (const prodId of selectedProductIds) {
-        const catProd = catalogProducts.find((p) => p.normalizedId === prodId);
-        const prodName = catProd ? catProd.normalizedId : prodId;
-        const part = catProd ? catProd.part : cpePart;
-        const cpe = buildStrictCpe23(part, v, prodName, versionInput, targetHwInput);
-        list.push({ product: catProd ? catProd.name : prodName, cpe, part });
-      }
-    }
-
-    if (customProductInput.trim()) {
-      const customP = customProductInput.trim();
-      const cpe = buildStrictCpe23(cpePart, v, customP, versionInput, targetHwInput);
-      list.push({ product: customP, cpe, part: cpePart });
-    }
-
-    if (list.length === 0 && (vendorInput.trim() || customProductInput.trim())) {
-      const cpe = buildStrictCpe23(cpePart, v, 'software', versionInput, targetHwInput);
-      list.push({ product: 'Standard Asset', cpe, part: cpePart });
-    }
-
-    const nvdAdditions = selectedNvdCpes
-      .filter((cpe) => cpe && !list.some((item) => item.cpe === cpe))
-      .map((cpe) => ({
-        product: 'NVD verified',
+    return [
+      ...selectedNvdCpes.map((cpe) => ({
+        product: 'NVD dictionary',
         cpe,
         part: parseCPE23(cpe).part as 'a' | 'o' | 'h',
-      }));
-
-    return [
-      ...list.filter((item) => !removedAutoCpes.has(item.cpe)),
-      ...nvdAdditions,
-      ...customAddedCpes.map((cpe) => {
-        const parsed = parseCPE23(cpe);
-        return {
-          product: 'Custom',
-          cpe,
-          part: parsed.isValid ? (parsed.part as 'a' | 'o' | 'h') : cpePart,
-        };
-      }),
+      })),
+      ...customAddedCpes.map((cpe) => ({
+        product: 'Pending NVD verification',
+        cpe,
+        part: parseCPE23(cpe).part as 'a' | 'o' | 'h',
+      })),
     ].filter(
       (item, index, entries) =>
         !removedAutoCpes.has(item.cpe) &&
@@ -462,7 +459,15 @@ export const WatchListView: React.FC = () => {
     }
   };
 
+  const verifySelectedCpe = (cpe: string) =>
+    verifyNvdCpe(cpe, nvdDictionaryIds.current.get(cpe.toLowerCase()));
+
   const addNvdCpe = (cpe: string) => {
+    const dictionaryEntry = nvdResults.find((entry) => entry.cpeName === cpe);
+    if (!dictionaryEntry || !parseCPE23(cpe).isValid) return;
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dictionaryEntry.cpeNameId)) {
+      nvdDictionaryIds.current.set(cpe.toLowerCase(), dictionaryEntry.cpeNameId);
+    }
     setRemovedAutoCpes((previous) => new Set([...previous].filter((entry) => entry !== cpe)));
     setSelectedNvdCpes((prev) => dedupeCpes([...prev, cpe]));
     setNvdResults((prev) => prev.filter((r) => r.cpeName !== cpe));
@@ -535,7 +540,9 @@ export const WatchListView: React.FC = () => {
               vendor: vendorInput.trim(),
               product: product.name,
               version: versionInput,
-              cpes: [addedCpe],
+              cpes: dictionaryCpesForCandidate(addedCpe, selectedNvdCpes).filter(
+                (entry) => !removedAutoCpes.has(entry),
+              ),
               targetHw: targetHwInput !== '*' ? targetHwInput : undefined,
               assetTag: `${assetTagInput.trim() || editingItem.assetTag}-${index + 1}`,
               ownerGroup: ownerGroupInput.trim() || 'Unassigned',
@@ -557,7 +564,9 @@ export const WatchListView: React.FC = () => {
               vendor: vendorInput.trim(),
               product: additionalProductInput.trim(),
               version: versionInput,
-              cpes: [addedCpe],
+              cpes: dictionaryCpesForCandidate(addedCpe, selectedNvdCpes).filter(
+                (entry) => !removedAutoCpes.has(entry),
+              ),
               targetHw: targetHwInput !== '*' ? targetHwInput : undefined,
               assetTag: `${assetTagInput.trim() || editingItem.assetTag}-new`,
               ownerGroup: ownerGroupInput.trim() || 'Unassigned',
@@ -567,7 +576,7 @@ export const WatchListView: React.FC = () => {
           }
         }
         const finalCpes = dedupeCpes([
-          ...(removedAutoCpes.has(cpe) ? [] : [cpe]),
+          ...dictionaryCpesForCandidate(cpe, selectedNvdCpes).filter((entry) => !removedAutoCpes.has(entry)),
           ...additionalCpes.filter((c) => !removedAutoCpes.has(c)),
           ...selectedNvdCpes.filter((c) => !removedAutoCpes.has(c)),
           ...customAddedCpes.filter((c) => !removedAutoCpes.has(c)),
@@ -575,40 +584,54 @@ export const WatchListView: React.FC = () => {
         if (finalCpes.length === 0) {
           setSaveFeedback({
             type: 'error',
-            message: 'All auto-generated CPEs were removed. Add at least one product or CPE before saving.',
+            message: 'No CPE identifiers remain. Add a verified NVD entry before saving.',
           });
           return;
         }
-        if (productsToAdd.length) {
-          const imported = await bulkImportWatchlist(productsToAdd);
-          if (!imported.success || imported.errors.length) {
-            setSaveFeedback({
-              type: 'error',
-              message: imported.errors.join('; ') || 'Selected catalog products could not be added.',
-            });
-            return;
-          }
-        }
-
+        // Resolve every identifier before writing any asset; NVD failures leave inventory unchanged.
+        await verifyRegistrationCpes(
+          [...finalCpes, ...productsToAdd.flatMap((product) => product.cpes)],
+          verifySelectedCpe,
+        );
         const primaryCpe = parseCPE23(finalCpes[0]);
-        const saved = await updateWatchlistItem({
+        const updatedItem: WatchListItem = {
           ...editingItem,
           vendor: primaryCpe.vendor,
           product: primaryCpe.product,
-          version: primaryCpe.version,
+          version:
+            new Set(finalCpes.map((entry) => parseCPE23(entry).version)).size === 1
+              ? primaryCpe.version
+              : '*',
           cpes: finalCpes,
-          purls: purlList.length > 0 ? purlList : undefined,
-          targetHw: primaryCpe.targetHw !== '*' ? primaryCpe.targetHw : undefined,
+          purls: purlList,
+          targetHw:
+            new Set(finalCpes.map((entry) => parseCPE23(entry).targetHw)).size === 1 &&
+            primaryCpe.targetHw !== '*'
+              ? primaryCpe.targetHw
+              : '*',
           assetTag: assetTagInput.trim() || editingItem.assetTag,
           ownerGroup: ownerGroupInput.trim() || 'Unassigned',
           notes: notesInput.trim(),
-        });
-        if (!saved) {
+        };
+        const saved = await saveRegisteredProducts([
+          updatedItem,
+          ...productsToAdd
+            .filter((product) => product.cpes.length > 0)
+            .map((product) => ({
+              ...registrationAssetsFromCpes(product.cpes, {
+                assetTag: product.assetTag,
+                ownerGroup: product.ownerGroup,
+                notes: product.notes,
+                purls: [],
+              })[0],
+              id: crypto.randomUUID(),
+              createdAt: new Date().toISOString(),
+            })),
+        ]);
+        if (!saved.success || saved.errors?.length) {
           setSaveFeedback({
             type: 'error',
-            message: productsToAdd.length
-              ? `Added ${productsToAdd.length} selected product(s), but could not save changes to the current asset.`
-              : 'Could not save changes to the current asset.',
+            message: saved.errors?.join('; ') || 'Could not save the registered products.',
           });
           return;
         }
@@ -624,115 +647,15 @@ export const WatchListView: React.FC = () => {
         return;
       }
 
-      // Creating new products (supports multi-products!)
-      const productsToCreate: Array<{ name: string; normalizedId: string; part: 'a' | 'o' | 'h' }> = [];
-
-      // Add selected catalog products
-      for (const prodId of selectedProductIds) {
-        const catProd = catalogProducts.find((p) => p.normalizedId === prodId);
-        if (catProd) {
-          const generatedCpe = buildStrictCpe23(
-            catProd.part,
-            vendorInput.trim(),
-            catProd.normalizedId,
-            versionInput,
-            targetHwInput,
-          );
-          if (!removedAutoCpes.has(generatedCpe)) {
-            productsToCreate.push({
-              name: catProd.name,
-              normalizedId: catProd.normalizedId,
-              part: catProd.part,
-            });
-          }
-        } else {
-          const generatedCpe = buildStrictCpe23(
-            cpePart,
-            vendorInput.trim(),
-            prodId,
-            versionInput,
-            targetHwInput,
-          );
-          if (!removedAutoCpes.has(generatedCpe)) {
-            productsToCreate.push({ name: prodId, normalizedId: prodId, part: cpePart });
-          }
-        }
-      }
-
-      // Add custom product if entered
-      if (customProductInput.trim()) {
-        const generatedCpe = buildStrictCpe23(
-          cpePart,
-          vendorInput.trim(),
-          customProductInput.trim().toLowerCase().replace(/\s+/g, '_'),
-          versionInput,
-          targetHwInput,
-        );
-        if (!removedAutoCpes.has(generatedCpe)) {
-          productsToCreate.push({
-            name: customProductInput.trim(),
-            normalizedId: customProductInput.trim().toLowerCase().replace(/\s+/g, '_'),
-            part: cpePart,
-          });
-        }
-      }
-
-      // If none selected, fallback to single entry
-      if (productsToCreate.length === 0 && (selectedProductIds.length || customProductInput.trim())) {
-        setSaveFeedback({
-          type: 'error',
-          message: 'All selected products were removed. Select a product before saving.',
-        });
-        return;
-      }
-      if (productsToCreate.length === 0) {
-        const fallbackCpe = buildStrictCpe23(
-          cpePart,
-          vendorInput.trim(),
-          'software',
-          versionInput,
-          targetHwInput,
-        );
-        if (!removedAutoCpes.has(fallbackCpe)) {
-          productsToCreate.push({
-            name: 'Standard Asset',
-            normalizedId: 'software',
-            part: cpePart,
-          });
-        } else {
-          setSaveFeedback({
-            type: 'error',
-            message: 'All auto-generated CPEs were removed. Add at least one product or CPE before saving.',
-          });
-          return;
-        }
-      }
-
-      // Register all products into inventory
-      const newItems = productsToCreate.map((p, idx) => {
-        const cpe = buildStrictCpe23(p.part, vendorInput.trim(), p.normalizedId, versionInput, targetHwInput);
-        const tagSuffix = productsToCreate.length > 1 ? `-${idx + 1}` : '';
-        const baseTag =
-          assetTagInput.trim() ||
-          `${vendorInput.toUpperCase().slice(0, 4)}-${p.normalizedId.toUpperCase().slice(0, 6)}`;
-        const isPrimary = idx === 0;
-
-        return {
-          vendor: vendorInput.trim(),
-          product: p.name,
-          version: versionInput,
-          cpes: isPrimary
-            ? dedupeCpes(
-                [cpe, ...selectedNvdCpes, ...customAddedCpes].filter((entry) => !removedAutoCpes.has(entry)),
-              )
-            : [cpe],
-          purls: purlList.length > 0 ? purlList : undefined,
-          targetHw: targetHwInput !== '*' ? targetHwInput : undefined,
-          assetTag: `${baseTag}${tagSuffix}`,
-          ownerGroup: ownerGroupInput.trim() || 'SecOps-Core',
-          notes: notesInput.trim(),
-          active: true,
-        };
+      const verifiedCpes = await verifyRegistrationCpes(
+        generatedCpes.map((entry) => entry.cpe),
+        verifySelectedCpe,
+      );
+      const newItems = registrationAssetsFromCpes(verifiedCpes, {
+        assetTag: assetTagInput,
+        ownerGroup: ownerGroupInput,
+        notes: notesInput,
+        purls: purlList,
       });
       const result = await bulkImportWatchlist(newItems);
       if (!result.errors.length) setShowAddModal(false);
@@ -752,37 +675,57 @@ export const WatchListView: React.FC = () => {
   };
 
   const handleBulkImport = async () => {
+    if (bulkImporting) return;
+    setBulkImporting(true);
+    setBulkFeedback(null);
     try {
       const parsed = JSON.parse(bulkJsonText);
       const items = Array.isArray(parsed) ? parsed : [parsed];
+      if (!items.length || items.length > 1000)
+        throw new Error('Provide between 1 and 1,000 product records.');
       const validItems: Array<Omit<WatchListItem, 'id' | 'createdAt'>> = [];
       const errors: string[] = [];
 
       items.forEach((item: any, i: number) => {
-        if (!item.vendor || !item.product) {
+        if (
+          !item ||
+          typeof item.vendor !== 'string' ||
+          !item.vendor.trim() ||
+          typeof item.product !== 'string' ||
+          !item.product.trim()
+        ) {
           errors.push(`Row ${i + 1}: Missing required vendor or product name.`);
           return;
         }
 
-        const generatedCpe =
-          item.cpes && item.cpes.length > 0
-            ? item.cpes
-            : [generateCPE23('a', item.vendor, item.product, item.version || '*')];
-
-        validItems.push({
-          vendor: item.vendor.trim(),
-          product: item.product.trim(),
-          cpes: generatedCpe,
-          purls: item.purls || [],
-          targetHw: item.targetHw || '*',
+        if (
+          !Array.isArray(item.cpes) ||
+          !item.cpes.length ||
+          item.cpes.some((cpe: unknown) => typeof cpe !== 'string' || !parseCPE23(cpe).isValid)
+        ) {
+          errors.push(
+            `Row ${i + 1}: Provide valid NVD CPE identifiers; automatic CPE generation is disabled.`,
+          );
+          return;
+        }
+        const rows = registrationAssetsFromCpes(item.cpes, {
           assetTag: item.assetTag?.trim() || `BULK-${i + 1}-${Date.now().toString(36).toUpperCase()}`,
           ownerGroup: item.ownerGroup?.trim() || 'Imported-Inventory',
           notes: item.notes || 'Bulk imported product asset',
-          active: item.active !== false,
+          purls: item.purls || [],
         });
+        validItems.push(...rows.map((row) => ({ ...row, active: item.active !== false })));
       });
 
+      if (errors.length) {
+        setBulkFeedback({ imported: 0, errors });
+        return;
+      }
       if (validItems.length > 0) {
+        await verifyRegistrationCpes(
+          validItems.flatMap((item) => item.cpes),
+          verifySelectedCpe,
+        );
         const result = await bulkImportWatchlist(validItems);
         if (result.errors.length) {
           setBulkFeedback(result);
@@ -794,19 +737,19 @@ export const WatchListView: React.FC = () => {
         imported: validItems.length,
         errors,
       });
-
-      if (errors.length === 0) {
-        setTimeout(() => {
-          setShowBulkModal(false);
-          setBulkJsonText('');
-          setBulkFeedback(null);
-        }, 1200);
-      }
-    } catch {
+    } catch (error) {
       setBulkFeedback({
         imported: 0,
-        errors: ['Invalid JSON syntax. Ensure data is valid JSON array or object.'],
+        errors: [
+          error instanceof SyntaxError
+            ? 'Invalid JSON syntax. Provide a JSON array or object.'
+            : error instanceof Error
+              ? error.message
+              : 'Could not verify and import products. Please retry.',
+        ],
       });
+    } finally {
+      setBulkImporting(false);
     }
   };
 
@@ -1216,7 +1159,7 @@ export const WatchListView: React.FC = () => {
                 {editingItem ? 'Edit monitored product' : 'Register monitored products'}
               </h2>
               <p id="product-registration-description">
-                Define ownership, select your products, and review their identifiers before saving.
+                Define ownership and select active CPE identifiers from the NVD dictionary.
               </p>
             </div>
             <button
@@ -1288,7 +1231,7 @@ export const WatchListView: React.FC = () => {
                       <span aria-hidden="true">02</span>
                       <div>
                         <h3>Vendor & products</h3>
-                        <p>Select one or more catalog products, or enter a custom product.</p>
+                        <p>Use the catalog or a custom name to find verified NVD dictionary entries.</p>
                       </div>
                     </div>
                     {/* Vendor Field with Quick Presets */}
@@ -1412,6 +1355,12 @@ export const WatchListView: React.FC = () => {
                           )}
                       </div>
                     )}
+                    {!editingItem && (
+                      <p className="registration-helper">
+                        Catalog selections guide the search. Add the published CPEs from the NVD dictionary
+                        below to choose what will be registered.
+                      </p>
+                    )}
                     {/* Custom Product Input Field */}
                     <div>
                       <label
@@ -1429,7 +1378,7 @@ export const WatchListView: React.FC = () => {
                         className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
                       />
                       <p className="registration-helper">
-                        Optional. Add a product that is not listed in the catalog.
+                        Use this name to search NVD when the product is not listed in the catalog.
                       </p>
                     </div>
                   </section>
@@ -1452,6 +1401,7 @@ export const WatchListView: React.FC = () => {
                         </label>
                         <select
                           id="registration-part"
+                          disabled={!editingItem && selectedNvdCpes.length > 0}
                           value={cpePart}
                           onChange={(e) => setCpePart(e.target.value as any)}
                           className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
@@ -1470,6 +1420,7 @@ export const WatchListView: React.FC = () => {
                         </label>
                         <input
                           id="registration-version"
+                          disabled={!editingItem && selectedNvdCpes.length > 0}
                           type="text"
                           placeholder="* or exact e.g. 10.2.3"
                           value={versionInput}
@@ -1486,6 +1437,7 @@ export const WatchListView: React.FC = () => {
                         </label>
                         <input
                           id="registration-architecture"
+                          disabled={!editingItem && selectedNvdCpes.length > 0}
                           type="text"
                           placeholder="* or x86_64, aarch64"
                           value={targetHwInput}
@@ -1567,8 +1519,8 @@ export const WatchListView: React.FC = () => {
                       </div>
                     )}
                     <p className="registration-helper">
-                      Use * when a version or architecture is unknown. Version-specific matches may require
-                      review.
+                      The selected dictionary entry determines the saved version and architecture. Generated
+                      or manually edited identifiers must pass exact NVD verification.
                     </p>
                   </section>
                   <section className="registration-section">
@@ -1576,7 +1528,10 @@ export const WatchListView: React.FC = () => {
                       <span aria-hidden="true">04</span>
                       <div>
                         <h3>Find dictionary entries</h3>
-                        <p>Look up published CPE identifiers for the selected vendor and product.</p>
+                        <p>
+                          Choose the exact vendor, product, version, and platform to monitor. Registration
+                          requires an active NVD dictionary entry.
+                        </p>
                       </div>
                     </div>
                     {/* NVD Verified CPE 2.3 Search */}
@@ -1669,7 +1624,7 @@ export const WatchListView: React.FC = () => {
                                         ) : (
                                           <AlertCircle className="w-3 h-3 text-rose-400" />
                                         )}
-                                        <span>{parsed.isValid ? 'Valid CPE 2.3' : 'Invalid CPE'}</span>
+                                        <span>{parsed.isValid ? 'NVD dictionary entry' : 'Invalid CPE'}</span>
                                       </span>
                                       <span className="text-zinc-600 dark:text-zinc-600 light:text-zinc-700">
                                         ·
@@ -1791,7 +1746,7 @@ export const WatchListView: React.FC = () => {
                         CPE preview
                       </span>
                       <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-800/60">
-                        {generatedCpes.length} entries
+                        {generatedCpes.length} {generatedCpes.length === 1 ? 'entry' : 'entries'}
                       </span>
                     </div>
 
@@ -1823,9 +1778,7 @@ export const WatchListView: React.FC = () => {
                               }}
                               aria-label={`Remove CPE ${item.cpe}`}
                               className="rounded-lg p-0.75 text-zinc-500 dark:text-zinc-500 light:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-800 light:hover:bg-zinc-200 hover:text-rose-400 transition"
-                              title={
-                                item.product === 'Custom' ? 'Remove custom CPE' : 'Remove auto-generated CPE'
-                              }
+                              title={'Remove CPE identifier'}
                             >
                               <X className="h-3.5 w-3.5" />
                             </button>
@@ -1839,15 +1792,15 @@ export const WatchListView: React.FC = () => {
                     {!generatedCpes.length && (
                       <div className="registration-preview-empty">
                         <Code size={24} aria-hidden="true" />
-                        <p>Select a product to preview its CPE identifiers.</p>
+                        <p>Search NVD and add a dictionary entry to register this product.</p>
                       </div>
                     )}
                     <p className="registration-helper">
-                      Review these identifiers before saving. Dictionary entries are attached to the first
-                      product when registering several products.
+                      NVD verifies these identifiers before saving. Different products are registered
+                      separately; versions of the same product stay together.
                     </p>
                   </div>
-                  <label htmlFor="registration-manual-cpe">Add a CPE expression</label>
+                  <label htmlFor="registration-manual-cpe">Add a CPE expression to verify</label>
                   {/* Custom CPE 2.3 Expression Input */}
                   <div className="registration-manual-cpe flex gap-2">
                     <input
@@ -1914,6 +1867,7 @@ export const WatchListView: React.FC = () => {
                   type="submit"
                   disabled={
                     savingProduct ||
+                    !generatedCpes.length ||
                     !vendorInput.trim() ||
                     (Boolean(editingItem) && !parseCPE23(editedCpe()).isValid)
                   }
@@ -1921,7 +1875,7 @@ export const WatchListView: React.FC = () => {
                 >
                   {savingProduct ? (
                     <>
-                      <Loader2 size={15} className="animate-spin" aria-hidden="true" /> Saving…
+                      <Loader2 size={15} className="animate-spin" aria-hidden="true" /> Verifying & saving…
                     </>
                   ) : editingItem ? (
                     selectedProductIds.length > 0 || additionalProductInput.trim() ? (
@@ -1929,10 +1883,8 @@ export const WatchListView: React.FC = () => {
                     ) : (
                       'Save Changes'
                     )
-                  ) : selectedProductIds.length > 1 ? (
-                    `Register ${selectedProductIds.length} products`
                   ) : (
-                    'Register Product'
+                    'Verify & register'
                   )}
                 </button>
               </div>
@@ -1946,6 +1898,8 @@ export const WatchListView: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
           <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative">
             <button
+              disabled={bulkImporting}
+              aria-label="Close bulk registration"
               onClick={() => {
                 setShowBulkModal(false);
                 setBulkFeedback(null);
@@ -1960,12 +1914,13 @@ export const WatchListView: React.FC = () => {
               Bulk Product Asset Import (JSON)
             </h2>
             <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
-              Import up to 1,000 product records. Provide vendor, product, assetTag, and optional CPE 2.3
-              expressions.
+              Import up to 1,000 product records with vendor, product, assetTag, and active NVD CPE
+              identifiers. All identifiers are verified before import.
             </p>
 
             {bulkFeedback && (
               <div
+                role={bulkFeedback.errors.length ? 'alert' : 'status'}
                 className={`p-3 rounded-xl text-xs mb-3 flex items-center gap-2 ${
                   bulkFeedback.errors.length === 0
                     ? 'bg-zinc-950 border border-emerald-800 text-emerald-300'
@@ -1978,7 +1933,9 @@ export const WatchListView: React.FC = () => {
                   <AlertCircle className="w-4 h-4 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 shrink-0" />
                 )}
                 <span>
-                  Successfully imported {bulkFeedback.imported} monitored products.
+                  {bulkFeedback.errors.length
+                    ? 'Import blocked.'
+                    : `Successfully imported ${bulkFeedback.imported} monitored products.`}
                   {bulkFeedback.errors.length > 0 && ` (${bulkFeedback.errors.join('; ')})`}
                 </span>
               </div>
@@ -1986,28 +1943,38 @@ export const WatchListView: React.FC = () => {
 
             <textarea
               rows={8}
+              aria-label="Products to import as JSON"
+              disabled={bulkImporting}
               value={bulkJsonText}
-              onChange={(e) => setBulkJsonText(e.target.value)}
-              placeholder={`[\n  {\n    "vendor": "microsoft",\n    "product": "windows_server_2022",\n    "assetTag": "DC-PDC01",\n    "ownerGroup": "SecOps-Core"\n  }\n]`}
+              onChange={(e) => {
+                setBulkJsonText(e.target.value);
+                setBulkFeedback(null);
+              }}
+              placeholder={`[\n  {\n    "vendor": "microsoft",\n    "product": "windows_server_2022",\n    "assetTag": "DC-PDC01",\n    "ownerGroup": "SecOps-Core",\n    "cpes": ["cpe:2.3:o:microsoft:windows_server_2022:20348:*:*:*:*:*:x64:*"]\n  }\n]`}
               className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-3 font-mono text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none leading-relaxed"
             />
 
             <div className="flex justify-end space-x-2 mt-4 pt-3 border-t border-zinc-800 dark:border-zinc-800 light:border-zinc-200 text-xs">
               <button
+                disabled={bulkImporting}
                 onClick={() => {
                   setShowBulkModal(false);
                   setBulkFeedback(null);
                 }}
                 className="px-3 py-1.5 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 text-zinc-300 dark:text-zinc-300 light:text-zinc-800"
               >
-                Cancel
+                {bulkFeedback && !bulkFeedback.errors.length ? 'Done' : 'Cancel'}
               </button>
               <button
                 onClick={handleBulkImport}
-                disabled={!bulkJsonText.trim()}
+                disabled={
+                  bulkImporting ||
+                  !bulkJsonText.trim() ||
+                  Boolean(bulkFeedback && !bulkFeedback.errors.length)
+                }
                 className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold disabled:opacity-50"
               >
-                Import Products
+                {bulkImporting ? 'Verifying & importing…' : 'Verify & import products'}
               </button>
             </div>
           </div>

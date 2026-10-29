@@ -233,6 +233,30 @@ function ThreatDetailDialog({ children, onClose }: { children: React.ReactNode; 
   );
 }
 
+function ThreatApiKeyDialog({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  const ref = useDialogFocus(onClose);
+  return (
+    <div
+      className="threat-key-overlay fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="threat-key-title"
+        aria-describedby="threat-key-description"
+        tabIndex={-1}
+        className="threat-key-dialog"
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export const ThreatIntelligenceSearch: React.FC = () => {
   const { searchThreatIntelligence, feeds, updateFeed } = useApp();
 
@@ -295,6 +319,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
   };
 
   const handleSaveApiKey = async () => {
+    if (apiKeySaving || !apiKeyInput.trim()) return;
     setApiKeySaving(true);
     setApiKeyMessage('');
     if (!nvdFeed) {
@@ -310,7 +335,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
       });
       if (ok) {
         setApiKeyMessage('API key saved. Run a new search to pick it up.');
-        setTimeout(() => setApiKeyDialogOpen(false), 1500);
+        setApiKeyInput('');
       } else {
         setApiKeyMessage('Failed to save API key. Please try again.');
       }
@@ -319,7 +344,7 @@ export const ThreatIntelligenceSearch: React.FC = () => {
     } finally {
       setApiKeySaving(false);
     }
-   };
+  };
 
   const selectedVendor = useMemo(
     () => ENTERPRISE_VENDOR_CATALOG.find((vendor) => vendor.normalizedId === vendorSelected),
@@ -790,10 +815,41 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             void handleSearch();
           }}
         >
+          <div className="threat-examples">
+            <span>Common products</span>
+            {[
+              { vendor: 'microsoft', product: 'windows_server_2025', label: 'Windows Server 2025' },
+              { vendor: 'fortinet', product: 'fortios', label: 'Fortinet FortiOS' },
+              { vendor: 'apache', product: 'http_server', label: 'Apache HTTP Server' },
+            ].map((example) => (
+              <button
+                type="button"
+                key={example.product}
+                aria-pressed={vendorSelected === example.vendor && effectiveProduct === example.product}
+                disabled={loading}
+                onClick={() => {
+                  const vendor = ENTERPRISE_VENDOR_CATALOG.find(
+                    (item) => item.normalizedId === example.vendor,
+                  );
+                  if (vendor) {
+                    chooseCatalogVendor(vendor);
+                    setProductSelected(example.product);
+                  }
+                }}
+              >
+                {example.label}
+                <ChevronRight size={13} aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+
           <div className="threat-search-fields grid gap-5 lg:grid-cols-14">
             {/* Vendor */}
-            <div className="lg:col-span-4">
+            <div className="threat-vendor-field">
               <label htmlFor="threat-vendor" className={labelClass}>
+                <span className="threat-field-number" aria-hidden="true">
+                  01
+                </span>{' '}
                 Vendor
               </label>
               {vendorSelected ? (
@@ -928,9 +984,12 @@ export const ThreatIntelligenceSearch: React.FC = () => {
             </div>
 
             {/* Product */}
-            <div className="lg:col-span-6">
+            <div className="threat-product-field">
               <div className="threat-product-heading flex flex-wrap items-center justify-between gap-2">
                 <label htmlFor="threat-product" className={labelClass}>
+                  <span className="threat-field-number" aria-hidden="true">
+                    02
+                  </span>{' '}
                   Product
                 </label>
                 {selectedVendor && catalogProducts.length > 0 && (
@@ -1020,67 +1079,79 @@ export const ThreatIntelligenceSearch: React.FC = () => {
               )}
             </div>
 
-            {/* Limit */}
-            <div className="lg:col-span-2">
-              <label htmlFor="threat-limit" className={labelClass}>
-                Max results
-              </label>
-              <select
-                id="threat-limit"
-                value={resultLimit}
-                onChange={(event) => setResultLimit(Number(event.target.value))}
-                className={`${inputClass} px-3`}
-              >
-                {[25, 50, 100, 200].map((limit) => (
-                  <option key={limit} value={limit}>
-                    {limit}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                Per search
-              </p>
-            </div>
-
-            {/* Scan start date */}
-            <div className="lg:col-span-2">
-              <label htmlFor="threat-start-date" className={labelClass}>
-                Published from
-              </label>
-              <div className="relative">
-                <input
-                  id="threat-start-date"
-                  type="date"
-                  value={startDate}
-                  max={new Date().toISOString().slice(0, 10)}
-                  onChange={(event) => setStartDate(event.target.value)}
-                  placeholder="YYYY-MM-DD"
-                  className={`${inputClass} px-3`}
-                />
+            <div className="threat-search-options">
+              <div className="threat-scope-heading">
+                <SlidersHorizontal size={16} aria-hidden="true" />
+                <div>
+                  <h3>Search scope</h3>
+                  <p>Set a result limit and optional publication date.</p>
+                </div>
               </div>
-              <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
-                Only CVEs published on or after this date
-                {startDate && (
-                  <button
-                    type="button"
-                    aria-label="Clear start date"
-                    onClick={() => setStartDate('')}
-                    className="ml-2 text-blue-400 light:text-blue-700 hover:underline"
-                  >
-                    Clear
-                  </button>
-                )}
-              </p>
+              {/* Limit */}
+              <div className="threat-limit-field">
+                <label htmlFor="threat-limit" className={labelClass}>
+                  Max results
+                </label>
+                <select
+                  id="threat-limit"
+                  value={resultLimit}
+                  onChange={(event) => setResultLimit(Number(event.target.value))}
+                  className={`${inputClass} px-3`}
+                >
+                  {[25, 50, 100, 200].map((limit) => (
+                    <option key={limit} value={limit}>
+                      {limit}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                  Per search
+                </p>
+              </div>
+
+              {/* Scan start date */}
+              <div className="threat-date-field">
+                <label htmlFor="threat-start-date" className={labelClass}>
+                  Published from
+                </label>
+                <div className="relative">
+                  <input
+                    id="threat-start-date"
+                    type="date"
+                    value={startDate}
+                    max={new Date().toISOString().slice(0, 10)}
+                    onChange={(event) => setStartDate(event.target.value)}
+                    placeholder="YYYY-MM-DD"
+                    className={`${inputClass} px-3`}
+                  />
+                </div>
+                <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500 light:text-zinc-600">
+                  Only CVEs published on or after this date
+                  {startDate && (
+                    <button
+                      type="button"
+                      aria-label="Clear start date"
+                      onClick={() => setStartDate('')}
+                      className="ml-2 text-blue-400 light:text-blue-700 hover:underline"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </p>
+              </div>
             </div>
           </div>
-
           <div className="threat-search-actions">
             <div className={`threat-search-context ${draftChanged ? 'is-changed' : ''}`} role="status">
               <Crosshair className="h-4 w-4 shrink-0" aria-hidden="true" />
               <p>
                 {draftChanged
                   ? 'Selection changed. Run a new search to update your results.'
-                  : 'Matches product identifiers first, then broadens to keyword search.'}
+                  : !vendorSelected
+                    ? 'Choose a vendor and product to begin your investigation.'
+                    : !effectiveProduct
+                      ? 'Choose a catalog product or enter a custom product name.'
+                      : 'Your search is ready. Results include CPE and keyword match evidence.'}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -1113,51 +1184,84 @@ export const ThreatIntelligenceSearch: React.FC = () => {
 
       {/* NVD API key configuration dialog */}
       {apiKeyDialogOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl light:border-zinc-200 light:bg-white">
-            <h3 className="mb-1 flex items-center gap-2 text-sm font-bold text-zinc-100 light:text-zinc-900">
-              <Key className="h-4 w-4" />
-              NVD API Key
-            </h3>
-            <p className="mb-4 text-xs text-zinc-400 light:text-zinc-600">
-              {hasNvdApiKey
-                ? 'An NVD API key is already configured. Enter a new key to replace it.'
-                : 'Without an API key, NVD limits anonymous requests to 5 per 30 seconds. Get a free key from the NVD and enter it here.'}
-            </p>
-            {apiKeyMessage && (
-              <p
-                className={`mb-3 text-xs ${apiKeyMessage.includes('saved') ? 'text-emerald-400' : 'text-rose-400 light:text-rose-700'}`}
-              >
-                {apiKeyMessage}
-              </p>
-            )}
-            <input
-              type="password"
-              value={apiKeyInput}
-              onChange={(e) => setApiKeyInput(e.target.value)}
-              placeholder={hasNvdApiKey ? 'New NVD API key' : 'Enter NVD API key'}
-              maxLength={256}
-              className={`${inputClass} mb-4`}
-            />
-            <div className="flex justify-end gap-2">
+        <ThreatApiKeyDialog
+          onClose={() => {
+            if (!apiKeySaving) setApiKeyDialogOpen(false);
+          }}
+        >
+          <form
+            aria-busy={apiKeySaving}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleSaveApiKey();
+            }}
+          >
+            <header className="threat-key-header">
+              <span className="threat-section-icon">
+                <Key size={19} aria-hidden="true" />
+              </span>
+              <div>
+                <p className="threat-key-eyebrow">Search configuration</p>
+                <h2 id="threat-key-title">NVD API key</h2>
+              </div>
               <button
                 type="button"
+                aria-label="Close API key settings"
+                disabled={apiKeySaving}
                 onClick={() => setApiKeyDialogOpen(false)}
-                className={`${smallButton} ${smallButtonIdle}`}
+                className="threat-key-close"
               >
-                Cancel
+                <X size={18} aria-hidden="true" />
               </button>
+            </header>
+            <div className="threat-key-body">
+              <p id="threat-key-description">
+                {hasNvdApiKey
+                  ? 'An API key is configured. Enter a new key to replace it for future searches.'
+                  : 'Configure the API key for your NVD feed. You can also search without a key.'}
+              </p>
+              <label htmlFor="threat-api-key">{hasNvdApiKey ? 'Replacement API key' : 'API key'}</label>
+              <input
+                id="threat-api-key"
+                type="password"
+                autoComplete="off"
+                value={apiKeyInput}
+                disabled={apiKeySaving}
+                onChange={(event) => setApiKeyInput(event.target.value)}
+                placeholder="Enter your NVD API key"
+                maxLength={256}
+                className={inputClass}
+              />
+              <p className="threat-key-hint">This updates the enabled NVD feed in Threat feeds.</p>
+              {apiKeyMessage && (
+                <p
+                  role={apiKeyMessage.includes('saved') ? 'status' : 'alert'}
+                  className={`threat-key-feedback ${apiKeyMessage.includes('saved') ? 'is-success' : ''}`}
+                >
+                  {apiKeyMessage}
+                </p>
+              )}
+            </div>
+            <footer className="threat-key-footer">
               <button
                 type="button"
-                onClick={handleSaveApiKey}
-                disabled={apiKeySaving || !apiKeyInput}
-                className={`${smallButton} border-blue-700 bg-blue-950/30 text-blue-300 hover:border-blue-600 light:border-blue-300 light:bg-blue-50 light:text-blue-700 disabled:opacity-50`}
+                disabled={apiKeySaving}
+                onClick={() => setApiKeyDialogOpen(false)}
+                className="ui-secondary"
               >
+                {apiKeyMessage.includes('saved') ? 'Done' : 'Cancel'}
+              </button>
+              <button type="submit" disabled={apiKeySaving || !apiKeyInput.trim()} className="ui-primary">
+                {apiKeySaving ? (
+                  <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <Key size={14} aria-hidden="true" />
+                )}
                 {apiKeySaving ? 'Saving…' : 'Save key'}
               </button>
-            </div>
-          </div>
-        </div>
+            </footer>
+          </form>
+        </ThreatApiKeyDialog>
       )}
 
       {/* Guidance before the first search */}
@@ -1173,31 +1277,6 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                 Choose from the catalog or enter a custom vendor and product. Your results will appear here.
               </p>
             </div>
-          </div>
-          <div className="threat-examples">
-            <span>Quick start</span>
-            {[
-              { vendor: 'microsoft', product: 'windows_server_2025', label: 'Windows Server 2025' },
-              { vendor: 'fortinet', product: 'fortios', label: 'Fortinet FortiOS' },
-              { vendor: 'apache', product: 'http_server', label: 'Apache HTTP Server' },
-            ].map((example) => (
-              <button
-                type="button"
-                key={example.product}
-                onClick={() => {
-                  const vendor = ENTERPRISE_VENDOR_CATALOG.find(
-                    (item) => item.normalizedId === example.vendor,
-                  );
-                  if (vendor) {
-                    chooseCatalogVendor(vendor);
-                    setProductSelected(example.product);
-                  }
-                }}
-              >
-                {example.label}
-                <ChevronRight size={13} aria-hidden="true" />
-              </button>
-            ))}
           </div>
           <div className="threat-capabilities">
             {[
@@ -1517,6 +1596,38 @@ export const ThreatIntelligenceSearch: React.FC = () => {
                   </button>
                 </div>
               </div>
+              {hasResultFilters && (
+                <div className="threat-active-filters" role="group" aria-label="Active result filters">
+                  <span>Applied filters</span>
+                  {[
+                    ...(resultQuery.trim()
+                      ? [{ label: `Text: ${resultQuery.trim()}`, clear: () => setResultQuery('') }]
+                      : []),
+                    ...(severityFilter !== 'ALL'
+                      ? [
+                          {
+                            label: `Severity: ${severityFilter.toLowerCase()}`,
+                            clear: () => setSeverityFilter('ALL'),
+                          },
+                        ]
+                      : []),
+                    ...(evidenceFilter !== 'ALL'
+                      ? [
+                          {
+                            label: evidenceFilter === 'EXACT' ? 'Exact CPE matches' : 'Keyword matches',
+                            clear: () => setEvidenceFilter('ALL'),
+                          },
+                        ]
+                      : []),
+                    ...(kevOnly ? [{ label: 'CISA KEV only', clear: () => setKevOnly(false) }] : []),
+                  ].map(({ label, clear }) => (
+                    <button key={label} type="button" onClick={clear} aria-label={`Remove filter ${label}`}>
+                      <span>{label}</span>
+                      <X size={12} aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="threat-view-status">
                 <p role="status">
                   <strong>{filteredResults.length}</strong> of {results.length} returned results

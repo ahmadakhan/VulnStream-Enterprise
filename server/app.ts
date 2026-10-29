@@ -1,3 +1,4 @@
+import { parseCPE23 } from '../src/utils/cpeMatcher.ts';
 import { correlationMetrics } from './correlation/metrics.ts';
 import {
   correlationWorkflows,
@@ -791,16 +792,28 @@ export function createApp(
     '/api/cpes/search',
     requireRole('ADMIN', 'OPERATOR'),
     asyncRoute(async (req, res) => {
-      const { vendor, product, limit } = z
+      const { vendor, product, limit, cpe, cpeNameId } = z
         .object({
-          vendor: z.string().trim().min(1).max(200),
+          vendor: z.string().trim().min(1).max(200).optional(),
+          cpe: z
+            .string()
+            .trim()
+            .max(1000)
+            .refine((value) => parseCPE23(value).isValid, 'Invalid CPE 2.3')
+            .optional(),
+          cpeNameId: z.uuid().optional(),
           product: z.string().trim().max(200).default(''),
           limit: z.coerce.number().int().min(1).max(200).default(50),
         })
+        .refine((query) => query.vendor || query.cpe, 'A vendor or exact CPE is required')
+        .refine(
+          (query) => !query.cpeNameId || query.cpe,
+          'A CPE name is required when verifying a dictionary ID',
+        )
         .parse(req.query);
       const apiKey = await loadNvdApiKey(pool, config);
       try {
-        res.json(await searchNvdCpes(request, apiKey, vendor, product, limit));
+        res.json(await searchNvdCpes(request, apiKey, vendor || '', product, limit, cpe, cpeNameId));
       } catch (error) {
         if (isNvdRateLimitError(error)) {
           const retryAfter = nvdRetryAfterSeconds(error);

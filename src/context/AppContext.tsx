@@ -409,6 +409,16 @@ function useApplication() {
       const params = new URLSearchParams({ vendor, product, limit: String(limit) });
       return request<NvdCpeSearchResponse>(`/cpes/search?${params}`);
     },
+    verifyNvdCpe: async (cpe: string, cpeNameId?: string) => {
+      const params = new URLSearchParams({ cpe, limit: '200' });
+      if (cpeNameId) params.set('cpeNameId', cpeNameId);
+      return request<NvdCpeSearchResponse>(`/cpes/search?${params}`);
+    },
+    saveRegisteredProducts: async (items: WatchListItem[]) => {
+      const result = await command('watchlist.import', items);
+      if (result?.success && !result.errors?.length) await refreshAfterMutation();
+      return result || { success: false, imported: 0, errors: ['Could not save registered products.'] };
+    },
     searchThreatIntelligence: async (vendor: string, product: string, limit = 50, startDate?: string) => {
       const params = new URLSearchParams({ vendor, product, limit: String(limit) });
       if (startDate) params.set('startDate', startDate);
