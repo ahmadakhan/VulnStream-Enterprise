@@ -5,7 +5,12 @@ import {
   matchCPE,
   matchesWatchlistItem,
   matchVendorWithAliases,
+  matchProductWithAliases,
+  DEFAULT_VENDOR_ALIASES,
+  DEFAULT_PRODUCT_ALIASES,
 } from '../src/utils/cpeMatcher.ts';
+import { ENTERPRISE_VENDOR_CATALOG } from '../src/data/vendorCatalog.ts';
+
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine.ts';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import { INITIAL_NORMALIZED_CVES } from './fixtures/seedData';
@@ -179,4 +184,75 @@ test('built-in vendor aliases reach the pipeline candidate prefilter', () => {
   assert.ok(finding, 'a built-in alias pair must reach the matcher');
   assert.equal(finding.matchingMethod, 'VENDOR_PRODUCT_ALIAS');
   assert.equal(finding.notificationStatus, 'REVIEW_REQUIRED');
+});
+
+const DEFAULTS = { vendorAliases: DEFAULT_VENDOR_ALIASES, productAliases: DEFAULT_PRODUCT_ALIASES };
+const osCpe = (vendor: string, product: string, version = '*') =>
+  `cpe:2.3:o:${vendor}:${product}:${version}:*:*:*:*:*:*:*`;
+
+test('fortios asset CPE matches the fortios product, not fortimanager', () => {
+  const asset = osCpe('fortinet', 'fortios');
+  const fortiOs = osCpe('fortinet', 'fortios');
+  const fortiManager = 'cpe:2.3:a:fortinet:fortimanager:*:*:*:*:*:*:*:*';
+
+  assert.equal(matchCPE(asset, fortiOs, undefined, DEFAULTS).matched, true);
+  assert.equal(matchCPE(asset, fortiManager, undefined, DEFAULTS).matched, false);
+  assert.equal(matchCPE(asset, osCpe('fortinet', 'fortimanager'), undefined, DEFAULTS).matched, false);
+  assert.equal(matchProductWithAliases('fortios', 'fortimanager'), false);
+});
+
+test('product names do not leak into any vendor alias namespace', () => {
+  assert.equal(matchVendorWithAliases('fortios', 'fortinet'), false);
+  assert.equal(matchVendorWithAliases('fortinet', 'fortios'), false);
+  assert.equal(matchVendorWithAliases('fortiguard', 'fortinet'), false);
+  assert.equal(matchVendorWithAliases('fortinet', 'fortinet_technologies'), true);
+  assert.equal(matchVendorWithAliases('windows', 'microsoft'), false);
+  assert.equal(matchVendorWithAliases('microsoft', 'windows'), false);
+  assert.equal(matchVendorWithAliases('microsoft', 'msft'), true);
+  assert.equal(matchVendorWithAliases('esxi', 'vmware'), false);
+  assert.equal(matchVendorWithAliases('vmware', 'esxi'), false);
+  assert.equal(matchVendorWithAliases('httpd', 'apache'), false);
+  assert.equal(matchVendorWithAliases('apache', 'apache_software_foundation'), true);
+});
+
+test('fortimanager watchlist item is never produced from a fortios asset CPE', () => {
+  const result = matchesWatchlistItem(
+    [osCpe('fortinet', 'fortios')],
+    'fortinet',
+    'fortios',
+    ['cpe:2.3:a:fortinet:fortimanager:*:*:*:*:*:*:*:*'],
+    'FortiManager advisory title',
+    'A vulnerability in FortiManager',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    true,
+    DEFAULT_VENDOR_ALIASES,
+    DEFAULT_PRODUCT_ALIASES,
+  );
+  assert.equal(result.matched, false);
+  assert.equal(result.method, 'NONE');
+});
+
+test('no catalog product name leaks into the vendor alias namespace', () => {
+  const catalogProductIds = new Set(
+    ENTERPRISE_VENDOR_CATALOG.flatMap((v) => v.products).map((p) => p.normalizedId.toLowerCase()),
+  );
+  const vendorAliasTokens = Object.values(DEFAULT_VENDOR_ALIASES)
+    .flat()
+    .map((a) => a.toLowerCase());
+  const vendorAliasTokensThatAreAlsoCatalogProducts = vendorAliasTokens.filter((token) =>
+    catalogProductIds.has(token),
+  );
+  const vendorAliasTokensLegitimatelySharedWithCatalogProducts = new Set(['linux_kernel']);
+  const leakedProductNames = vendorAliasTokensThatAreAlsoCatalogProducts.filter(
+    (token) => !vendorAliasTokensLegitimatelySharedWithCatalogProducts.has(token),
+  );
+  assert.equal(
+    leakedProductNames.length,
+    0,
+    `product names must not appear as vendor aliases: ${leakedProductNames.join(', ')}`,
+  );
 });
