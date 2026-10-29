@@ -119,6 +119,25 @@ test('delivery audit: digest scope, policy, retry budgets and legacy content', {
       const rebuilt=(await pool.query('SELECT payload FROM outbox WHERE id=$1',[waiting])).rows[0].payload;
       assert.ok(!rebuilt.html.includes('obsolete-patch'));assert.ok(rebuilt.text.includes('current-patch'));
     });
+    await t.test('repeated recovery preserves accepted state and creates only one replacement', async () => {
+      await reset(); const cve=makeCve('CVE-2026-98110');const [finding]=await seed([cve]);
+      await put(pool,'recipients','all',recipient('all'));
+      const advisory:Advisory={id:'ADV-idempotent',title:'Notice',severity:'HIGH',cveIds:[cve.cveId],findingIds:[finding.id],createdDate:new Date().toISOString(),deliveryStatus:'FAILED',recipientCount:1,executiveSummary:'Old',affectedSystems:[finding.matchedAssetName],remediationInstructions:'Old'};
+      await put(pool,'advisories',advisory.id,advisory);
+      const id=await enqueue(pool,'email','all',advisory.id,{subject:'Old',text:'Old',cveIds:[cve.cveId],recipientEmail:'all@example.invalid'},'failed-original');
+      await pool.query("UPDATE outbox SET status='FAILED',error='no longer applicable' WHERE id=$1",[id]);
+      await rebuildFromCurrentInventory(pool,advisory.id,'no longer applicable');
+      const count=(await list<Advisory>(pool,'advisories')).length;
+      await rebuildFromCurrentInventory(pool,advisory.id,'no longer applicable');
+      assert.equal((await list<Advisory>(pool,'advisories')).length,count);
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED'")).rows[0].n,1);
+      let sent=0; await deliverNext(pool,config,noNetwork,async()=>{sent++;return 'replacement';});assert.equal(sent,1);
+      const accepted=await get<Finding>(pool,'findings',finding.id);assert.equal(accepted?.notificationStatus,'AUTO_DISPATCHED');
+      await rebuildFromCurrentInventory(pool,advisory.id,'no longer applicable');
+      assert.equal((await get<Finding>(pool,'findings',finding.id))?.notificationStatus,'AUTO_DISPATCHED');
+      assert.equal((await list<Advisory>(pool,'advisories')).length,count);
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='QUEUED'")).rows[0].n,0);
+    });
     await t.test('legacy rebuilding never blesses an old body with current-CVE revision evidence',async()=>{
       await reset();const cve=makeCve('CVE-2026-98105');const [finding]=await seed([cve]);
       const advisory:Advisory={id:'ADV-legacy',title:'Old notice',severity:'HIGH',cveIds:[cve.cveId],findingIds:[finding.id],createdDate:new Date().toISOString(),deliveryStatus:'PENDING',recipientCount:1,executiveSummary:'Old content',affectedSystems:[finding.matchedAssetName],remediationInstructions:'Install obsolete patch https://example.com/obsolete-patch'};
