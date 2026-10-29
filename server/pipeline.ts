@@ -386,7 +386,8 @@ export async function regroupStaleAdvisory(
       createdDate: new Date().toISOString(),
       deliveryStatus: 'PENDING',
     };
-    await put(db, 'advisories', replacement.id, replacement);
+    let regroupedJobs = 0;
+    let emailJobs = 0;
     for (const job of regroup) {
       const { cveRevisions, findingRevisions, findings: groupedFindings } = evidence.get(job.id)!;
       const included = groupedFindings.map(f => f.id);
@@ -406,8 +407,9 @@ export async function regroupStaleAdvisory(
         const fingerprint = createHash('sha256').update(stableJson({
           cveRevisions: payload.cveRevisions, findingRevisions, included,
         })).digest('hex');
-        await enqueue(db, job.channel, job.target_id, replacement.id, payload,
+        const inserted = await enqueue(db, job.channel, job.target_id, replacement.id, payload,
           `rebuild:${job.id}:${fingerprint}`, 'QUEUED', job.priority || 0);
+        if (!inserted) continue;
       } else {
       await db.query(
         `UPDATE outbox
@@ -421,15 +423,19 @@ export async function regroupStaleAdvisory(
         ],
       );
       }
+      regroupedJobs++;
+      if (job.channel === 'email') emailJobs++;
       for (const finding of groupedFindings) {
         await put(db, 'findings', finding.id, { ...finding, advisoryId: replacement.id, notificationStatus: 'QUEUED_FOR_DISPATCH' });
       }
     }
+    if (!regroupedJobs) return { regrouped: true, holdGated };
+    await put(db, 'advisories', replacement.id, { ...replacement, recipientCount: emailJobs });
     await writeEvent(db, {
       category: 'EMAIL',
       code: 'delivery.bundle_regrouped',
-      message: `Regrouped ${regroup.length} deliverable job(s) from a stale advisory bundle`,
-      context: { staleAdvisoryId: advisoryId, advisoryId: replacement.id, jobs: regroup.length },
+      message: `Regrouped ${regroupedJobs} deliverable job(s) from a stale advisory bundle`,
+      context: { staleAdvisoryId: advisoryId, advisoryId: replacement.id, jobs: regroupedJobs },
     });
     return { regrouped: true, holdGated };
   });
