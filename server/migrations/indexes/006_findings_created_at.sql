@@ -11,10 +11,6 @@
 -- findings kind, and the build must not hold a table lock that blocks ingestion
 -- or delivery. IF NOT EXISTS keeps this idempotent for databases that already
 -- have the index.
---
--- Note for editors: the migration splitter splits on semicolons BEFORE removing
--- comments, so a semicolon in this prose would cut the statement in half. Do not
--- add one.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS records_findings_created_at
   ON records (created_at)
   WHERE kind = 'findings';

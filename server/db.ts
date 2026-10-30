@@ -83,9 +83,9 @@ async function indexMigrationFiles(): Promise<{ name: string; sql: string }[]> {
 /**
  * Strip comments and split on semicolons outside string literals.
  *
- * Comments must be removed while scanning, not afterwards: a semicolon inside a
- * `--` comment (common in prose) otherwise cut the statement in half and the
- * build failed with `syntax error at or near ...` from a fragment of a comment.
+ * A `--` comment is consumed as a unit before quote tracking runs, so a
+ * semicolon or an apostrophe inside it can neither split the statement nor open
+ * a string literal. Index files are heavily commented prose, and both occur.
  */
 export function indexStatements(sql: string): string[] {
   const statements: string[] = [];
