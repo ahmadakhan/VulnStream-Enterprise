@@ -10,9 +10,10 @@ import {
   writeEvent,
   readEvents,
 } from '../server/events';
-import { createPool, migrate, put, state } from '../server/db.ts';
+import { createPool, migrate, put, get, state } from '../server/db.ts';
 import { queueRun, processPipeline } from '../server/pipeline';
 import { loadConfig } from '../server/config.ts';
+import { applyCommand } from '../server/commands.ts';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import type {
   WatchListItem,
@@ -398,6 +399,53 @@ test(
           .rows[0].value,
         'sec@example.invalid',
       );
+    } finally {
+      await pool.end();
+      await base.query(`DROP SCHEMA ${schema} CASCADE`);
+      await base.end();
+    }
+  },
+);
+test(
+  'settings.save persists the opt-in news auto-dispatch flag through the schema',
+  { skip: !process.env.TEST_DATABASE_URL },
+  async () => {
+    const base = createPool(process.env.TEST_DATABASE_URL!);
+    const schema = 'news_save_' + randomUUID().replaceAll('-', '');
+    await base.query(`CREATE SCHEMA ${schema}`);
+    const url = new URL(process.env.TEST_DATABASE_URL!);
+    url.searchParams.set('options', `-c search_path=${schema}`);
+    const pool = createPool(url.href);
+    try {
+      await migrate(pool);
+      const config = loadConfig({
+        NODE_ENV: 'test',
+        DATABASE_URL: url.href,
+        APP_ORIGIN: 'http://localhost',
+        ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
+        EGRESS_ALLOWED_HOSTS: 'example.com',
+        WORKER_ENABLED: 'false',
+      });
+      await put(pool, 'settings', 'main', { ...DEFAULT_SETTINGS });
+      assert.equal((await get<any>(pool, 'settings', 'main'))!.autoDispatchNewsToSecurityTeam, false);
+      const saved = await applyCommand(pool, config, {
+        action: 'settings.save',
+        data: { autoDispatchNewsToSecurityTeam: true },
+        actor: 'test',
+      });
+      assert.equal(saved.success, true);
+      assert.equal(
+        (await get<any>(pool, 'settings', 'main'))!.autoDispatchNewsToSecurityTeam,
+        true,
+        'the flag must survive settings.save (not be stripped by the schema)',
+      );
+      // Toggling off must also round-trip; this guards against the zod strip regression.
+      await applyCommand(pool, config, {
+        action: 'settings.save',
+        data: { autoDispatchNewsToSecurityTeam: false },
+        actor: 'test',
+      });
+      assert.equal((await get<any>(pool, 'settings', 'main'))!.autoDispatchNewsToSecurityTeam, false);
     } finally {
       await pool.end();
       await base.query(`DROP SCHEMA ${schema} CASCADE`);
