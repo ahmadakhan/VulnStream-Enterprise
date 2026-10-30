@@ -27,6 +27,7 @@ const finding = (id: string, cveId: string, evidence: string): Finding => ({
   status: 'MONITORED',
   autoDispatchedAt: null,
   advisoryId: null,
+  reviewNotifiedAt: null,
   timeline: [],
 });
 

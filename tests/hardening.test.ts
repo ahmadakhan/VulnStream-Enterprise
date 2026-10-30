@@ -64,6 +64,7 @@ const finding = (value: NormalizedCVE, overrides: Partial<Finding> = {}): Findin
   status: 'MONITORED',
   autoDispatchedAt: null,
   advisoryId: null,
+  reviewNotifiedAt: null,
   timeline: [],
   ...overrides,
 });

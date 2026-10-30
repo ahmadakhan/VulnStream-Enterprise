@@ -473,6 +473,7 @@ export const INITIAL_FINDINGS: Finding[] = [
     status: 'REMEDIATION_AVAILABLE',
     autoDispatchedAt: '2026-10-19T21:00:00Z',
     advisoryId: 'ADV-2026-0841',
+    reviewNotifiedAt: null,
     timeline: [
       {
         timestamp: '2026-10-19T20:45:00Z',
@@ -503,6 +504,7 @@ export const INITIAL_FINDINGS: Finding[] = [
     status: 'REMEDIATION_AVAILABLE',
     autoDispatchedAt: '2026-10-19T17:00:00Z',
     advisoryId: 'ADV-2026-0839',
+    reviewNotifiedAt: null,
     timeline: [
       {
         timestamp: '2026-10-19T17:00:00Z',
@@ -527,6 +529,7 @@ export const INITIAL_FINDINGS: Finding[] = [
     status: 'RESOLVED',
     autoDispatchedAt: '2026-10-19T18:00:00Z',
     advisoryId: 'ADV-2026-0840',
+    reviewNotifiedAt: null,
     timeline: [
       {
         timestamp: '2026-10-19T18:00:00Z',

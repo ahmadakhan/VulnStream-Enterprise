@@ -105,6 +105,7 @@ test('correlation aliases are learned only from current, non-rejected matches', 
     status: 'MONITORED' as const,
     advisoryId: null,
     autoDispatchedAt: '2026-10-25T00:00:00.000Z',
+    reviewNotifiedAt: null,
   };
   const byId = new Map([[cve.cveId, cve]]);
   const learned = deriveCorrelationAliases([finding], [watch], byId);
@@ -118,6 +119,7 @@ test('correlation aliases are learned only from current, non-rejected matches', 
     ...finding,
     notificationStatus: 'REVIEW_REQUIRED' as const,
     autoDispatchedAt: null,
+    reviewNotifiedAt: null,
   };
   assert.deepEqual(deriveCorrelationAliases([review], [watch], byId), []);
 

@@ -87,6 +87,7 @@ test('correlation evidence teaches an alias only after confirmation', () => {
     notificationStatus: 'REVIEW_REQUIRED',
     status: 'MONITORED',
     autoDispatchedAt: null,
+    reviewNotifiedAt: null,
     cve: {
       cveId: 'CVE-2026-90001',
       cpeMatches: [cpe('acme_corp', 'widget_pro', '1.0')],
@@ -102,6 +103,7 @@ test('correlation evidence teaches an alias only after confirmation', () => {
     ...review,
     notificationStatus: 'AUTO_DISPATCHED' as const,
     autoDispatchedAt: '2026-10-26T00:00:00Z',
+    reviewNotifiedAt: null,
   };
   const learned = deriveCorrelationAliases([confirmed], [asset()], undefined, [], '2026-10-26T00:00:00Z');
   assert.deepEqual(

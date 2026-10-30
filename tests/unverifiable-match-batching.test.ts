@@ -47,6 +47,7 @@ const finding = (cveId: string, id: string, assetName: string, vendor?: string, 
     status: 'MONITORED',
     autoDispatchedAt: null,
     advisoryId: null,
+    reviewNotifiedAt: null,
     cve: {
       cveId,
       title: cveId,
