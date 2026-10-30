@@ -195,6 +195,38 @@ test(
   },
 );
 
+test(
+  'a poisoned pending advisory is retired after its attempt budget, not retried forever',
+  { skip: !process.env.TEST_DATABASE_URL },
+  async () => {
+    const outcome = await withDatabase(async (pool) => {
+      const id = randomUUID();
+      await pool.query('INSERT INTO correlation_pending(id,payload) VALUES($1,$2)', [
+        id,
+        JSON.stringify({ url: 'https://example.org/poison', title: 'x', content: 'x' }),
+      ]);
+      // Before the fix, nothing retired a row whose payload fails
+      // deterministically: each claim lapsed, was re-claimed and re-failed
+      // forever, and on a small estate occupied the head of the queue on every tick.
+      const { MAX_PENDING_ATTEMPTS } = await import('../server/correlation/pending.ts');
+      let lastBatch;
+      for (let attempt = 0; attempt < MAX_PENDING_ATTEMPTS; attempt++) {
+        await pool.query("UPDATE correlation_pending SET lease_until = now() - interval '1 second'");
+        lastBatch = await claimPending(pool, 4);
+        assert.equal(lastBatch.jobs.length, 1, `attempt ${attempt + 1} still offers the row`);
+      }
+      // The next claim, after the budget, must not offer it again.
+      await pool.query("UPDATE correlation_pending SET lease_until = now() - interval '1 second'");
+      const after = await claimPending(pool, 4);
+      assert.equal(after.jobs.length, 0, 'the exhausted row is no longer offered');
+      // The row is retained (visible, countable), not deleted.
+      const row = await pool.query('SELECT attempts FROM correlation_pending WHERE id=$1', [id]);
+      assert.equal(row.rows[0].attempts, MAX_PENDING_ATTEMPTS);
+    });
+    assert.notEqual(outcome, null);
+  },
+);
+
 test('an advisory rejection names the field and rule, never the rejected value', () => {
   const secret = 'customer-secret-token-1234567890';
   const reason = describeAdvisoryError({ title: 'ok', content: 'ok', url: `javascript:${secret}` });

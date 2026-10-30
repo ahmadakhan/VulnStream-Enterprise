@@ -40,8 +40,17 @@ export function correlationMetrics(
     vulnstream_correlation_dropped_logs_total: telemetry.droppedLogs,
     vulnstream_correlation_latency_milliseconds_total: telemetry.latencyTotal,
   };
+  const gaugesExtra: Record<string, number> = {
+    // Spool saturation: the durable fallback accepts at most 256 letters before
+    // `capture` reports capacity and the ingest path falls through to the
+    // database. Without this gauge, a deployment whose database fallback is also
+    // degraded reaches the last-resort loss window with no monitoring signal.
+    vulnstream_correlation_dead_letter_spool_files: telemetry.deadLetterSpoolFiles,
+  };
   const lines: string[] = [];
   for (const [name, value] of Object.entries(gauges))
+    lines.push(`# TYPE ${name} gauge`, `${name} ${Number.isFinite(value) ? value : 0}`);
+  for (const [name, value] of Object.entries(gaugesExtra))
     lines.push(`# TYPE ${name} gauge`, `${name} ${Number.isFinite(value) ? value : 0}`);
   for (const [name, value] of Object.entries(counters))
     lines.push(`# TYPE ${name} counter`, `${name} ${value}`);

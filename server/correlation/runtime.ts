@@ -8,7 +8,7 @@ import { DeadLetterQueue } from './deadLetter.ts';
 import { AdvisoryIngestor } from './ingest.ts';
 import { PipelineSupervisor } from './supervisor.ts';
 import { AdvisoryStreamProcessor } from './stream.ts';
-import { claimPending, renewPending, acknowledgePending, acknowledgePendingExcept } from './pending.ts';
+import { claimPending, renewPending, acknowledgePending, acknowledgePendingExcept, MAX_PENDING_ATTEMPTS } from './pending.ts';
 
 /** Structural equality for pending payloads (plain JSON values only). */
 const samePayload = (left: unknown, right: unknown): boolean => {
@@ -102,6 +102,19 @@ export class CorrelationRuntime {
   private async drain(): Promise<void> {
     await this.cleanupStaleMatches();
     await this.queueNotifications();
+    // Rows the claim no longer offers have exhausted MAX_PENDING_ATTEMPTS. Log
+    // their count once per drain pass: silently leaving them in the table would
+    // make a poisoned advisory invisible while `pending` still counts it.
+    try {
+      const exhausted = await this.pool.query<{ count: number }>(
+        'SELECT count(*)::int AS count FROM correlation_pending WHERE attempts >= $1',
+        [MAX_PENDING_ATTEMPTS],
+      );
+      const count = Number(exhausted.rows[0]?.count ?? 0);
+      if (count) this.supervisor.ingestor.telemetry.log('CRITICAL', 'pending.attempts_exhausted', { count });
+    } catch {
+      // Metrics on a missing column (pre-032 database) must not block draining.
+    }
     // The maintenance clock advanced even when the run failed, so a failing
     // sweep (for example a lock timeout while the table is being vacuumed) was
     // not retried for a full minute while its errors filled the log. Back off

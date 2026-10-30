@@ -234,7 +234,7 @@ export const AdvisoryTemplateView: React.FC = () => {
       )
       .replace(
         /{{vendor_products_html}}/g,
-        '<li style="padding-left:18px;margin:4px 0;">VendorCorp - ProductSuite</li>\n<li style="padding-left:18px;margin:4px 0;">AnotherVendor - ProductLine</li>',
+        '<li style="margin:4px 0;">VendorCorp - ProductSuite</li>\n<li style="margin:4px 0;">AnotherVendor - ProductLine</li>',
       )
       .replace(
         /{{cve_details}}/g,

@@ -38,6 +38,8 @@ export class CorrelationTelemetry {
   readonly logs: CorrelationLog[] = [];
   completed = 0;
   deadLetters = 0;
+  /** Files currently in the durable spool, for the saturation gauge. */
+  deadLetterSpoolFiles = 0;
   latencyTotal = 0;
   readonly startedAt = performance.now();
   private outputBlocked = false;

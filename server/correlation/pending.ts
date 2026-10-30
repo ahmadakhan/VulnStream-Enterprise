@@ -5,14 +5,26 @@ export interface PendingBatch {
   token: string;
   jobs: { id: string; payload: unknown }[];
 }
+/**
+ * How many times one pending row may be claimed before it is presumed
+ * unprocessable. A validation failure or a durability failure is deterministic,
+ * so retrying it on every tick re-claims the same row forever: claims are
+ * ordered `created_at,id` and `SKIP LOCKED` skips only *live* leases, so the
+ * poison row occupies the head of the queue and is attempted again each pass.
+ * 20 attempts (~20 minutes of leases) leaves ample room for transient outages —
+ * a database recovery, a deploy restart — while bounding the loop.
+ */
+export const MAX_PENDING_ATTEMPTS = 20;
 export async function claimPending(db: Db, limit: number): Promise<PendingBatch> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 32) throw new Error('INVALID_CLAIM_LIMIT');
   const token = randomUUID();
   const result = await db.query<{ id: string; payload: unknown }>(timedQuery(`WITH selected AS (
-    SELECT id FROM correlation_pending WHERE lease_until IS NULL OR lease_until<now()
+    SELECT id FROM correlation_pending WHERE (lease_until IS NULL OR lease_until<now())
+      AND attempts < $3
     ORDER BY created_at,id LIMIT $1 FOR UPDATE SKIP LOCKED)
-    UPDATE correlation_pending p SET lease_until=now()+interval '60 seconds',lease_token=$2
-    FROM selected s WHERE p.id=s.id RETURNING p.id,p.payload`, [limit, token]));
+    UPDATE correlation_pending p SET lease_until=now()+interval '60 seconds',lease_token=$2,
+      attempts=attempts+1
+    FROM selected s WHERE p.id=s.id RETURNING p.id,p.payload`, [limit, token, MAX_PENDING_ATTEMPTS]));
   return { token, jobs: result.rows };
 }
 /** A stale worker can neither delete nor extend another worker's claim. */

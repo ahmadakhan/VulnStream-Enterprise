@@ -193,6 +193,26 @@ groups:
 
       # --- Data integrity -----------------------------------------------------
 
+      - alert: VulnStreamDeadLetterSpoolSaturating
+        # The durable spool accepts at most 256 letters (deadLetter.ts). Beyond
+        # that, capture() reports capacity and every new failure depends on the
+        # database fallback — and if that is also unavailable, the record enters
+        # the last-resort loss window. 200 leaves headroom to act.
+        expr: vulnstream_correlation_dead_letter_spool_files >= 200
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: Dead-letter spool is near its 256-file capacity
+          runbook: Check disk space on the spool volume and the database fallback; replay or dismiss letters to free files.
+
+      - alert: VulnStreamDeadLetterSpoolFull
+        expr: vulnstream_correlation_dead_letter_spool_files >= 256
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: Dead-letter spool is full; new failures depend on the database
+          runbook: Free spool files immediately. Records that fail while the spool is full AND the database is unreachable are not durable.
+
       - alert: VulnStreamDeadLetters
         expr: increase(vulnstream_correlation_dead_letters_total[5m]) > 0
         for: 5m

@@ -74,6 +74,15 @@ export class DeadLetterQueue {
         await dir.close();
       }
       this.telemetry.deadLetters++;
+      // The saturation gauge is refreshed opportunistically on every spool
+      // write, so the alert fires from the existing metrics endpoint without a
+      // new scrape path. It is a count of one bounded directory, so a readdir
+      // here stays cheap.
+      try {
+        this.telemetry.deadLetterSpoolFiles = (await readdir(this.directory)).length;
+      } catch {
+        // A vanished directory is reported by the next write's mkdir.
+      }
       return 'SPOOLED' as const;
     };
     const pending = this.tail.then(persist);

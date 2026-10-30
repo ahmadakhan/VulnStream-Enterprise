@@ -101,8 +101,8 @@ export function renderAdvisory(template: string, advisory: Advisory, findings?: 
             if (vendor && product) acc.add(`${vendor} - ${product}`);
             return acc;
           }, new Set<string>())
-        ).map((pair: string) => `<li style="padding-left:18px;margin:4px 0;">${escape(pair)}</li>`).join('\n')
-      : advisory.affectedSystems.map((sys: string) => `<li style="padding-left:18px;margin:4px 0;">${escape(sys)}</li>`).join('\n'),
+        ).map((pair: string) => `<li style="margin:4px 0;">${escape(pair)}</li>`).join('\n')
+       : advisory.affectedSystems.map((sys: string) => `<li style="margin:4px 0;">${escape(sys)}</li>`).join('\n'),
     remediation_steps: advisory.remediationInstructions,
     vendor_link: advisory.vendorLink || '',
     remediation_link:
