@@ -348,6 +348,7 @@ export interface DigestFinding {
   severity: string;
   assetName: string;
   vendor?: string;
+  sourceUrl?: string;
 }
 
 export interface DigestHealth {
@@ -509,10 +510,6 @@ ${classificationBanner}
      <tr>
          <td class="mobile-padding" style="padding:28px 32px;">
 
-             <p style="margin:0 0 12px 0;font-size:14px;line-height:22px;color:#64748b;">
-                 Hello {{recipient_name}},
-             </p>
-
              <div style="font-size:11px;font-weight:bold;letter-spacing:1.5px;color:${config.accentColor};margin-bottom:8px;">
                  EXECUTIVE SUMMARY
              </div>
@@ -644,10 +641,12 @@ export function renderDailyFindingSummary(findings: DigestFinding[], config: Tem
       const marginBottom = index < ordered.length - 1 ? ' style="margin-bottom:18px;"' : '';
       const list = items
         .slice(0, 25)
-        .map(
-          (f) =>
-            `<strong>${digestEscapeHtml(f.cveId)}</strong> — ${digestEscapeHtml(f.assetName)}${f.vendor ? ` (${digestEscapeHtml(f.vendor)})` : ''}`,
-        )
+        .map((f) => {
+          const cveIdHtml = f.sourceUrl
+            ? `<a href="${digestEscapeHtml(f.sourceUrl)}" target="_blank">${digestEscapeHtml(f.cveId)}</a>`
+            : `<strong>${digestEscapeHtml(f.cveId)}</strong>`;
+          return `${cveIdHtml} — ${digestEscapeHtml(f.assetName)}${f.vendor ? ` (${digestEscapeHtml(f.vendor)})` : ''}`;
+        })
         .join('<br>');
       const extra = items.length > 25 ? `<br><span style="color:#71717a;">…and ${items.length - 25} more</span>` : '';
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"${marginBottom}>

@@ -56,6 +56,7 @@ function parseNvdCpeProducts(
   body: string,
   exactCpe?: string,
   seenCpes?: Set<string>,
+  viaWildcardVendor?: boolean,
 ): { results: NvdCpeSearchResult[]; totalResults: number } {
   let data: any;
   try {
@@ -92,6 +93,7 @@ function parseNvdCpeProducts(
       targetSw: parsed.targetSw,
       targetHw: parsed.targetHw,
       ...(title ? { title } : {}),
+      ...(viaWildcardVendor ? { viaWildcardVendor: true } : {}),
     });
     seenCpes?.add(name.toLowerCase());
   }
@@ -230,6 +232,12 @@ export async function searchNvdCpes(
   // label differs from the published NVD vendor (e.g. "notepad_plus_plus"
   // vs. the registered "don_ho"), so the operator can still select a
   // published, verified identifier before saving.
+  //
+  // These matches are put at the FRONT of the list: a product-name-only
+  // match is what the operator is most likely looking for when their typed
+  // vendor didn't produce a hit (or wasn't supplied at all), and every
+  // result returned here is still an exact, verified NVD dictionary CPE —
+  // only the search path differs, never the accuracy of the entry itself.
   if (!exactCpe && product.trim()) {
     const escapedProduct = escapeCpeComponent(product.trim());
     const matchString = `cpe:2.3:*:*:${escapedProduct}:*:*:*:*:*:*:*:*`;
@@ -245,9 +253,11 @@ export async function searchNvdCpes(
         } as NvdRateLimitError;
       }
       if (wildcardResponse.status === 200) {
-        const wildcardParsed = parseNvdCpeProducts(wildcardResponse.body, undefined, seenCpes);
-        results.push(...wildcardParsed.results);
-        return { results, totalResults: totalResults + wildcardParsed.totalResults };
+        const wildcardParsed = parseNvdCpeProducts(wildcardResponse.body, undefined, seenCpes, true);
+        return {
+          results: [...wildcardParsed.results, ...results],
+          totalResults: totalResults + wildcardParsed.totalResults,
+        };
       }
     } catch (error) {
       if (isNvdRateLimitError(error)) throw error;
@@ -277,9 +287,8 @@ export async function searchNvdCpes(
           } as NvdRateLimitError;
         }
         if (wildcardResponse.status === 200) {
-          const wildcardParsed = parseNvdCpeProducts(wildcardResponse.body, undefined, seenCpes);
-          results.push(...wildcardParsed.results);
-          return { results, totalResults: totalResults + wildcardParsed.totalResults };
+          const wildcardParsed = parseNvdCpeProducts(wildcardResponse.body, undefined, seenCpes, true);
+          return { results: [...results, ...wildcardParsed.results], totalResults: totalResults + wildcardParsed.totalResults };
         }
       } catch (error) {
         if (isNvdRateLimitError(error)) throw error;

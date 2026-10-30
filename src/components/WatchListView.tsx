@@ -466,7 +466,10 @@ export const WatchListView: React.FC = () => {
   };
 
   const handleNvdSearch = async () => {
-    if (!vendorInput.trim()) return;
+    // A product name alone is enough: the backend also runs a wildcard-vendor
+    // dictionary search, so an operator who doesn't know (or isn't sure of)
+    // the NVD-registered vendor label can still find a verified, exact CPE.
+    if (!vendorInput.trim() && !nvdSearchProductTerm.trim()) return;
     const sequence = ++nvdSearchSequence.current;
     setNvdLoading(true);
     setNvdError(null);
@@ -538,6 +541,13 @@ export const WatchListView: React.FC = () => {
         const parsedCpe = parseCPE23(cpe);
         if (!parsedCpe.isValid) {
           setSaveFeedback({ type: 'error', message: 'Enter a valid CPE 2.3 expression before saving.' });
+          return;
+        }
+        if (['*', '?', '-'].includes(parsedCpe.vendor) || ['*', '?', '-'].includes(parsedCpe.product)) {
+          setSaveFeedback({
+            type: 'error',
+            message: 'Vendor and product must be specific — a wildcard CPE cannot be monitored.',
+          });
           return;
         }
 
@@ -1586,7 +1596,7 @@ export const WatchListView: React.FC = () => {
                         <button
                           type="button"
                           onClick={handleNvdSearch}
-                          disabled={nvdLoading || !vendorInput.trim()}
+                           disabled={nvdLoading || (!vendorInput.trim() && !nvdSearchProductTerm.trim())}
                           className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-sky-900/40 dark:bg-sky-900/40 light:bg-sky-100 border border-sky-800 dark:border-sky-800 light:border-sky-300 text-sky-300 dark:text-sky-300 light:text-sky-700 hover:bg-sky-900/60 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
                         >
                           {nvdLoading ? (
@@ -1657,12 +1667,22 @@ export const WatchListView: React.FC = () => {
                                 >
                                   <div className="min-w-0 flex-1">
                                     {r.title && <p className="registration-result-title">{r.title}</p>}
-                                    <code
-                                      className="block text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono truncate"
-                                      title={r.cpeName}
-                                    >
-                                      {r.cpeName}
-                                    </code>
+                                    <div className="flex items-center gap-1.5">
+                                      <code
+                                        className="block text-[10px] text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono truncate"
+                                        title={r.cpeName}
+                                      >
+                                        {r.cpeName}
+                                      </code>
+                                      {r.viaWildcardVendor && (
+                                        <span
+                                          className="shrink-0 text-[8px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-500/10 text-sky-300 light:text-sky-800"
+                                          title="Found by matching the product name only — the NVD vendor label differs from what you searched for"
+                                        >
+                                          matched by product
+                                        </span>
+                                      )}
+                                    </div>
                                     <div className="text-[9px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 flex items-center gap-2 mt-0.5">
                                       <span className="flex items-center gap-1">
                                         {parsed.isValid ? (

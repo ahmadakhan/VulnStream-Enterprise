@@ -13,11 +13,11 @@ import type { DailyDigestParts, DigestFinding, DigestHealth } from '../src/utils
 const UI_COLOR_KEYS = ['canvasBg', 'cardBg', 'headerBg', 'accentColor', 'fontFamily', 'headingColor'] as const;
 
 const FINDINGS: DigestFinding[] = [
-  { cveId: 'CVE-2026-0001', severity: 'CRITICAL', assetName: 'edge-router-01', vendor: 'VendorX' },
-  { cveId: 'CVE-2026-0002', severity: 'CRITICAL', assetName: 'auth-service' },
-  { cveId: 'CVE-2026-0003', severity: 'HIGH', assetName: 'portal-web' },
-  { cveId: 'CVE-2026-0004', severity: 'MEDIUM', assetName: 'internal-api' },
-  { cveId: 'CVE-2026-0005', severity: 'LOW', assetName: 'monitoring-agent' },
+  { cveId: 'CVE-2026-0001', severity: 'CRITICAL', assetName: 'edge-router-01', vendor: 'VendorX', sourceUrl: 'https://nvd.nist.gov/vuln/detail/CVE-2026-0001' },
+  { cveId: 'CVE-2026-0002', severity: 'CRITICAL', assetName: 'auth-service', sourceUrl: 'https://nvd.nist.gov/vuln/detail/CVE-2026-0002' },
+  { cveId: 'CVE-2026-0003', severity: 'HIGH', assetName: 'portal-web', sourceUrl: 'https://nvd.nist.gov/vuln/detail/CVE-2026-0003' },
+  { cveId: 'CVE-2026-0004', severity: 'MEDIUM', assetName: 'internal-api', sourceUrl: 'https://nvd.nist.gov/vuln/detail/CVE-2026-0004' },
+  { cveId: 'CVE-2026-0005', severity: 'LOW', assetName: 'monitoring-agent', sourceUrl: 'https://nvd.nist.gov/vuln/detail/CVE-2026-0005' },
 ];
 
 const HEALTH: DigestHealth = {
@@ -98,6 +98,19 @@ test('renderDailyFindingSummary groups findings by severity with count headers',
   assert.ok(html.includes('portal-web'));
   assert.ok(html.includes('internal-api'));
   assert.ok(html.includes('monitoring-agent'));
+});
+
+test('renderDailyFindingSummary renders each CVE as a link to its source', () => {
+  const html = renderDailyFindingSummary(FINDINGS, DEFAULT_DAILY_DIGEST_CUSTOMIZATION);
+  assert.ok(
+    html.includes('href="https://nvd.nist.gov/vuln/detail/CVE-2026-0001"'),
+    'CVE links to its source URL',
+  );
+  assert.ok(
+    html.includes('href="https://nvd.nist.gov/vuln/detail/CVE-2026-0005"'),
+    'CVE links to its source URL',
+  );
+  assert.ok(!html.includes('Hello'), 'greeting text removed');
 });
 
 test('renderDailyHealthReport returns HTML containing the database status', () => {

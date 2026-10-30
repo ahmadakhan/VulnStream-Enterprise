@@ -7,6 +7,26 @@ export async function syncCorrelationAsset(db: Db, asset: WatchListItem): Promis
   const primary = parsed[0];
   const version =
     asset.version || (primary && !['*', '-'].includes(primary.version) ? primary.version : null);
+  const vendor = primary?.vendor || asset.vendor.toLowerCase();
+  const product = primary?.product || asset.product.toLowerCase();
+  // Defense in depth: the command-layer schema (server/validation.ts) already
+  // rejects a wildcard vendor or product before a save reaches here. This is
+  // the last gate before the record becomes live in the correlation engine,
+  // for any future write path that reaches this function without going
+  // through that schema. A wildcard here would match every CVE sharing the
+  // product string (or every CVE, if product is also wildcarded).
+  if (['*', '?', '-'].includes(vendor) || ['*', '?', '-'].includes(product)) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        event: 'correlation_asset_sync_rejected_wildcard',
+        recordId: asset.id,
+        vendor,
+        product,
+      }),
+    );
+    return;
+  }
   await db.query(
     `INSERT INTO correlation_managed_assets(record_id,vendor,product,version,cpes,purls,active)
     VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(record_id) DO UPDATE SET
@@ -14,8 +34,8 @@ export async function syncCorrelationAsset(db: Db, asset: WatchListItem): Promis
     cpes=EXCLUDED.cpes,purls=EXCLUDED.purls,active=EXCLUDED.active,updated_at=now()`,
     [
       asset.id,
-      primary?.vendor || asset.vendor.toLowerCase(),
-      primary?.product || asset.product.toLowerCase(),
+      vendor,
+      product,
       version,
       [...new Set(asset.cpes)].sort(),
       [...new Set(asset.purls || [])].sort(),

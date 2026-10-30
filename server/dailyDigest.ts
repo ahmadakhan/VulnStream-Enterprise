@@ -441,15 +441,16 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
              severity: view.severity,
              finding_count: included.length,
              severity_counts: formatSeverityCounts(severityCounts),
-             findings_summary: renderDailyFindingSummary(
-               included.map((finding) => ({
-                 cveId: finding.cveId,
-                 severity: finding.cve.cvss.severity,
-                 assetName: finding.matchedAssetName,
-                 vendor: finding.matchedAssetVendor,
-               })),
-               dailyConfig,
-             ),
+              findings_summary: renderDailyFindingSummary(
+                included.map((finding) => ({
+                  cveId: finding.cveId,
+                  severity: finding.cve.cvss.severity,
+                  assetName: finding.matchedAssetName,
+                  vendor: finding.matchedAssetVendor,
+                  sourceUrl: `https://nvd.nist.gov/vuln/detail/${finding.cveId}`,
+                })),
+                dailyConfig,
+              ),
              health_report: healthReportHtml,
              recipient_name: recipient.name || recipient.email,
              critical_count: criticalCount,

@@ -123,8 +123,8 @@ test('registration checks exact dictionary identity and rejects a related but di
 });
 
 test('registration accepts vendor-agnostic match from NVD dictionary', async () => {
-  const userCpe = 'cpe:2.3:a:notepad-plus-plus:notepad\\+\\+:*:*:*:*:*:*:*';
-  const nvdCpe = 'cpe:2.3:a:don_ho:notepad\\+\\+:*:*:*:*:*:*:*';
+  const userCpe = 'cpe:2.3:a:notepad-plus-plus:notepadplus:*:*:*:*:*:*:*:*';
+  const nvdCpe = 'cpe:2.3:a:don_ho:notepadplus:*:*:*:*:*:*:*:*';
   const verified = await verifyRegistrationCpes([userCpe], async () => ({
     results: [{ cpeName: nvdCpe }],
   }));

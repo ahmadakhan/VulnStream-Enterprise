@@ -68,6 +68,17 @@ export const feedImportSchema = z
     }),
   )
   .max(100);
+// Wildcard vendor or product would match every CVE sharing the product
+// string (or every CVE, if product is also wildcarded) in the correlation
+// engine, defeating the specificity the matching pipeline relies on to avoid
+// a false-positive flood. This mirrors the client-side check in
+// src/utils/watchlist.ts's registrationAssetsFromCpes, which only runs on
+// one of several save paths — this is the one check every save path passes
+// through, so it's the authoritative guard.
+const isNonWildcardCpe = (s: string) => {
+  const parsed = parseCPE23(s);
+  return parsed.isValid && !['*', '?', '-'].includes(parsed.vendor) && !['*', '?', '-'].includes(parsed.product);
+};
 const assetShape = z.object({
   vendor: shortText,
   product: shortText,
@@ -77,7 +88,8 @@ const assetShape = z.object({
       z
         .string()
         .max(1000)
-        .refine((s) => parseCPE23(s).isValid, 'Invalid CPE 2.3'),
+        .refine((s) => parseCPE23(s).isValid, 'Invalid CPE 2.3')
+        .refine(isNonWildcardCpe, 'CPE must have a specific vendor and product, not a wildcard'),
     )
     .max(100),
   purls: z

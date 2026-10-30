@@ -222,7 +222,10 @@ export const CpeMatcherView: React.FC = () => {
   };
 
   const handleLookup = async () => {
-    if (!lookupVendor.trim()) return;
+    // A product name alone is enough: the backend also runs a wildcard-vendor
+    // dictionary search, so an unknown or mismatched vendor label doesn't
+    // block finding a verified, exact CPE.
+    if (!lookupVendor.trim() && !lookupProduct.trim()) return;
     setLookupLoading(true);
     setLookupError(null);
     setLookupResults(null);
@@ -732,7 +735,11 @@ export const CpeMatcherView: React.FC = () => {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <button type="submit" disabled={lookupLoading || !lookupVendor.trim()} className="ui-primary">
+              <button
+                type="submit"
+                disabled={lookupLoading || (!lookupVendor.trim() && !lookupProduct.trim())}
+                className="ui-primary"
+              >
                 {lookupLoading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
                 Search NVD
               </button>
@@ -772,9 +779,19 @@ export const CpeMatcherView: React.FC = () => {
                       className="bg-zinc-950/70 dark:bg-zinc-950/70 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-lg p-2 flex items-center justify-between"
                     >
                       <div className="min-w-0 flex-1">
-                        <code className="text-[10px] text-zinc-300 light:text-zinc-800 font-mono break-all block">
-                          {cpe.cpeName}
-                        </code>
+                        <div className="flex items-center gap-1.5">
+                          <code className="text-[10px] text-zinc-300 light:text-zinc-800 font-mono break-all block">
+                            {cpe.cpeName}
+                          </code>
+                          {cpe.viaWildcardVendor && (
+                            <span
+                              className="shrink-0 text-[8px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-500/10 text-sky-300 light:text-sky-800"
+                              title="Found by matching the product name only — the NVD vendor label differs from what you typed"
+                            >
+                              matched by product
+                            </span>
+                          )}
+                        </div>
                         {(cpe.vendor || cpe.product || cpe.title) && (
                           <div className="text-[9px] text-zinc-500 light:text-zinc-600 mt-0.5 truncate">
                             {[cpe.vendor, cpe.product, cpe.title].filter(Boolean).join(' / ')}

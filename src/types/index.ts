@@ -326,6 +326,12 @@ export interface NvdCpeSearchResult {
   targetHw: string;
   /** Human-readable title from the NVD CPE dictionary, when available. */
   title?: string;
+  /**
+   * True when this entry was found via the wildcard-vendor dictionary search
+   * (matched on product name alone), not the vendor-scoped keyword search.
+   * Still a verified, exact NVD dictionary CPE — only the search path differs.
+   */
+  viaWildcardVendor?: boolean;
 }
 
 export interface NvdCpeSearchResponse {

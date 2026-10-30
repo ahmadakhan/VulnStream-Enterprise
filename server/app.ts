@@ -836,7 +836,10 @@ export function createApp(
           product: z.string().trim().max(200).default(''),
           limit: z.coerce.number().int().min(1).max(200).default(50),
         })
-        .refine((query) => query.vendor || query.cpe, 'A vendor or exact CPE is required')
+        .refine(
+          (query) => query.vendor || query.cpe || query.product,
+          'A vendor, product, or exact CPE is required',
+        )
         .refine(
           (query) => !query.cpeNameId || query.cpe,
           'A CPE name is required when verifying a dictionary ID',
@@ -1570,11 +1573,11 @@ export function createApp(
         const dailyConfig = data.dailyDigestCustomization || DEFAULT_DAILY_DIGEST_CUSTOMIZATION;
         const dailyDigestTemplate = data.dailyDigestCustomTemplate;
         const sampleFindings: DigestFinding[] = [
-          { cveId: 'CVE-2026-0001', severity: 'CRITICAL', assetName: 'edge-router-01', vendor: 'VendorX' },
-          { cveId: 'CVE-2026-0002', severity: 'CRITICAL', assetName: 'auth-service' },
-          { cveId: 'CVE-2026-0003', severity: 'HIGH', assetName: 'portal-web' },
-          { cveId: 'CVE-2026-0004', severity: 'MEDIUM', assetName: 'internal-api' },
-          { cveId: 'CVE-2026-0005', severity: 'LOW', assetName: 'monitoring-agent' },
+          { cveId: 'CVE-2026-0001', severity: 'CRITICAL', assetName: 'edge-router-01', vendor: 'VendorX', sourceUrl: 'https://nvd.nist.gov/vuln/detail/CVE-2026-0001' },
+          { cveId: 'CVE-2026-0002', severity: 'CRITICAL', assetName: 'auth-service', sourceUrl: 'https://nvd.nist.gov/vuln/detail/CVE-2026-0002' },
+          { cveId: 'CVE-2026-0003', severity: 'HIGH', assetName: 'portal-web', sourceUrl: 'https://nvd.nist.gov/vuln/detail/CVE-2026-0003' },
+          { cveId: 'CVE-2026-0004', severity: 'MEDIUM', assetName: 'internal-api', sourceUrl: 'https://nvd.nist.gov/vuln/detail/CVE-2026-0004' },
+          { cveId: 'CVE-2026-0005', severity: 'LOW', assetName: 'monitoring-agent', sourceUrl: 'https://nvd.nist.gov/vuln/detail/CVE-2026-0005' },
         ];
         const sampleHealth: DigestHealth = {
           database: 'connected',
