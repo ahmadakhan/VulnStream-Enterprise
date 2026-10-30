@@ -1,6 +1,6 @@
 import type { WatchListItem } from '../types/index.ts';
 import { buildStrictCpe23 } from '../data/vendorCatalog.ts';
-import { parseCPE23 } from './cpeMatcher.ts';
+import { parseCPE23, normalizeCpeForComparison } from './cpeMatcher.ts';
 
 export function orderWatchlist(items: WatchListItem[]): WatchListItem[] {
   return [...items].sort((a, b) => {
@@ -86,7 +86,27 @@ export async function verifyRegistrationCpes(
     seen.add(cpe.toLowerCase());
     if (!parseCPE23(cpe).isValid) throw new Error(`Invalid CPE 2.3 expression: ${cpe}`);
     const response = await lookup(cpe);
-    const match = response.results.find((entry) => entry.cpeName.toLowerCase() === cpe.toLowerCase());
+    let match = response.results.find((entry) =>
+      normalizeCpeForComparison(entry.cpeName) === normalizeCpeForComparison(cpe),
+    );
+    if (!match) {
+      const parsed = parseCPE23(cpe);
+      if (parsed.isValid) {
+        const normalizedProduct = normalizeCpeForComparison(parsed.product);
+        const normalizedVersion = normalizeCpeForComparison(parsed.version);
+        const normalizedPart = normalizeCpeForComparison(parsed.part);
+        match = response.results.find(
+          (entry) => {
+            const entryParsed = parseCPE23(entry.cpeName);
+            return (
+              normalizeCpeForComparison(entryParsed.product) === normalizedProduct &&
+              normalizeCpeForComparison(entryParsed.part) === normalizedPart &&
+              normalizeCpeForComparison(entryParsed.version) === normalizedVersion
+            );
+          },
+        );
+      }
+    }
     if (!match)
       throw new Error(
         `CPE is not an active NVD dictionary entry: ${cpe}. Search NVD and select a published identifier.`,

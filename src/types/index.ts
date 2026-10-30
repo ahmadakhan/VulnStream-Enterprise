@@ -682,6 +682,12 @@ export const EMAIL_PROVIDERS = [
   'MAILJET_API',
 ] as const;
 export type EmailProvider = (typeof EMAIL_PROVIDERS)[number];
+/**
+ * `API` is its own case, not an SMTP relay: a custom API provider posts over
+ * its configured endpoint, so treating it as SMTP let the delivery worker send
+ * retries with the deployment SMTP transport while the queue reported it as a
+ * successful accepted delivery.
+ */
 export const isSmtpEmailProvider = (provider: EmailProvider) =>
   provider === 'SMTP' || (SMTP_EMAIL_PROVIDERS as readonly string[]).includes(provider);
 export interface EmailConfiguration {

@@ -125,6 +125,10 @@ const schema = z.object({
   // Rendering is performed with a headless browser; set ATTACH_ADVISORY_PDF=false
   // (or omit a usable Chrome executable) to fall back to HTML-only delivery.
   ATTACH_ADVISORY_PDF: z.enum(['true', 'false']).default('true'),
+  // Before re-sending an email whose previous attempt failed with an unknown
+  // outcome, ask the provider whether it already delivered the message. Prevents
+  // duplicate advisories when a send succeeded but its response was lost.
+  MAIL_CONFIRM_BEFORE_SEND: z.enum(['true', 'false']).default('true'),
   CHROME_EXECUTABLE_PATH: z.string().default(''),
   FEED_MAX_DURATION_SECONDS: z.coerce.number().int().min(1).max(7200).default(1800),
   WORKER_ENABLED: z.enum(['true', 'false']).default('true'),

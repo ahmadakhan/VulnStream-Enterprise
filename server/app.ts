@@ -36,7 +36,7 @@ import {
   sessionCookieOptions,
   updateUser,
 } from './auth';
-import { transaction, state, get, getForUpdate, put, appendAudit, list } from './db';
+import { transaction, state, get, getForUpdate, getMany, put, appendAudit, list } from './db';
 import { queryCollection } from './collections';
 import { runRetention, previewRetention } from './retention';
 import { merkleRoot, verifyAuditChain } from '../src/utils/cryptoChain.ts';
@@ -50,7 +50,9 @@ import { createRequester, resolvePublic } from './network';
 import type { Requester, ResponseData } from './network';
 import { queueRun, stopRun, renderAdvisory } from './pipeline';
 import { recoveryAt } from './feedRecovery';
-import { enqueue, queueAdvisory } from './delivery';
+import { advisoryRevision, enqueue, queueAdvisory } from './delivery';
+import { createHash } from 'node:crypto';
+import { stableJson } from '../src/utils/deduplicator.ts';
 import { advisoryEmail } from './advisoryEmail';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG, isCollectionKind } from '../shared/state.ts';
 import { emailIsConfigured } from './emailProviders';
@@ -1744,9 +1746,41 @@ export function createApp(
           if (noticeBlock) updatedHtml = updatedHtml.replace(/(<body[^>]*>)/i, `$1${noticeBlock}`);
           if (commentBlock) updatedHtml = updatedHtml.replace(/(<\/body>)/i, `${commentBlock}$1`);
           if (updatedHtml !== currentPayload.html) {
+            // The reviewer comment is now part of the body. Keep the stored
+            // content revision in step with it, or the delivery worker would
+            // reject the very message the operator just approved as having
+            // "changed" between queueing and approval.
+            let contentRevision = currentPayload.contentRevision;
+            if (currentPayload.dailyDigest) {
+              contentRevision = createHash('sha256')
+                .update(stableJson({ ...currentPayload, html: updatedHtml, contentRevision: undefined }))
+                .digest('hex')
+                .slice(0, 20);
+            } else {
+              const advisory = await get<any>(db, 'advisories', String(row.rows[0].advisory_id));
+              const findingIds: string[] = currentPayload.includedFindingIds ?? advisory?.findingIds ?? [];
+              const findings = [...(await getMany<any>(db, 'findings', findingIds)).values()];
+              if (advisory) {
+                const recomputed = advisoryRevision(
+                  { ...advisory, cveIds: currentPayload.cveIds ?? advisory.cveIds },
+                  findings,
+                );
+                if (!currentPayload.contentRevision || recomputed === currentPayload.contentRevision)
+                  contentRevision = recomputed;
+                else
+                  // The advisory or its findings changed between queueing and
+                  // approval. Sending the modified body would deliver content the
+                  // revision does not describe, so the job goes back to review
+                  // instead of being dispatched on a mismatched hash.
+                  throw new HttpError(
+                    409,
+                    'Advisory content changed since this notification was queued; rebuild it before approving',
+                  );
+              }
+            }
             await db.query('UPDATE outbox SET payload=$2::jsonb WHERE id=$1', [
               id,
-              JSON.stringify({ ...currentPayload, html: updatedHtml }),
+              JSON.stringify({ ...currentPayload, html: updatedHtml, contentRevision }),
             ]);
           }
         }

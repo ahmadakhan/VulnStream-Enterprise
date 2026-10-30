@@ -158,6 +158,9 @@ const report = (event: string) => (error: unknown) => {
   });
   console.error(JSON.stringify({ level: 'error', event, ...detail }));
 };
+/** Longer than any guarded operation is permitted to run before it is abandoned. */
+const STUCK_PROMISE_MS = 15 * 60_000;
+let digestStartedAt = 0;
 const tick = () => {
   if (stopping || config.WORKER_ENABLED !== 'true') return;
   verboseLog('worker.tick');
@@ -183,7 +186,19 @@ const tick = () => {
       .finally(() => {
         outbox = null;
       });
-  if (!digest)
+  // An in-flight promise must never become a reason to stop running. Both jobs
+  // below guard against overlapping with themselves; if such a promise never
+  // settles (for example a statement stuck beyond its timeout on a wedged
+  // connection), the `.finally` that clears it never runs and the job is
+  // skipped for the rest of the process lifetime. Clearing a guard that has been
+  // held far longer than any legal operation lets the next tick start a fresh
+  // attempt, which is what "always keep running" requires.
+  if (digest && Date.now() - digestStartedAt > STUCK_PROMISE_MS) {
+    void report('digest')(new Error('Previous digest flush is still running; starting a new attempt'));
+    digest = null;
+  }
+  if (!digest) {
+    digestStartedAt = Date.now();
     digest = flushDueDigest(pool)
       .then((count) => {
         verboseLog('digest.flushed', { count });
@@ -193,6 +208,7 @@ const tick = () => {
       .finally(() => {
         digest = null;
       });
+  }
 };
 const timer = setInterval(tick, 5000);
 tick();
@@ -201,6 +217,8 @@ tick();
 // persisted in the database so replicas do not each schedule the same cleanup,
 // and a failed run releases its claim so the next tick can retry immediately.
 const RETENTION_SCHEDULE_ID = 'retention-schedule';
+/** A retention sweep is abandoned (and its claim released) after this long. */
+const RETENTION_RUN_LIMIT_MS = 10 * 60_000;
 const RETENTION_CLAIM_TTL_MS = 5 * 60_000;
 async function claimRetention(policy: AppSettings['retentionConfig']): Promise<boolean> {
   return transaction(
@@ -248,8 +266,14 @@ async function releaseRetention(success: boolean, nextRetryAt?: string) {
   );
 }
 let retentionRunning: Promise<unknown> | null = null;
+let retentionStartedAt = 0;
 const retentionTick = () => {
+  if (retentionRunning && Date.now() - retentionStartedAt > STUCK_PROMISE_MS) {
+    void report('retention')(new Error('Previous retention run is still running; starting a new attempt'));
+    retentionRunning = null;
+  }
   if (stopping || config.WORKER_ENABLED !== 'true' || retentionRunning) return;
+  retentionStartedAt = Date.now();
   retentionRunning = (async () => {
     const settings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
     const policy = settings.retentionConfig;
@@ -262,14 +286,30 @@ const retentionTick = () => {
     // Honor nextRetryAt for failed runs to enable immediate retry.
     if (typeof data.nextRetryAt === 'string' && Date.parse(data.nextRetryAt) > now) return;
     if (!(await claimRetention(policy))) return;
+    // Bounded independently of the connection's statement timeout. Without this
+    // a single hung `records` query kept the claim renewal alive forever: the
+    // claim never expired, so no replica (including this one) could retry
+    // retention again until the process was restarted.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`Retention run exceeded ${RETENTION_RUN_LIMIT_MS}ms; abandoned for a fresh attempt`)),
+        RETENTION_RUN_LIMIT_MS,
+      );
+      timer.unref();
+    });
     verboseLog('retention.start');
     try {
-      await runRetention(pool, 'system-retention');
+      await Promise.race([runRetention(pool, 'system-retention'), timeout]);
       await releaseRetention(true);
       verboseLog('retention.completed');
     } catch (error) {
       await releaseRetention(false).catch(() => {});
       throw error;
+    } finally {
+      // A pending timer would fire during a clean shutdown and reject a promise
+      // nobody is awaiting.
+      if (timer) clearTimeout(timer);
     }
   })()
     .catch(report('retention'))
@@ -283,8 +323,14 @@ retentionTick();
 // configured time/timezone). It is polled on the same cadence as retention and
 // self-claims the calendar day, so it needs no separate clock.
 let dailyDigestRunning: Promise<unknown> | null = null;
+let dailyDigestStartedAt = 0;
 const dailyDigestTick = () => {
+  if (dailyDigestRunning && Date.now() - dailyDigestStartedAt > STUCK_PROMISE_MS) {
+    void report('dailyDigest')(new Error('Previous daily digest run is still running; starting a new attempt'));
+    dailyDigestRunning = null;
+  }
   if (stopping || config.WORKER_ENABLED !== 'true' || dailyDigestRunning) return;
+  dailyDigestStartedAt = Date.now();
   dailyDigestRunning = (async () => {
     verboseLog('dailyDigest.start');
     await runDailyDigest(pool);
@@ -323,7 +369,7 @@ async function shutdown() {
   deadline.unref();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await Promise.allSettled(
-    [pipeline, outbox, digest, retentionRunning].filter(Boolean) as Promise<unknown>[],
+    [pipeline, outbox, digest, retentionRunning, dailyDigestRunning].filter(Boolean) as Promise<unknown>[],
   );
   await correlation.stop();
   await closePdfRenderer();

@@ -41,6 +41,10 @@ export function emailIsConfigured(
   config: EmailConfiguration,
   env: { SMTP_HOST: string; SMTP_FROM: string; EGRESS_ALLOWED_HOSTS?: string },
 ): boolean {
+  // `API` is a custom HTTP endpoint, never an SMTP relay. The old form treated it
+  // as one, so a deployment with no SMTP host reported the provider as
+  // unconfigured while the delivery worker silently fell back to SMTP.
+  if (config.provider === 'API') return !!config.apiEndpoint && !!config.fromEmail && !!config.apiKey;
   if (config.provider === 'SMTP' && !config.smtpHost)
     return !!env.SMTP_HOST && !!(config.fromEmail || env.SMTP_FROM);
   if (isSmtpEmailProvider(config.provider)) {
@@ -57,7 +61,6 @@ export function emailIsConfigured(
   return (
     !!config.fromEmail &&
     !!config.apiKey &&
-    (config.provider !== 'API' || !!config.apiEndpoint) &&
     (config.provider !== 'MAILGUN' || !!config.mailgunDomain) &&
     (config.provider !== 'MAILTRAP' || config.mailtrapMode !== 'SANDBOX' || !!config.mailtrapInboxId) &&
     (config.provider !== 'MAILJET_API' || !!config.mailjetApiSecret)

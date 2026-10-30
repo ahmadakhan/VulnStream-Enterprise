@@ -1,7 +1,7 @@
 import type pg from 'pg';
 import { get, getMany, list, put, transaction, schemaLockKey, type Db } from './db';
 import { writeEvent } from './events';
-import { enqueue, findingRevision, revision, recipientAllows } from './delivery';
+import { advisoryRevision, enqueue, findingRevision, revision, recipientAllows } from './delivery';
 import { advisoryEmail } from './advisoryEmail';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { buildAliasMap } from '../src/utils/cpeMatcher';
@@ -469,6 +469,10 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
            low_kpi: digestSeverityKpi('LOW', lowCount, dailyConfig),
           };
           const html = renderDailyDigest(dailyConfig, parts, dailyDigestTemplate ?? undefined);
+          // Recorded so approval can prove the stored body is unchanged. The
+          // union `advisory` here is built from every recipient's findings, so a
+          // recipient-specific view must not be re-hashed against it.
+          const contentRevision = advisoryRevision(view, included);
           const payload = {
             ...advisoryEmail(view, html),
             cveIds: view.cveIds,
@@ -484,6 +488,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
               included.map((finding) => [finding.cveId, revision(finding.cve)]),
             ),
             digestKey: `daily:${todayKey}`,
+            contentRevision,
             dailyDigest: true,
           };
           if (

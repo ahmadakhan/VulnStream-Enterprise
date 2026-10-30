@@ -38,6 +38,8 @@ export class CorrelationRuntime {
   pendingDepth = -1;
   /** When `pendingDepth` was last refreshed; 0 means never. */
   pendingSampledAt = 0;
+  /** Set when a stale-match sweep or retention run last succeeded or failed. */
+  private lastMaintenanceAttempt = 0;
   /** Set when the consumer is disabled, so readiness does not claim it runs. */
   readonly workerEnabled: boolean;
   constructor(
@@ -100,11 +102,21 @@ export class CorrelationRuntime {
   private async drain(): Promise<void> {
     await this.cleanupStaleMatches();
     await this.queueNotifications();
-    if (Date.now() - this.lastMaintenance >= 60_000) {
-      await transaction(this.pool, (db) => retainCorrelationData(db)).catch(() => {
-        this.supervisor.ingestor.telemetry.log('ERROR', 'retention.failed');
-      });
-      this.lastMaintenance = Date.now();
+    // The maintenance clock advanced even when the run failed, so a failing
+    // sweep (for example a lock timeout while the table is being vacuumed) was
+    // not retried for a full minute while its errors filled the log. Back off
+    // for the full interval only after success; retry sooner after a failure,
+    // bounded so a broken sweep cannot spin.
+    if (Date.now() - this.lastMaintenanceAttempt >= 60_000 || Date.now() - this.lastMaintenance >= 10_000) {
+      this.lastMaintenanceAttempt = Date.now();
+      const retained = await transaction(this.pool, (db) => retainCorrelationData(db)).then(
+        () => true,
+        () => {
+          this.supervisor.ingestor.telemetry.log('ERROR', 'retention.failed');
+          return false;
+        },
+      );
+      if (retained) this.lastMaintenance = Date.now();
     }
     while (!this.stopped && this.supervisor.health === 'HEALTHY') {
       // Leased SKIP LOCKED claims survive crashes; final ingestion is idempotent.

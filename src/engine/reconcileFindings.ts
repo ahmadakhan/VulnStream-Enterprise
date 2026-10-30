@@ -38,6 +38,15 @@ export function reconcileFindings(
         : ['QUEUED_FOR_DISPATCH', 'DELIVERY_FAILED', 'SECURITY_REJECTED'].includes(old.notificationStatus)
           ? old.notificationStatus
           : 'DELIVERY_FAILED';
+    } else if (notificationStatus !== 'REVIEW_REQUIRED' && old.notificationStatus === 'DELIVERY_FAILED') {
+      // A delivery failure is a terminal, operator-visible outcome. The candidate
+      // is freshly built and always starts as QUEUED_FOR_DISPATCH, so without this
+      // every pipeline run silently turned a failed delivery back into an
+      // automatic resend. Recovery from a failure is an explicit operator action;
+      // only a rebuild that re-queued the finding (it sets `advisoryId`) or an
+      // operator re-queue may clear it.
+      notificationStatus =
+        old.autoDispatchedAt || old.advisoryId === null ? candidate.notificationStatus : 'DELIVERY_FAILED';
     }
     const changed =
       old.matchingEvidence !== candidate.matchingEvidence ||

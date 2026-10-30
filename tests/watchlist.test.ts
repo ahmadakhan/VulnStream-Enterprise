@@ -122,6 +122,15 @@ test('registration checks exact dictionary identity and rejects a related but di
   );
 });
 
+test('registration accepts vendor-agnostic match from NVD dictionary', async () => {
+  const userCpe = 'cpe:2.3:a:notepad-plus-plus:notepad\\+\\+:*:*:*:*:*:*:*';
+  const nvdCpe = 'cpe:2.3:a:don_ho:notepad\\+\\+:*:*:*:*:*:*:*';
+  const verified = await verifyRegistrationCpes([userCpe], async () => ({
+    results: [{ cpeName: nvdCpe }],
+  }));
+  assert.deepEqual(verified, [nvdCpe]);
+});
+
 test('registration propagates upstream failures and does not silently accept a CPE', async () => {
   const cpe = 'cpe:2.3:a:example:widget:1.0:*:*:*:*:*:*:*';
   await assert.rejects(

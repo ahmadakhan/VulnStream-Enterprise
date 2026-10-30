@@ -49,7 +49,9 @@ export interface Job {
     nativeCorrelation?: NativeDelivery;
     cveRevisions?: Record<string, string>;
     findingRevisions?: Record<string, string>;
-    /**
+      /** Provider-assigned message id of a prior attempt that could not be recorded. */
+      unconfirmedProviderId?: string;
+      /**
      * Digest jobs carry only the findings the target is subscribed to. Delivery
      * revalidation and receipt accounting must use this subset, not the union
      * advisory, or a KEV-only recipient would be blocked by unrelated findings.
@@ -57,6 +59,15 @@ export interface Job {
     includedFindingIds?: string[];
     /** Stable per-batch key used for CVE dispatch accounting across recipients. */
     digestKey?: string;
+    /**
+     * The content revision this payload was queued under. Queueing proves the
+     * revision; re-deriving it later from the advisory does not. The advisory a
+     * digest job references is the union of every recipient's findings, so the
+     * content-derived key differs from the per-recipient key for any mixed
+     * subscription set. Approval re-hashes the stored payload and must compare
+     * against this value, not a recomputed union revision.
+     */
+    contentRevision?: string;
     /**
      * When true, the job is a calendar daily-digest delivery: an overall summary
      * email. Such jobs never carry a PDF attachment — the body is the summary
@@ -349,6 +360,57 @@ async function buildPdfAttachment(job: Job, config: Config, db?: Db): Promise<Em
     return undefined;
   }
 }
+export type DeliveryConfirmation = 'delivered' | 'not-delivered' | 'unknown';
+/**
+ * Decides, without ever contacting the transport, whether a previous attempt
+ * may already have delivered this message.
+ *
+ * Evidence that the provider accepted the message is committed only after the
+ * send returns, so an attempt that sent and then lost its commit is
+ * indistinguishable from one that never sent. The deterministic Message-ID
+ * (`<${job.id}@domain>`) is the only identity both cases share, and it is what
+ * a provider-side lookup keys on. Until such a lookup exists, three cases are
+ * treated as unconfirmed and the job is deferred rather than resent:
+ *
+ *  - the prior attempt returned a provider message id that could not be
+ *    recorded (`unconfirmedProviderId`);
+ *  - the delivery log still shows an in-flight attempt;
+ *  - the provider is one that accepts a message synchronously, where a lost
+ *    response is most likely (HTTP API providers).
+ *
+ * SMTP is confirmed by the server's 250 reply before the send returns, so a
+ * failed SMTP attempt provably did not hand the message over. That path keeps
+ * ordinary retry behaviour and is never deferred.
+ */
+async function confirmPriorDelivery(
+  db: Db,
+  job: Job,
+): Promise<DeliveryConfirmation> {
+  if (job.channel !== 'email') return 'not-delivered';
+  const log = await get<EmailDeliveryLog>(db, 'emailLogs', job.id);
+  if (log?.sentAt || log?.status === 'ACCEPTED') return 'delivered';
+  if (job.payload.unconfirmedProviderId) return 'unknown';
+  // The recorded cause of the failure is decisive. A rejected HTTP response
+  // (4xx/5xx) or a refused SMTP session proves the provider did not accept the
+  // message, so retrying cannot duplicate it. Confirmation is only needed when
+  // the cause is unknown — a timeout, reset or dropped socket.
+  if (log?.errorMessage && /HTTP \d{3}\b|did not accept the recipient|not configured|is missing/i.test(log.errorMessage))
+    return 'not-delivered';
+  // SMTP hands the message over synchronously and fails the send when the
+  // server does not accept the recipient, so an SMTP attempt that threw provably
+  // did not deliver. The HTTP API providers return before the message may still
+  // be queued or delivered, so their failed attempts stay unconfirmed.
+  const saved = (await get<EmailConfiguration>(db, 'emailConfig', 'main')) || DEFAULT_EMAIL_CONFIG;
+  if (isSmtpEmailProvider(saved.provider)) return 'not-delivered';
+  // The HTTP API providers are addressed by a stored endpoint/domain, which is
+  // the only case where an accepted-but-unrecorded send is a duplicate risk.
+  // A custom `API` endpoint without a configured domain is the self-hosted
+  // relay shape used by the test-email path; there the channel is an SMTP
+  // relay, so a failed attempt did not hand the message over.
+  if (saved.provider === 'API' && !saved.apiSourceDomain) return 'not-delivered';
+  return 'unknown';
+}
+
 export function createMailSender(
   config: Config,
   db?: Db,
@@ -543,18 +605,19 @@ export async function queueAdvisory(
   const selected = recipients.filter(
     (r) => r.enabled && findings.length > 0 && findings.every((finding) => recipientAllows(r, finding)),
   );
-  const payload = {
-    ...advisoryEmail(advisory, html),
-    cveIds: advisory.cveIds,
-    findingRevisions: Object.fromEntries(findings.map((finding) => [finding.id, findingRevision(finding)])),
-    cveRevisions: Object.fromEntries(findings.map((finding) => [finding.cveId, revision(finding.cve)])),
-  };
   // Deduplicate by content revision, not just advisory ID: a genuinely revised
   // advisory may be delivered again, while a repeated queue pass over the same
   // revision remains idempotent. Pipeline-created advisories get a new random
   // ID on every run, so the default dispatch key must be content-derived; an
   // explicit key (operator resend) still overrides it.
   const contentRevision = advisoryRevision(advisory, findings);
+  const payload = {
+    ...advisoryEmail(advisory, html),
+    cveIds: advisory.cveIds,
+    findingRevisions: Object.fromEntries(findings.map((finding) => [finding.id, findingRevision(finding)])),
+    cveRevisions: Object.fromEntries(findings.map((finding) => [finding.cveId, revision(finding.cve)])),
+    contentRevision,
+  };
   const stableDispatchKey = dispatchKey ?? contentRevision;
   let count = 0;
   const priority = advisoryPriority(findings);
@@ -662,6 +725,7 @@ export async function queueDigestAdvisory(
       findingRevisions: Object.fromEntries(batch.map((finding) => [finding.id, findingRevision(finding)])),
       cveRevisions: Object.fromEntries(batch.map((finding) => [finding.cveId, revision(finding.cve)])),
       digestKey: stableDispatchKey,
+      contentRevision,
       recipientEmail: recipient.email,
     };
     if (
@@ -690,6 +754,7 @@ export async function queueDigestAdvisory(
       findingRevisions: Object.fromEntries(batch.map((finding) => [finding.id, findingRevision(finding)])),
       cveRevisions: Object.fromEntries(batch.map((finding) => [finding.cveId, revision(finding.cve)])),
       digestKey: stableDispatchKey,
+      contentRevision,
     };
     if (
       await enqueue(
@@ -774,6 +839,10 @@ export async function deliverNext(
   // whose applicability changed. A rebuild cannot change a held verdict, so the
   // job is routed to operator review instead of a permanent FAILED + rebuild.
   let holdGated = false;
+  // Set when the transport returned 2xx but the attempt could not be marked
+  // ACCEPTED because the response was rejected (confirm-before-send). This only
+  // happens for email; a webhook response needs no confirmation.
+  let unconfirmedError = '';
   try {
     if (!retryPolicy.enabled && job.attempts > 1 && job.channel === 'email') {
       permanent = true;
@@ -848,6 +917,7 @@ export async function deliverNext(
       const vendorAliases = buildAliasMap(aliasEntries, 'VENDOR');
       const productAliases = buildAliasMap(aliasEntries, 'PRODUCT');
       const invalid: string[] = [];
+      let revalidationError = '';
       const findingMap = await getMany<Finding>(pool, 'findings', declaredFindingIds);
       const findings = [...findingMap.values()];
       const assetIds = [...new Set(findings.map((f) => f.matchedAssetId))];
@@ -872,26 +942,45 @@ export async function deliverNext(
         // validated CVE snapshot, so fall back to it instead of permanently
         // rejecting an otherwise deliverable bundle.
         const cve = cachedCve || finding?.cve;
-        const match =
-          asset && cve
-            ? runVulnerabilityPipeline(
-                [],
-                [cve],
-                [asset],
-                [],
-                [],
-                // Fall back to the documented defaults for any setting the stored
-                // object does not carry, so revalidation applies the same policy
-                // the pipeline used instead of an implicit 90% threshold.
-                { ...DEFAULT_SETTINGS, ...settings, scopeHours: 0 },
-                'Server worker',
-                false,
-                vendorAliases,
-                productAliases,
-                undefined,
-                aliasEntries,
-              ).newFindings[0]
-            : undefined;
+        // Revalidation is a safety check, not a reason to lose the job. A corrupt
+        // stored asset/CVE row made runVulnerabilityPipeline throw, which skipped
+        // the commit below entirely: the outbox row stayed SENDING until the
+        // two-minute lease expired, was re-claimed, and hit the same corrupt row
+        // for every attempt until the budget was gone. The batch error also
+        // rejected the worker tick that had already committed earlier deliveries.
+        let match: Finding | undefined;
+        let revalidationFailed = false;
+        try {
+          match =
+            asset && cve
+              ? runVulnerabilityPipeline(
+                  [],
+                  [cve],
+                  [asset],
+                  [],
+                  [],
+                  // Fall back to the documented defaults for any setting the stored
+                  // object does not carry, so revalidation applies the same policy
+                  // the pipeline used instead of an implicit 90% threshold.
+                  { ...DEFAULT_SETTINGS, ...settings, scopeHours: 0 },
+                  'Server worker',
+                  false,
+                  vendorAliases,
+                  productAliases,
+                  undefined,
+                  aliasEntries,
+                ).newFindings[0]
+              : undefined;
+        } catch {
+          revalidationFailed = true;
+        }
+        // A failed recheck cannot prove the finding is still applicable, so the
+        // job is held (never sent) and committed as retryable instead of being
+        // mislabelled as a permanent stale-bundle failure.
+        if (revalidationFailed) {
+          revalidationError = 'Finding applicability could not be re-verified; delivery deferred';
+          continue;
+        }
         if (match) currentFindings.push(match);
         const reason = !finding
           ? 'a finding was removed'
@@ -912,6 +1001,9 @@ export async function deliverNext(
                       : undefined;
         if (reason) invalid.push(reason);
       }
+      // A safety-check failure defers the whole bundle: it is retried on the
+      // normal backoff and can never reach the transport while unproven.
+      if (revalidationError) throw new Error(revalidationError);
       // The queued payload contains the complete advisory. Sending it after any
       // finding becomes stale would disclose or act on invalidated inventory.
       // Mark the bundle as stale and trigger an immediate rebuild instead of
@@ -954,6 +1046,30 @@ export async function deliverNext(
         if (rec.deliveryGroup === 'EVERYONE' && !job.review_approved) {
           routeToReview = true;
           throw new Error('Recipient now requires security review');
+        }
+      }
+      // Confirm before sending. A failed attempt whose outcome is unknown (the
+      // send threw after the transport had already accepted the message, or a
+      // worker crash left the attempt count advanced) is sent again by a retry.
+      // HTML advisory bodies do not carry the delivery id, so this confirmation
+      // is the only way to prevent a duplicate alert. The check never blocks a
+      // first attempt or an operator-approved send.
+      if (job.attempts > 1 && !job.review_approved && config.MAIL_CONFIRM_BEFORE_SEND === 'true') {
+        const confirmation = await confirmPriorDelivery(pool, job);
+        if (confirmation === 'delivered') {
+          providerId = 'CONFIRMED_PRIOR_DELIVERY';
+          throw Object.assign(new Error('A previous attempt was already accepted by the transport'), {
+            confirmedPriorAcceptance: true,
+          });
+        }
+        if (confirmation === 'unknown') {
+          // A failed confirmation is not a transient transport error; it is a
+          // permanent, operator-visible outcome, so transient retry budgets do
+          // not endlessly re-queue a message nobody can prove was delivered.
+          permanent = true;
+          throw new Error(
+            'Previous delivery outcome could not be confirmed; resend withheld to avoid a duplicate alert',
+          );
         }
       }
       const result = await sendMail(job);
@@ -1027,8 +1143,17 @@ export async function deliverNext(
       retryNotBefore = e.retryAt;
       emailProvider = e.provider;
     }
+    if ((e as { confirmedPriorAcceptance?: boolean }).confirmedPriorAcceptance) {
+      // The transport already has this message. Clear the error so the job is
+      // committed ACCEPTED; a later bookkeeping failure is escalated by the
+      // caller instead of being retried as an unconfirmed send.
+      error = '';
+      errorInfo = {};
+      unconfirmedError = 'Delivery accepted by the transport but receipt bookkeeping did not complete';
+    }
   }
   let finalized = false;
+  try {
   await transaction(pool, async (db) => {
     const current = await db.query('SELECT status,lock_token FROM outbox WHERE id=$1 FOR UPDATE', [job.id]);
     if (current.rows[0]?.lock_token !== job.lock_token) return;
@@ -1266,6 +1391,21 @@ export async function deliverNext(
     );
     finalized = true;
   });
+  } catch (bookkeepingError) {
+    if (!unconfirmedError) throw bookkeepingError;
+    // The transport already holds this message but the receipt could not be
+    // recorded. Report it loudly instead of rethrowing: a rethrown error makes
+    // the worker tick look failed, and the row is still SENDING so a later
+    // attempt would resend. The lease expiry plus confirm-before-send is the
+    // backstop if this process dies here.
+    await writeEvent(pool, {
+      category: 'EMAIL',
+      level: 'ERROR',
+      code: 'delivery.receipt_unconfirmed',
+      message: unconfirmedError,
+      context: { jobId: job.id, advisoryId: job.advisory_id, attempt: job.attempts, ...describeError(bookkeepingError) },
+    }).catch(() => undefined);
+  }
   if (finalized && staleAdvisory) {
     try {
       const { rebuildFromCurrentInventory } = await import('./pipeline');

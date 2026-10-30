@@ -536,7 +536,7 @@ ${classificationBanner}
 
                 <tr>
 
-                    <td width="25%" align="center" bgcolor="#f8fafc" style="padding:16px;border:1px solid #e2e8f0;">
+                    <td align="center" bgcolor="#f8fafc" style="padding:16px;border:1px solid #e2e8f0;">
                         <div style="font-size:24px;font-weight:bold;color:#0f172a;">{{finding_count}}</div>
                         <div style="font-size:11px;color:#64748b;">TOTAL FINDINGS</div>
                     </td>
@@ -546,7 +546,7 @@ ${classificationBanner}
                     {{medium_kpi}}
                     {{low_kpi}}
 
-                    <td width="25%" align="center" bgcolor="#eff6ff" style="padding:16px;border:1px solid #e2e8f0;">
+    <td align="center" bgcolor="$eff6ff" style="padding:16px;border:1px solid #e2e8f0;">
                         <div style="font-size:24px;font-weight:bold;color:#2563eb;">{{asset_count}}</div>
                         <div style="font-size:11px;color:#64748b;">ASSETS</div>
                     </td>
@@ -831,11 +831,41 @@ export const digestSeverityKpi = (
   if (count === 0) return '';
   const safe = normalizeDigestConfig(config);
   const sev = SEVERITY_KPI[severity] ?? { label: severity, color: safe.fontColor, bg: '#f8fafc' };
-  return `<td width="25%" align="center" bgcolor="${sev.bg}" style="padding:16px;border:1px solid #e2e8f0;">
+  return `<td align="center" bgcolor="${sev.bg}" style="padding:16px;border:1px solid #e2e8f0;">
     <div style="font-size:24px;font-weight:bold;color:${sev.color};">${count}</div>
     <div style="font-size:11px;color:#64748b;">${sev.label}</div>
 </td>`;
 };
+
+const formatExecutiveSummary = (total: number, counts: Record<string, number>): string => {
+  const parts: string[] = [];
+  for (const severity of ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'] as const) {
+    if (counts[severity] > 0) {
+      parts.push(
+        `<strong>${counts[severity]} ${severity.charAt(0) + severity.slice(1).toLowerCase()}</strong>`,
+      );
+    }
+  }
+  const summary =
+    parts.length > 1
+      ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+      : parts[0];
+  return `A total of <strong>${total} ${total === 1 ? 'vulnerability' : 'vulnerabilities'}</strong> were identified during the latest monitoring cycle, including ${summary} severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.`;
+}
+
+/**
+ * The daily digest's executive summary is trusted HTML only when it has exactly
+ * the shape this module generates. Anything else is treated as data and escaped.
+ */
+function digestSafeExecutiveSummary(value: string): string {
+  // Shape check: the generated sentence, containing only the two tags this
+  // module emits and no other markup. Any `<` that is not one of those tags
+  // means the text carries something this module did not put there.
+  const generatedShape =
+    /^A total of <strong>\d+ vulnerabilities?<\/strong> were identified during the latest monitoring cycle, including .* severity findings across monitored assets\. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures\.$/;
+  const onlyGeneratedTags = !value.replace(/<\/?strong>/g, '').includes('<');
+  return generatedShape.test(value) && onlyGeneratedTags ? value : digestEscapeHtml(value);
+}
 
 export function renderDailyDigest(config: TemplateCustomization, parts: DailyDigestParts, template?: string): string {
   const compiled = template || compileDailyDigestTemplate(config);
@@ -853,7 +883,11 @@ export function renderDailyDigest(config: TemplateCustomization, parts: DailyDig
     .replace(/{{severity_counts}}/g, digestEscapeHtml(parts.severity_counts))
     .replace(/{{dispatch_date}}/g, digestEscapeHtml(parts.dispatch_date))
     .replace(/{{severity}}/g, digestEscapeHtml(parts.severity))
-    .replace(/{{executive_summary}}/g, parts.executive_summary)
+    // The executive summary is composed server-side from fixed templates and
+    // anchors, not from inventory text, so it stays raw HTML. It is escaped here
+    // when it is not one of those compositions, so operator-editable input such
+    // as an asset name can never become live markup in a delivered email.
+    .replace(/{{executive_summary}}/g, digestSafeExecutiveSummary(parts.executive_summary))
     .replace(/{{findings_summary}}/g, parts.findings_summary)
     .replace(/{{health_report}}/g, parts.health_report)
     .replace(/{{critical_summary}}/g, parts.critical_summary || '')

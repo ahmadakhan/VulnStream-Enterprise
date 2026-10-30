@@ -1,7 +1,7 @@
 import type { Db } from './db';
 import { list } from './db';
 import { decrypt } from './secrets';
-import { parseCPE23 } from '../src/utils/cpeMatcher.ts';
+import { parseCPE23, normalizeCpeForComparison } from '../src/utils/cpeMatcher.ts';
 import type { Config } from './config';
 import type { Requester } from './network';
 import type { ThreatFeed, NvdCpeSearchResult, NvdCpeSearchResponse } from '../src/types/index.ts';
@@ -73,8 +73,8 @@ function parseNvdCpeProducts(
     const cpe = entry?.cpe || entry;
     const name = typeof cpe?.cpeName === 'string' ? cpe.cpeName : '';
     if (!name || cpe?.deprecated === true) continue;
-    if (exactCpe && name.toLowerCase() !== exactCpe.toLowerCase()) continue;
-    if (seenCpes && seenCpes.has(name.toLowerCase())) continue;
+    if (exactCpe && normalizeCpeForComparison(name) !== normalizeCpeForComparison(exactCpe)) continue;
+    if (seenCpes && seenCpes.has(normalizeCpeForComparison(name))) continue;
     const parsed = parseCPE23(name);
     if (!parsed.isValid) continue;
     const title =
@@ -252,6 +252,39 @@ export async function searchNvdCpes(
     } catch (error) {
       if (isNvdRateLimitError(error)) throw error;
       // Non-fatal: a failed wildcard search still returns the keyword results
+    }
+    return { results, totalResults };
+  }
+
+  // If an exact CPE was requested but no exact match was returned, retry
+  // with a wildcard-vendor matchString built from the CPE's product. This
+  // handles the common case where the operator's vendor label differs from
+  // the NVD-registered vendor (e.g. "notepad-plus-plus" vs. "don_ho").
+  if (exactCpe && results.length === 0) {
+    const parsed = parseCPE23(exactCpe);
+    if (parsed.isValid && parsed.product && parsed.product !== '*') {
+      const escapedProduct = escapeCpeComponent(parsed.product);
+      const matchString = `cpe:2.3:*:*:${escapedProduct}:*:*:*:*:*:*:*:*`;
+      const wildcardUrl = buildCpeMatchStringUrl(matchString, pageSize);
+      try {
+        const wildcardResponse = await fetchPage(effectiveKey, wildcardUrl);
+        if (wildcardResponse.status === 429) {
+          throw {
+            __nvdRateLimit: true,
+            retryAfter: wildcardResponse.headers['retry-after'],
+            status: 429,
+            message: 'NVD rate limit reached; retry later',
+          } as NvdRateLimitError;
+        }
+        if (wildcardResponse.status === 200) {
+          const wildcardParsed = parseNvdCpeProducts(wildcardResponse.body, undefined, seenCpes);
+          results.push(...wildcardParsed.results);
+          return { results, totalResults: totalResults + wildcardParsed.totalResults };
+        }
+      } catch (error) {
+        if (isNvdRateLimitError(error)) throw error;
+        // Non-fatal: fall through to return empty results
+      }
     }
   }
 

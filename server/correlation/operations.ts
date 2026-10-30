@@ -228,10 +228,14 @@ export async function retainCorrelationData(db: Db): Promise<number> {
   const policy = await getCorrelationPolicy(db);
   if (!policy.retentionEnabled) return 0;
   const cutoff = new Date(Date.now() - policy.retentionHours * 3600000);
+  // Always a transaction-scoped advisory lock, never the session-level form
+  // used previously: a session lock taken here is never released, so the pooled
+  // connection kept holding it and every later retention run on that connection
+  // (and every replica after it) returned 0 without cleaning anything.
   const lock = await db.query<{ locked: boolean }>(
     "SELECT pg_try_advisory_xact_lock(hashtext('correlation-retention'),hashtext(current_schema())) AS locked",
   );
-  if (!lock.rows[0].locked) return 0;
+  if (!lock.rows[0]?.locked) return 0;
   const reviews = await db.query(
     `DELETE FROM low_confidence_review_buffer WHERE id IN (
     SELECT b.id FROM low_confidence_review_buffer b JOIN correlation_review_decisions d ON d.review_id=b.id

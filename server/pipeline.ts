@@ -171,6 +171,8 @@ const aliasSignature = (entries: readonly AliasEntry[]) => {
  * Derived only from non-wildcard CPE criteria; a CVE with no parseable
  * structured identity cannot bind a cluster (binding on prose would let a
  * poisoned CVE claim another vulnerability's rulings). */
+/** Bounded retries for a pre-CVE disposition bind that lost its lock race. */
+const DEFERRED_BIND_MAX_ATTEMPTS = 5;
 function cveClusterIdentities(cve: NormalizedCVE): { vendor: string; product: string }[] {
   const criteria = cve.cpeMatchDetails?.length
     ? cve.cpeMatchDetails.map((detail) => detail.criteria)
@@ -1091,18 +1093,36 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       // FALSE_POSITIVE/NOT_AFFECTED ruling would never reach the canonical
       // finding. Deferred identities are merged into the pending pin, which the
       // next citation run retries before re-deriving new publications.
-      const deferredBinds: { cveId: string; vendor: string; product: string }[] = [];
-      const previous = await get<{ pending: typeof deferredBinds }>(
+      type DeferredBind = { cveId: string; vendor: string; product: string; attempts?: number };
+      const deferredBinds: DeferredBind[] = [];
+      const previous = await get<{ pending: DeferredBind[] }>(
         db,
         'systemState',
         'correlation-deferred-binds',
       ).catch(() => undefined);
+      // At most 500 entries fit in the durable pin, and CVEs beyond the cap are
+      // never revisited (a CVE that is already in the corpus is skipped by
+      // `oldCveMap.has` on every later run). Defer only what the pin can hold:
+      // the rest still inherits its cluster, because bindClusterToCve's own
+      // bounded retries already ran and a cluster that genuinely exists is
+      // bindable. Losing a bound identity silently is the outcome this list
+      // exists to prevent.
+      const DEFERRED_BIND_LIMIT = 500;
+      const defer = (bind: DeferredBind, attempts = 1) => {
+        if (deferredBinds.length >= DEFERRED_BIND_LIMIT) return;
+        deferredBinds.push({ ...bind, attempts });
+      };
       for (const identity of previous?.pending ?? []) {
         try {
           await bindClusterToCve(db, identity.cveId, identity.vendor, identity.product);
         } catch (error) {
           if ((error as { code?: string }).code !== 'BIND_LOCK_CONTENDED') throw error;
-          deferredBinds.push(identity);
+          const attempts = (identity.attempts ?? 0) + 1;
+          if (attempts < DEFERRED_BIND_MAX_ATTEMPTS) defer(identity, attempts);
+          else
+            execution!.logs.push(
+              `Pre-CVE disposition inheritance for ${identity.cveId} was deferred ${attempts} times and is now abandoned`,
+            );
         }
       }
       for (const cve of changedCves) {
@@ -1112,13 +1132,15 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             await bindClusterToCve(db, cve.cveId, identity.vendor, identity.product);
           } catch (error) {
             if ((error as { code?: string }).code !== 'BIND_LOCK_CONTENDED') throw error;
-            deferredBinds.push({ cveId: cve.cveId, ...identity });
+            defer({ cveId: cve.cveId, ...identity }, 1);
           }
         }
       }
+      // Retried binds whose CVE has left the changed set are carried forward
+      // too; dropping them here is the same loss as never recording them.
       if (deferredBinds.length)
         await put(db, 'systemState', 'correlation-deferred-binds', {
-          pending: deferredBinds.slice(0, 500),
+          pending: deferredBinds.slice(0, DEFERRED_BIND_LIMIT),
           updatedAt: new Date().toISOString(),
         });
       else if (previous)
