@@ -184,7 +184,10 @@ export function renderAdvisory(template: string, advisory: Advisory, findings?: 
     'severity_badge',
     'severity_header_badge',
   ]);
-  return template.replace(/{{([a-z_]+)}}/g, (_, key) => {
+  let processed = template.replace(/\{\{#if\s+([a-z_]+)\}\}([\s\S]*?)\{\{\/if\}\}/g, (_, key, content) => {
+    return values[key] && values[key].trim() ? content : '';
+  });
+  return processed.replace(/{{([a-z_]+)}}/g, (_, key) => {
     if (rawHtmlTokens.has(key)) return values[key] || '';
     return escape(values[key] || '');
   });

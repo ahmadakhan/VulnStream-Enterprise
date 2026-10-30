@@ -170,5 +170,23 @@ test('renderAdvisory produces template matching the studio HTML structure', () =
   assert.ok(html.includes('Test vulnerability advisory'), 'advisory title should be rendered in vulnerability name row');
   assert.ok(html.includes('Affected Products &amp; Versions'), 'affected products row should appear');
   assert.ok(html.includes('Workaround / Mitigation'), 'mitigation row should appear');
-  assert.ok(html.includes('Honeywell Recommended Actions'), 'recommended action row should appear');
-});
+   assert.ok(html.includes('Honeywell Recommended Actions'), 'recommended action row should appear');
+  });
+
+  test('renderAdvisory shows View Vendor Guidance and Vendor Security Advisory links when vendor link is present', () => {
+    const template = compileCustomizedTemplate(testCustomization);
+    const html = renderAdvisory(template, baseAdvisory);
+    assert.ok(html.includes('View Vendor Guidance'), 'view vendor guidance should appear with a link');
+    assert.ok(html.includes('Vendor Security Advisory'), 'vendor security advisory should appear with a link');
+    assert.ok(html.includes('href="https://example.com/advisory/12345"'), 'links should point to the vendor source');
+    assert.ok(!html.includes('href=""'), 'no empty href should remain');
+  });
+
+  test('renderAdvisory hides View Vendor Guidance and Vendor Security Advisory when no link is present', () => {
+    const template = compileCustomizedTemplate(testCustomization);
+    const html = renderAdvisory(template, { ...baseAdvisory, vendorLink: undefined });
+    assert.ok(!html.includes('View Vendor Guidance'), 'view vendor guidance should be hidden without a link');
+    assert.ok(!html.includes('Vendor Security Advisory'), 'vendor security advisory should be hidden without a link');
+    assert.ok(!html.includes('#if'), 'no unrendered conditional tokens should remain');
+  });
+

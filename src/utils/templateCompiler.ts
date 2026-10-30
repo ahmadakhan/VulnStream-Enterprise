@@ -258,11 +258,11 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
                             {{remediation_steps}}
                         </div>
 
-                        <p style="margin:12px 0 0;">
+                        {{#if remediation_link}}<p style="margin:12px 0 0;">
                             <a href="{{remediation_link}}" target="_blank">
                                 View Vendor Guidance
                             </a>
-                        </p>
+                        </p>{{/if}}
 
                     </td>
                 </tr>
@@ -281,13 +281,13 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
                         References
                     </td>
                     <td style="padding:12px;border:1px solid #e2e8f0;">
-                        <ul style="margin:0;padding-left:18px;">
+                        {{#if references_link}}<ul style="margin:0;padding-left:18px;">
                             <li>
                                 <a href="{{references_link}}" target="_blank">
                                     Vendor Security Advisory
                                 </a>
                             </li>
-                        </ul>
+                        </ul>{{/if}}
                     </td>
                 </tr>
 
