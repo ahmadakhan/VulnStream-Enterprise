@@ -6,6 +6,7 @@ import {
   matchesWatchlistItem,
   matchVendorWithAliases,
   matchProductWithAliases,
+  aliasGroupKeys,
   DEFAULT_VENDOR_ALIASES,
   DEFAULT_PRODUCT_ALIASES,
 } from '../src/utils/cpeMatcher.ts';
@@ -255,4 +256,52 @@ test('no catalog product name leaks into the vendor alias namespace', () => {
     0,
     `product names must not appear as vendor aliases: ${leakedProductNames.join(', ')}`,
   );
+});
+
+test('solarwinds is a built-in vendor alias for the current n-able vendor', () => {
+  assert.equal(matchVendorWithAliases('n-able', 'solarwinds'), true);
+  assert.equal(matchVendorWithAliases('solarwinds', 'n-able'), true);
+  // The two vendor spellings resolve to the same alias group keys.
+  assert.deepEqual(
+    aliasGroupKeys('solarwinds', DEFAULT_VENDOR_ALIASES),
+    aliasGroupKeys('n-able', DEFAULT_VENDOR_ALIASES),
+  );
+});
+
+test('a CVE with the legacy solarwinds:n-central CPE matches an n-able:n-central asset', () => {
+  const record = {
+    ...structuredClone(INITIAL_NORMALIZED_CVES[0]),
+    cveId: 'CVE-2026-70004',
+    cpeMatches: [cpe('solarwinds', 'n-central', '2020.1')],
+    cpeMatchDetails: [{ criteria: cpe('solarwinds', 'n-central', '2020.1') }],
+    versionRange: undefined,
+    purls: undefined,
+    vex: undefined,
+    vexStatements: [],
+    sourceFeeds: [],
+    exploitationSources: [],
+    cisaKev: { isKev: false },
+    exploitStatus: 'None' as const,
+    applicabilityRequiresReview: false,
+  };
+  const asset: WatchListItem = {
+    id: 'asset-ncentral',
+    vendor: 'n-able',
+    product: 'n-central',
+    version: '*',
+    cpes: ['cpe:2.3:a:n-able:n-central:*:*:*:*:*:*:*:*'],
+    assetTag: 'NC-01',
+    ownerGroup: 'test',
+    active: true,
+    createdAt: '2026-10-25T00:00:00.000Z',
+  };
+
+  const finding = runVulnerabilityPipeline([], [record], [asset], [], [], {
+    ...DEFAULT_SETTINGS,
+    scopeHours: 0,
+  }).newFindings[0];
+
+  assert.ok(finding, 'a legacy solarwinds CPE must correlate with the current n-able vendor asset');
+  assert.equal(finding.matchingMethod, 'VENDOR_PRODUCT_ALIAS');
+  assert.equal(finding.notificationStatus, 'REVIEW_REQUIRED');
 });

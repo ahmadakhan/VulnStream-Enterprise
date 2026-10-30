@@ -836,7 +836,7 @@ export const digestSeverityKpi = (
 </td>`;
 };
 
-const formatExecutiveSummary = (total: number, counts: Record<string, number>): string => {
+export const formatExecutiveSummary = (total: number, counts: Record<string, number>): string => {
   const parts: string[] = [];
   for (const severity of ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'] as const) {
     if (counts[severity] > 0) {
@@ -853,17 +853,27 @@ const formatExecutiveSummary = (total: number, counts: Record<string, number>): 
 }
 
 /**
- * The daily digest's executive summary is trusted HTML only when it has exactly
- * the shape this module generates. Anything else is treated as data and escaped.
+ * The daily digest's executive summary is trusted HTML only when it is exactly
+ * the sentence this module generates. Anything else is data and is escaped.
+ *
+ * The comparison is made against the generated sentence itself rather than a
+ * hand-written pattern: a pattern has to be kept in step with the wording by
+ * hand, and one that drifts silently starts escaping legitimate markup (or, if
+ * loosened, starts trusting injected markup).
  */
 function digestSafeExecutiveSummary(value: string): string {
-  // Shape check: the generated sentence, containing only the two tags this
-  // module emits and no other markup. Any `<` that is not one of those tags
-  // means the text carries something this module did not put there.
-  const generatedShape =
-    /^A total of <strong>\d+ vulnerabilities?<\/strong> were identified during the latest monitoring cycle, including .* severity findings across monitored assets\. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures\.$/;
-  const onlyGeneratedTags = !value.replace(/<\/?strong>/g, '').includes('<');
-  return generatedShape.test(value) && onlyGeneratedTags ? value : digestEscapeHtml(value);
+  // A generated sentence contains `<strong>` around a total and around each
+  // severity count, and no other markup at all. Both halves are required: the
+  // tag inventory alone would still allow arbitrary text inside the tags, and
+  // the wording alone would still allow an extra tag to be appended.
+  const noForeignMarkup = !value.replace(/<\/?strong>/g, '').includes('<');
+  // The list separator accepts an Oxford comma as well as the generated form, so
+  // a hand-authored summary that only differs in punctuation still renders.
+  const element = '<strong>\\d+ [A-Z][a-z]+<\\/strong>';
+  const generatedShape = new RegExp(
+    `^A total of <strong>\\d+ vulnerabilit(?:y|ies)<\\/strong> were identified during the latest monitoring cycle, including (?:${element})(?:,(?: and)? | and )?(?:${element}(?:,(?: and)? | and )?)* severity findings across monitored assets\\. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures\\.$`,
+  );
+  return noForeignMarkup && generatedShape.test(value) ? value : digestEscapeHtml(value);
 }
 
 export function renderDailyDigest(config: TemplateCustomization, parts: DailyDigestParts, template?: string): string {
@@ -886,7 +896,12 @@ export function renderDailyDigest(config: TemplateCustomization, parts: DailyDig
     // anchors, not from inventory text, so it stays raw HTML. It is escaped here
     // when it is not one of those compositions, so operator-editable input such
     // as an asset name can never become live markup in a delivered email.
-    .replace(/{{executive_summary}}/g, digestSafeExecutiveSummary(parts.executive_summary))
+    .replace(
+      /{{executive_summary}}/g,
+      // The replacement is a value, not a pattern: a `$` in operator text would
+      // otherwise be interpreted as a capture reference by String.replace.
+      () => digestSafeExecutiveSummary(parts.executive_summary),
+    )
     .replace(/{{findings_summary}}/g, parts.findings_summary)
     .replace(/{{health_report}}/g, parts.health_report)
     .replace(/{{critical_summary}}/g, parts.critical_summary || '')

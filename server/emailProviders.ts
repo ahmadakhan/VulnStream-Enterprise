@@ -333,3 +333,111 @@ export async function sendProviderEmail(
   }
   throw new EmailProviderError(`${provider} did not confirm message acceptance`, 502);
 }
+
+/**
+ * Outcome of a provider-side delivery lookup for one already-sent message.
+ *
+ * `unknown` is a first-class answer, not an error: a provider may not retain
+ * message events, the lookup host may not be allowlisted, or the console may be
+ * disabled. Callers must treat it as "keep withholding" rather than "retry".
+ */
+export type ProviderDeliveryState = 'delivered' | 'not-delivered' | 'unknown';
+
+/** Providers whose delivery state can be queried by the message id we recorded. */
+export function supportsDeliveryLookup(provider: EmailConfiguration['provider']): boolean {
+  return provider === 'SENDGRID' || provider === 'MAILGUN' || provider === 'POSTMARK';
+}
+
+/**
+ * Fixed, never operator-controlled endpoints. A custom `API` provider cannot be
+ * queried: its contract is unknown, so it stays unconfirmed by design.
+ */
+function lookupUrl(provider: EmailConfiguration['provider'], config: EmailConfiguration, messageId: string): string {
+  const id = encodeURIComponent(messageId);
+  if (provider === 'SENDGRID') return `https://api.sendgrid.com/v3/messages/${id}`;
+  if (provider === 'MAILGUN')
+    return `https://${config.mailgunRegion === 'EU' ? 'api.eu.mailgun.net' : 'api.mailgun.net'}/v3/${encodeURIComponent(config.mailgunDomain)}/events?message-id=${id}`;
+  return `https://api.postmarkapp.com/messages/outbound/${id}/details`;
+}
+
+function lookupHeaders(
+  provider: EmailConfiguration['provider'],
+  config: EmailConfiguration,
+  token: string,
+): Record<string, string> {
+  if (provider === 'MAILGUN')
+    return { authorization: `Basic ${Buffer.from(`api:${token}`).toString('base64')}`, accept: 'application/json' };
+  if (provider === 'POSTMARK') return { 'x-postmark-server-token': token, accept: 'application/json' };
+  return { authorization: `Bearer ${token}`, accept: 'application/json' };
+}
+
+/** Normalises the three provider payloads into one verdict. */
+function interpret(provider: EmailConfiguration['provider'], status: number, body: string): ProviderDeliveryState {
+  // The provider does not know this message. It was never accepted.
+  if (status === 404) return 'not-delivered';
+  if (status < 200 || status >= 300) return 'unknown';
+  let data: any;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    return 'unknown';
+  }
+  if (provider === 'SENDGRID') {
+    const events: unknown[] = Array.isArray(data?.events) ? data.events : [];
+    const names = events.map((event) => String((event as { event_name?: string })?.event_name || ''));
+    // A hard bounce or drop means the provider accepted the message and then
+    // refused it at the mailbox: it reached the transport and must not be
+    // re-sent, or the recipient receives a duplicate attempt.
+    if (names.some((name) => ['bounce', 'dropped', 'blocked', 'spamreport', 'unsubscribe', 'delivered'].includes(name)))
+      return 'delivered';
+    // Explicitly deferred/processed with no terminal event: not yet resolved.
+    if (names.length) return 'unknown';
+    // A message record with no events yet is accepted but unresolved.
+    return data?.id ? 'unknown' : 'not-delivered';
+  }
+  if (provider === 'MAILGUN') {
+    const items: unknown[] = Array.isArray(data?.items) ? data.items : [];
+    if (items.length) return 'delivered';
+    return typeof data?.paging === 'object' ? 'not-delivered' : 'unknown';
+  }
+  // Postmark: 200 with a record means the outbound message exists.
+  if (typeof data?.MessageID === 'string' && data.MessageID) return 'delivered';
+  if (Number.isInteger(data?.ErrorCode) && data.ErrorCode !== 0) return 'not-delivered';
+  return 'unknown';
+}
+
+/**
+ * Asks the provider whether it still has a record of this message.
+ *
+ * The request goes through the same DNS-pinned, allowlisted HTTPS client as
+ * every other outbound call, so enabling the feature never widens the egress
+ * surface: a deployment that has not allowlisted the provider's API host simply
+ * receives `unknown` and keeps withholding. Never used to send.
+ */
+export async function lookupProviderDelivery(
+  config: EmailConfiguration,
+  token: string,
+  messageId: string,
+  request: Requester,
+): Promise<ProviderDeliveryState> {
+  if (!supportsDeliveryLookup(config.provider) || !messageId) return 'unknown';
+  const url = lookupUrl(config.provider, config, messageId);
+  const endpoint = emailEndpoint(config);
+  // Defence in depth: a lookup must stay on the host that sends for this
+  // provider, so a malformed configuration can never point it elsewhere.
+  if (!endpoint || new URL(endpoint).hostname !== new URL(url).hostname) return 'unknown';
+  try {
+    const response = await request(url, {
+      method: 'GET',
+      headers: lookupHeaders(config.provider, config, token),
+      timeoutMs: 15000,
+      socketTimeoutMs: 10000,
+      maxResponseBytes: 256 * 1024,
+      // A redirect must never carry the provider credential to another host.
+      allowRedirects: false,
+    });
+    return interpret(config.provider, response.status, response.body);
+  } catch {
+    return 'unknown';
+  }
+}

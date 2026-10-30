@@ -1,4 +1,5 @@
 /** Internal state, committed in the same transaction as the imported records. */
+import type { NormalizedCVE } from '../src/types/index.ts';
 export interface IngestionState {
   cursor?: string;
   hasMore?: boolean;

@@ -40,6 +40,7 @@ import {
   EMAIL_PROVIDER_LABELS,
   EmailProviderError,
   emailIsConfigured,
+  lookupProviderDelivery,
   sendProviderEmail,
 } from './emailProviders';
 import { decrypt } from './secrets';
@@ -395,16 +396,10 @@ export type DeliveryConfirmation = 'delivered' | 'not-delivered' | 'unknown';
  *
  * Evidence that the provider accepted the message is committed only after the
  * send returns, so an attempt that sent and then lost its commit is
- * indistinguishable from one that never sent. The deterministic Message-ID
- * (`<${job.id}@domain>`) is the only identity both cases share, and it is what
- * a provider-side lookup keys on. Until such a lookup exists, three cases are
- * treated as unconfirmed and the job is deferred rather than resent:
- *
- *  - the prior attempt returned a provider message id that could not be
- *    recorded (`unconfirmedProviderId`);
- *  - the delivery log still shows an in-flight attempt;
- *  - the provider is one that accepts a message synchronously, where a lost
- *    response is most likely (HTTP API providers).
+ * indistinguishable from one that never sent. The provider's own record of the
+ * message id is therefore authoritative, and it is queried when the local
+ * evidence is inconclusive. Only when that lookup cannot answer is the job
+ * withheld rather than resent.
  *
  * SMTP is confirmed by the server's 250 reply before the send returns, so a
  * failed SMTP attempt provably did not hand the message over. That path keeps
@@ -413,6 +408,7 @@ export type DeliveryConfirmation = 'delivered' | 'not-delivered' | 'unknown';
 async function confirmPriorDelivery(
   db: Db,
   job: Job,
+  config: Config,
 ): Promise<DeliveryConfirmation> {
   if (job.channel !== 'email') return 'not-delivered';
   const log = await get<EmailDeliveryLog>(db, 'emailLogs', job.id);
@@ -436,7 +432,15 @@ async function confirmPriorDelivery(
   // relay shape used by the test-email path; there the channel is an SMTP
   // relay, so a failed attempt did not hand the message over.
   if (saved.provider === 'API' && !saved.apiSourceDomain) return 'not-delivered';
-  return 'unknown';
+  // The local evidence is inconclusive, so ask the provider. This is the only
+  // way to tell an attempt that delivered and lost its receipt from one that
+  // never left, and it is what lets those jobs be recovered instead of held.
+  const messageId = job.payload.unconfirmedProviderId || log?.providerId || '';
+  if (!messageId) return 'unknown';
+  const token = decrypt(saved.apiKey, config.ENCRYPTION_KEY, `email-provider:${saved.provider}`);
+  if (!token) return 'unknown';
+  const state = await lookupProviderDelivery(saved, token, messageId, createRequester(config));
+  return state;
 }
 
 export function createMailSender(
@@ -1158,7 +1162,7 @@ export async function deliverNext(
       // is the only way to prevent a duplicate alert. The check never blocks a
       // first attempt or an operator-approved send.
       if (job.attempts > 1 && !job.review_approved && config.MAIL_CONFIRM_BEFORE_SEND === 'true') {
-        const confirmation = await confirmPriorDelivery(pool, job);
+        const confirmation = await confirmPriorDelivery(pool, job, config);
         if (confirmation === 'delivered') {
           providerId = 'CONFIRMED_PRIOR_DELIVERY';
           throw Object.assign(new Error('A previous attempt was already accepted by the transport'), {
@@ -1166,15 +1170,29 @@ export async function deliverNext(
           });
         }
         if (confirmation === 'unknown') {
-          // A failed confirmation is not a transient transport error; it is a
-          // permanent, operator-visible outcome, so transient retry budgets do
-          // not endlessly re-queue a message nobody can prove was delivered.
-          permanent = true;
+          // The provider could not answer (not allowlisted, console disabled, or
+          // an error). That is a transient condition, not proof of duplication:
+          // the job stays retryable and is re-confirmed on the next attempt. If
+          // the retry budget ends first it is committed FAILED, which is visible
+          // to the operator and never silently re-sent.
           throw new Error(
-            'Previous delivery outcome could not be confirmed; resend withheld to avoid a duplicate alert',
+            'Previous delivery outcome could not be confirmed yet; the resend is deferred until it can be',
           );
         }
       }
+      // Record the attempt before the transport is contacted. A crash between
+      // the provider accepting the message and the commit is then detectable,
+      // and the confirmation above resolves it on recovery.
+      await transaction(pool, async (db) => {
+        const log = await get<EmailDeliveryLog>(db, 'emailLogs', job.id);
+        if (log)
+          await put(db, 'emailLogs', job.id, {
+            ...log,
+            status: 'SENDING',
+            attemptCount: job.attempts,
+            nextRetryTime: null,
+          });
+      });
       const result = await sendMail(job);
       providerId = typeof result === 'string' ? result : result.id;
       if (typeof result !== 'string') emailProvider = result.provider;

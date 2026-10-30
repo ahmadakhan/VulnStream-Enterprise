@@ -493,6 +493,11 @@ export const DEFAULT_VENDOR_ALIASES: Record<string, string[]> = {
   sentinelone: ['sentinelone_inc', 'sentinel_one'],
   adobe: ['adobe_systems'],
   canonical: ['ubuntu'],
+  // N-able spun out of SolarWinds in 2021. The NVD CPE dictionary still carries
+  // the legacy `solarwinds` vendor entries for N-central (not flagged as
+  // deprecated), so the alias bridges the old and current vendor spellings and
+  // keeps CVE CPE criteria on either vendor correlated with a registered asset.
+  'n-able': ['solarwinds'],
 };
 
 export const DEFAULT_PRODUCT_ALIASES: Record<string, string[]> = {

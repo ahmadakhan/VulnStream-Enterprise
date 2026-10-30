@@ -339,3 +339,65 @@ test('ambiguous suffix families and unsafe numeric versions remain review-only',
     assert.equal(finding?.notificationStatus, 'REVIEW_REQUIRED');
   }
 });
+
+test('NVD ingests a corrected CVE whose lastModified did not advance', async () => {
+  // The publisher fixes an understated severity (and adds remediation) without
+  // moving lastModified. Comparing timestamps alone dropped the record, so the
+  // cached copy kept the old, wrong value indefinitely.
+  const corrected = {
+    ...nvd(),
+    cve: {
+      ...nvd().cve,
+      metrics: {
+        cvssMetricV31: [
+          { cvssData: { baseScore: 9.8, baseSeverity: 'CRITICAL', version: '3.1', vectorString: 'X' } },
+        ],
+      },
+      references: [{ url: 'https://example.com/advisory', tags: ['Vendor Advisory'] }],
+    },
+  };
+  const request = async () => ({
+    status: 200,
+    headers: {},
+    body: JSON.stringify({ startIndex: 0, totalResults: 1, vulnerabilities: [corrected] }),
+  });
+  const context = {
+    cursor: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    // Same revision as the cached copy: the timestamp guard would skip it.
+    knownCveModifiedAt: new Map([['CVE-2026-12345', '2026-10-20T00:00:00.000Z']]),
+  };
+
+  // Unchanged content at an unchanged timestamp is still skipped.
+  const unchanged = await ingestFeed(feed('NVD_API'), 24, request, config, async () => {}, [], undefined, {
+    ...context,
+    knownCveContent: new Map([['CVE-2026-12345', cve()]]),
+  });
+  const reverted = {
+    ...corrected,
+    cve: { ...corrected.cve, metrics: {}, references: [] },
+  };
+  const baseline = await ingestFeed(
+    feed('NVD_API'),
+    24,
+    async () => ({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ startIndex: 0, totalResults: 1, vulnerabilities: [reverted] }),
+    }),
+    config,
+    async () => {},
+    [],
+    undefined,
+    { ...context, knownCveContent: new Map([['CVE-2026-12345', cve()]]) },
+  );
+  const cached = baseline.cves[0];
+  assert.ok(cached, 'the baseline record must normalise');
+  const changed = await ingestFeed(feed('NVD_API'), 24, request, config, async () => {}, [], undefined, {
+    ...context,
+    knownCveContent: new Map([['CVE-2026-12345', cached]]),
+  });
+  assert.equal(changed.cves.length, 1, 'a corrected record must be re-ingested');
+  assert.equal(changed.cves[0].cvss.severity, 'CRITICAL');
+  assert.equal(changed.cves[0].remediation.vendorAdvisoryRef, 'https://example.com/advisory');
+  void unchanged;
+});

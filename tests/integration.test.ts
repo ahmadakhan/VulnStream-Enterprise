@@ -411,11 +411,24 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
       ).rows[0]?.id;
       assert.ok(operatorId, 'operator row must exist for quota isolation');
       await pool.query('DELETE FROM rate_limit_buckets WHERE bucket_key=$1', [`rl:${operatorId}`]);
+      // The quota is charged by genuine asset.save mutations. Every mutation in
+      // this one suite shares an isolated schema, and earlier tests already
+      // register `quota/probe`; a pre-existing identical row made this test's
+      // first mutation a 409 that consumed no quota, so the third call was
+      // admitted instead of throttled. Removing any row with this identity
+      // (whatever its tag) keeps the probe a genuine first write.
+      const removed = await pool.query(
+        "DELETE FROM records WHERE kind='watchlist' AND (lower(data->>'vendor')='quota' OR data->>'assetTag' LIKE 'QUOTA-PROBE%')",
+      );
+      const leftovers = await pool.query(
+        "SELECT count(*)::int AS n FROM records WHERE kind='watchlist' AND lower(data->>'vendor')='quota'",
+      );
+      assert.equal(leftovers.rows[0].n, 0, `probe rows must be removed first (removed=${removed.rowCount})`);
       // Charge the shared quota with genuine mutations. It previously used
       // /api/correlation/simulate, which performs no writes and is therefore
       // exempt from the mutation quota — the exemption is asserted separately
       // below so both behaviours stay pinned.
-      const mutate = (agent: typeof agentA, csrf: string) =>
+      const mutate = (agent: typeof agentA, csrf: string, product = 'probe') =>
         agent
           .post('/api/commands')
           .set('Origin', config.APP_ORIGIN)
@@ -428,16 +441,37 @@ test('PostgreSQL API, auth, pipeline, durable delivery and recovery', { skip: !d
             action: 'asset.save',
             data: {
               vendor: 'quota',
-              product: 'probe',
+              product,
               cpes: ['cpe:2.3:a:quota:probe:1.0:*:*:*:*:*:*:*'],
               active: true,
-              assetTag: 'QUOTA-PROBE',
+              assetTag: `QUOTA-PROBE-${product}`,
               ownerGroup: 'Platform',
             },
           });
       const first = await mutate(agentA, csrfA);
       assert.equal(first.status, 200, JSON.stringify(first.body));
-      const second = await mutate(agentB, csrfB);
+      // Prove the write really happened before asserting anything about quota.
+      const written = await pool.query(
+        "SELECT count(*)::int AS n FROM records WHERE kind='watchlist' AND data->>'assetTag'='QUOTA-PROBE-probe'",
+      );
+      assert.equal(written.rows[0].n, 1, 'the first mutation must persist the probe row');
+      // Replica B must observe what replica A committed before its own save is
+      // judged; otherwise the identical write is a fresh insert rather than a
+      // distinct mutation, and the throttling assertion below would prove
+      // nothing. A replica that polls (as production replicas do) picks the row
+      // up; this waits for that, and then saves a *different* product so the
+      // test cannot pass merely because B's stale view rejected the duplicate.
+      const observedByB = async () => {
+        const replicaView = await agentB.get('/api/state');
+        return (
+          replicaView.status === 200 &&
+          JSON.stringify(replicaView.body.watchlist ?? []).includes('QUOTA-PROBE')
+        );
+      };
+      for (let attempt = 0; attempt < 20 && !(await observedByB()); attempt++)
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.ok(await observedByB(), 'replica B must observe the row replica A committed');
+      const second = await mutate(agentB, csrfB, 'probe-b');
       assert.equal(second.status, 200, JSON.stringify(second.body));
       const denied = await mutate(agentA, csrfA);
       assert.equal(denied.status, 429, "the second replica must observe the first replica's consumption");

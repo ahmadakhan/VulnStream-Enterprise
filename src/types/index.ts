@@ -636,12 +636,23 @@ export interface EmailDeliveryLog {
   provider:
     'Mailgun' | 'Mailtrap' | 'SendGrid' | 'Postmark' | 'Custom API' | 'SMTP_Relay' | 'Local_Mock' | 'Mailjet';
   status:
-    'REVIEW_REQUIRED' | 'QUEUED' | 'ACCEPTED' | 'DELIVERED' | 'BOUNCED' | 'RETRYING' | 'FAILED' | 'CANCELLED';
+    | 'REVIEW_REQUIRED'
+    | 'QUEUED'
+    /** Attempt in flight: the transport has been (or is about to be) contacted. */
+    | 'SENDING'
+    | 'ACCEPTED'
+    | 'DELIVERED'
+    | 'BOUNCED'
+    | 'RETRYING'
+    | 'FAILED'
+    | 'CANCELLED';
   attemptCount: number;
   retrySchedule: string[];
   nextRetryTime: string | null;
   sentAt: string;
   errorMessage?: string;
+  /** Provider-assigned message id of the last attempt, when one was returned. */
+  providerId?: string;
 }
 
 export interface EmailQueueItem {

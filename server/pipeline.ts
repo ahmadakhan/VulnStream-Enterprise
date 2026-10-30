@@ -743,6 +743,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
               ...(execution!.incrementalFeeds !== false && cursor ? cursor : {}),
               knownCveModifiedAt,
               knownWithdrawalAt,
+              knownCveContent: canonicalCache,
             };
             // A validator is usable only together with its complete source snapshot.
             let result = await ingestFeed(

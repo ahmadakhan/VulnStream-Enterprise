@@ -8,7 +8,7 @@ import { decrypt } from './secrets';
 import type { Config } from './config';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
-import { normalizeCveId } from '../src/utils/deduplicator';
+import { normalizeCveId, stableJson } from '../src/utils/deduplicator';
 import { paceConcurrent } from './concurrency';
 import { cvssSeverity, normalizeCvssVersion } from './cvss.ts';
 export interface IngestResult {
@@ -36,6 +36,11 @@ export interface IngestContext extends IngestionState {
   knownCveModifiedAt?: ReadonlyMap<string, string>;
   /** Latest cached withdrawal times, keyed by canonical CVE ID. */
   knownWithdrawalAt?: ReadonlyMap<string, string>;
+  /**
+   * Cached records keyed by canonical CVE ID, used to detect a content change
+   * that did not advance the source's lastModified timestamp.
+   */
+  knownCveContent?: ReadonlyMap<string, NormalizedCVE>;
 }
 const CHECKPOINT_OVERLAP_MS = 15 * 60 * 1000;
 export function getIngestionWindowStart(end: Date, scopeHours: number, checkpoint?: string, maxHours = 2880): Date {
@@ -333,8 +338,23 @@ export async function ingestFeed(
           }
           const cachedModified = Date.parse(ctx.knownCveModifiedAt?.get(id) || '');
           const incomingModified = Date.parse(item.cve?.lastModified || '');
-          if (Number.isFinite(cachedModified) && Number.isFinite(incomingModified) && cachedModified >= incomingModified)
+          // A publisher that corrects a score, CPE set or remediation without
+          // advancing lastModified produced a record this guard dropped, so the
+          // cached copy kept an understated severity indefinitely. The timestamp
+          // stays the fast path, but a normalised record is still compared when
+          // the incoming timestamp is not newer: identical content is skipped,
+          // changed content is ingested.
+          if (
+            Number.isFinite(cachedModified) &&
+            Number.isFinite(incomingModified) &&
+            cachedModified >= incomingModified
+          ) {
+            const cve = normalizeNvd(item, feed.id);
+            const cached = ctx.knownCveContent?.get(id);
+            if (!cve || !cached || stableJson(cve) === stableJson(cached)) continue;
+            cves.push(cve);
             continue;
+          }
           const cve = normalizeNvd(item, feed.id);
           if (cve) cves.push(cve);
         }

@@ -297,3 +297,8 @@ test('DEFAULT_VENDOR_ALIASES includes microsoft/msft pair', () => {
   assert.ok(DEFAULT_VENDOR_ALIASES.microsoft);
   assert.ok(DEFAULT_VENDOR_ALIASES.microsoft.includes('msft'));
 });
+
+test('DEFAULT_VENDOR_ALIASES includes n-able/solarwinds pair for the N-central product', () => {
+  assert.ok(DEFAULT_VENDOR_ALIASES['n-able']);
+  assert.ok(DEFAULT_VENDOR_ALIASES['n-able'].includes('solarwinds'));
+});
