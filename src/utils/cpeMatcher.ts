@@ -28,9 +28,19 @@ const MAX_CPE_CACHE_SIZE = 10000;
 /**
  * Unescapes CPE 2.3 special characters and lowercases for semantic comparison.
  * The NVD CPE dictionary API may return cpeName with different escape
- * representations (e.g. unescaped "+" vs. "\+"), so both sides must be
- * normalized before an exact-match comparison.
- */
+  * representations (e.g. unescaped "+" vs. "\+"), so both sides must be
+  * normalized before an exact-match comparison.
+  *
+  * Three normalizers exist in this codebase and are deliberately different,
+  * not drift: this one only unescapes CPE-reserved characters for literal CPE
+  * string comparison; `normalizeAliasToken` (below) strips separator
+  * characters but preserves symbols like `+` so `c++` and `c` stay distinct
+  * products; `normalizeName` (aliasLifecycle.ts) strips everything
+  * non-alphanumeric and is used only for auto-alias *derivation*, never for
+  * live matching — using it on the matching path would collapse `c++` to `c`.
+  * Do not consolidate these without re-running the full test suite; the
+  * difference is load-bearing for distinguishing products like C vs C++.
+  */
 export function normalizeCpeForComparison(cpe: string): string {
   return cpe
     .toLowerCase()

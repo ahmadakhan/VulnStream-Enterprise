@@ -48,6 +48,10 @@ function expiryFor(now: string, ttlDays: number): string | undefined {
   return new Date(start + ttlDays * 86_400_000).toISOString();
 }
 
+// Deliberately looser than cpeMatcher.ts's normalizeAliasToken: this one is
+// for suggesting candidate aliases, not for live matching, and stripping all
+// non-alphanumeric characters (including `+`) is intentional here. Do not
+// reuse it on the matching path — it would collapse `c++` into `c`.
 const normalizeName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /**

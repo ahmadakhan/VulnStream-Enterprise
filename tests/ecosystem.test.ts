@@ -294,7 +294,7 @@ test('NVD rejects duplicate, overfull and shifting pages atomically', async () =
         config,
         async () => {},
       ),
-      /duplicate|pagination/,
+       /duplicate|pagination|short/,
     );
   }
 });

@@ -48,7 +48,10 @@ export function normalizeMitre(record: any, feedId: string): NormalizedCVE | nul
     // cvssV4_0, then cvssV3_1/cvssV3_0, then cvssV2_0, each of which carries a
     // version in a valid CNA record.
     cvss: { version: !metric ? 'UNKNOWN' : normalizeCvssVersion(metric.version),
-      score, vector: metric?.vectorString || '', severity: !metric ? 'UNKNOWN' : cvssSeverity(score) },
+      score, vector: metric?.vectorString || '',
+      // See the matching comment in ingestion.ts: a metric present without its
+      // own baseScore is the storage sentinel, not a genuine CVSS 0.0.
+      severity: !metric || metric.baseScore == null ? 'UNKNOWN' : cvssSeverity(score) },
     cwe: [...new Set(containers.flatMap(c => (c.problemTypes || []).flatMap((p: any) => (p.descriptions || []).map((d: any) => d.cweId).filter((id: unknown) => typeof id === 'string'))))].slice(0, 100),
     cpeMatches: cpes, applicabilityRequiresReview: true, sourceFeeds: [feedId],
     epss: { score: 0, percentile: 0 }, cisaKev: { isKev: false }, exploitStatus: 'None',

@@ -153,7 +153,12 @@ export function normalizeNvd(item: any, feedId: string): NormalizedCVE | null {
       version: !metric ? 'UNKNOWN' : normalizeCvssVersion(metric.version),
       score,
       vector: metric?.vectorString || '',
-      severity: !metric ? 'UNKNOWN' : cvssSeverity(score),
+      // `metric?.baseScore ?? 0` collapses "no score reported" and "a genuine
+      // 0.0" to the same stored value. The stored `score` field has to pick
+      // one (0, for schema compatibility), but severity must not: a metric
+      // object that exists without its own baseScore is exactly the storage
+      // sentinel case the comment above describes, not a real CVSS 0.0.
+      severity: !metric || metric.baseScore == null ? 'UNKNOWN' : cvssSeverity(score),
     },
     cwe: (cve.weaknesses || [])
       .flatMap((w: any) => (w.description || []).filter((d: any) => d.lang === 'en').map((d: any) => d.value))
@@ -323,6 +328,14 @@ export async function ingestFeed(
         )
           throw new Error('Invalid NVD pagination response');
         if (page.totalResults > 50000) throw new Error('NVD window exceeds 50,000 records; reduce scope');
+        // A page short of the requested 2,000 before the claimed total is
+        // reached means the API stopped returning records it said were still
+        // available. The checks above only catch totalResults changing mid-run
+        // or the final count missing the total; neither catches a total that is
+        // wrong (too low) from the first page, since the loop and the final
+        // `seen.size !== expectedTotal` check both trust that same number.
+        if (offset + page.vulnerabilities.length < page.totalResults && page.vulnerabilities.length < 2000)
+          throw new Error('NVD page was short of a full page before reaching the declared total');
         expectedTotal = page.totalResults;
         for (const item of page.vulnerabilities) {
           const id = normalizeCveId(item?.cve?.id);
