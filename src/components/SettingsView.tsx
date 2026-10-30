@@ -801,6 +801,9 @@ export function SettingsView() {
                           className={field}
                           value={form.emailRetryMaxDelayMinutes ?? 60}
                           onChange={(event) =>
+                            setForm({ ...form, emailRetryMaxDelayMinutes: Number(event.target.value) })
+                          }
+                          onBlur={(event) =>
                             setForm({
                               ...form,
                               emailRetryMaxDelayMinutes: Math.max(

@@ -673,6 +673,9 @@
 .processing-settings-form .settings-section-heading {
   padding-bottom: 20px;
 }
+.processing-summary {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+}
 .processing-summary strong {
   display: flex;
   align-items: center;
