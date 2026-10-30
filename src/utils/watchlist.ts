@@ -1,5 +1,5 @@
 import type { WatchListItem } from '../types/index.ts';
-import { isProductWildcard, dictionaryEntryMatchesWildcard } from './registrationCpe.ts';
+import { isProductWildcard, dictionaryEntryMatchesWildcard, productWildcardCpe } from './registrationCpe.ts';
 import { buildStrictCpe23 } from '../data/vendorCatalog.ts';
 import { parseCPE23, normalizeCpeForComparison } from './cpeMatcher.ts';
 
@@ -43,11 +43,7 @@ export function registrationAssetsFromCpes(
   for (const raw of cpes) {
     const cpe = raw.trim();
     const parsed = parseCPE23(cpe);
-    if (
-      !parsed.isValid ||
-      ['*', '?', '-'].includes(parsed.vendor) ||
-      ['*', '?', '-'].includes(parsed.product)
-    ) {
+    if (!productWildcardCpe(cpe)) {
       throw new Error('Select a valid product CPE from the NVD dictionary.');
     }
     const key = JSON.stringify([parsed.part, parsed.vendor.toLowerCase(), parsed.product.toLowerCase()]);
@@ -100,17 +96,32 @@ export async function verifyRegistrationCpes(
     if (!match) {
       const parsed = parseCPE23(cpe);
       if (parsed.isValid) {
-        const normalizedProduct = normalizeCpeForComparison(parsed.product);
-        const normalizedVersion = normalizeCpeForComparison(parsed.version);
-        const normalizedPart = normalizeCpeForComparison(parsed.part);
-        match = response.results.find((entry) => {
-          const entryParsed = parseCPE23(entry.cpeName);
+        const fields = [
+          'part',
+          'product',
+          'version',
+          'update',
+          'edition',
+          'language',
+          'swEdition',
+          'targetSw',
+          'targetHw',
+          'other',
+        ] as const;
+        const compatible = response.results.filter((entry) => {
+          const published = parseCPE23(entry.cpeName);
           return (
-            normalizeCpeForComparison(entryParsed.product) === normalizedProduct &&
-            normalizeCpeForComparison(entryParsed.part) === normalizedPart &&
-            normalizeCpeForComparison(entryParsed.version) === normalizedVersion
+            published.isValid &&
+            fields.every(
+              (field) =>
+                normalizeCpeForComparison(published[field]) === normalizeCpeForComparison(parsed[field]),
+            )
           );
         });
+        const unique = new Map(compatible.map((entry) => [normalizeCpeForComparison(entry.cpeName), entry]));
+        // A canonical vendor spelling can be resolved only when the rest of the CPE
+        // is identical and NVD returns a single unambiguous identity.
+        if (unique.size === 1) match = [...unique.values()][0];
       }
     }
     if (!match)
@@ -140,4 +151,33 @@ export function dictionaryCpesForCandidate(candidate: string, dictionaryCpes: st
     );
   });
   return matches.length ? matches : [candidate];
+}
+
+/** Preserve every row's ownership and IDs while saving the identifiers NVD actually verified. */
+export async function verifyRegistrationAssets<T extends Omit<WatchListItem, 'id' | 'createdAt'>>(
+  items: T[],
+  lookup: (cpe: string) => Promise<{ results: Array<{ cpeName: string }> }>,
+): Promise<T[]> {
+  const cache = new Map<string, Promise<{ results: Array<{ cpeName: string }> }>>();
+  const cachedLookup = (cpe: string) => {
+    const key = normalizeCpeForComparison(cpe);
+    if (!cache.has(key)) cache.set(key, lookup(cpe));
+    return cache.get(key)!;
+  };
+  const verifiedItems: T[] = [];
+  for (const item of items) {
+    const cpes = await verifyRegistrationCpes(item.cpes, cachedLookup);
+    const primary = parseCPE23(cpes[0]);
+    const versions = new Set(cpes.map((cpe) => parseCPE23(cpe).version));
+    const architectures = new Set(cpes.map((cpe) => parseCPE23(cpe).targetHw));
+    verifiedItems.push({
+      ...item,
+      cpes,
+      vendor: primary.vendor,
+      product: primary.product,
+      version: versions.size === 1 ? primary.version : '*',
+      targetHw: architectures.size === 1 ? primary.targetHw : '*',
+    });
+  }
+  return verifiedItems;
 }

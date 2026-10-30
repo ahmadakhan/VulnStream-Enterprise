@@ -1,3 +1,5 @@
+import { productWildcardCpe } from '../src/utils/registrationCpe.ts';
+import { watchlistIdentity, watchlistDuplicateErrors } from '../shared/watchlistIdentity.ts';
 import { syncCorrelationAsset } from './correlation/inventory.ts';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -43,6 +45,14 @@ export interface CommandResult {
   success: boolean;
   imported?: number;
   errors?: string[];
+}
+
+function assertSpecificInventoryCpes(cpes: string[]) {
+  if (cpes.some((cpe) => !productWildcardCpe(cpe)))
+    throw new HttpError(
+      400,
+      'CPEs must have a specific part, vendor, and product. Wildcards are permitted for versions and platforms.',
+    );
 }
 
 /**
@@ -119,23 +129,29 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     await appendAudit(db, 'Feeds imported', `${input.length} feeds`, actor, 'FEED', 'INFO', ipAddress);
     return { success: true, imported: input.length, errors: [] };
   } else if (action === 'asset.save') {
+    await db.query(`SELECT pg_advisory_xact_lock(hashtext($1), ${schemaLockKey})`, ['watchlist-identity']);
     const input = assetSchema.parse(data),
       old = await checkExisting('watchlist');
+    assertSpecificInventoryCpes(input.cpes);
+    const duplicates = watchlistDuplicateErrors([{ ...input, id: newId }], await list<any>(db, 'watchlist'));
+    if (duplicates.length) throw new HttpError(409, duplicates.join(' '));
     const asset = { ...input, id: newId, createdAt: old?.createdAt || now };
     await put(db, 'watchlist', newId, asset);
     await syncCorrelationAsset(db, asset);
   } else if (action === 'asset.import') {
+    await db.query(`SELECT pg_advisory_xact_lock(hashtext($1), ${schemaLockKey})`, ['watchlist-identity']);
     const input = z.array(assetSchema).min(1).max(1000).parse(data);
+    input.forEach((item) => assertSpecificInventoryCpes(item.cpes));
     const identity = (item: z.infer<typeof assetSchema>) =>
-      JSON.stringify([
-        item.assetTag,
-        item.vendor.toLowerCase(),
-        item.product.toLowerCase(),
-        item.cpes.map((cpe) => cpe.trim().toLowerCase()).sort(),
-        [...(item.purls || [])].sort(),
-      ]);
-    const existing = new Map((await list<any>(db, 'watchlist')).map((item) => [identity(item), item]));
+      JSON.stringify([item.assetTag, watchlistIdentity(item)]);
+    const inventory = await list<any>(db, 'watchlist');
+    const existing = new Map(inventory.map((item) => [identity(item), item]));
     const unique = new Map(input.map((item) => [identity(item), item]));
+    const duplicates = watchlistDuplicateErrors(
+      [...unique].map(([key, item]) => ({ ...item, id: existing.get(key)?.id })),
+      inventory,
+    );
+    if (duplicates.length) return { success: false, imported: 0, errors: duplicates };
     for (const [key, item] of unique) {
       const old = existing.get(key),
         assetId = old?.id || randomUUID();
@@ -154,24 +170,17 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     );
     return { success: true, imported: unique.size, errors: [] };
   } else if (action === 'watchlist.import') {
+    await db.query(`SELECT pg_advisory_xact_lock(hashtext($1), ${schemaLockKey})`, ['watchlist-identity']);
     if (!Array.isArray(data)) throw new HttpError(400, 'Expected an array of assets');
     // Pre-validate all rows before inserting any, collecting per-row errors with line numbers.
     const validItems: { id: string; [key: string]: unknown }[] = [];
     const rowErrors: string[] = [];
-    const identity = (item: { id: string; [key: string]: unknown } | Record<string, unknown>) => {
-      const asAny = item as Record<string, unknown>;
-      return JSON.stringify([
-        (asAny.vendor || ('any' as string)).toString().toLowerCase(),
-        (asAny.product || ('any' as string)).toString().toLowerCase(),
-        ((asAny.cpes as string[]) || []).map((c) => c.trim().toLowerCase()).sort(),
-        [...((asAny.purls as string[]) || [])].sort(),
-      ]);
-    };
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
       const rowNumber = i + 1;
       try {
-        watchlistImportSchema.element.parse(row);
+        const validated = watchlistImportSchema.element.parse(row);
+        assertSpecificInventoryCpes(validated.cpes);
         validItems.push(row as { id: string; [key: string]: unknown });
       } catch (e: any) {
         rowErrors.push(
@@ -182,37 +191,13 @@ export async function applyCommand(db: Db, config: Config, request: CommandReque
     if (rowErrors.length) {
       return { success: false, imported: 0, errors: rowErrors };
     }
-    // Detect duplicate entries: an incoming item whose vendor + product + CPEs + PURLs
-    // already exist on a different watchlist record (regardless of ID) is rejected.
-    const existing = await list<any>(db, 'watchlist');
-    const existingIdentities = new Map<string, any>();
-    for (const item of existing) {
-      existingIdentities.set(identity(item), item);
-    }
-    const duplicateErrors: string[] = [];
-    const deduped: typeof validItems = [];
-    const seenInBatch = new Set<string>();
-    for (const item of validItems) {
-      const itemIdentity = identity(item);
-      const existingItem = existingIdentities.get(itemIdentity);
-      if (existingItem && existingItem.id !== item.id) {
-        duplicateErrors.push(
-          `Duplicate: "${item.vendor || ''} / ${item.product || ''}" already exists as asset tag "${existingItem.assetTag || existingItem.id}".`,
-        );
-        continue;
-      }
-      if (seenInBatch.has(itemIdentity)) {
-        duplicateErrors.push(`Duplicate within batch: "${item.vendor || ''} / ${item.product || ''}".`);
-        continue;
-      }
-      seenInBatch.add(itemIdentity);
-      deduped.push(item);
-    }
-    if (duplicateErrors.length) {
-      return { success: false, imported: 0, errors: duplicateErrors };
-    }
+    const duplicateErrors = watchlistDuplicateErrors(
+      validItems as unknown as WatchListItem[],
+      await list<any>(db, 'watchlist'),
+    );
+    if (duplicateErrors.length) return { success: false, imported: 0, errors: duplicateErrors };
     let imported = 0;
-    for (const item of deduped) {
+    for (const item of validItems) {
       const old = await getForUpdate<any>(db, 'watchlist', item.id);
       const merged = {
         ...old,

@@ -38,11 +38,13 @@ import {
   editedWatchlistCpe,
   registrationAssetsFromCpes,
   verifyRegistrationCpes,
+  verifyRegistrationAssets,
   dictionaryCpesForCandidate,
 } from '../utils/watchlist';
 import { CveLink } from './CveLink';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import './product-registration.css';
+import { watchlistDuplicateErrors } from '../../shared/watchlistIdentity';
 import {
   withProductWildcards,
   isProductWildcard,
@@ -442,33 +444,8 @@ export const WatchListView: React.FC = () => {
     });
   };
 
-  const itemIdentity = (item: { vendor: string; product: string; cpes: string[]; purls?: string[] }) =>
-    [
-      (item.vendor || 'any').toLowerCase(),
-      (item.product || 'any').toLowerCase(),
-      ...item.cpes.map((c) => c.trim().toLowerCase()).sort(),
-      ...(item.purls || []).map((p) => p.trim().toLowerCase()).sort(),
-    ].join('|');
-
-  const checkDuplicates = (
-    incoming: Array<{ vendor: string; product: string; cpes: string[]; purls?: string[]; id?: string }>,
-  ): string[] => {
-    const errors: string[] = [];
-    const existingMap = new Map<string, WatchListItem>();
-    for (const item of watchlist) {
-      existingMap.set(itemIdentity(item), item);
-    }
-    for (const item of incoming) {
-      const identity = itemIdentity(item);
-      const existing = existingMap.get(identity);
-      if (existing && existing.id !== item.id) {
-        errors.push(
-          `"${item.vendor} / ${item.product}" is already monitored as "${existing.assetTag || existing.id}".`,
-        );
-      }
-    }
-    return errors;
-  };
+  const checkDuplicates = (incoming: Array<Omit<WatchListItem, 'createdAt' | 'id'> & { id?: string }>) =>
+    watchlistDuplicateErrors(incoming, watchlist);
 
   const handleNvdSearch = async () => {
     // A product name alone is enough: the backend also runs a wildcard-vendor
@@ -619,10 +596,15 @@ export const WatchListView: React.FC = () => {
             });
           }
         }
+        const separateProductCpes = new Set(
+          productsToAdd.flatMap((product) => product.cpes).map((entry) => entry.toLowerCase()),
+        );
         const finalCpes = dedupeCpes([
           ...dictionaryCpesForCandidate(cpe, selectedNvdCpes).filter((entry) => !removedAutoCpes.has(entry)),
           ...additionalCpes.filter((c) => !removedAutoCpes.has(c)),
-          ...selectedNvdCpes.filter((c) => !removedAutoCpes.has(c)),
+          ...selectedNvdCpes.filter(
+            (c) => !removedAutoCpes.has(c) && !separateProductCpes.has(c.toLowerCase()),
+          ),
           ...customAddedCpes.filter((c) => !removedAutoCpes.has(c)),
         ]);
         if (finalCpes.length === 0) {
@@ -632,11 +614,6 @@ export const WatchListView: React.FC = () => {
           });
           return;
         }
-        // Resolve every identifier before writing any asset; NVD failures leave inventory unchanged.
-        await verifyRegistrationCpes(
-          [...finalCpes, ...productsToAdd.flatMap((product) => product.cpes)],
-          verifySelectedCpe,
-        );
         const primaryCpe = parseCPE23(finalCpes[0]);
         const updatedItem: WatchListItem = {
           ...editingItem,
@@ -669,7 +646,11 @@ export const WatchListView: React.FC = () => {
             id: crypto.randomUUID(),
             createdAt: new Date().toISOString(),
           }));
-        const newProductDupErrors = checkDuplicates(newProducts);
+        const verifiedItems = await verifyRegistrationAssets(
+          [updatedItem, ...newProducts],
+          verifySelectedCpe,
+        );
+        const newProductDupErrors = checkDuplicates(verifiedItems);
         if (newProductDupErrors.length) {
           setSaveFeedback({
             type: 'error',
@@ -677,7 +658,7 @@ export const WatchListView: React.FC = () => {
           });
           return;
         }
-        const saved = await saveRegisteredProducts([updatedItem, ...newProducts]);
+        const saved = await saveRegisteredProducts(verifiedItems);
         if (!saved.success || saved.errors?.length) {
           setSaveFeedback({
             type: 'error',
@@ -687,8 +668,8 @@ export const WatchListView: React.FC = () => {
         }
         setSaveFeedback({
           type: 'success',
-          message: productsToAdd.length
-            ? `Saved the asset and added ${productsToAdd.length} product(s).`
+          message: newProducts.length
+            ? `Saved the asset and added ${newProducts.length} product(s).`
             : selectedProductIds.length
               ? 'Asset changes saved; the selected catalog product(s) were already attached to this asset.'
               : 'Asset changes saved.',
@@ -780,11 +761,13 @@ export const WatchListView: React.FC = () => {
         return;
       }
       if (validItems.length > 0) {
-        await verifyRegistrationCpes(
-          validItems.flatMap((item) => item.cpes),
-          verifySelectedCpe,
-        );
-        const result = await bulkImportWatchlist(validItems);
+        const verifiedItems = await verifyRegistrationAssets(validItems, verifySelectedCpe);
+        const duplicates = checkDuplicates(verifiedItems);
+        if (duplicates.length) {
+          setBulkFeedback({ imported: 0, errors: duplicates });
+          return;
+        }
+        const result = await bulkImportWatchlist(verifiedItems);
         if (result.errors.length) {
           setBulkFeedback(result);
           return;

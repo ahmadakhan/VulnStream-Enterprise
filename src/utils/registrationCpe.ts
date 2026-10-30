@@ -3,6 +3,22 @@ import { normalizeCpeForComparison, parseCPE23 } from './cpeMatcher.ts';
 
 export type RegistrationCpeSearchResult = NvdCpeSearchResult & { generatedWildcard?: boolean };
 
+function hasUnescapedWildcard(value: string): boolean {
+  let escaped = false;
+  for (const character of value) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (character === '*' || character === '?') return true;
+  }
+  return false;
+}
+
 /** A product-scoped pattern keeps the dictionary identity and covers every version/platform. */
 export function productWildcardCpe(name: string): string | null {
   const parsed = parseCPE23(name);
@@ -10,15 +26,27 @@ export function productWildcardCpe(name: string): string | null {
     !parsed.isValid ||
     !['a', 'o', 'h'].includes(parsed.part) ||
     ['*', '?', '-'].includes(parsed.vendor) ||
-    ['*', '?', '-'].includes(parsed.product)
+    ['*', '?', '-'].includes(parsed.product) ||
+    hasUnescapedWildcard(parsed.vendor) ||
+    hasUnescapedWildcard(parsed.product)
   )
     return null;
   return `cpe:2.3:${[parsed.part, parsed.vendor, parsed.product, ...Array(8).fill('*')].join(':')}`;
 }
 
 export function isProductWildcard(name: string): boolean {
-  const wildcard = productWildcardCpe(name);
-  return wildcard !== null && normalizeCpeForComparison(wildcard) === normalizeCpeForComparison(name);
+  if (!productWildcardCpe(name)) return false;
+  const parsed = parseCPE23(name);
+  return [
+    parsed.version,
+    parsed.update,
+    parsed.edition,
+    parsed.language,
+    parsed.swEdition,
+    parsed.targetSw,
+    parsed.targetHw,
+    parsed.other,
+  ].every((component) => component === '*');
 }
 
 export function dictionaryEntryMatchesWildcard(pattern: string, dictionaryName: string): boolean {
