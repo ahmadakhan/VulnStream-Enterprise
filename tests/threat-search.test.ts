@@ -426,6 +426,121 @@ test('searchThreatIntelligence returns startDate in the response', async () => {
   assert.equal(result.startDate, '2024-01-01');
 });
 
+test('searchThreatIntelligence skips CVEs with invalid CPEs instead of aborting the batch', async () => {
+  const cveWithBadCpe = {
+    id: 'CVE-2024-9999',
+    published: '2024-01-01T00:00:00.000',
+    lastModified: '2024-01-02T00:00:00.000',
+    vulnStatus: 'Analyzed',
+    descriptions: [{ lang: 'en', value: 'A vulnerability with invalid CPE data.' }],
+    configurations: [
+      {
+        nodes: [
+          {
+            cpeMatch: [
+              { criteria: 'INVALID_CPE_STRING', vulnerable: true },
+              {
+                criteria: 'cpe:2.3:a:apache:http_server:2.4.58:*:*:*:*:*:*:*',
+                vulnerable: true,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    metrics: {
+      cvssMetricV31: [
+        {
+          cvssData: {
+            version: '3.1',
+            baseScore: 7.5,
+            vectorString: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
+            baseSeverity: 'HIGH',
+          },
+        },
+      ],
+    },
+    weaknesses: [],
+    references: [],
+  };
+
+  const requester = createRequester({
+    status: 200,
+    body: JSON.stringify({
+      totalResults: 1,
+      vulnerabilities: [{ cve: cveWithBadCpe }],
+    }),
+  });
+
+  const db = createMockDb(false);
+
+  const result = await searchThreatIntelligence(requester, db, config, {
+    vendor: 'apache',
+    product: 'http_server',
+    limit: 50,
+  });
+
+  assert.equal(result.hits.length, 1, 'should return the valid CVE despite the invalid CPE');
+  assert.equal(result.hits[0].cve.cveId, 'CVE-2024-9999');
+  assert.equal(
+    result.hits[0].matchingCpes.includes('cpe:2.3:a:apache:http_server:2.4.58:*:*:*:*:*:*:*'),
+    true,
+    'should match the valid CPE, not the invalid one',
+  );
+});
+
+test('searchThreatIntelligence returns empty results when all CVEs have only invalid CPEs', async () => {
+  const cveAllBadCpes = {
+    id: 'CVE-2024-ALLBADCPE',
+    published: '2024-01-01T00:00:00.000',
+    lastModified: '2024-01-02T00:00:00.000',
+    vulnStatus: 'Analyzed',
+    descriptions: [{ lang: 'en', value: 'A vulnerability with only invalid CPE data.' }],
+    configurations: [
+      {
+        nodes: [
+          {
+            cpeMatch: [{ criteria: 'INVALID_CPE_STRING', vulnerable: true }],
+          },
+        ],
+      },
+    ],
+    metrics: {
+      cvssMetricV31: [
+        {
+          cvssData: {
+            version: '3.1',
+            baseScore: 7.5,
+            vectorString: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
+            baseSeverity: 'HIGH',
+          },
+        },
+      ],
+    },
+    weaknesses: [],
+    references: [],
+  };
+
+  const requester = createRequester({
+    status: 200,
+    body: JSON.stringify({
+      totalResults: 1,
+      vulnerabilities: [{ cve: cveAllBadCpes }],
+    }),
+  });
+
+  const db = createMockDb(false);
+
+  const result = await searchThreatIntelligence(requester, db, config, {
+    vendor: 'apache',
+    product: 'http_server',
+    limit: 50,
+  });
+
+  assert.equal(result.hits.length, 0, 'should return no hits when CPEs are invalid');
+  assert.equal(result.totalResults, 0);
+});
+
 test('generateCpePrefixes produces valid CPE 2.3 match strings for all three parts', () => {
   const prefixes = generateCpePrefixes('microsoft', 'windows_10');
   assert.equal(prefixes.length, 3);
