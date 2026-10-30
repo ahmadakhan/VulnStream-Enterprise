@@ -220,6 +220,8 @@ export async function runRetention(
   pool: pg.Pool,
   actor: string,
   ipAddress = '',
+  /** Cancels the sweep inside PostgreSQL instead of only abandoning it. */
+  signal?: AbortSignal,
 ): Promise<RetentionRunResult | null> {
   return transaction(
     pool,
@@ -301,6 +303,6 @@ export async function runRetention(
     undefined,
     // Serialize destructive cleanup across replicas; ordinary mutations are no
     // longer blocked behind a multi-second retention sweep.
-    { locks: ['retention-run'] },
+    { locks: ['retention-run'], signal },
   );
 }

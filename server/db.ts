@@ -80,7 +80,13 @@ async function indexMigrationFiles(): Promise<{ name: string; sql: string }[]> {
   );
 }
 
-/** Strip comments and split on semicolons outside string literals. */
+/**
+ * Strip comments and split on semicolons outside string literals.
+ *
+ * Comments must be removed while scanning, not afterwards: a semicolon inside a
+ * `--` comment (common in prose) otherwise cut the statement in half and the
+ * build failed with `syntax error at or near ...` from a fragment of a comment.
+ */
 export function indexStatements(sql: string): string[] {
   const statements: string[] = [];
   let current = '';
@@ -324,6 +330,62 @@ export interface TransactionOptions {
    * installation; scoped locks let independent domains proceed concurrently.
    */
   locks?: string[];
+  /**
+   * Cancels the work at the database rather than only abandoning the promise.
+   *
+   * A caller that stops waiting on a hung query still holds its pool connection
+   * until the statement finishes, so a wedged statement can pin a connection
+   * indefinitely and starve the pool of every other job. Aborting requests a
+   * PostgreSQL cancel (and drops the connection as a backstop), so the timeout
+   * releases the resource it exists to protect.
+   */
+  signal?: AbortSignal;
+}
+
+/**
+ * Requests cancellation on a live backend.
+ *
+ * `pg` exposes no cancel API, so the cancel request is sent on the *same*
+ * connection. If the connection is stuck that request cannot be delivered and
+ * the backend keeps running, so the connection is destroyed once the socket no
+ * longer responds. Destroying it returns it to the pool as broken and the
+ * server terminates the orphaned backend when it notices the dropped socket.
+ */
+const CANCEL_REQUEST_TIMEOUT_MS = 2000;
+/**
+ * Cancels the running statement on a live backend.
+ *
+ * The cancel request must not share the connection whose statement is stuck: a
+ * `pg` client serialises queries per connection, so `SELECT pg_cancel_backend()`
+ * issued on that connection is queued behind the very statement it is meant to
+ * cancel and is only sent once the statement finishes. It is therefore sent from
+ * a second connection, which is available because the stuck one is still held.
+ */
+async function cancelBackend(pool: pg.Pool, db: PoolClient): Promise<void> {
+  const pid = (db as unknown as { processID?: number }).processID;
+  if (!pid) return;
+  // `destroy` exists at runtime but is absent from the public typings.
+  const destroy = () => {
+    const client = db as unknown as { destroy?: () => void };
+    if (typeof client.destroy === 'function') client.destroy();
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // A reachable database answers immediately. An unreachable one never
+    // answers, so race the cancel against a short deadline: a request that
+    // cannot be delivered is exactly the case where the socket must be dropped.
+    await Promise.race([
+      pool.query(`SELECT pg_cancel_backend(${Number(pid)})`), // integer pid from the driver
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('CANCEL_TIMEOUT')), CANCEL_REQUEST_TIMEOUT_MS);
+        timer.unref?.();
+      }),
+    ]);
+  } catch {
+    destroy();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function transaction<T>(
@@ -340,6 +402,17 @@ export async function transaction<T>(
     failed = true;
   };
   db.on('error', onError);
+  const onAbort = () => {
+    connectionError = new Error('Transaction cancelled: operation exceeded its deadline');
+    failed = true;
+    void cancelBackend(pool, db);
+  };
+  if (options.signal?.aborted) {
+    db.removeListener('error', onError);
+    if (!client) db.release(true);
+    throw new Error('Transaction cancelled: operation exceeded its deadline');
+  }
+  options.signal?.addEventListener('abort', onAbort, { once: true });
   try {
     await db.query('BEGIN');
     // Named, transaction-scoped locks replace the former global mutation lock.
@@ -363,6 +436,7 @@ export async function transaction<T>(
     // where a future caller would otherwise inherit an unusable connection.
     if (!client) db.release(failed);
     db.removeListener('error', onError);
+    options.signal?.removeEventListener('abort', onAbort);
   }
 }
 export async function put(db: Db, kind: string, id: string, data: unknown) {

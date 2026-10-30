@@ -158,7 +158,12 @@ const report = (event: string) => (error: unknown) => {
   });
   console.error(JSON.stringify({ level: 'error', event, ...detail }));
 };
-/** Longer than any guarded operation is permitted to run before it is abandoned. */
+/**
+ * Backstop for a guarded operation that never settles despite its own deadline.
+ * Retention and the digest renderer have explicit cancellation; this only covers
+ * the case where cancellation itself cannot complete, so it is deliberately
+ * longer than any legitimate run and is a last resort, not the deadline.
+ */
 const STUCK_PROMISE_MS = 15 * 60_000;
 let digestStartedAt = 0;
 const tick = () => {
@@ -286,30 +291,30 @@ const retentionTick = () => {
     // Honor nextRetryAt for failed runs to enable immediate retry.
     if (typeof data.nextRetryAt === 'string' && Date.parse(data.nextRetryAt) > now) return;
     if (!(await claimRetention(policy))) return;
-    // Bounded independently of the connection's statement timeout. Without this
-    // a single hung `records` query kept the claim renewal alive forever: the
-    // claim never expired, so no replica (including this one) could retry
-    // retention again until the process was restarted.
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`Retention run exceeded ${RETENTION_RUN_LIMIT_MS}ms; abandoned for a fresh attempt`)),
-        RETENTION_RUN_LIMIT_MS,
-      );
-      timer.unref();
-    });
+    // Bounded independently of the connection's statement timeout, and the
+    // cancellation is delivered to PostgreSQL rather than only abandoning the
+    // promise: an abandoned transaction keeps its pool connection until the
+    // statement finishes, and a wedged one never does. The claim is released on
+    // every failure so another replica (or the next tick here) can retry.
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () =>
+        controller.abort(
+          new Error(`Retention run exceeded ${RETENTION_RUN_LIMIT_MS}ms; cancellation requested`),
+        ),
+      RETENTION_RUN_LIMIT_MS,
+    );
+    timer.unref();
     verboseLog('retention.start');
     try {
-      await Promise.race([runRetention(pool, 'system-retention'), timeout]);
+      await runRetention(pool, 'system-retention', '', controller.signal);
       await releaseRetention(true);
       verboseLog('retention.completed');
     } catch (error) {
       await releaseRetention(false).catch(() => {});
       throw error;
     } finally {
-      // A pending timer would fire during a clean shutdown and reject a promise
-      // nobody is awaiting.
-      if (timer) clearTimeout(timer);
+      clearTimeout(timer);
     }
   })()
     .catch(report('retention'))
