@@ -213,7 +213,14 @@ test(
     };
     const reset = async () => {
       await pool.query('DELETE FROM records; DELETE FROM outbox');
-      await put(pool, 'settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchEnabled: false });
+      await put(pool, 'settings', 'main', {
+        ...DEFAULT_SETTINGS,
+        autoDispatchEnabled: false,
+        // Retries must be permitted for a retry (and therefore its confirmation)
+        // to be reachable at all.
+        emailRetryEnabled: true,
+        emailRetryMaxAttempts: 5,
+      });
       await put(pool, 'watchlist', asset.id, asset);
     };
     const seedFinding = async (id: string) => {
@@ -356,6 +363,17 @@ test(
           'audit-fixes-unconfirmed',
         );
         assert.ok(jobId);
+        // This is the HTTP-provider case: the provider returned an id, so an
+        // earlier attempt may have been accepted. Configure a queryable provider
+        // (the lookup itself is exercised in tests/delivery-confirmation.test.ts).
+        await put(pool, 'emailConfig', 'main', {
+          provider: 'SENDGRID',
+          apiKey: 'cipher',
+          fromEmail: 'security@example.invalid',
+          fromName: 'Security',
+          replyTo: '',
+          unsubscribeUrl: '',
+        });
         // Make it look like a retry of an earlier attempt.
         await pool.query('UPDATE outbox SET attempts=2 WHERE id=$1', [jobId]);
         let sent = 0;
@@ -364,9 +382,13 @@ test(
           return 'second-copy';
         });
         assert.equal(sent, 0, 'a message that may already have been delivered is not sent again');
+        // The outcome is unresolved rather than disproven, so the job stays
+        // retryable and is re-confirmed on the next attempt instead of being
+        // failed outright. (A provider verdict is covered in
+        // tests/delivery-confirmation.test.ts.)
         assert.equal(
           (await pool.query('SELECT status FROM outbox WHERE id=$1', [jobId])).rows[0].status,
-          'FAILED',
+          'QUEUED',
         );
       });
 

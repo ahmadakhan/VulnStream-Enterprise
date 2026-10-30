@@ -1,18 +1,20 @@
 -- Recent-findings window used by the daily digest (server/dailyDigest.ts).
 --
--- The digest selects `kind='findings' AND created_at > now() - interval '24 hours'`.
--- Without an index that is a sequential scan of the whole records table, so the
--- cost of one daily email grows with the entire finding history.
+-- The digest selects findings whose created_at is inside the last 24 hours.
+-- `records_created_order (kind, created_at DESC, id)` is ordered the wrong way
+-- for this predicate: with created_at DESC nothing bounds the start of the scan,
+-- so the planner narrows only by kind and then filters every finding by
+-- timestamp. A partial index in ascending order lets the window be read as a
+-- bounded range instead.
 --
--- A plain composite B-tree (kind, created_at) does not help here: `created_at`
--- is not the leading column for a range predicate, and an index on the
--- timestamp alone would be no more selective than the filter. The time window
--- is compared directly against the row's system column, so the index is built
--- on that expression and restricted to the one kind it serves.
+-- Partial and CONCURRENTLY: `records` is a live table, the index only covers the
+-- findings kind, and the build must not hold a table lock that blocks ingestion
+-- or delivery. IF NOT EXISTS keeps this idempotent for databases that already
+-- have the index.
 --
--- Partial and CONCURRENTLY: records is a live table, the index only covers the
--- `findings` rows (one kind of many), and the build must not hold a table lock
--- that blocks ingestion or delivery.
+-- Note for editors: the migration splitter splits on semicolons BEFORE removing
+-- comments, so a semicolon in this prose would cut the statement in half. Do not
+-- add one.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS records_findings_created_at
   ON records (created_at)
   WHERE kind = 'findings';

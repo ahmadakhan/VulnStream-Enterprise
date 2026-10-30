@@ -409,11 +409,11 @@ async function confirmPriorDelivery(
   db: Db,
   job: Job,
   config: Config,
+  request: Requester,
 ): Promise<DeliveryConfirmation> {
   if (job.channel !== 'email') return 'not-delivered';
   const log = await get<EmailDeliveryLog>(db, 'emailLogs', job.id);
   if (log?.sentAt || log?.status === 'ACCEPTED') return 'delivered';
-  if (job.payload.unconfirmedProviderId) return 'unknown';
   // The recorded cause of the failure is decisive. A rejected HTTP response
   // (4xx/5xx) or a refused SMTP session proves the provider did not accept the
   // message, so retrying cannot duplicate it. Confirmation is only needed when
@@ -439,8 +439,7 @@ async function confirmPriorDelivery(
   if (!messageId) return 'unknown';
   const token = decrypt(saved.apiKey, config.ENCRYPTION_KEY, `email-provider:${saved.provider}`);
   if (!token) return 'unknown';
-  const state = await lookupProviderDelivery(saved, token, messageId, createRequester(config));
-  return state;
+  return lookupProviderDelivery(saved, token, messageId, request);
 }
 
 export function createMailSender(
@@ -1162,7 +1161,7 @@ export async function deliverNext(
       // is the only way to prevent a duplicate alert. The check never blocks a
       // first attempt or an operator-approved send.
       if (job.attempts > 1 && !job.review_approved && config.MAIL_CONFIRM_BEFORE_SEND === 'true') {
-        const confirmation = await confirmPriorDelivery(pool, job, config);
+        const confirmation = await confirmPriorDelivery(pool, job, config, request);
         if (confirmation === 'delivered') {
           providerId = 'CONFIRMED_PRIOR_DELIVERY';
           throw Object.assign(new Error('A previous attempt was already accepted by the transport'), {
