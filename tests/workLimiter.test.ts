@@ -1,4 +1,9 @@
-import { WorkLimiter, WorkCapacityError } from '../server/workLimiter.ts';
+import {
+  WorkLimiter,
+  WorkCapacityError,
+  WorkLimiterAbortedError,
+  WorkLimiterDeadlineError,
+} from '../server/workLimiter.ts';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -55,4 +60,35 @@ test('WorkLimiter releases slots to queued callers in FIFO order', async () => {
   assert.equal(a.status, 'fulfilled');
   assert.equal(b.status, 'fulfilled');
   assert.deepEqual(order, ['a', 'b']);
+});
+
+test('WorkLimiter rejects work that exceeds deadlineMs and frees the slot for the next caller', async () => {
+  const limiter = new WorkLimiter(1, 4, 5000);
+  let completed = 0;
+  const [a, b] = await Promise.allSettled([
+    limiter.run(
+      () => new Promise<void>((resolve) => { setTimeout(() => { completed++; resolve(); }, 2000); }),
+      { deadlineMs: 30 },
+    ),
+    limiter.run(() => { completed++; return Promise.resolve(); }),
+  ]);
+  assert.equal(a.status, 'rejected');
+  assert.ok(a.reason instanceof WorkLimiterDeadlineError, 'should reject with a deadline error');
+  assert.equal(b.status, 'fulfilled');
+  assert.equal(completed, 1, 'the deadline-rejected work must not complete; the queued work must run');
+});
+
+test('WorkLimiter rejects immediately when the signal is already aborted and does not consume a slot', async () => {
+  const limiter = new WorkLimiter(1, 4, 5000);
+  const controller = new AbortController();
+  controller.abort();
+  let ran = false;
+  await assert.rejects(
+    () => limiter.run(() => { ran = true; return Promise.resolve(); }, { signal: controller.signal }),
+    (err) => err instanceof WorkLimiterAbortedError,
+  );
+  assert.equal(ran, false);
+  // No slot was consumed: a subsequent caller admits immediately.
+  const ok = await limiter.run(() => Promise.resolve('admitted'));
+  assert.equal(ok, 'admitted');
 });

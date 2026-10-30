@@ -2,7 +2,7 @@ import type { NormalizedCVE, ThreatFeed } from '../src/types/index.ts';
 import type { Requester } from './network';
 import { type IngestContext, type IngestResult } from './ingestion';
 import { cveSchema } from './validation';
-import { normalizeCveId } from '../src/utils/deduplicator';
+import { normalizeCveId, stableJson } from '../src/utils/deduplicator';
 import { parseCPE23 } from '../src/utils/cpeMatcher.ts';
 import { paceConcurrent } from './concurrency';
 import { z } from 'zod';
@@ -93,12 +93,12 @@ export async function ingestMitre(feed: ThreatFeed, scopeHours: number, request:
       const knownTimes = [state.knownCveModifiedAt?.get(id), state.knownWithdrawalAt?.get(id), revisions[id]]
         .map((value) => Date.parse(value || '')).filter(Number.isFinite);
       const known = knownTimes.length ? Math.max(...knownTimes) : NaN;
-      if (updated >= start.getTime() && updated <= end.getTime() && (!Number.isFinite(known) || updated > known)) ids.add(id);
+      if (updated >= start.getTime() && updated <= end.getTime() && (!Number.isFinite(known) || updated > known || (Number.isFinite(known) && updated === known && Boolean(state.knownCveContent?.has(id))))) ids.add(id);
     }
   }
   if (ids.size > 5000) throw new Error('MITRE window exceeds 5,000 unique CVEs; reduce ingestion scope');
   const sorted = [...ids].sort();
-  type DetailResult = { cve: NormalizedCVE | null; withdrawnId: string; modifiedDate: string };
+  type DetailResult = { cve: NormalizedCVE | null; withdrawnId: string; modifiedDate: string; unchanged: boolean };
   // One request per changed CVE is unavoidable (the delta log has no bulk detail
   // endpoint), but requests no longer need to be fully serialized: pace dispatch
   // at the configured rate while letting several responses be in flight at once,
@@ -115,11 +115,25 @@ export async function ingestMitre(feed: ThreatFeed, scopeHours: number, request:
       const url = `https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/${year}/${bucket}/${id}.json`;
       const record = await readJson(url, 4 * 1024 * 1024);
       if (normalizeCveId(record?.cveMetadata?.cveId) !== id) throw new Error('MITRE response did not match requested CVE');
-      return { cve: normalizeMitre(record, feed.id), withdrawnId: id, modifiedDate: timestamp(record.cveMetadata.dateUpdated || record.cveMetadata.datePublished) };
+      const cve = normalizeMitre(record, feed.id);
+      // A timestamp-equal revision may still carry a silent content correction
+      // (severity, remediation, CPE set) without advancing dateUpdated. When a
+      // cached copy exists, compare the normalised record and mark identical
+      // ones unchanged so the finding is neither re-emitted nor treated as a
+      // withdrawal.
+      const cached = state.knownCveContent?.get(id);
+      const unchanged = Boolean(cached && cve && stableJson(cve) === stableJson(cached));
+      return { cve, withdrawnId: id, modifiedDate: timestamp(record.cveMetadata.dateUpdated || record.cveMetadata.datePublished), unchanged };
     },
   );
   const cves: NormalizedCVE[] = [], withdrawals: NonNullable<IngestResult['withdrawals']> = [];
   for (const result of fetched) {
+    if (result.unchanged) {
+      // Re-fetched only to confirm content stability; refresh its revision
+      // marker without re-emitting or withdrawing the record.
+      revisions[result.withdrawnId] = result.modifiedDate;
+      continue;
+    }
     if (result.cve) cves.push(result.cve);
     else withdrawals.push({ cveId: result.withdrawnId, modifiedDate: result.modifiedDate });
     revisions[result.withdrawnId] = result.modifiedDate;

@@ -363,12 +363,26 @@ const CANCEL_REQUEST_TIMEOUT_MS = 2000;
  */
 async function cancelBackend(pool: pg.Pool, db: PoolClient): Promise<void> {
   const pid = (db as unknown as { processID?: number }).processID;
-  if (!pid) return;
   // `destroy` exists at runtime but is absent from the public typings.
   const destroy = () => {
     const client = db as unknown as { destroy?: () => void };
     if (typeof client.destroy === 'function') client.destroy();
   };
+  if (!pid) {
+    // No backend pid is visible yet (the connection has not been checked out or
+    // the driver did not populate `processID`), so a cancel request cannot be
+    // sent. Deliver the destroy-only backstop so the connection is not returned
+    // to the pool in a half-open state, and make the unsent cancel observable.
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        event: 'cancelBackend.no_pid',
+        reason: 'pg processID unavailable; delivering destroy-only backstop',
+      }),
+    );
+    destroy();
+    return;
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     // A reachable database answers immediately. An unreachable one never
@@ -382,6 +396,17 @@ async function cancelBackend(pool: pg.Pool, db: PoolClient): Promise<void> {
       }),
     ]);
   } catch {
+    // The cancel could not be delivered (timeout or transport failure): drop
+    // the socket so the pool surfaces the broken connection and PostgreSQL
+    // terminates the orphaned backend when it notices the dropped socket.
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        event: 'cancelBackend.timeout',
+        pid,
+        reason: 'cancel request not delivered within deadline; destroying connection',
+      }),
+    );
     destroy();
   } finally {
     if (timer) clearTimeout(timer);

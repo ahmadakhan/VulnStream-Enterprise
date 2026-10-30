@@ -99,3 +99,66 @@ test('MITRE fails closed on invalid JSON, HTTP failures, upstream errors and ove
   const delta = [{ fetchTime: date, new: Array.from({ length: 5001 }, (_, index) => ({ cveId: `CVE-2026-${10000 + index}`, dateUpdated: date })), updated: [] }];
   await assert.rejects(ingestFeed(source, 24, async () => response(delta), config, sleep), /5,000/);
 });
+test('MITRE does not re-emit a CVE whose timestamp and content are unchanged', async () => {
+  const date = new Date(Date.now() - 1000).toISOString();
+  const baseline = await ingestFeed(
+    source,
+    24,
+    async (url) =>
+      response(url === MITRE_DELTA_URL ? mitreDelta('CVE-2026-98001', date) : mitreRecord('CVE-2026-98001', date)),
+    config,
+    sleep,
+  );
+  assert.equal(baseline.cves.length, 1);
+  const cached = baseline.cves[0];
+  const calls: string[] = [];
+  const second = await ingestFeed(
+    source,
+    24,
+    async (url) => {
+      calls.push(url);
+      return response(url === MITRE_DELTA_URL ? mitreDelta('CVE-2026-98001', date) : mitreRecord('CVE-2026-98001', date));
+    },
+    config,
+    sleep,
+    [],
+    undefined,
+    { knownCveModifiedAt: new Map([['CVE-2026-98001', date]]), knownCveContent: new Map([['CVE-2026-98001', cached]]) },
+  );
+  assert.equal(second.cves.length, 0, 'unchanged content at an unchanged timestamp must not be re-ingested');
+  assert.ok(
+    calls.includes('https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/2026/98xxx/CVE-2026-98001.json'),
+    'content comparison still fetches the detail to diff against the cache',
+  );
+});
+test('MITRE re-ingests a CVE whose timestamp did not advance but whose content changed', async () => {
+  const date = new Date(Date.now() - 1000).toISOString();
+  const baseline = await ingestFeed(
+    source,
+    24,
+    async (url) =>
+      response(url === MITRE_DELTA_URL ? mitreDelta('CVE-2026-98001', date) : mitreRecord('CVE-2026-98001', date)),
+    config,
+    sleep,
+  );
+  assert.equal(baseline.cves.length, 1);
+  const cached = baseline.cves[0];
+  // Same dateUpdated (timestamp does not advance), but the description changed.
+  const corrected = mitreRecord('CVE-2026-98001', date);
+  corrected.containers.cna.descriptions = [
+    { lang: 'en', value: 'corrected remediation without a timestamp advance' },
+  ];
+  const second = await ingestFeed(
+    source,
+    24,
+    async (url) =>
+      response(url === MITRE_DELTA_URL ? mitreDelta('CVE-2026-98001', date) : corrected),
+    config,
+    sleep,
+    [],
+    undefined,
+    { knownCveModifiedAt: new Map([['CVE-2026-98001', date]]), knownCveContent: new Map([['CVE-2026-98001', cached]]) },
+  );
+  assert.equal(second.cves.length, 1, 'a content correction without a timestamp advance must be re-ingested');
+  assert.equal(second.count, 1);
+});

@@ -865,7 +865,9 @@ export function matchesWatchlistItem(
               'targetHw',
               'other',
             ] as const
-          ).some((field) => hasUnescapedCpeWildcard(asset[field]));
+          ).some(
+            (field) => hasUnescapedCpeWildcard(asset[field]) || hasUnescapedCpeWildcard(vuln[field]),
+          );
         const requiresReview =
           rangeNeedsReview || contextNeedsReview || genericIdentity || Boolean(matchRes.unverifiedVersion);
         retain({

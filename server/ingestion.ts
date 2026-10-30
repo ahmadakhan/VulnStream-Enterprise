@@ -365,6 +365,15 @@ export async function ingestFeed(
         if (!page.vulnerabilities.length) throw new Error('NVD pagination stopped before completion');
         await sleep(nvdInterval);
       }
+      // Invariant: every vulnerability in the page set was added to `seen` and
+      // duplicates already threw above, so the number of unique records fetched
+      // must equal the provider-asserted total. A shortfall means NVD under-
+      // reported its window; advancing the cursor past silently-dropped records
+      // would lose intelligence until the next re-baseline, so fail instead.
+      if (expectedTotal !== undefined && seen.size !== expectedTotal)
+        throw new Error(
+          `NVD totalResults mismatch: fetched ${seen.size} unique record${seen.size === 1 ? '' : 's'} of ${expectedTotal}`,
+        );
       // Advance the context cursor for the next catch-up window.
       ctx.cursor = end.toISOString();
       hasMore = windowHasMore;
@@ -542,12 +551,23 @@ export async function ingestFeed(
       async (id) => {
         const cachedModified = Date.parse(context.knownCveModifiedAt?.get(id) || '');
         const listedModified = Date.parse(records.get(id)?.updated_at || '');
-        if (Number.isFinite(cachedModified) && Number.isFinite(listedModified) && cachedModified >= listedModified) return null;
+        // A publisher can correct a score, CPE set or remediation without
+        // advancing `updated_at`; the listing filter above drops only records
+        // whose timestamp moved, so a non-newer timestamp here is not by itself
+        // proof the content is unchanged. When a cached copy exists, re-fetch and
+        // compare the normalised record (mirroring the NVD path) so a silent
+        // correction is surfaced instead of being dropped indefinitely.
+        let cached: NormalizedCVE | undefined;
+        if (Number.isFinite(cachedModified) && Number.isFinite(listedModified) && cachedModified >= listedModified) {
+          cached = context.knownCveContent?.get(id);
+          if (!cached) return null;
+        }
         const detailUrl = new URL(`${listPath}/${encodeURIComponent(id)}`, listUrl.origin);
         detailUrl.searchParams.set('include', 'nvd_cpe_configurations');
         const { data } = await json(detailUrl.href, false, { timeoutMs: 60000, socketTimeoutMs: 30000, maxResponseBytes: 4 * 1024 * 1024 }, true);
         if (!data || normalizeCveId(data.cve_id) !== id) throw new Error('OpenCVE detail response did not match requested CVE');
         const cve = normalizeOpenCve(data, feed.id);
+        if (cached && stableJson(cve) === stableJson(cached)) return null;
         revisions[id] = cve.modifiedDate;
         return cve;
       },

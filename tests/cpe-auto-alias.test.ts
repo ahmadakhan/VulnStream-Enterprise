@@ -231,8 +231,26 @@ test('fallback cannot override a structured CPE version exclusion', () => {
       [cpe('nvd_vendor', 'nvd_widget', '*')],
       'asset_vendor asset_widget security advisory',
       '',
-      { versionEndExcluding: '2.0' },
-    ).matched,
-    false,
+       { versionEndExcluding: '2.0' },
+     ).matched,
+     false,
+   );
+});
+test('a vuln-side partial wildcard version is review-gated even when it intersects the asset', () => {
+  // The vulnerability CPE asserts a `1.*` family while the inventory proves a
+  // concrete `1.5`; matchComponent accepts the intersection, but a partial
+  // wildcard on the vuln side is an unverified release assertion and must not
+  // auto-dispatch above the review threshold.
+  const matched = matchesWatchlistItem(
+    [cpe('acme', 'widget', '1.5')],
+    'acme',
+    'widget',
+    [cpe('acme', 'widget', '1.*')],
+    '',
+    '',
   );
+  assert.equal(matched.matched, true);
+  assert.equal(matched.method, 'STRICT_CPE');
+  assert.equal(matched.confidence, 70);
+  assert.equal(matched.applicabilityRequiresReview, true);
 });

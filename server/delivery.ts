@@ -257,6 +257,12 @@ export const findingRevision = (finding: Finding) =>
         cveId: finding.cveId,
         assetId: finding.matchedAssetId,
         assetName: finding.matchedAssetName,
+        // Include the matched asset vendor/product so a cosmetic identity
+        // label change (e.g. an alias thesaurus rename) re-renders a digest
+        // summary instead of silently shipping stale labels. Pure enrichment
+        // fields remain excluded to avoid churn on feed refreshes.
+        assetVendor: finding.matchedAssetVendor,
+        assetProduct: finding.matchedAssetProduct,
       }),
     )
     .digest('hex');
@@ -1440,6 +1446,12 @@ export async function deliverNext(
         await put(db, 'emailLogs', job.id, {
           ...log,
           provider: emailProvider || log.provider,
+          // Persist the transport-assigned message id so a later retry can ask
+          // the provider whether the prior attempt was accepted (see
+          // confirmPriorDelivery). Without this the lookup is dead code and HTTP
+          // providers with non-status transport failures stay `unknown` until
+          // the retry budget is spent.
+          providerId: providerId || undefined,
           status,
           attemptCount: job.attempts,
           errorMessage: routeToReview ? undefined : error || undefined,

@@ -176,6 +176,13 @@ export const cveSchema = z.object({
   description: z.string().max(30000),
   publishedDate: z.iso.datetime({ offset: true }),
   modifiedDate: z.iso.datetime({ offset: true }),
+  // CVSS payloads are persisted verbatim. The base `score` is the source of
+  // truth for severity and is range-validated (fail-closed: a non-finite or
+  // out-of-range score aborts the source run); vector strings are intentionally
+  // NOT structurally validated at ingest, because NVD/MITRE vectors can be
+  // partial or truncated and rejecting them would discard otherwise matching
+  // intelligence. `cvssVectorIsValid` (server/cvss.ts) is an advisory validator
+  // retained for tooling and tests; it is deliberately not a schema gate.
   cvss: z.object({
     version: z.enum(['3.0', '3.1', '4.0', '2.0', 'UNKNOWN']),
     score: z.number().min(0).max(10),
