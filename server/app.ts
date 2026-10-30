@@ -49,8 +49,9 @@ import { checkPassword, passwordHash, decrypt, secureEqual, tokenHash } from './
 import { createRequester, resolvePublic } from './network';
 import type { Requester, ResponseData } from './network';
 import { queueRun, stopRun, renderAdvisory } from './pipeline';
+import { formatAdvisoryId } from '../src/utils/executionName';
 import { recoveryAt } from './feedRecovery';
-import { advisoryRevision, enqueue, queueAdvisory } from './delivery';
+import { advisoryRevision, enqueue, queueAdvisory, queueBulkNotificationAdvisory } from './delivery';
 import { createHash } from 'node:crypto';
 import { stableJson } from '../src/utils/deduplicator.ts';
 import { advisoryEmail } from './advisoryEmail';
@@ -81,6 +82,7 @@ import type {
   Advisory,
   TemplateCustomization,
   EmailConfiguration,
+  EmailRecipient,
   NormalizedCVE,
   AliasEntry,
   WatchListItem,
@@ -89,6 +91,7 @@ import type {
   ThreatAnalytics,
   CpeMatchSimulation,
   ReviewEdits,
+  Severity,
 } from '../src/types/index.ts';
 import {
   DEFAULT_DAILY_DIGEST_CUSTOMIZATION,
@@ -2041,6 +2044,84 @@ export function createApp(
           db,
           'Advisory resend queued',
           `${advisory.id}: ${data.reason}`,
+          req.operator!.username,
+          'EMAIL',
+        );
+      });
+      res.status(202).json({ success: true });
+    }),
+  );
+  app.post(
+    '/api/send-bulk-notification',
+    requireRole('ADMIN', 'OPERATOR'),
+    asyncRoute(async (req, res) => {
+      const data = z
+        .object({
+          findingIds: z.array(z.string()).min(1),
+          reason: z.string().trim().max(1000).default(''),
+          recipientMode: z.enum(['SINGLE_EMAIL', 'SECURITY_TEAM', 'EVERYONE']).default('SECURITY_TEAM'),
+          customEmail: z.string().email().optional(),
+        })
+        .parse(req.body);
+      await transaction(pool, async (db) => {
+        const snapshot = await state(db);
+        const findings = snapshot.findings.filter((f) => data.findingIds.includes(f.id));
+        if (findings.length !== data.findingIds.length)
+          throw new HttpError(404, 'One or more selected findings could not be found');
+        const cveIds = Array.from(new Set(findings.map((f) => f.cveId))).sort();
+        const rank = ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+        const severity = findings.reduce(
+          (s, f) => (rank.indexOf(f.cve.cvss.severity) > rank.indexOf(s) ? f.cve.cvss.severity : s),
+          'UNKNOWN' as Severity,
+        );
+        const recipients = await list<EmailRecipient>(db, 'recipients');
+        let selectedRecipients: EmailRecipient[];
+        if (data.recipientMode === 'SINGLE_EMAIL' && data.customEmail) {
+          selectedRecipients = recipients.filter((r) => r.email.toLowerCase() === data.customEmail!.toLowerCase());
+        } else if (data.recipientMode === 'EVERYONE') {
+          selectedRecipients = recipients.filter((r) => r.enabled && r.deliveryGroup === 'EVERYONE');
+        } else {
+          selectedRecipients = recipients.filter(
+            (r) => r.enabled && (r.deliveryGroup === 'SECURITY_TEAM' || r.deliveryGroup === undefined),
+          );
+        }
+        if (!selectedRecipients.length) throw new HttpError(400, 'No eligible recipients for the selected delivery group');
+        const advisory: Advisory = {
+          id: formatAdvisoryId(snapshot.settings.advisoryPrefix),
+          title: `Vulnerability notice: ${cveIds.slice(0, 3).join(', ')}${cveIds.length > 3 ? ` (+${cveIds.length - 3} more)` : ''}`,
+          severity,
+          cveIds,
+          findingIds: findings.map((f) => f.id),
+          createdDate: new Date().toISOString(),
+          deliveryStatus: 'PENDING',
+          recipientCount: selectedRecipients.length,
+          executiveSummary: `${findings.length} correlated vulnerability finding(s) require investigation. ${data.reason}`,
+          remediationInstructions: 'Review vendor advisories and deploy tested remediation through your change process.',
+          affectedSystems: Array.from(new Set(findings.map((f) => f.matchedAssetName))).sort(),
+          vendorLink:
+            Array.from(
+              new Set(findings.map((f) => f.cve.remediation.vendorAdvisoryRef || f.cve.remediation.patchUrl).filter(Boolean)),
+            ).sort()[0] || '',
+        };
+        await put(db, 'advisories', advisory.id, advisory);
+        await queueBulkNotificationAdvisory(
+          db,
+          advisory,
+          findings,
+          renderAdvisory(snapshot.advisoryTemplate, advisory, findings),
+          selectedRecipients,
+          randomUUID(),
+        );
+        for (const finding of findings)
+          await db.query('UPDATE findings SET advisory_id=$1, notification_status=$2 WHERE id=$3 AND advisory_id IS DISTINCT FROM $1', [
+            advisory.id,
+            'QUEUED_FOR_DISPATCH',
+            finding.id,
+          ]);
+        await appendAudit(
+          db,
+          'Bulk notification queued',
+          `${advisory.id}: ${findings.length} finding(s)${data.reason ? `; ${data.reason}` : ''}`,
           req.operator!.username,
           'EMAIL',
         );

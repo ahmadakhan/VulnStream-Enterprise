@@ -15,6 +15,7 @@ import {
   X,
   Send,
   Trash2,
+  Mail,
 } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { useCollection } from '../hooks/useCollection';
@@ -23,8 +24,15 @@ import { CveLink } from './CveLink';
 import { formatDateTime as fmtDateTime, formatTime as fmtTime } from '../utils/dateTime';
 
 export const FindingsView: React.FC = () => {
-  const { selectedFinding, setSelectedFinding, updateFindingStatus, resendNotification, deleteFinding, settings } =
-    useApp();
+  const {
+    selectedFinding,
+    setSelectedFinding,
+    updateFindingStatus,
+    resendNotification,
+    deleteFinding,
+    sendBulkNotification,
+    settings,
+  } = useApp();
   const [removeFeedback, setRemoveFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(
     null,
   );
@@ -46,6 +54,13 @@ export const FindingsView: React.FC = () => {
   const [resendReason, setResendReason] = useState('');
 
   const [removeConfirm, setRemoveConfirm] = useState<Finding | null>(null);
+  const [selectedFindings, setSelectedFindings] = useState<Set<string>>(new Set());
+  const [bulkNotifyModalOpen, setBulkNotifyModalOpen] = useState(false);
+  const [bulkNotifyReason, setBulkNotifyReason] = useState('');
+  const [bulkRecipientMode, setBulkRecipientMode] = useState<'SINGLE_EMAIL' | 'SECURITY_TEAM' | 'EVERYONE'>(
+    'SECURITY_TEAM',
+  );
+  const [bulkCustomEmail, setBulkCustomEmail] = useState('');
 
   const {
     items: findings,
@@ -195,6 +210,35 @@ export const FindingsView: React.FC = () => {
               <span>Clear</span>
             </button>
           )}
+
+          {/* Bulk Actions */}
+          {selectedFindings.size > 0 && (
+            <div className="flex items-center space-x-3 text-xs">
+              <span className="text-zinc-300 dark:text-zinc-300 light:text-zinc-700">
+                {selectedFindings.size} finding{selectedFindings.size !== 1 ? 's' : ''} selected
+              </span>
+              <button
+                onClick={() => {
+                  setBulkNotifyReason('');
+                  setBulkRecipientMode('SECURITY_TEAM');
+                  setBulkCustomEmail('');
+                  setBulkNotifyModalOpen(true);
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 text-zinc-200 dark:text-zinc-200 light:text-zinc-900 font-medium border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 transition flex items-center space-x-1"
+                title="Send notification for selected findings"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span>Send Notification</span>
+              </button>
+              <button
+                onClick={() => setSelectedFindings(new Set())}
+                className="px-2.5 py-1.5 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 text-zinc-300 dark:text-zinc-300 light:text-zinc-800 border border-zinc-700 dark:border-zinc-700 light:border-zinc-300 transition"
+                title="Clear selection"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -207,6 +251,18 @@ export const FindingsView: React.FC = () => {
               <table className="w-full min-w-[1200px] text-left text-xs">
                 <thead className="bg-zinc-950/80 dark:bg-zinc-950/80 light:bg-zinc-100 border-b border-zinc-800/80 dark:border-zinc-800/80 light:border-zinc-200 text-zinc-400 dark:text-zinc-400 light:text-zinc-600 font-mono uppercase text-[11px]">
                   <tr>
+                    <th className="py-3 px-3.5 w-[40px]">
+                      <input
+                        type="checkbox"
+                        checked={findings.length > 0 && findings.every((f) => selectedFindings.has(f.id))}
+                        onChange={(e) => {
+                          if (e.target.checked)
+                            setSelectedFindings(new Set(findings.map((f) => f.id)));
+                          else setSelectedFindings(new Set());
+                        }}
+                        className="w-4 h-4 rounded border-zinc-600 text-zinc-800 focus:ring-zinc-500"
+                      />
+                    </th>
                     <th className="py-3 px-3.5">CVE Identifier</th>
                     <th className="py-3 px-3.5 whitespace-nowrap">Published</th>
                     <th className="py-3 px-3.5 whitespace-nowrap">Modified</th>
@@ -220,13 +276,14 @@ export const FindingsView: React.FC = () => {
                 <tbody className="divide-y divide-zinc-800/60 dark:divide-zinc-800/60 light:divide-zinc-200">
                   {findings.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-zinc-500 text-xs">
+                      <td colSpan={9} className="py-8 text-center text-zinc-500 text-xs">
                         No product vulnerabilities match the current filter.
                       </td>
                     </tr>
                   ) : (
                     findings.map((finding) => {
                       const isSelected = selectedFinding?.id === finding.id;
+                      const isBulkSelected = selectedFindings.has(finding.id);
                       const isKev = finding.cve.cisaKev?.isKev ?? false;
 
                       return (
@@ -239,6 +296,21 @@ export const FindingsView: React.FC = () => {
                               : 'hover:bg-zinc-800/30 dark:hover:bg-zinc-800/30 light:hover:bg-zinc-50'
                           }`}
                         >
+                          {/* Bulk select checkbox */}
+                          <td className="py-3 px-3.5" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={isBulkSelected}
+                              onChange={(e) => {
+                                const next = new Set(selectedFindings);
+                                if (e.target.checked) next.add(finding.id);
+                                else next.delete(finding.id);
+                                setSelectedFindings(next);
+                              }}
+                              className="w-4 h-4 rounded border-zinc-600 text-zinc-800 focus:ring-zinc-500"
+                            />
+                          </td>
+
                           {/* CVE ID */}
                           <td className="py-3 px-3.5">
                             <div className="font-mono font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 flex items-center space-x-1.5">
@@ -714,7 +786,7 @@ export const FindingsView: React.FC = () => {
         </div>
       )}
 
-      {/* Remove Feedback */}
+       {/* Remove Feedback */}
       {removeFeedback && (
         <div className="fixed bottom-4 right-4 z-50 max-w-sm">
           <div
@@ -730,6 +802,103 @@ export const FindingsView: React.FC = () => {
               <X className="w-4 h-4 shrink-0" />
             )}
             <span>{removeFeedback.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Notification Modal */}
+      {bulkNotifyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="ui-panel bg-zinc-900 dark:bg-zinc-900 light:bg-white border border-zinc-800 dark:border-zinc-800 light:border-zinc-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+            <button
+              onClick={() => setBulkNotifyModalOpen(false)}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-200 dark:hover:text-zinc-200 light:hover:text-zinc-900"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="text-base font-bold text-zinc-100 dark:text-zinc-100 light:text-zinc-900 mb-1 flex items-center gap-2">
+              <Mail className="w-4 h-4 text-zinc-300 dark:text-zinc-300 light:text-zinc-700" />
+              Send Notification for {selectedFindings.size} Finding{selectedFindings.size !== 1 ? 's' : ''}
+            </h3>
+            <p className="text-xs text-zinc-400 dark:text-zinc-400 light:text-zinc-600 mb-4">
+              Dispatches a security advisory email for the selected findings to the chosen recipient group.
+            </p>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono mb-1">
+                  Recipient Group
+                </label>
+                <select
+                  value={bulkRecipientMode}
+                  onChange={(e) => {
+                    setBulkRecipientMode(e.target.value as typeof bulkRecipientMode);
+                    if (e.target.value !== 'SINGLE_EMAIL') setBulkCustomEmail('');
+                  }}
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
+                >
+                  <option value="SINGLE_EMAIL">Specific Email Address</option>
+                  <option value="SECURITY_TEAM">Security Team</option>
+                  <option value="EVERYONE">Everyone</option>
+                </select>
+              </div>
+
+              {bulkRecipientMode === 'SINGLE_EMAIL' && (
+                <div>
+                  <label className="block text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono mb-1">
+                    Custom Email Address
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="e.g. analyst@example.com"
+                    value={bulkCustomEmail}
+                    onChange={(e) => setBulkCustomEmail(e.target.value)}
+                    className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-zinc-300 dark:text-zinc-300 light:text-zinc-700 font-mono mb-1">
+                  Dispatch Rationale / Reason
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="e.g. Manual dispatch for quarterly vendor review. (optional)"
+                  value={bulkNotifyReason}
+                  onChange={(e) => setBulkNotifyReason(e.target.value)}
+                  className="w-full bg-zinc-950 dark:bg-zinc-950 light:bg-zinc-50 border border-zinc-800 dark:border-zinc-800 light:border-zinc-300 rounded-xl p-2.5 text-xs text-zinc-100 dark:text-zinc-100 light:text-zinc-900 focus:border-zinc-600 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 mt-4 pt-3 border-t border-zinc-800 dark:border-zinc-800 light:border-zinc-200 text-xs">
+              <button
+                onClick={() => setBulkNotifyModalOpen(false)}
+                className="px-3 py-1.5 rounded-xl bg-zinc-800 dark:bg-zinc-800 light:bg-zinc-200 hover:bg-zinc-700 text-zinc-300 dark:text-zinc-300 light:text-zinc-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const ok = await sendBulkNotification(
+                    Array.from(selectedFindings),
+                    bulkNotifyReason,
+                    bulkRecipientMode,
+                    bulkRecipientMode === 'SINGLE_EMAIL' ? bulkCustomEmail : undefined,
+                  );
+                  if (ok) {
+                    setSelectedFindings(new Set());
+                    setBulkNotifyModalOpen(false);
+                  }
+                }}
+                className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-100 dark:hover:bg-zinc-200 light:bg-zinc-900 light:hover:bg-zinc-800 text-zinc-900 dark:text-zinc-900 light:text-zinc-50 font-semibold transition flex items-center space-x-1"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Send Notification</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

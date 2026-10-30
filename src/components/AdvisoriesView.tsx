@@ -120,7 +120,7 @@ ${adv.remediationInstructions}
     const url = URL.createObjectURL(blob);
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', url);
-    downloadAnchor.setAttribute('download', `${adv.id}-Security-Advisory.html`);
+    downloadAnchor.setAttribute('download', `${adv.id.split('-').slice(0, 3).join('-')}.html`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();

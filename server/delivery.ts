@@ -717,6 +717,52 @@ export async function queueAdvisory(
   return count;
 }
 /**
+ * Queues an operator-initiated advisory for a specific set of pre-selected
+ * recipients, bypassing the automatic `recipientAllows` filter. Used by the
+ * Findings bulk-notification feature where the operator chooses the delivery
+ * group (Security Team, Everyone, or a single email address).
+ */
+export async function queueBulkNotificationAdvisory(
+  db: Db,
+  advisory: Advisory,
+  findings: Finding[],
+  html: string,
+  recipients: EmailRecipient[],
+  dispatchKey?: string,
+): Promise<number> {
+  if (findings.length === 0) return 0;
+  const contentRevision = advisoryRevision(advisory, findings);
+  const payload = {
+    ...advisoryEmail(advisory, html),
+    cveIds: advisory.cveIds,
+    findingRevisions: Object.fromEntries(findings.map((finding) => [finding.id, findingRevision(finding)])),
+    cveRevisions: Object.fromEntries(findings.map((finding) => [finding.cveId, revision(finding.cve)])),
+    contentRevision,
+  };
+  const stableDispatchKey = dispatchKey ?? contentRevision;
+  const priority = advisoryPriority(findings);
+  let count = 0;
+  for (const recipient of recipients)
+    if (
+      await enqueue(
+        db,
+        'email',
+        recipient.id,
+        advisory.id,
+        { ...payload, recipientEmail: recipient.email },
+        `${stableDispatchKey}:${contentRevision}:email:${recipient.id}`,
+        recipient.deliveryGroup === 'EVERYONE' ? 'REVIEW' : 'QUEUED',
+        priority,
+      )
+    )
+      count++;
+  if (!count) return 0;
+  advisory.recipientCount = recipients.length;
+  advisory.deliveryStatus = 'PENDING';
+  await put(db, 'advisories', advisory.id, advisory);
+  return count;
+}
+/**
  * Queues one email per eligible Security-team recipient for an
  * `IntelligenceMatch` (security news/advisory evidence) that matched the
  * monitored vendor + product inventory. Each job carries no Advisory row

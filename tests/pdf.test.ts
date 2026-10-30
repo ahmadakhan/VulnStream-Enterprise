@@ -10,8 +10,19 @@ import type { Advisory, EmailConfiguration } from '../src/types/index.ts';
 
 const chrome = resolveChromeExecutablePath();
 
+test('advisoryFilename extracts the ADV-ddMMMyyyy prefix from advisory IDs', () => {
+  assert.equal(advisoryFilename('ADV-05Oct2026-A1B2C3D4'), 'ADV-05Oct2026.pdf');
+  assert.equal(advisoryFilename('ADV-15Jan2025-ABCD1234'), 'ADV-15Jan2025.pdf');
+  assert.equal(advisoryFilename('ADV-31Dec2099-99999999'), 'ADV-31Dec2099.pdf');
+});
+
+test('advisoryFilename falls back to the raw ID for non-standard advisory IDs', () => {
+  assert.equal(advisoryFilename('ADV-2026-0001'), 'ADV-2026-0001.pdf');
+  assert.equal(advisoryFilename('CUSTOM-2026'), 'CUSTOM-2026.pdf');
+});
+
 const advisory = {
-  id: 'ADV-2026-0001',
+  id: 'ADV-05Oct2026-A1B2C3D4',
   title: 'Test vulnerability advisory',
   severity: 'CRITICAL',
   cveIds: ['CVE-2026-12345', 'CVE-2026-67890'],
@@ -41,7 +52,7 @@ test('rendered advisory PDF is attached to provider messages', { skip: !chrome }
   const html = renderAdvisory(template, advisory);
   const pdf = await renderAdvisoryPdf(html);
   const attachment = {
-    filename: advisoryFilename('ADV-2026-0001'),
+    filename: advisoryFilename('ADV-05Oct2026-A1B2C3D4'),
     content: Buffer.from(pdf),
     contentType: 'application/pdf' as const,
   };
@@ -52,7 +63,7 @@ test('rendered advisory PDF is attached to provider messages', { skip: !chrome }
     dedupe_key: 'test',
     channel: 'email',
     target_id: 'recipient',
-    advisory_id: 'ADV-2026-0001',
+    advisory_id: 'ADV-05Oct2026-A1B2C3D4',
     attempts: 1,
     lock_token: 'test',
     payload: { subject: 'Security notice', text: 'see html', html, recipientEmail: 'recipient@example.invalid', cveIds: ['CVE-2026-12345'] },
@@ -74,7 +85,7 @@ test('rendered advisory PDF is attached to provider messages', { skip: !chrome }
   assert.ok(capturedBody);
   const payload = JSON.parse(capturedBody!);
   assert.equal(payload.attachments[0].type, 'application/pdf');
-  assert.equal(payload.attachments[0].filename, 'Security-Advisory-ADV-2026-0001.pdf');
+  assert.equal(payload.attachments[0].filename, 'ADV-05Oct2026.pdf');
   assert.equal(payload.attachments[0].disposition, 'attachment');
   assert.equal(payload.attachments[0].content, base64);
   assert.ok(base64.length > 1000);

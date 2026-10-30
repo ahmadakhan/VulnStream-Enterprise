@@ -542,6 +542,12 @@ function useApplication() {
       return result?.success || false;
     },
     resendNotification: (cveId: string, reason: string) => call('/resend', { cveId, reason }),
+    sendBulkNotification: (
+      findingIds: string[],
+      reason: string,
+      recipientMode: 'SINGLE_EMAIL' | 'SECURITY_TEAM' | 'EVERYONE',
+      customEmail?: string,
+    ) => call('/send-bulk-notification', { findingIds, reason, recipientMode, customEmail }),
     retryEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/retry`),
     approveEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/approve`),
     rejectEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/reject`),

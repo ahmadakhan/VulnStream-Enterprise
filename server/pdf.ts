@@ -45,8 +45,8 @@ export interface PdfAttachment {
 }
 
 export function advisoryFilename(advisoryId: string): string {
-  const safe = advisoryId.replace(/[^A-Za-z0-9._-]/g, '_');
-  return `Security-Advisory-${safe}.pdf`;
+  const match = advisoryId.match(/^ADV-\d{1,2}[A-Z][a-z]{2}\d{4}/);
+  return `${match ? match[0] : advisoryId.replace(/[^A-Za-z0-9._-]/g, '_')}.pdf`;
 }
 
 export async function renderAdvisoryPdf(html: string, config?: Config): Promise<Uint8Array> {
