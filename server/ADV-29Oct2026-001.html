@@ -47,15 +47,8 @@
             <table class="ms-rteTable-default" cellspacing="0" style="width:100%;">
               <tbody>
 
-              <tr class="ms-rteTableEvenRow-default" style="background:#f8fafc;">
-                <td class="ms-rteTableEvenCol-default" style="width:11%;padding:10px 12px;border:1px solid #e2e8f0;">Vulnerability Name</td>
-                <td class="ms-rteTableOddCol-default" style="padding:10px 12px;border:1px solid #e2e8f0;">
-                  {{executive_summary}}
-                </td>
-              </tr>
-
-              <tr class="ms-rteTableOddRow-default">
-                <td class="ms-rteTableEvenCol-default" style="width:11%;padding:10px 12px;border:1px solid #e2e8f0;">CVE ID</td>
+               <tr class="ms-rteTableOddRow-default">
+                 <td class="ms-rteTableEvenCol-default" style="width:11%;padding:10px 12px;border:1px solid #e2e8f0;">CVE ID</td>
                 <td class="ms-rteTableOddCol-default" style="padding:10px 12px;border:1px solid #e2e8f0;">
                   {{cve_id_links}}
                 </td>
@@ -93,22 +86,22 @@
                   <ul style="margin:0 0 8px;padding-left:18px;font-size:12px;line-height:20px;">
                     {{affected_systems_html}}
                   </ul>
-                </td>
-              </tr>
+                 </td>
+               </tr>
 
-              <tr class="ms-rteTableOddRow-default">
-                <td class="ms-rteTableEvenCol-default" style="width:11%;padding:10px 12px;border:1px solid #e2e8f0;">
-                  <a name="fix_section" id="fix_section"><span style="color:#ffffff;">Fix</span></a>
-                </td>
-                <td class="ms-rteTableOddCol-default" style="padding:10px 12px;border:1px solid #e2e8f0;">
-                  <ol style="margin:0 0 8px;padding-left:24px;font-size:12px;line-height:20px;">
-                    <li style="margin-bottom:8px;"><strong>Remediation:</strong>
-                      <div style="margin-top:8px;border-left:3px solid #2563eb;padding:8px 12px;background:#f8fafc;white-space:pre-wrap;overflow-wrap:anywhere;font-family:monospace;font-size:11px;">{{remediation_steps}}</div>
-                    </li>
-                  </ol>
-                  <p style="margin:8px 0 0;"><a href="{{vendor_link}}" target="_blank" style="color:#2563eb;text-decoration:underline;">Click for details</a></p>
-                </td>
-              </tr>
+               <tr class="ms-rteTableOddRow-default">
+                 <td class="ms-rteTableEvenCol-default" style="width:11%;padding:10px 12px;border:1px solid #e2e8f0;">
+                   <a name="fix_section" id="fix_section"><span style="color:#ffffff;">Fix</span></a>
+                 </td>
+                 <td class="ms-rteTableOddCol-default" style="padding:10px 12px;border:1px solid #e2e8f0;">
+                   <ol style="margin:0 0 8px;padding-left:24px;font-size:12px;line-height:20px;">
+                     <li style="margin-bottom:8px;"><strong>Remediation:</strong>
+                       <div style="margin-top:8px;border-left:3px solid #2563eb;padding:8px 12px;background:#f8fafc;white-space:pre-wrap;overflow-wrap:anywhere;font-family:monospace;font-size:11px;">{{remediation_steps}}</div>
+                     </li>
+                   </ol>
+                   {{#if remediation_link}}<p style="margin:8px 0 0;"><a href="{{remediation_link}}" target="_blank" style="color:#2563eb;text-decoration:underline;">View Vendor Guidance</a></p>{{/if}}
+                 </td>
+               </tr>
 
               <tr class="ms-rteTableEvenRow-default" style="background:#f8fafc;">
                 <td class="ms-rteTableEvenCol-default" style="width:11%;padding:10px 12px;border:1px solid #e2e8f0;">
@@ -123,7 +116,7 @@
                 <td class="ms-rteTableEvenCol-default" style="width:11%;padding:10px 12px;border:1px solid #e2e8f0;">Resource</td>
                 <td class="ms-rteTableOddCol-default" style="padding:10px 12px;border:1px solid #e2e8f0;">
                   <ul style="margin:0;padding-left:18px;font-size:12px;line-height:20px;">
-                    <li style="margin-bottom:4px;"><a href="{{vendor_link}}" target="_blank" style="color:#2563eb;text-decoration:underline;">Vendor Security Advisory</a></li>
+                    {{#if references_link}}<li style="margin-bottom:4px;"><a href="{{references_link}}" target="_blank" style="color:#2563eb;text-decoration:underline;">Vendor Security Advisory</a></li>{{/if}}
                   </ul>
                 </td>
               </tr>

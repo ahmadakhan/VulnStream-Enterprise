@@ -16,13 +16,6 @@
 </td>
 </tr>
 
-<tr class="ms-rteTableEvenRow-default">
-<td class="ms-rteTableEvenCol-default" style="width:11%;">Vulnerability Name</td>
-<td class="ms-rteTableOddCol-default">
-{{advisory_title}}
-</td>
-</tr>
-
 <tr class="ms-rteTableOddRow-default">
 <td class="ms-rteTableEvenCol-default">CVE ID​​​​​</td>
 <td class="ms-rteTableOddCol-default">
@@ -91,7 +84,7 @@
 <tr class="ms-rteTableOddRow-default">
 <td class="ms-rteTableEvenCol-default">Resource</td>
 <td class="ms-rteTableOddCol-default">
-<a href="{{references_link}}" target="_blank">Vendor Security Advisory</a>
+{{#if references_link}}<a href="{{references_link}}" target="_blank">Vendor Security Advisory</a>{{/if}}
 </td>
 </tr>
 

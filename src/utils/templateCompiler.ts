@@ -8,7 +8,7 @@ export const DEFAULT_TEMPLATE_CUSTOMIZATION: TemplateCustomization = {
   canvasBg: '#f1f5f9',
   cardBg: '#ffffff',
   headerBg: '#0f172a',
-  badgeStampText: 'SECURITY OPERATIONS',
+  badgeStampText: 'BA HBS Cyber Operations',
   badgeStampColor: '#2563eb',
   showStamp: true,
   showClassificationBanner: false,
@@ -130,7 +130,7 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
             ${stampHtml}
 
             <div style="font-size:10px;font-weight:bold;letter-spacing:1.5px;color:${headerMuted};margin-bottom:8px;">
-                THREAT INTELLIGENCE &amp; SECURITY OPERATIONS
+                THREAT INTELLIGENCE &amp; BA HBS CYBER OPERATIONS
             </div>
 
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:8px;">
@@ -181,15 +181,6 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
             </div>
 
              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;line-height:22px;">
-
-                 <tr>
-                     <td width="30%" bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">
-                         Vulnerability Name
-                     </td>
-                     <td style="padding:12px;border:1px solid #e2e8f0;">
-                         {{advisory_title}}
-                     </td>
-                 </tr>
 
                  <tr>
                      <td bgcolor="#f8fafc" style="padding:12px;font-weight:bold;border:1px solid #e2e8f0;color:#0f172a;">

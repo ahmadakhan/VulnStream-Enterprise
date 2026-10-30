@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderAdvisory, validateAdvisoryFields } from '../server/advisoryRender.ts';
 import { compileCustomizedTemplate } from '../src/utils/templateCompiler.ts';
-import type { Advisory } from '../src/types/index.ts';
+import type { Advisory, Finding } from '../src/types/index.ts';
 
 const baseAdvisory: Advisory = {
   id: 'ADV-2026-001',
@@ -28,7 +28,7 @@ test('renderAdvisory does not render audience notice or reviewer comment rows', 
     canvasBg: '#f1f5f9',
     cardBg: '#ffffff',
     headerBg: '#0f172a',
-    badgeStampText: 'SECURITY OPERATIONS',
+    badgeStampText: 'BA HBS Cyber Operations',
     badgeStampColor: '#2563eb',
     showStamp: true,
     showClassificationBanner: false,
@@ -84,7 +84,7 @@ const testCustomization = {
   cardBg: '#ffffff',
   headerBg: '#0f172a',
   badgeStampColor: '#2563eb',
-  badgeStampText: 'SECURITY OPERATIONS',
+  badgeStampText: 'BA HBS Cyber Operations',
   showStamp: true,
   showClassificationBanner: false,
   classificationText: '',
@@ -159,34 +159,74 @@ test('renderAdvisory throws when required advisory fields are empty', () => {
 test('renderAdvisory produces template matching the studio HTML structure', () => {
   const template = compileCustomizedTemplate(testCustomization);
   const html = renderAdvisory(template, baseAdvisory);
-  assert.ok(html.includes('THREAT INTELLIGENCE &amp; SECURITY OPERATIONS'), 'studio label should appear');
+  assert.ok(html.includes('THREAT INTELLIGENCE &amp; BA HBS CYBER OPERATIONS'), 'studio label should appear');
   assert.ok(html.includes('Security Advisory'), 'static heading should appear');
   assert.ok(html.includes('ADV-2026-001'), 'advisory id should be rendered');
   assert.ok(html.includes('Test vulnerability advisory'), 'advisory title should be rendered');
   assert.ok(html.includes('BA Threat Intelligence'), 'footer label should appear');
   assert.ok(html.includes('EXECUTIVE SUMMARY'), 'executive summary section should appear');
   assert.ok(html.includes('ADVISORY DETAILS'), 'advisory details section should appear');
-  assert.ok(html.includes('Vulnerability Name'), 'vulnerability name row should appear');
-  assert.ok(html.includes('Test vulnerability advisory'), 'advisory title should be rendered in vulnerability name row');
+  assert.ok(!html.includes('Vulnerability Name'), 'vulnerability name row should not appear');
+  assert.ok(html.includes('Test vulnerability advisory'), 'advisory title should be rendered');
   assert.ok(html.includes('Affected Products &amp; Versions'), 'affected products row should appear');
   assert.ok(html.includes('Workaround / Mitigation'), 'mitigation row should appear');
-   assert.ok(html.includes('Honeywell Recommended Actions'), 'recommended action row should appear');
-  });
+  assert.ok(html.includes('Honeywell Recommended Actions'), 'recommended action row should appear');
+});
 
-  test('renderAdvisory shows View Vendor Guidance and Vendor Security Advisory links when vendor link is present', () => {
-    const template = compileCustomizedTemplate(testCustomization);
-    const html = renderAdvisory(template, baseAdvisory);
-    assert.ok(html.includes('View Vendor Guidance'), 'view vendor guidance should appear with a link');
-    assert.ok(html.includes('Vendor Security Advisory'), 'vendor security advisory should appear with a link');
-    assert.ok(html.includes('href="https://example.com/advisory/12345"'), 'links should point to the vendor source');
-    assert.ok(!html.includes('href=""'), 'no empty href should remain');
-  });
+const findingsWithVendorLinks: Finding[] = [
+  {
+    id: 'finding-1',
+    cveId: 'CVE-2026-12345',
+    cve: {
+      cveId: 'CVE-2026-12345',
+      title: 'Test vulnerability',
+      description: 'A test vulnerability',
+      publishedDate: '2026-10-30T00:00:00Z',
+      modifiedDate: '2026-10-30T00:00:00Z',
+      cvss: { version: '3.1', score: 9.8, vector: 'AV:N/AC:L', severity: 'CRITICAL' },
+      cwe: [],
+      cpeMatches: [],
+      sourceFeeds: [],
+      epss: { score: 0.5, percentile: 0.8 },
+      cisaKev: { isKev: false },
+      exploitStatus: 'None',
+      remediation: {
+        patchUrl: 'https://vendor.com/patch/CVE-2026-12345',
+        vendorAdvisoryRef: 'https://vendor.com/advisory/CVE-2026-12345',
+        immediateActions: [],
+        workarounds: [],
+        rollbackPlan: '',
+        stepByStep: [],
+      },
+    } as any,
+    matchedAssetId: 'asset-1',
+    matchedAssetName: 'web-server-01',
+    matchedCpe: 'cpe:2.3:*',
+    matchingMethod: 'CPE',
+    matchingEvidence: 'matched',
+    exploitRisk: 'STANDARD',
+    notificationStatus: 'AUTO_DISPATCHED',
+    status: 'MONITORED',
+    autoDispatchedAt: null,
+    advisoryId: null,
+    timeline: [],
+  } as unknown as Finding,
+];
 
-  test('renderAdvisory hides View Vendor Guidance and Vendor Security Advisory when no link is present', () => {
-    const template = compileCustomizedTemplate(testCustomization);
-    const html = renderAdvisory(template, { ...baseAdvisory, vendorLink: undefined });
-    assert.ok(!html.includes('View Vendor Guidance'), 'view vendor guidance should be hidden without a link');
-    assert.ok(!html.includes('Vendor Security Advisory'), 'vendor security advisory should be hidden without a link');
-    assert.ok(!html.includes('#if'), 'no unrendered conditional tokens should remain');
-  });
+test('renderAdvisory shows View Vendor Guidance and Vendor Security Advisory links from finding remediation data', () => {
+  const template = compileCustomizedTemplate(testCustomization);
+  const html = renderAdvisory(template, baseAdvisory, findingsWithVendorLinks);
+  assert.ok(html.includes('View Vendor Guidance'), 'view vendor guidance should appear with a link');
+  assert.ok(html.includes('Vendor Security Advisory'), 'vendor security advisory should appear with a link');
+  assert.ok(html.includes('href="https://vendor.com/patch/CVE-2026-12345"'), 'view vendor guidance should point to the patch URL');
+  assert.ok(html.includes('href="https://vendor.com/advisory/CVE-2026-12345"'), 'vendor security advisory should point to the advisory URL');
+  assert.ok(!html.includes('href=""'), 'no empty href should remain');
+});
 
+test('renderAdvisory hides View Vendor Guidance and Vendor Security Advisory when no vendor link is present in findings', () => {
+  const template = compileCustomizedTemplate(testCustomization);
+  const html = renderAdvisory(template, baseAdvisory);
+  assert.ok(!html.includes('View Vendor Guidance'), 'view vendor guidance should be hidden without a vendor link in findings');
+  assert.ok(!html.includes('Vendor Security Advisory'), 'vendor security advisory should be hidden without a vendor link in findings');
+  assert.ok(!html.includes('#if'), 'no unrendered conditional tokens should remain');
+});
