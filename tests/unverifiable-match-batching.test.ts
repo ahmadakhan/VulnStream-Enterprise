@@ -1,9 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import { randomBytes } from 'node:crypto';
-import { createPool, migrate } from '../server/db.ts';
-import { queueUnverifiableMatchNotification } from '../server/delivery.ts';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { createPool, migrate, put, get } from '../server/db.ts';
+import { queueUnverifiableMatchNotification, deliverNext } from '../server/delivery.ts';
+import { DEFAULT_SETTINGS } from '../shared/state.ts';
+import { loadConfig } from '../server/config.ts';
+import type { Requester } from '../server/network.ts';
 import type { Finding, EmailRecipient } from '../src/types/index.ts';
 
 interface OutboxRow {
@@ -121,6 +124,88 @@ test('unverifiable matches are batched into a single combined email per recipien
       `SELECT count(*)::int AS n FROM outbox WHERE advisory_id LIKE 'UNVERIFIABLE:%'`,
     );
     assert.equal(after.rows[0].n, 2, 'no additional jobs after re-queue');
+    return true;
+  });
+  assert.ok(outcome, 'database-backed test ran');
+});
+
+test('unverifiable match email is stamped reviewNotifiedAt on transport acceptance', async () => {
+  const outcome = await withDatabase(async (pool) => {
+    await put(pool, 'settings', 'main', { ...DEFAULT_SETTINGS, reviewUnverifiableMatches: true });
+    await put(pool, 'emailConfig', 'main', {
+      provider: 'SMTP',
+      host: 'localhost',
+      port: 25,
+      fromEmail: '',
+      user: '',
+      password: '',
+    });
+    const recipients: EmailRecipient[] = [
+      recipient('r1', 'sec-1@example.com', 'SECURITY_TEAM'),
+      recipient('r2', 'sec-2@example.com', 'SECURITY_TEAM'),
+    ];
+    for (const r of recipients) await put(pool, 'recipients', r.id, r);
+    const findings: Finding[] = [
+      finding('CVE-2026-20001', 'f1', 'server-1', 'acme', 'widget'),
+      finding('CVE-2026-20002', 'f2', 'server-2', 'acme', 'gadget'),
+    ];
+    for (const f of findings) await put(pool, 'findings', f.id, f);
+
+    const queued = await queueUnverifiableMatchNotification(pool, findings, recipients);
+    assert.equal(queued, 2, 'one notification per recipient');
+
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      DATABASE_URL: url,
+      APP_ORIGIN: 'http://localhost',
+      ENCRYPTION_KEY: randomBytes(32).toString('base64'),
+      WORKER_ENABLED: 'false',
+    });
+    const requester: Requester = async () => {
+      throw new Error('No network expected');
+    };
+
+    let sent = 0;
+    const delivered = await deliverNext(pool, config, requester, async () => {
+      sent++;
+      return `msg-${randomUUID()}`;
+    });
+    assert.equal(delivered, true, 'deliverNext should process a queued job');
+    assert.equal(sent, 1, 'mail sender called exactly once');
+
+    for (const f of findings) {
+      const updated = await get<Finding>(pool, 'findings', f.id);
+      assert.ok(
+        updated?.reviewNotifiedAt,
+        `finding ${f.id} should have reviewNotifiedAt set after acceptance`,
+      );
+    }
+
+    // The second recipient's job is still pending; deliver it so both email
+    // logs record ACCEPTED. The findings are already stamped — the put is
+    // an idempotent skip for the second job.
+    sent = 0;
+    const delivered2 = await deliverNext(pool, config, requester, async () => {
+      sent++;
+      return `msg-${randomUUID()}`;
+    });
+    assert.equal(delivered2, true, 'second recipient job is processed');
+    assert.equal(sent, 1, 'mail sender called for the second recipient job');
+
+    for (const f of findings) {
+      const updated = await get<Finding>(pool, 'findings', f.id);
+      assert.ok(updated?.reviewNotifiedAt, `finding ${f.id} retains reviewNotifiedAt`);
+    }
+
+    // Re-queueing the same batch produces no new jobs: dedupe_key prevents
+    // duplicates and the findings are now marked as notified.
+    const requeued = await queueUnverifiableMatchNotification(pool, findings, recipients);
+    assert.equal(requeued, 0, 'already-notified findings do not re-queue');
+    const after = await pool.query(
+      `SELECT count(*)::int AS n FROM outbox WHERE advisory_id LIKE 'UNVERIFIABLE:%'`,
+    );
+    assert.equal(after.rows[0].n, 2, 'no additional outbox rows after re-queue');
+
     return true;
   });
   assert.ok(outcome, 'database-backed test ran');
