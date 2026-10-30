@@ -593,7 +593,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           schedulerEnabled: settings.schedulerEnabled,
           recoveryProbeDue,
           catchupDue: catchupDue || catchupScheduled,
-          lastRun: last ? new Date(last.last_run).toISOString() : null,
+          lastRun: last?.last_run ? new Date(last.last_run).toISOString() : null,
           intervalMinutes: settings.schedulerIntervalMinutes,
         })
       )

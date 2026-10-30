@@ -8,6 +8,12 @@ export function correlationMetrics(
   pending = -1,
   /** Epoch ms of the last pending sample; 0 = never sampled. */
   pendingSampledAt = 0,
+  /** Epoch ms of the last pipeline scheduled-run; 0 = never ran. */
+  pipelineLastRun = 0,
+  /** Epoch ms of when pipelineLastRun was sampled; 0 = never sampled. */
+  pipelineLastRunSampledAt = 0,
+  /** Whether the in-app scheduler setting is enabled. */
+  pipelineSchedulerEnabled = false,
 ): string {
   const telemetry = supervisor.ingestor.telemetry;
   // The pipeline is only expected to make progress while the worker is enabled
@@ -33,6 +39,17 @@ export function correlationMetrics(
     vulnstream_correlation_pending_sample_age_seconds: pendingSampledAt
       ? Math.round((Date.now() - pendingSampledAt) / 1000)
       : -1,
+    // Age of the last pipeline scheduled run. 0 means "never ran"; -1 means the
+    // sample itself is stale (last refresh failed or stopped). An alert must guard
+    // on `vulnstream_pipeline_scheduler_enabled == 1` so a monitoring-only node does
+    // not alarm about runs nobody asked it to make.
+    vulnstream_pipeline_last_run_age_seconds:
+      pipelineLastRunSampledAt && pipelineLastRun
+        ? Math.round((Date.now() - pipelineLastRun) / 1000)
+        : pipelineLastRunSampledAt && !pipelineLastRun
+          ? 0
+          : -1,
+    vulnstream_pipeline_scheduler_enabled: pipelineSchedulerEnabled ? 1 : 0,
   };
   const counters: Record<string, number> = {
     vulnstream_correlation_items_total: telemetry.completed,

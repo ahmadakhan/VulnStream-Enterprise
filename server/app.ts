@@ -315,6 +315,9 @@ export function createApp(
           options.correlation.heartbeat,
           options.correlation.pendingDepth,
           options.correlation.pendingSampledAt,
+          options.correlation.pipelineLastRun,
+          options.correlation.pipelineLastRunSampledAt,
+          options.correlation.pipelineSchedulerEnabled,
         ),
       );
   });
@@ -1310,7 +1313,8 @@ export function createApp(
       const start = performance.now();
       await pool.query('SELECT 1');
       const dbMs = Math.round(performance.now() - start);
-      const worker = (await pool.query('SELECT last_run,heartbeat FROM scheduler_state WHERE id=1')).rows[0];
+       const worker = (await pool.query('SELECT last_run,heartbeat FROM scheduler_state WHERE id=1')).rows[0];
+       const appSettings = (await get<AppSettings>(pool, 'settings', 'main')) || DEFAULT_SETTINGS;
       const backlog = (await pool.query('SELECT status,count(*)::int AS count FROM outbox GROUP BY status'))
         .rows;
       const deliveryQueue = (
@@ -1344,6 +1348,8 @@ export function createApp(
         heartbeatAgeSeconds,
         deliveryQueue,
         lastScheduledRun: worker.last_run,
+        schedulerEnabled: appSettings.schedulerEnabled,
+        schedulerIntervalMinutes: appSettings.schedulerIntervalMinutes,
         backlog,
         smtpConfigured: !!config.SMTP_HOST && !!config.SMTP_FROM,
         emailProvider: emailConfig.provider,

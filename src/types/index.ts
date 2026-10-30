@@ -915,6 +915,8 @@ export interface SystemHealth {
     expiredLeases: number;
   };
   lastScheduledRun: string | null;
+  schedulerEnabled: boolean;
+  schedulerIntervalMinutes: number;
   backlog: { status: string; count: number }[];
   emailProvider: string;
   emailConfigured: boolean;

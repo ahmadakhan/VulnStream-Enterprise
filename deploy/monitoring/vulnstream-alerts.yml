@@ -148,9 +148,54 @@ groups:
         annotations:
           summary: Workers are occupied but no item has completed in 10 minutes
 
+  # --- Pipeline scheduler ------------------------------------------------
+  #
+  # The feed-ingestion scheduler (shouldStartAutomaticRun in server/pipeline.ts)
+  # starts a pipeline run every `schedulerIntervalMinutes` when both
+  # WORKER_ENABLED and the in-app scheduler setting are enabled. A stall here
+  # means fresh threat intelligence stops arriving — different from the
+  # ingestion/stalled rules above, which fire when work is queued but nothing
+  # completes.
+  #
+  # `vulnstream_pipeline_last_run_age_seconds` is 0 when the scheduler has
+  # never produced a run and -1 when the sample itself is stale (DB unavailable).
+  # A run at age 0 is not an alert condition — it means the scheduler is new or
+  # has never completed; the `for:` window lets an operator notice that without
+  # paging at midnight on a fresh install.
+
+      - alert: VulnStreamPipelineSchedulerDisabled
+        # Worker process is up but the in-app scheduler toggle is off, so no
+        # automatic runs will ever start. Recovery probes still fire for DOWN
+        # feeds, but routine ingestion is paused.
+        expr: |
+          vulnstream_correlation_worker_enabled == 1
+          and on(instance)
+          vulnstream_pipeline_scheduler_enabled == 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: Pipeline scheduler is disabled in application settings
+          runbook: Enable Scheduler in Settings → Pipeline, or set WORKER_ENABLED=false if this is a monitoring-only node.
+
+      - alert: VulnStreamPipelineSchedulerStalled
+        # Scheduler is enabled, worker is enabled, yet no run has started in
+        # far longer than the configured interval. Covers the case where the
+        # advisory lock is wedged, the tick loop is stuck, or last_run is stale.
+        expr: |
+          vulnstream_correlation_worker_enabled == 1
+          and on(instance)
+          vulnstream_pipeline_scheduler_enabled == 1
+          and on(instance)
+          vulnstream_pipeline_last_run_age_seconds > 7200
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: Pipeline scheduler enabled but no run has started in over 2 hours
+          runbook: Check pipeline execution history in the UI; the advisory lock (pg_try_advisory_lock) may be stuck. Verify the worker process is not blocked on a long-running query.
+
       # --- Dead-man's switch telemetry ---------------------------------------
-      #
-      # `vulnstream_heartbeat_age_seconds` is -1 until the first successful ping,
+  #
+  # `vulnstream_heartbeat_age_seconds` is -1 until the first successful ping,
       # so it must be gated on the heartbeat actually having pinged. `-1 > 180`
       # is false: without this guard a heartbeat that never started would be
       # silently exempt from its own staleness check.

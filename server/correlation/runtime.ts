@@ -26,6 +26,7 @@ export class CorrelationRuntime {
   /** Publishes liveness to an external receiver; disabled when no URL is set. */
   readonly heartbeat: Heartbeat;
   private timer?: ReturnType<typeof setInterval>;
+  private schedulerTimer?: ReturnType<typeof setInterval>;
   private draining?: Promise<void>;
   private stopped = false;
   private lastMaintenance = 0;
@@ -42,6 +43,17 @@ export class CorrelationRuntime {
   private lastMaintenanceAttempt = 0;
   /** Set when the consumer is disabled, so readiness does not claim it runs. */
   readonly workerEnabled: boolean;
+  /**
+   * Epoch ms of the last pipeline scheduled-run, cached from scheduler_state.
+   * /metrics is scraped during outages (when the DB may be unreachable), so the
+   * value is sampled by a timer and the route reads the cache. 0 means "never
+   * ran or not yet sampled"; the consumer recomputes age at scrape time.
+   */
+  pipelineLastRun = 0;
+  /** When `pipelineLastRun` was last sampled; 0 means never. */
+  pipelineLastRunSampledAt = 0;
+  /** Cached from the settings record — 1 means the in-app scheduler is enabled. */
+  pipelineSchedulerEnabled = false;
   constructor(
     private readonly pool: Pool,
     key: string,
@@ -98,6 +110,26 @@ export class CorrelationRuntime {
         });
     }, 1000);
     this.timer.unref();
+    this.schedulerTimer = setInterval(() => {
+      void this.refreshSchedulerState();
+    }, 15_000);
+    this.schedulerTimer.unref();
+  }
+  private async refreshSchedulerState(): Promise<void> {
+    try {
+      const row = (await this.pool.query('SELECT last_run FROM scheduler_state WHERE id=1')).rows[0];
+      this.pipelineLastRun = row?.last_run ? Date.parse(row.last_run) : 0;
+      this.pipelineLastRunSampledAt = Date.now();
+      const settingsRow = (
+        await this.pool.query<{ enabled: string }>(
+          "SELECT data->>'schedulerEnabled' AS enabled FROM records WHERE kind='settings' AND id='main'",
+        )
+      ).rows[0];
+      this.pipelineSchedulerEnabled = settingsRow?.enabled === 'true';
+    } catch {
+      // Keep previous values on database errors; the age gauge uses the last
+      // successful sample, which is the correct semantics for outage scraping.
+    }
   }
   private async drain(): Promise<void> {
     await this.cleanupStaleMatches();
@@ -195,6 +227,8 @@ export class CorrelationRuntime {
     this.stopped = true;
     clearInterval(this.timer);
     this.timer = undefined;
+    clearInterval(this.schedulerTimer);
+    this.schedulerTimer = undefined;
     this.heartbeat.stop();
     await this.supervisor.stop();
     await this.draining;
