@@ -1383,6 +1383,13 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           });
         }
       }
+      // Precedence (see autoDispatchUnverifiableMatches in src/engine/pipelineEngine.ts):
+      // At threshold 0 the flag releases unverifiable matches to QUEUED_FOR_DISPATCH, so the
+      // REVIEW_REQUIRED && confidence===0 filter below never sees them — enabling both toggles
+      // is harmless. At threshold > 0 the confidence pin (0) below the threshold holds the finding,
+      // so it stays REVIEW_REQUIRED and this notification still fires. The flag therefore cannot
+      // silence security-team notifications except at threshold 0, where the finding is no longer
+      // in review to notify about.
       if (settings.reviewUnverifiableMatches) {
         const securityRecipients = (await list<EmailRecipient>(db, 'recipients')).filter(
           (r) => r.enabled && (r.deliveryGroup === 'SECURITY_TEAM' || r.deliveryGroup === undefined),

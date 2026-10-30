@@ -817,6 +817,14 @@ export interface AppSettings {
    */
   autoDispatchConfidenceThreshold: number;
   /**
+   * When true, unverifiable matches (whose version range cannot be confirmed)
+   * participate in the confidence threshold instead of being held for review
+   * unconditionally. Combined with autoDispatchConfidenceThreshold set to 0
+   * this dispatches every finding automatically; the default (false) preserves
+   * the conservative review-only hold for unverifiable matches.
+   */
+  autoDispatchUnverifiableMatches: boolean;
+  /**
    * When true, news/advisory evidence (IntelligenceMatch records) that matches
    * the monitored vendor + product inventory is automatically sent to the
    * Security team recipients instead of being held as review-only evidence.

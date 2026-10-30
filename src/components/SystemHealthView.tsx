@@ -94,7 +94,11 @@ export function SystemHealthView() {
       !status.csrfEnforced ||
       !status.ssrfEnforced ||
       status.deliveryQueue.expiredLeases > 0 ||
-      count('FAILED') > 0);
+      count('FAILED') > 0 ||
+      (status.schedulerEnabled &&
+        !!status.lastScheduledRun &&
+        Date.now() - Date.parse(status.lastScheduledRun) >
+          status.schedulerIntervalMinutes * 1000 * 2));
   const workerTone: Tone =
     status?.workerStatus === 'HEALTHY' ? 'good' : status?.workerStatus === 'DISABLED' ? 'neutral' : 'warning';
   const overallTone: Tone = refreshFailed || attention ? 'warning' : 'good';
@@ -370,6 +374,26 @@ export function SystemHealthView() {
                   <p className="mt-1.5 break-words font-medium leading-relaxed">
                     {status.lastScheduledRun ? date(status.lastScheduledRun, settings.timezone) : 'Not yet run'}
                   </p>
+                  {status.schedulerEnabled && status.lastScheduledRun
+                    ? (() => {
+                        const ageMinutes = Math.floor((Date.now() - Date.parse(status.lastScheduledRun)) / 60000);
+                        const stale = ageMinutes > status.schedulerIntervalMinutes * 2;
+                        return (
+                          <>
+                            <p className={`mt-1 text-[10px] ${stale ? 'text-amber-400 light:text-amber-700' : muted}`}>
+                              Interval: {status.schedulerIntervalMinutes} min · Age: {ageMinutes} min
+                            </p>
+                            {stale && (
+                              <p className="mt-1 text-[11px] text-amber-400 light:text-amber-700">
+                                Scheduler is enabled but no run has started in over twice the configured interval.
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()
+                    : !status.schedulerEnabled && (
+                      <p className="mt-1 text-[11px] text-zinc-500 light:text-zinc-500">Scheduler is disabled in settings</p>
+                    )}
                 </div>
                 <div>
                   <p className={muted}>Clock synchronization</p>

@@ -57,10 +57,11 @@ export const DEFAULT_TIMEZONE = 'UTC';
 export const DEFAULT_SETTINGS: AppSettings = {
   scopeHours: 24,
   schedulerIntervalMinutes: 60,
-  schedulerEnabled: false,
+  schedulerEnabled: true,
   advisoryPrefix: 'ADV-',
   autoDispatchEnabled: false,
   autoDispatchConfidenceThreshold: 90,
+  autoDispatchUnverifiableMatches: false,
   autoDispatchNewsToSecurityTeam: false,
   reviewUnverifiableMatches: false,
   digestBatchingEnabled: false,

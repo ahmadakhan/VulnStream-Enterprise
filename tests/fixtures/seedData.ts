@@ -777,10 +777,11 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
 export const INITIAL_SETTINGS: AppSettings = {
   scopeHours: 24,
   schedulerIntervalMinutes: 60,
-  schedulerEnabled: false,
+  schedulerEnabled: true,
   advisoryPrefix: 'ADV-2026-',
    autoDispatchEnabled: true,
   autoDispatchConfidenceThreshold: 0,
+  autoDispatchUnverifiableMatches: false,
   autoDispatchNewsToSecurityTeam: false,
   // Matches the schema default (server/validation.ts).
   reviewUnverifiableMatches: false,

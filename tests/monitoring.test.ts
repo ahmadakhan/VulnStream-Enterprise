@@ -70,7 +70,7 @@ test('stall and admission rules require an enabled, admitting worker', async () 
   // WORKER_ENABLED=false (monitoring only) alarms forever about a stalled
   // consumer nobody asked to start.
   const rules = await readFile(path.join(deployDir, 'monitoring', 'vulnstream-alerts.yml'), 'utf8');
-  for (const alert of ['VulnStreamIngestionStalled', 'VulnStreamWorkersStuck', 'VulnStreamPipelineNotAdmitting']) {
+  for (const alert of ['VulnStreamIngestionStalled', 'VulnStreamWorkersStuck', 'VulnStreamPipelineNotAdmitting', 'VulnStreamPipelineSchedulerDisabled', 'VulnStreamPipelineSchedulerStalled']) {
     const block = rules.slice(rules.indexOf(alert));
     const expr = block.slice(block.indexOf('expr:'), block.indexOf('for:'));
     assert.match(expr, /vulnstream_correlation_worker_enabled == 1/, `${alert} must require the worker to be enabled`);

@@ -102,7 +102,10 @@ test('non-intersecting wildcard asset version does not match a concrete vuln ver
   // Overlapping wildcards still match at the token level.
   assert.equal(matchCPE(pattern('1.*'), pattern('1.5')).matched, true);
   // matchesWatchlistItem must not fabricate a finding for disjoint versions.
-  assert.equal(matchesWatchlistItem([pattern('2.*')], 'vendor', 'widget', [pattern('1.5')], 't', 'd').matched, false);
+  assert.equal(
+    matchesWatchlistItem([pattern('2.*')], 'vendor', 'widget', [pattern('1.5')], 't', 'd').matched,
+    false,
+  );
   // A literal-wildcard version still reaches review, as the asset version is
   // genuinely unasserted rather than a non-intersecting partial wildcard.
   const wildcardStar = matchesWatchlistItem([cpe('*')], 'vendor', 'widget', [cpe('1.5')], 't', 'd');
@@ -152,10 +155,60 @@ test('pipeline correctly distinguishes non-intersecting, intersecting, and exact
     const result = runVulnerabilityPipeline([], [cve], [asset], [], [], settings);
     assert.equal(result.newFindings.length, expected, `version ${version}: expected ${expected} findings`);
     if (expectedStatus)
-      assert.equal(result.newFindings[0]?.notificationStatus, expectedStatus, `version ${version}: expected ${expectedStatus}`);
+      assert.equal(
+        result.newFindings[0]?.notificationStatus,
+        expectedStatus,
+        `version ${version}: expected ${expectedStatus}`,
+      );
     else if (expected === 1)
-      assert.notEqual(result.newFindings[0]?.notificationStatus, 'REVIEW_REQUIRED', `version ${version}: should not be REVIEW_REQUIRED`);
+      assert.notEqual(
+        result.newFindings[0]?.notificationStatus,
+        'REVIEW_REQUIRED',
+        `version ${version}: should not be REVIEW_REQUIRED`,
+      );
   }
+});
+test('autoDispatchUnverifiableMatches releases the version-uncertain hold at threshold 0', () => {
+  const { cve, asset, settings } = fixture();
+  cve.cpeMatches = [cpe('1.5')];
+  cve.cpeMatchDetails = [];
+  cve.versionRange = undefined;
+  const wildcardAsset = { ...asset, id: 'asset-star', assetTag: 'asset-star', cpes: [cpe('*')] };
+  const held = runVulnerabilityPipeline([], [cve], [wildcardAsset], [], [], settings);
+  assert.equal(held.newFindings.length, 1);
+  assert.equal(
+    held.newFindings[0].notificationStatus,
+    'REVIEW_REQUIRED',
+    'unverifiable match stays in review at threshold 0 by default',
+  );
+  const released = runVulnerabilityPipeline([], [cve], [wildcardAsset], [], [], {
+    ...settings,
+    autoDispatchUnverifiableMatches: true,
+  });
+  assert.equal(released.newFindings.length, 1);
+  assert.equal(
+    released.newFindings[0].notificationStatus,
+    'QUEUED_FOR_DISPATCH',
+    'opt-in flag releases the unverifiable hold at threshold 0',
+  );
+});
+test('autoDispatchUnverifiableMatches cannot override a non-zero confidence threshold', () => {
+  const { cve, asset, settings } = fixture();
+  cve.cpeMatches = [cpe('1.5')];
+  cve.cpeMatchDetails = [];
+  cve.versionRange = undefined;
+  const wildcardAsset = { ...asset, id: 'asset-star', assetTag: 'asset-star', cpes: [cpe('*')] };
+  const held = runVulnerabilityPipeline([], [cve], [wildcardAsset], [], [], {
+    ...settings,
+    autoDispatchConfidenceThreshold: 50,
+    autoDispatchUnverifiableMatches: true,
+  });
+  assert.equal(held.newFindings.length, 1);
+  assert.equal(
+    held.newFindings[0].notificationStatus,
+    'REVIEW_REQUIRED',
+    'unverifiable match (confidence pinned to 0) stays held above threshold 0 even with the flag on',
+  );
 });
 test('fallback cannot override a known version exclusion', () => {
   assert.equal(
@@ -472,10 +525,7 @@ test('buildStrictCpe23 escapes plus signs so generated CPEs align with NVD dicti
   assert.equal(parsed.vendor, 'notepad_plus_plus');
   assert.equal(parsed.product, 'notepad\\+\\+');
   // The escaped product must match the NVD dictionary entry format.
-  assert.equal(
-    matchCPE(built, 'cpe:2.3:a:notepad_plus_plus:notepad\\+\\+:*:*:*:*:*:*:*:*').matched,
-    true,
-  );
+  assert.equal(matchCPE(built, 'cpe:2.3:a:notepad_plus_plus:notepad\\+\\+:*:*:*:*:*:*:*:*').matched, true);
 });
 
 test('a CPE range cannot override an explicit vulnerable version token', () => {

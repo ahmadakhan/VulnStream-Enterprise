@@ -252,6 +252,7 @@ export function SettingsView() {
     form.schedulerEnabled !== settings.schedulerEnabled ||
     form.autoDispatchEnabled !== settings.autoDispatchEnabled ||
     (form.autoDispatchConfidenceThreshold ?? 90) !== (settings.autoDispatchConfidenceThreshold ?? 90) ||
+    (form.autoDispatchUnverifiableMatches ?? false) !== (settings.autoDispatchUnverifiableMatches ?? false) ||
     (form.digestBatchingEnabled ?? false) !== (settings.digestBatchingEnabled ?? false) ||
     (form.digestWindowMinutes ?? 5) !== (settings.digestWindowMinutes ?? 5) ||
     (form.autoDispatchNewsToSecurityTeam ?? false) !== (settings.autoDispatchNewsToSecurityTeam ?? false) ||
@@ -454,6 +455,16 @@ export function SettingsView() {
                       {form.reviewUnverifiableMatches ? 'Enabled' : 'Off'}
                     </strong>
                   </div>
+                  <div>
+                    <span>Unverifiable auto-dispatch</span>
+                    <strong>
+                      <i
+                        className={form.autoDispatchUnverifiableMatches ? 'is-enabled' : ''}
+                        aria-hidden="true"
+                      />
+                      {form.autoDispatchUnverifiableMatches ? 'Enabled' : 'Off'}
+                    </strong>
+                  </div>
                 </div>
                 <fieldset className="processing-settings-fields" disabled={pending > 0}>
                   <legend className="sr-only">Processing and delivery configuration</legend>
@@ -606,12 +617,33 @@ export function SettingsView() {
                           </p>
                         </div>
                       </div>
+                      <div className="processing-context">
+                        <ShieldCheck size={17} aria-hidden="true" />
+                        <div>
+                          <strong>Unverifiable-match precedence</strong>
+                          <p>
+                            These two toggles operate on distinct, non-overlapping paths. At a confidence
+                            threshold of 0 the auto-dispatch toggle releases unverifiable matches from review
+                            before this notification block can act on them, so enabling both is safe. At a
+                            threshold above 0 unverifiable matches are held by their pinned confidence (0%) no
+                            matter the auto-dispatch toggle, so they remain eligible for this security-team
+                            notification.
+                          </p>
+                        </div>
+                      </div>
                       <ProcessingToggle
                         id="processing-unverifiable"
                         title="Notify Security team on unverifiable matches"
                         description="When a product correlation cannot verify the version range, a notification is sent to Security-team recipients for manual review before remediation."
                         checked={form.reviewUnverifiableMatches ?? false}
                         onChange={(checked) => setForm({ ...form, reviewUnverifiableMatches: checked })}
+                      />
+                      <ProcessingToggle
+                        id="processing-auto-unverifiable"
+                        title="Auto-dispatch unverifiable matches"
+                        description="Release findings whose version range cannot be verified from review so they dispatch like confirmed findings. Combine with a minimum confidence of 0 to auto-dispatch every finding."
+                        checked={form.autoDispatchUnverifiableMatches ?? false}
+                        onChange={(checked) => setForm({ ...form, autoDispatchUnverifiableMatches: checked })}
                       />
                     </div>
                   </ProcessingSection>

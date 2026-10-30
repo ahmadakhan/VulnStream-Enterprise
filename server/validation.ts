@@ -426,6 +426,10 @@ export const settingsSchema = z
     advisoryPrefix: z.string().regex(/^[A-Za-z0-9_-]{1,30}$/),
     autoDispatchEnabled: z.boolean(),
     autoDispatchConfidenceThreshold: z.number().int().min(0).max(100).default(90),
+    // Unverifiable matches are review-only by design. Opt-in releases them so the
+    // confidence threshold governs them too — pair with a threshold of 0 to
+    // auto-dispatch every finding.
+    autoDispatchUnverifiableMatches: z.boolean().default(false),
     // News evidence auto-dispatch is opt-in so existing deployments keep their
     // review-only behavior for intelligence matches.
     autoDispatchNewsToSecurityTeam: z.boolean().default(false),
@@ -456,17 +460,21 @@ export const settingsSchema = z
     // Defaults to 'standard' so an older client that omits the field cannot
     // silently switch an installation into high-volume forensic logging.
     logVerbosity: z.enum(['standard', 'verbose']).default('standard'),
-    ntpConfig: z.object({
-      enabled: z.literal(false),
-      server: z.literal(''),
-      driftToleranceMs: z.number().min(0).max(1000),
-    }),
-    mailgunConfig: z.object({
-      enabled: z.literal(false),
-      apiKey: z.literal(''),
-      domain: z.literal(''),
-      fromEmail: z.literal(''),
-    }),
+    ntpConfig: z
+      .object({
+        enabled: z.literal(false),
+        server: z.literal(''),
+        driftToleranceMs: z.number().min(0).max(1000),
+      })
+      .default({ enabled: false, server: '', driftToleranceMs: 50 }),
+    mailgunConfig: z
+      .object({
+        enabled: z.literal(false),
+        apiKey: z.literal(''),
+        domain: z.literal(''),
+        fromEmail: z.literal(''),
+      })
+      .default({ enabled: false, apiKey: '', domain: '', fromEmail: '' }),
     // Defaults keep settings stored before retention was configurable valid.
     retentionConfig: z
       .object({

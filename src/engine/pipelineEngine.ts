@@ -389,13 +389,16 @@ export function runVulnerabilityPipeline(
       //    not held purely on that basis.
       //  - result.applicabilityRequiresReview is a match-level signal that the
       //    match itself is uncertain (version range cannot be verified, package
-      //    identity without a version, etc.). This always holds the finding.
+      //    identity without a version, etc.). This holds the finding unless
+      //    autoDispatchUnverifiableMatches is set, in which case it participates
+      //    in the confidence threshold like any other match.
       const advisoryLacksApplicabilityData = !(cve.cpeMatches?.length || cve.cpeMatchDetails?.length);
       const cveReviewOverride = cve.applicabilityRequiresReview && !advisoryLacksApplicabilityData;
       const unverifiableMatch = cveReviewOverride || result.applicabilityRequiresReview;
       if (unverifiableMatch) result.confidence = 0;
       const confirmed =
-        !unverifiableMatch && result.confidence >= (settings.autoDispatchConfidenceThreshold ?? 90);
+        (!unverifiableMatch || settings.autoDispatchUnverifiableMatches) &&
+        result.confidence >= (settings.autoDispatchConfidenceThreshold ?? 90);
       // Say *why* a match is held. A held finding is re-derived before every
       // delivery attempt, so the reason has to name the actual blocker (policy
       // threshold vs. missing inventory version vs. unverifiable CVE evidence)
