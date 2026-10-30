@@ -1,4 +1,5 @@
 import type { WatchListItem } from '../types/index.ts';
+import { isProductWildcard, dictionaryEntryMatchesWildcard } from './registrationCpe.ts';
 import { buildStrictCpe23 } from '../data/vendorCatalog.ts';
 import { parseCPE23, normalizeCpeForComparison } from './cpeMatcher.ts';
 
@@ -33,7 +34,7 @@ export function editedWatchlistCpe(
     : fields.cpeExpression.trim();
 }
 
-/** Turn dictionary identifiers into inventory rows without inventing wildcard CPEs. */
+/** Turn verified names or product patterns into inventory rows without adding fallback identifiers. */
 export function registrationAssetsFromCpes(
   cpes: string[],
   details: { assetTag: string; ownerGroup: string; notes: string; purls: string[] },
@@ -73,7 +74,7 @@ export function registrationAssetsFromCpes(
   });
 }
 
-/** Fail before any write if a candidate is not an active, exact dictionary name. */
+/** Verify exact dictionary names or product-scoped wildcard patterns before any write. */
 export async function verifyRegistrationCpes(
   cpes: string[],
   lookup: (cpe: string) => Promise<{ results: Array<{ cpeName: string }> }>,
@@ -86,8 +87,15 @@ export async function verifyRegistrationCpes(
     seen.add(cpe.toLowerCase());
     if (!parseCPE23(cpe).isValid) throw new Error(`Invalid CPE 2.3 expression: ${cpe}`);
     const response = await lookup(cpe);
-    let match = response.results.find((entry) =>
-      normalizeCpeForComparison(entry.cpeName) === normalizeCpeForComparison(cpe),
+    if (
+      isProductWildcard(cpe) &&
+      response.results.some((entry) => dictionaryEntryMatchesWildcard(cpe, entry.cpeName))
+    ) {
+      verified.push(cpe);
+      continue;
+    }
+    let match = response.results.find(
+      (entry) => normalizeCpeForComparison(entry.cpeName) === normalizeCpeForComparison(cpe),
     );
     if (!match) {
       const parsed = parseCPE23(cpe);
@@ -95,16 +103,14 @@ export async function verifyRegistrationCpes(
         const normalizedProduct = normalizeCpeForComparison(parsed.product);
         const normalizedVersion = normalizeCpeForComparison(parsed.version);
         const normalizedPart = normalizeCpeForComparison(parsed.part);
-        match = response.results.find(
-          (entry) => {
-            const entryParsed = parseCPE23(entry.cpeName);
-            return (
-              normalizeCpeForComparison(entryParsed.product) === normalizedProduct &&
-              normalizeCpeForComparison(entryParsed.part) === normalizedPart &&
-              normalizeCpeForComparison(entryParsed.version) === normalizedVersion
-            );
-          },
-        );
+        match = response.results.find((entry) => {
+          const entryParsed = parseCPE23(entry.cpeName);
+          return (
+            normalizeCpeForComparison(entryParsed.product) === normalizedProduct &&
+            normalizeCpeForComparison(entryParsed.part) === normalizedPart &&
+            normalizeCpeForComparison(entryParsed.version) === normalizedVersion
+          );
+        });
       }
     }
     if (!match)

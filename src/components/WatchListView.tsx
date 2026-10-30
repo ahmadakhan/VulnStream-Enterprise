@@ -1,7 +1,7 @@
 import { PageHeading } from './PageHeading';
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { WatchListItem, NormalizedCVE, NvdCpeSearchResult } from '../types';
+import { WatchListItem, NormalizedCVE } from '../types';
 import {
   generateCPE23,
   parseCPE23,
@@ -43,6 +43,11 @@ import {
 import { CveLink } from './CveLink';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import './product-registration.css';
+import {
+  withProductWildcards,
+  isProductWildcard,
+  type RegistrationCpeSearchResult,
+} from '../utils/registrationCpe';
 
 function ProductRegistrationDialog({
   children,
@@ -144,7 +149,7 @@ export const WatchListView: React.FC = () => {
   const [nvdSearchProduct, setNvdSearchProduct] = useState('');
 
   // NVD Verified CPE search
-  const [nvdResults, setNvdResults] = useState<NvdCpeSearchResult[]>([]);
+  const [nvdResults, setNvdResults] = useState<RegistrationCpeSearchResult[]>([]);
   const [nvdLoading, setNvdLoading] = useState(false);
   const [nvdError, setNvdError] = useState<string | null>(null);
   const [selectedNvdCpes, setSelectedNvdCpes] = useState<string[]>([]);
@@ -290,7 +295,7 @@ export const WatchListView: React.FC = () => {
     }
     return [
       ...selectedNvdCpes.map((cpe) => ({
-        product: 'NVD dictionary',
+        product: isProductWildcard(cpe) ? 'Product wildcard · all versions' : 'NVD dictionary',
         cpe,
         part: parseCPE23(cpe).part as 'a' | 'o' | 'h',
       })),
@@ -478,7 +483,7 @@ export const WatchListView: React.FC = () => {
     try {
       const result = await searchNvdCpes(vendorInput.trim(), nvdSearchProductTerm, 50);
       if (sequence !== nvdSearchSequence.current) return;
-      const found = result?.results || [];
+      const found = withProductWildcards(result?.results || []);
       setNvdResults(found);
       if (found.length === 0)
         setNvdError('No verified CPEs found in the NVD dictionary for this vendor/product.');
@@ -496,6 +501,7 @@ export const WatchListView: React.FC = () => {
   const addNvdCpe = (cpe: string) => {
     const dictionaryEntry = nvdResults.find((entry) => entry.cpeName === cpe);
     if (!dictionaryEntry || !parseCPE23(cpe).isValid) return;
+    if (!vendorInput.trim()) setVendorInput(parseCPE23(cpe).vendor);
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dictionaryEntry.cpeNameId)) {
       nvdDictionaryIds.current.set(cpe.toLowerCase(), dictionaryEntry.cpeNameId);
     }
@@ -1211,7 +1217,7 @@ export const WatchListView: React.FC = () => {
                 {editingItem ? 'Edit monitored product' : 'Register monitored products'}
               </h2>
               <p id="product-registration-description">
-                Define ownership and select active CPE identifiers from the NVD dictionary.
+                Choose NVD products and monitor an exact release or every version.
               </p>
             </div>
             <button
@@ -1574,8 +1580,8 @@ export const WatchListView: React.FC = () => {
                       </div>
                     )}
                     <p className="registration-helper">
-                      The selected dictionary entry determines the saved version and architecture. Generated
-                      or manually edited identifiers must pass exact NVD verification.
+                      Your selected CPE determines the saved version and architecture. Product wildcards cover
+                      every version and platform; all selections are checked against NVD before saving.
                     </p>
                   </section>
                   <section className="registration-section">
@@ -1584,8 +1590,8 @@ export const WatchListView: React.FC = () => {
                       <div>
                         <h3>Find dictionary entries</h3>
                         <p>
-                          Choose the exact vendor, product, version, and platform to monitor. Registration
-                          requires an active NVD dictionary entry.
+                          Choose an exact dictionary entry, or use the generated product wildcard at the top
+                          to monitor every version and platform.
                         </p>
                       </div>
                     </div>
@@ -1596,7 +1602,7 @@ export const WatchListView: React.FC = () => {
                         <button
                           type="button"
                           onClick={handleNvdSearch}
-                           disabled={nvdLoading || (!vendorInput.trim() && !nvdSearchProductTerm.trim())}
+                          disabled={nvdLoading || (!vendorInput.trim() && !nvdSearchProductTerm.trim())}
                           className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-sky-900/40 dark:bg-sky-900/40 light:bg-sky-100 border border-sky-800 dark:border-sky-800 light:border-sky-300 text-sky-300 dark:text-sky-300 light:text-sky-700 hover:bg-sky-900/60 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
                         >
                           {nvdLoading ? (
@@ -1685,12 +1691,20 @@ export const WatchListView: React.FC = () => {
                                     </div>
                                     <div className="text-[9px] text-zinc-500 dark:text-zinc-500 light:text-zinc-600 flex items-center gap-2 mt-0.5">
                                       <span className="flex items-center gap-1">
-                                        {parsed.isValid ? (
+                                        {r.generatedWildcard ? (
+                                          <Code className="w-3 h-3 text-sky-400" aria-hidden="true" />
+                                        ) : parsed.isValid ? (
                                           <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                                         ) : (
                                           <AlertCircle className="w-3 h-3 text-rose-400" />
                                         )}
-                                        <span>{parsed.isValid ? 'NVD dictionary entry' : 'Invalid CPE'}</span>
+                                        <span>
+                                          {r.generatedWildcard
+                                            ? 'Generated wildcard · NVD product'
+                                            : parsed.isValid
+                                              ? 'NVD dictionary entry'
+                                              : 'Invalid CPE'}
+                                        </span>
                                       </span>
                                       <span className="text-zinc-600 dark:text-zinc-600 light:text-zinc-700">
                                         ·
@@ -1718,7 +1732,7 @@ export const WatchListView: React.FC = () => {
                                     type="button"
                                     onClick={() => addNvdCpe(r.cpeName)}
                                     disabled={!parsed.isValid}
-                                    aria-label={`Add NVD CPE ${r.cpeName}`}
+                                    aria-label={`${r.generatedWildcard ? 'Add product wildcard' : 'Add NVD CPE'} ${r.cpeName}`}
                                     className="shrink-0 ml-2 text-[10px] font-mono px-2 py-0.75 rounded bg-emerald-900/40 dark:bg-emerald-900/40 light:bg-emerald-100 border border-emerald-800 dark:border-emerald-800 light:border-emerald-300 text-emerald-300 dark:text-emerald-300 light:text-emerald-700 hover:bg-emerald-900/60"
                                   >
                                     Add
@@ -1737,7 +1751,7 @@ export const WatchListView: React.FC = () => {
                       {selectedNvdCpes.length > 0 && (
                         <div className="space-y-1">
                           <div className="text-[10px] font-mono text-zinc-400 dark:text-zinc-400 light:text-zinc-600">
-                            Selected verified CPEs ({selectedNvdCpes.length}):
+                            Selected CPEs ({selectedNvdCpes.length}):
                           </div>
                           {selectedNvdCpes.map((cpe) => (
                             <div key={cpe} className="flex items-center gap-2">
@@ -1862,8 +1876,8 @@ export const WatchListView: React.FC = () => {
                       </div>
                     )}
                     <p className="registration-helper">
-                      NVD verifies these identifiers before saving. Different products are registered
-                      separately; versions of the same product stay together.
+                      Identifiers are checked against NVD before saving. Product wildcards keep every version
+                      and platform in scope.
                     </p>
                   </div>
                   <label htmlFor="registration-manual-cpe">Add a CPE expression to verify</label>

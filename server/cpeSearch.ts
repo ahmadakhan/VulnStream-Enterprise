@@ -6,6 +6,8 @@ import type { Config } from './config';
 import type { Requester } from './network';
 import type { ThreatFeed, NvdCpeSearchResult, NvdCpeSearchResponse } from '../src/types/index.ts';
 
+import { isProductWildcard, dictionaryEntryMatchesWildcard } from '../src/utils/registrationCpe.ts';
+
 const NVD_CPE_ENDPOINT = 'https://services.nvd.nist.gov/rest/json/cpes/2.0';
 
 export function buildCpeUrl(keyword: string, resultsPerPage: number): URL {
@@ -224,7 +226,16 @@ export async function searchNvdCpes(
   if (response.status !== 200) throw new Error(`NVD CPE search returned HTTP ${response.status}`);
 
   const seenCpes = new Set<string>();
-  const { results, totalResults } = parseNvdCpeProducts(response.body, exactCpe, seenCpes);
+  const productWildcard = Boolean(exactCpe && isProductWildcard(exactCpe));
+  const { results, totalResults } = parseNvdCpeProducts(
+    response.body,
+    productWildcard ? undefined : exactCpe,
+    seenCpes,
+  );
+  if (productWildcard) {
+    const matching = results.filter((entry) => dictionaryEntryMatchesWildcard(exactCpe!, entry.cpeName));
+    if (matching.length) return { results: matching, totalResults };
+  }
 
   // When no exact CPE lookup is requested and a product name is supplied,
   // also search with a cpeMatchString that uses a wildcard vendor (`*`).
@@ -288,7 +299,10 @@ export async function searchNvdCpes(
         }
         if (wildcardResponse.status === 200) {
           const wildcardParsed = parseNvdCpeProducts(wildcardResponse.body, undefined, seenCpes, true);
-          return { results: [...results, ...wildcardParsed.results], totalResults: totalResults + wildcardParsed.totalResults };
+          return {
+            results: [...results, ...wildcardParsed.results],
+            totalResults: totalResults + wildcardParsed.totalResults,
+          };
         }
       } catch (error) {
         if (isNvdRateLimitError(error)) throw error;
