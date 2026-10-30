@@ -438,6 +438,7 @@ export function runVulnerabilityPipeline(
         status: 'MONITORED',
         autoDispatchedAt: null,
         advisoryId: null,
+        reviewNotifiedAt: null,
         timeline: [
           {
             timestamp: started.toISOString(),

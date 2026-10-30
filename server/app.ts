@@ -2113,11 +2113,10 @@ export function createApp(
           randomUUID(),
         );
         for (const finding of findings)
-          await db.query('UPDATE findings SET advisory_id=$1, notification_status=$2 WHERE id=$3 AND advisory_id IS DISTINCT FROM $1', [
-            advisory.id,
-            'QUEUED_FOR_DISPATCH',
-            finding.id,
-          ]);
+          await db.query(
+            "UPDATE records SET data = data || jsonb_build_object('advisoryId', $1::text, 'notificationStatus', $2::text) WHERE kind='findings' AND id=$3 AND (data->>'advisoryId') IS DISTINCT FROM $1",
+            [advisory.id, 'QUEUED_FOR_DISPATCH', finding.id],
+          );
         await appendAudit(
           db,
           'Bulk notification queued',

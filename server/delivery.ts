@@ -1690,6 +1690,28 @@ export async function deliverNext(
                 ? new Date().toISOString()
                 : null,
           });
+    }
+    }
+    // Unverifiable-match notifications carry no advisory row, so the advisory
+    // bookkeeping above is skipped. Without parallel tracking, the findings
+    // remain REVIEW_REQUIRED after the transport accepts the combined email and
+    // are re-selected — and re-queued — on every pipeline run. The dedupe_key
+    // prevents an actual duplicate for unchanged content, but a benign finding
+    // revision change (vendor/product/asset label) would produce a new dedupe
+    // key and fire the notification a second time. Stamp the acceptance here so
+    // the pipeline can exclude already-notified findings and guarantee the email
+    // is sent at most once.
+    if (job.payload.unverifiableMatch && !error && !routeToReview) {
+      const notifiedIds = job.payload.unverifiableMatch.findings.map((f) => f.findingId);
+      const findingMap = await getMany<Finding>(db, 'findings', notifiedIds);
+      const now = new Date().toISOString();
+      for (const findingId of notifiedIds) {
+        const finding = findingMap.get(findingId);
+        if (!finding || finding.reviewNotifiedAt) continue;
+        await put(db, 'findings', findingId, {
+          ...finding,
+          reviewNotifiedAt: now,
+        });
       }
     }
     await writeEvent(db, {

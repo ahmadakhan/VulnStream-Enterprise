@@ -281,6 +281,14 @@ export interface Finding {
   status: FindingStatus;
   autoDispatchedAt: string | null;
   advisoryId: string | null;
+  /**
+   * Timestamp when the unverifiable-match review notification email was accepted
+   * by the transport. Null when the finding has not yet been notified. Once set,
+   * the pipeline will not re-queue the notification, guaranteeing the email is
+   * sent at most once per finding. Optional for backward compatibility with
+   * records written before this field existed.
+   */
+  reviewNotifiedAt?: string | null;
   timeline: {
     timestamp: string;
     action: string;

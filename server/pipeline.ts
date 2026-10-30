@@ -1390,13 +1390,21 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       // so it stays REVIEW_REQUIRED and this notification still fires. The flag therefore cannot
       // silence security-team notifications except at threshold 0, where the finding is no longer
       // in review to notify about.
+      //
+      // The filter runs against vexEnforced (the reconciled set) rather than
+      // survivingNewFindings so that findings already notified on a prior run are
+      // excluded: deliverNext stamps reviewNotifiedAt on transport acceptance, and
+      // reconcileFindings preserves it via the ...old spread. This guarantees the
+      // unverifiable-match email is sent at most once, even if the finding revision
+      // changes on a later run.
       if (settings.reviewUnverifiableMatches) {
         const securityRecipients = (await list<EmailRecipient>(db, 'recipients')).filter(
           (r) => r.enabled && (r.deliveryGroup === 'SECURITY_TEAM' || r.deliveryGroup === undefined),
         );
         if (securityRecipients.length) {
-          const unverifiableFindings = survivingNewFindings.filter(
-            (f) => f.notificationStatus === 'REVIEW_REQUIRED' && f.confidence === 0,
+          const unverifiableFindings = vexEnforced.filter(
+            (f) =>
+              f.notificationStatus === 'REVIEW_REQUIRED' && f.confidence === 0 && !f.reviewNotifiedAt,
           );
           if (unverifiableFindings.length) {
             unverifiableNotificationsQueued += await queueUnverifiableMatchNotification(
