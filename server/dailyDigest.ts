@@ -364,12 +364,18 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
         // Reassess against today's inventory and policy, including findings
         // held under an older threshold. Never treat a stored hold as approval.
         const ids = [...new Set(candidates.map((f) => f.cveId))];
-        const [cached, assets, withdrawals, aliases] = await Promise.all([
-          getMany<NormalizedCVE>(db, 'cveData', ids),
-          getMany<WatchListItem>(db, 'watchlist', [...new Set(candidates.map((f) => f.matchedAssetId))]),
-          getMany<{ modifiedDate: string }>(db, 'cveWithdrawals', ids),
-          list<AliasEntry>(db, 'aliases'),
-        ]);
+        // Serial, not Promise.all: `db` is one pooled client inside this
+        // transaction, and pg serialises (and deprecates) concurrent queries on
+        // a single connection. Issuing four at once races the protocol queue and
+        // the results are only ordered by luck.
+        const cached = await getMany<NormalizedCVE>(db, 'cveData', ids);
+        const assets = await getMany<WatchListItem>(
+          db,
+          'watchlist',
+          [...new Set(candidates.map((f) => f.matchedAssetId))],
+        );
+        const withdrawals = await getMany<{ modifiedDate: string }>(db, 'cveWithdrawals', ids);
+        const aliases = await list<AliasEntry>(db, 'aliases');
         const cves = new Map(candidates.map((f) => [f.cveId, cached.get(f.cveId) || f.cve]));
         const current = runVulnerabilityPipeline(
           [],

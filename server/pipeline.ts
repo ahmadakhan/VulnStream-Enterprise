@@ -98,11 +98,11 @@ export async function rebuildLegacyDeliveryPayload(db: pg.Pool | pg.PoolClient, 
   const aliases = await list<AliasEntry>(db, 'aliases');
   const current: Finding[] = [];
   for (const finding of findingMap.values()) {
-    const [asset, cve, withdrawal] = await Promise.all([
-      get<WatchListItem>(db, 'watchlist', finding.matchedAssetId),
-      get<NormalizedCVE>(db, 'cveData', finding.cveId),
-      get<{ modifiedDate: string }>(db, 'cveWithdrawals', finding.cveId),
-    ]);
+    // Serial: `db` is a single client inside this transaction, and issuing
+    // queries concurrently on one pg connection races the protocol queue.
+    const asset = await get<WatchListItem>(db, 'watchlist', finding.matchedAssetId);
+    const cve = await get<NormalizedCVE>(db, 'cveData', finding.cveId);
+    const withdrawal = await get<{ modifiedDate: string }>(db, 'cveWithdrawals', finding.cveId);
     if (!asset?.active || !cve || ['RESOLVED', 'FALSE_POSITIVE', 'PATCH_APPLIED'].includes(finding.status) ||
         (withdrawal && Date.parse(cve.modifiedDate) <= Date.parse(withdrawal.modifiedDate))) return false;
     const match = runVulnerabilityPipeline([], [cve], [asset], [], [], { ...DEFAULT_SETTINGS, ...settings, scopeHours: 0 },
