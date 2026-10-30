@@ -1391,10 +1391,10 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           const unverifiableFindings = survivingNewFindings.filter(
             (f) => f.notificationStatus === 'REVIEW_REQUIRED' && f.confidence === 0,
           );
-          for (const finding of unverifiableFindings) {
+          if (unverifiableFindings.length) {
             unverifiableNotificationsQueued += await queueUnverifiableMatchNotification(
               db,
-              finding,
+              unverifiableFindings,
               securityRecipients,
             );
           }

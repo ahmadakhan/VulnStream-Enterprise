@@ -28,19 +28,21 @@ export interface NewsEvidencePayload {
   zeroDay?: boolean;
   credibilityScore?: number;
 }
-/** Payload carried by an unverifiable-match review notification delivery job. */
-export interface UnverifiableMatchPayload {
-  /** Finding.id this job was queued from. */
+/** Per-finding record inside an unverifiable-match batch. */
+export interface UnverifiableMatchFinding {
   findingId: string;
-  /** Asset the CVE was matched against. */
   asset: { name: string; vendor?: string; product?: string };
-  /** CVE identifiers referenced by the finding. */
-  cveIds: string[];
-  /** Why the finding could not be verified (e.g. missing version range). */
+  cveId: string;
   evidence: string;
-  /** Severity of the matched CVE. */
   severity: string;
   cvssScore: number;
+}
+/** Payload carried by an unverifiable-match review notification delivery job. */
+export interface UnverifiableMatchPayload {
+  /** Findings batched into this single combined notification, in display order. */
+  findings: UnverifiableMatchFinding[];
+  /** CVE identifiers referenced across the batch, de-duplicated and sorted. */
+  cveIds: string[];
 }
 import { buildAliasMap } from '../src/utils/cpeMatcher';
 import { randomUUID, createHmac, createHash } from 'node:crypto';
@@ -796,65 +798,112 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, ch =>
 const stripCrlf = (value: string) => value.replace(/[\r\n]/g, ' ');
 
 /**
- * Queues one email per eligible Security-team recipient for an unverifiable
- * finding — a product correlation whose version range could not be confirmed.
- * Each job carries no Advisory row and is delivered as a standalone review
- * notification by `deliverNext`.
+ * Queues a single combined review notification per eligible Security-team
+ * recipient for every unverifiable finding in `findings` — product correlations
+ * whose version ranges could not be confirmed. Each job carries no Advisory row
+ * and is delivered as a standalone review notification by `deliverNext`.
+ *
+ * All findings are batched into one email rather than one email per finding, so
+ * a pipeline pass that produced N unverifiable matches produces M combined
+ * emails (one per recipient) instead of N*M individual emails.
  *
  * The email header reads "for Review - Unverifiable matches" in bold, so the
- * security team knows the finding needs manual verification before remediation.
+ * security team knows the matches need manual verification before remediation.
  */
 export async function queueUnverifiableMatchNotification(
   db: Db,
-  finding: Finding,
+  findings: Finding[],
   recipients: EmailRecipient[],
 ): Promise<number> {
   const selected = recipients.filter(
     (r) => r.enabled && (r.deliveryGroup === 'SECURITY_TEAM' || r.deliveryGroup === undefined),
   );
-  if (!selected.length) return 0;
-  const cveIds = [finding.cveId].filter(Boolean);
-  const asset = finding.matchedAssetName || finding.matchedAssetVendor || finding.matchedAssetProduct || 'unknown asset';
-  const vendor = finding.matchedAssetVendor;
-  const product = finding.matchedAssetProduct;
-  const subject = `[Threat intelligence] for Review - Unverifiable matches: ${finding.cveId} on ${asset}`.replace(/[\r\n]/g, ' ');
-  const evidence = stripCrlf(finding.matchingEvidence);
+  if (findings.length === 0 || selected.length === 0) return 0;
+  const findingLines = findings.map((finding) => {
+    const asset =
+      finding.matchedAssetName || finding.matchedAssetVendor || finding.matchedAssetProduct || 'unknown asset';
+    const vendor = finding.matchedAssetVendor;
+    const product = finding.matchedAssetProduct;
+    const evidence = stripCrlf(finding.matchingEvidence);
+    const cveId = finding.cveId;
+    return {
+      asset,
+      vendor,
+      product,
+      evidence,
+      cveId,
+      severity: finding.cve.cvss.severity,
+      cvssScore: finding.cve.cvss.score,
+      findingId: finding.id,
+    };
+  });
+  const cveIds = Array.from(new Set(findings.map((f) => f.cveId).filter(Boolean))).sort();
+  const subject = `[Threat intelligence] for Review - Unverifiable matches (${findings.length} findings)`.replace(
+    /[\r\n]/g,
+    ' ',
+  );
+  const textBlocks = findingLines.map((f, i) => {
+    const lines = [
+      `${i + 1}. CVE: ${f.cveId}`,
+      `   Asset: ${f.asset}`,
+      f.vendor ? `   Vendor: ${f.vendor}` : '',
+      f.product ? `   Product: ${f.product}` : '',
+      `   Severity: ${f.severity}`,
+      `   CVSS score: ${f.cvssScore}`,
+      `   Evidence: ${f.evidence}`,
+    ].filter(Boolean);
+    return lines.join('\n');
+  });
   const text =
     `for Review - Unverifiable matches\n\n` +
-    `CVE: ${finding.cveId}\n` +
-    `Asset: ${asset}\n` +
-    (vendor ? `Vendor: ${vendor}\n` : '') +
-    (product ? `Product: ${product}\n` : '') +
-    `Severity: ${finding.cve.cvss.severity}\n` +
-    `CVSS score: ${finding.cve.cvss.score}\n\n` +
-    `Evidence: ${evidence}\n\n` +
+    `The following ${findings.length} product-identity correlation(s) matched inventory ` +
+    `but could not verify the version range. Confirm applicability with the vendor advisory before remediation.\n\n` +
+    `${textBlocks.join('\n\n')}\n\n` +
     `This finding matched inventory but could not verify the version range. ` +
     `Confirm applicability with the vendor advisory before remediation.`;
+  const htmlBlocks = findingLines
+    .map(
+      (f) =>
+        `<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">` +
+        `<tr><td style="padding:4px 8px;font-weight:bold;">CVE</td><td style="padding:4px 8px;"><code>${escapeHtml(f.cveId)}</code></td></tr>` +
+        `<tr><td style="padding:4px 8px;font-weight:bold;">Asset</td><td style="padding:4px 8px;">${escapeHtml(f.asset)}</td></tr>` +
+        (f.vendor
+          ? `<tr><td style="padding:4px 8px;font-weight:bold;">Vendor</td><td style="padding:4px 8px;">${escapeHtml(f.vendor)}</td></tr>`
+          : '') +
+        (f.product
+          ? `<tr><td style="padding:4px 8px;font-weight:bold;">Product</td><td style="padding:4px 8px;">${escapeHtml(f.product)}</td></tr>`
+          : '') +
+        `<tr><td style="padding:4px 8px;font-weight:bold;">Severity</td><td style="padding:4px 8px;">${escapeHtml(f.severity)}</td></tr>` +
+        `<tr><td style="padding:4px 8px;font-weight:bold;">CVSS score</td><td style="padding:4px 8px;">${f.cvssScore}</td></tr>` +
+        `</table>` +
+        `<p style="margin-top:8px;">${escapeHtml(f.evidence).replace(/\n/g, '<br>')}</p>`,
+    )
+    .join('<hr style="border:none;border-top:1px solid #ccc;margin:16px 0;">');
   const html =
     `<html><body>` +
     `<p><strong>for Review - Unverifiable matches</strong></p>` +
-    `<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">` +
-    `<tr><td style="padding:4px 8px;font-weight:bold;">CVE</td><td style="padding:4px 8px;"><code>${escapeHtml(finding.cveId)}</code></td></tr>` +
-    `<tr><td style="padding:4px 8px;font-weight:bold;">Asset</td><td style="padding:4px 8px;">${escapeHtml(asset)}</td></tr>` +
-    (vendor ? `<tr><td style="padding:4px 8px;font-weight:bold;">Vendor</td><td style="padding:4px 8px;">${escapeHtml(vendor)}</td></tr>` : '') +
-    (product ? `<tr><td style="padding:4px 8px;font-weight:bold;">Product</td><td style="padding:4px 8px;">${escapeHtml(product)}</td></tr>` : '') +
-    `<tr><td style="padding:4px 8px;font-weight:bold;">Severity</td><td style="padding:4px 8px;">${finding.cve.cvss.severity}</td></tr>` +
-    `<tr><td style="padding:4px 8px;font-weight:bold;">CVSS score</td><td style="padding:4px 8px;">${finding.cve.cvss.score}</td></tr>` +
-    `</table>` +
-    `<p style="margin-top:16px;">${escapeHtml(evidence).replace(/\n/g, '<br>')}</p>` +
-    `<p>This finding matched inventory but could not verify the version range. ` +
+    `<p>The following ${findings.length} product-identity correlation(s) matched inventory ` +
+    `but could not verify the version range. Confirm applicability with the vendor advisory before remediation.</p>` +
+    htmlBlocks +
+    `<p style="margin-top:16px;">This finding matched inventory but could not verify the version range. ` +
     `Confirm applicability with the vendor advisory before remediation.</p>` +
     `</body></html>`;
   const unverifiableMatch: UnverifiableMatchPayload = {
-    findingId: finding.id,
-    asset: { name: asset, vendor, product },
+    findings: findingLines.map((f) => ({
+      findingId: f.findingId,
+      asset: { name: f.asset, vendor: f.vendor, product: f.product },
+      cveId: f.cveId,
+      evidence: f.evidence,
+      severity: f.severity,
+      cvssScore: f.cvssScore,
+    })),
     cveIds,
-    evidence,
-    severity: finding.cve.cvss.severity,
-    cvssScore: finding.cve.cvss.score,
   };
-  const contentRevision = `${finding.id}:${findingRevision(finding)}`;
-  const identity = `unverifiable:${finding.id}:${contentRevision}`;
+  const findingRevisions = Object.fromEntries(findings.map((f) => [f.id, findingRevision(f)]));
+  const findingIds = findings.map((f) => f.id).sort();
+  const batchRevision = createHash('sha256').update(stableJson(findingRevisions)).digest('hex');
+  const contentRevision = `${findingIds.join(',')}:${batchRevision}`;
+  const identity = `unverifiable:${findingIds.join(',')}:${contentRevision}`;
   let queued = 0;
   for (const recipient of selected) {
     if (
@@ -862,19 +911,20 @@ export async function queueUnverifiableMatchNotification(
         db,
         'email',
         recipient.id,
-        `UNVERIFIABLE:${finding.id}`,
+        `UNVERIFIABLE:${findingIds.join(',')}`,
         {
           subject,
           text,
           html,
           cveIds,
-          unverifiableMatch,
+          findingRevisions,
           contentRevision,
+          unverifiableMatch,
           recipientEmail: recipient.email,
         },
         `${identity}:email:${recipient.id}`,
         'QUEUED',
-        advisoryPriority([finding]),
+        advisoryPriority(findings),
       )
     )
       queued++;
