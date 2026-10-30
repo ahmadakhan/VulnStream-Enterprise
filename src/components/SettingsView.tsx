@@ -255,6 +255,7 @@ export function SettingsView() {
     (form.digestBatchingEnabled ?? false) !== (settings.digestBatchingEnabled ?? false) ||
     (form.digestWindowMinutes ?? 5) !== (settings.digestWindowMinutes ?? 5) ||
     (form.autoDispatchNewsToSecurityTeam ?? false) !== (settings.autoDispatchNewsToSecurityTeam ?? false) ||
+    (form.reviewUnverifiableMatches ?? false) !== (settings.reviewUnverifiableMatches ?? false) ||
     (form.emailRetryEnabled ?? true) !== (settings.emailRetryEnabled ?? true) ||
     (form.emailRetryMaxAttempts ?? 6) !== (settings.emailRetryMaxAttempts ?? 6) ||
     (form.emailRetryInitialDelayMinutes ?? 1) !== (settings.emailRetryInitialDelayMinutes ?? 1) ||
@@ -446,6 +447,13 @@ export function SettingsView() {
                         : 'Disabled'}
                     </strong>
                   </div>
+                  <div>
+                    <span>Unverifiable match review</span>
+                    <strong>
+                      <i className={form.reviewUnverifiableMatches ? 'is-enabled' : ''} aria-hidden="true" />
+                      {form.reviewUnverifiableMatches ? 'Enabled' : 'Off'}
+                    </strong>
+                  </div>
                 </div>
                 <fieldset className="processing-settings-fields" disabled={pending > 0}>
                   <legend className="sr-only">Processing and delivery configuration</legend>
@@ -598,6 +606,13 @@ export function SettingsView() {
                           </p>
                         </div>
                       </div>
+                      <ProcessingToggle
+                        id="processing-unverifiable"
+                        title="Notify Security team on unverifiable matches"
+                        description="When a product correlation cannot verify the version range, a notification is sent to Security-team recipients for manual review before remediation."
+                        checked={form.reviewUnverifiableMatches ?? false}
+                        onChange={(checked) => setForm({ ...form, reviewUnverifiableMatches: checked })}
+                      />
                     </div>
                   </ProcessingSection>
                   <ProcessingSection

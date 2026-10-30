@@ -782,6 +782,8 @@ export const INITIAL_SETTINGS: AppSettings = {
    autoDispatchEnabled: true,
   autoDispatchConfidenceThreshold: 0,
   autoDispatchNewsToSecurityTeam: false,
+  // Matches the schema default (server/validation.ts).
+  reviewUnverifiableMatches: false,
   // Fixtures use standard detail: verbose telemetry is a deliberate forensic
   // choice an operator makes against a live installation.
   logVerbosity: 'standard',

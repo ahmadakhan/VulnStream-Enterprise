@@ -428,6 +428,7 @@ export function runVulnerabilityPipeline(
         matchedCpe: result.matchedCpe || '',
         matchingMethod: result.method,
         matchingEvidence: evidence,
+        confidence: result.confidence,
         exposure: asset.exposure,
         exploitRisk: determineExploitRisk(cve),
         notificationStatus: confirmed ? 'QUEUED_FOR_DISPATCH' : 'REVIEW_REQUIRED',

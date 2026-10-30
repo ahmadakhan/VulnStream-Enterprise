@@ -64,8 +64,9 @@ export function reconcileFindings(
       matchedAssetPurls: candidate.matchedAssetPurls,
       matchedCpe: candidate.matchedCpe,
       matchingMethod: candidate.matchingMethod,
-      matchingEvidence: candidate.matchingEvidence,
-      exposure: candidate.exposure,
+       matchingEvidence: candidate.matchingEvidence,
+       confidence: candidate.confidence,
+       exposure: candidate.exposure,
       exploitRisk: candidate.exploitRisk,
       notificationStatus,
       timeline: changed

@@ -135,6 +135,24 @@ test('the statement splitter respects string literals and comments', () => {
   assert.match(statements[1], /'a;b'/);
 });
 
+test('a comment semicolon or apostrophe alone cannot split a statement', () => {
+  // The combined case above can pass while either path is broken: a semicolon in
+  // prose only splits if comments are handled after splitting, and an apostrophe
+  // only breaks the statement if quote tracking runs before comment removal.
+  // Index files are heavily commented prose, so each is asserted on its own.
+  const semicolon = indexStatements(
+    '-- explain the build; it must not lock\nCREATE INDEX CONCURRENTLY IF NOT EXISTS a ON t (x);',
+  );
+  assert.equal(semicolon.length, 1, 'a semicolon inside a comment must not split the statement');
+  assert.match(semicolon[0]!, /^CREATE INDEX CONCURRENTLY/);
+
+  const apostrophe = indexStatements(
+    "-- it protects the table's writers\nCREATE INDEX CONCURRENTLY IF NOT EXISTS b ON t (y);",
+  );
+  assert.equal(apostrophe.length, 1, "an apostrophe in a comment must not open a string literal");
+  assert.match(apostrophe[0]!, /^CREATE INDEX CONCURRENTLY/);
+});
+
 test('index builds target columns their migrations actually create', async () => {
   // Index DDL runs after every schema migration commits, so a build referencing
   // a column no migration creates fails only on a brand-new database — the one

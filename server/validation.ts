@@ -422,6 +422,7 @@ export const settingsSchema = z
     // News evidence auto-dispatch is opt-in so existing deployments keep their
     // review-only behavior for intelligence matches.
     autoDispatchNewsToSecurityTeam: z.boolean().default(false),
+    reviewUnverifiableMatches: z.boolean().default(false),
     // Digest coalescing is opt-in so existing deployments keep their current behavior.
     digestBatchingEnabled: z.boolean().default(false),
     digestWindowMinutes: z.number().int().min(1).max(1440),

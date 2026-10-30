@@ -270,6 +270,9 @@ export interface Finding {
   matchedCpe: string;
   matchingMethod: string;
   matchingEvidence: string;
+  /** Match confidence (0–100). 0 indicates the version range could not be verified
+   *  and the finding is an unverifiable match held for security-team review. */
+  confidence?: number;
   exposure?: ExposureLevel; // Deprecated
   exploitRisk: ExploitRiskLevel;
   /** Per-source VEX lattice result captured at correlation time. */
@@ -540,6 +543,8 @@ export interface PipelineExecution {
     digestBuffered?: number;
     /** IntelligenceMatch records auto-sent to the Security team this run. */
     newsNotificationsQueued?: number;
+    /** Unverifiable-match notifications queued to the Security team this run. */
+    unverifiableNotificationsQueued?: number;
   };
   logs: string[];
 }
@@ -818,6 +823,13 @@ export interface AppSettings {
    * Opt-in so existing deployments keep their default review-only behavior.
    */
   autoDispatchNewsToSecurityTeam: boolean;
+  /**
+   * When true, unverifiable matches (version range cannot be confirmed) found
+   * during correlation are sent to the Security team recipients for review
+   * instead of being held silently. The notification header reads
+   * "for Review - Unverifiable matches".
+   */
+  reviewUnverifiableMatches: boolean;
   digestBatchingEnabled: boolean;
   digestWindowMinutes: number;
   /**

@@ -58,6 +58,7 @@ import {
   findingRevision,
   queueAdvisory,
   queueNewsEvidenceNotifications,
+  queueUnverifiableMatchNotification,
   revision,
   type Job,
 } from './delivery';
@@ -1344,7 +1345,8 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       let notificationsQueued = 0,
         advisoriesQueued = 0,
         digestBuffered = 0,
-        newsNotificationsQueued = 0;
+        newsNotificationsQueued = 0,
+        unverifiableNotificationsQueued = 0;
       if (settings.autoDispatchNewsToSecurityTeam && rateLimitedMatches.length) {
         const articleMap = new Map(
           articles.map((article) => [article.id, article] as [string, IntelligenceArticle]),
@@ -1379,6 +1381,35 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             runId: execution!.id,
             context: { matches: rateLimitedMatches.length, recipientsNotified: newsNotificationsQueued },
           });
+        }
+      }
+      if (settings.reviewUnverifiableMatches) {
+        const securityRecipients = (await list<EmailRecipient>(db, 'recipients')).filter(
+          (r) => r.enabled && (r.deliveryGroup === 'SECURITY_TEAM' || r.deliveryGroup === undefined),
+        );
+        if (securityRecipients.length) {
+          const unverifiableFindings = survivingNewFindings.filter(
+            (f) => f.notificationStatus === 'REVIEW_REQUIRED' && f.confidence === 0,
+          );
+          for (const finding of unverifiableFindings) {
+            unverifiableNotificationsQueued += await queueUnverifiableMatchNotification(
+              db,
+              finding,
+              securityRecipients,
+            );
+          }
+          if (unverifiableFindings.length) {
+            await writeEvent(db, {
+              category: 'MATCHING',
+              code: 'matching.unverifiable_dispatched',
+              message: 'Unverifiable matches notified to the Security team for review',
+              runId: execution!.id,
+              context: {
+                unverifiableFindings: unverifiableFindings.length,
+                recipientsNotified: unverifiableNotificationsQueued,
+              },
+            });
+          }
         }
       }
       // Previously queued findings also become deliverable after enabling dispatch.
@@ -1516,7 +1547,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             name: 'Delivery queue',
             status: 'SUCCESS',
             durationMs: Date.now() - queueStarted,
-            details: `${notificationsQueued} jobs queued${digestBuffered ? `; ${digestBuffered} findings buffered for the digest window` : ''}${pending.length && !settings.autoDispatchEnabled ? `; ${pending.length} findings pending but autoDispatchEnabled is false` : ''}${newsNotificationsQueued ? `; ${newsNotificationsQueued} news notifications queued` : ''}; transport acceptance is tracked separately`,
+            details: `${notificationsQueued} jobs queued${digestBuffered ? `; ${digestBuffered} findings buffered for the digest window` : ''}${pending.length && !settings.autoDispatchEnabled ? `; ${pending.length} findings pending but autoDispatchEnabled is false` : ''}${newsNotificationsQueued ? `; ${newsNotificationsQueued} news notifications queued` : ''}${unverifiableNotificationsQueued ? `; ${unverifiableNotificationsQueued} unverifiable-match notifications queued` : ''}; transport acceptance is tracked separately`,
           },
         ],
       };
@@ -1526,6 +1557,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       execution.stats.advisoriesQueued = advisoriesQueued;
       execution.stats.digestBuffered = digestBuffered;
       execution.stats.newsNotificationsQueued = newsNotificationsQueued;
+      execution.stats.unverifiableNotificationsQueued = unverifiableNotificationsQueued;
       await saveActiveExecution(db, execution);
       // Clear next_catchup_run if all feeds have completed their catch-up.
       const pendingCatchup = acceptedResults.some((r) => r.syncState?.catch_up && r.syncState.hasMore);
