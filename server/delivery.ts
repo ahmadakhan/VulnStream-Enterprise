@@ -5,7 +5,29 @@ import { advisoryFilename, renderAdvisoryPdf } from './pdf';
 import type pg from 'pg';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine';
 import { DEFAULT_SETTINGS, DEFAULT_EMAIL_CONFIG } from '../shared/state.ts';
-import type { WatchListItem, NormalizedCVE, AliasEntry } from '../src/types/index.ts';
+import type {
+  WatchListItem,
+  NormalizedCVE,
+  AliasEntry,
+  IntelligenceArticle,
+  IntelligenceMatch,
+} from '../src/types/index.ts';
+/** Payload carried by a news (IntelligenceMatch) delivery job. */
+export interface NewsEvidencePayload {
+  /** IntelligenceMatch.id this job was queued from. */
+  matchId: string;
+  /** The article that triggered the match. */
+  article: Pick<IntelligenceArticle, 'id' | 'title' | 'url' | 'sourceFeeds' | 'publishedDate'>;
+  /** Asset the article was matched against. */
+  asset: { name: string; vendor?: string; product?: string };
+  /** CVE identifiers referenced by the matched article, if any. */
+  cveIds: string[];
+  /** Structured evidence text for the email body. */
+  evidence: string;
+  /** True when the article describes an unassigned vulnerability (potential zero-day). */
+  zeroDay?: boolean;
+  credibilityScore?: number;
+}
 import { buildAliasMap } from '../src/utils/cpeMatcher';
 import { randomUUID, createHmac, createHash } from 'node:crypto';
 import { stableJson } from '../src/utils/deduplicator';
@@ -59,6 +81,12 @@ export interface Job {
     includedFindingIds?: string[];
     /** Stable per-batch key used for CVE dispatch accounting across recipients. */
     digestKey?: string;
+    /**
+     * IntelligenceMatch (security news/advisory) evidence queued for direct
+     * delivery to the Security team. When present, the job carries no advisory
+     * row and is validated as a news bundle instead.
+     */
+    newsEvidence?: NewsEvidencePayload;
     /**
      * The content revision this payload was queued under. Queueing proves the
      * revision; re-deriving it later from the advisory does not. The advisory a
@@ -657,6 +685,81 @@ export async function queueAdvisory(
   await put(db, 'advisories', advisory.id, advisory);
   return count;
 }
+/**
+ * Queues one email per eligible Security-team recipient for an
+ * `IntelligenceMatch` (security news/advisory evidence) that matched the
+ * monitored vendor + product inventory. Each job carries no Advisory row
+ * and is delivered as a standalone news alert by `deliverNext`.
+ *
+ * Runs inside the pipeline transaction: the outbox insert commits with the
+ * match record, so a crash between match storage and dispatch cannot drop
+ * evidence or double-count it on the next run — the per-match dedupe key is
+ * idempotent across runs.
+ */
+export async function queueNewsEvidenceNotifications(
+  db: Db,
+  match: IntelligenceMatch,
+  article: IntelligenceArticle,
+  asset: { name: string; vendor?: string; product?: string },
+  recipients: EmailRecipient[],
+): Promise<number> {
+  const selected = recipients.filter(
+    (r) => r.enabled && (r.deliveryGroup === 'SECURITY_TEAM' || r.deliveryGroup === undefined),
+  );
+  if (!selected.length) return 0;
+  const cveIds = article.cveIds.filter(Boolean);
+  const assetLine = asset.vendor && asset.product ? `${asset.vendor} / ${asset.product}` : asset.name;
+  const sourceName = article.sourceFeeds.length ? article.sourceFeeds.join(', ') : 'security news';
+  const publishedAt = article.modifiedDate || article.publishedDate;
+  const subject = `[Threat intelligence] [NEWS] ${article.title}`.replace(/[\r\n]/g, ' ');
+  const text =
+    `${article.title}\n\nSource: ${article.url}\nPublished: ${publishedAt}\nSource feed: ${sourceName}\n\n` +
+    `Matched asset: ${assetLine}\n` +
+    (cveIds.length ? `CVE reference(s): ${cveIds.join(', ')}\n` : '') +
+    `Evidence: ${match.evidence}\n\n` +
+    (match.zeroDay ? '** Potential zero-day: no assigned CVE **\n' : '') +
+    'This is applicability evidence, not a confirmed advisory. Confirm source authenticity and consult the vendor before remediation.';
+  const newsEvidence: NewsEvidencePayload = {
+    matchId: match.id,
+    article: {
+      id: article.id,
+      title: article.title,
+      url: article.url,
+      sourceFeeds: article.sourceFeeds,
+      publishedDate: article.publishedDate,
+    },
+    asset,
+    cveIds,
+    evidence: match.evidence,
+    zeroDay: match.zeroDay,
+    credibilityScore: match.credibilityScore,
+  };
+  const contentRevision = `${match.id}:${article.id}`;
+  const identity = `news:${match.id}:${contentRevision}`;
+  let queued = 0;
+  for (const recipient of selected) {
+    if (
+      await enqueue(
+        db,
+        'email',
+        recipient.id,
+        `NEWS:${match.id}`,
+        {
+          subject,
+          text,
+          cveIds,
+          newsEvidence,
+          contentRevision,
+          recipientEmail: recipient.email,
+        },
+        `${identity}:email:${recipient.id}`,
+        'QUEUED',
+      )
+    )
+      queued++;
+  }
+  return queued;
+}
 export interface DigestQueueResult {
   /** Persisted union advisory, or the supplied advisory when nothing was queued. */
   advisory: Advisory;
@@ -870,7 +973,7 @@ export async function deliverNext(
     }
     const advisory = await get<Advisory>(pool, 'advisories', job.advisory_id);
     const currentFindings: Finding[] = [];
-    if (!advisory && !native && job.advisory_id !== 'TEST') {
+    if (!advisory && !native && !job.payload.newsEvidence && job.advisory_id !== 'TEST') {
       permanent = true;
       throw new Error('Queued advisory no longer exists');
     }

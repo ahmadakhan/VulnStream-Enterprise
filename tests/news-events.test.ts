@@ -13,7 +13,15 @@ import {
 import { createPool, migrate, put, state } from '../server/db.ts';
 import { queueRun, processPipeline } from '../server/pipeline';
 import { loadConfig } from '../server/config.ts';
-import type { WatchListItem, NormalizedCVE, Finding, IntelligenceArticle } from '../src/types/index.ts';
+import { DEFAULT_SETTINGS } from '../shared/state.ts';
+import type {
+  WatchListItem,
+  NormalizedCVE,
+  Finding,
+  IntelligenceArticle,
+  EmailRecipient,
+} from '../src/types/index.ts';
+import { deliverNext } from '../server/delivery';
 const now = new Date('2026-10-21T12:00:00Z');
 const rss = (items: string) => `<rss version="2.0"><channel><title>Security</title>${items}</channel></rss>`;
 const item = (
@@ -308,6 +316,88 @@ test(
       assert.equal((await readEvents(pool, { q: 'searchable', category: 'SYSTEM' })).events.length, 1);
       assert.ok((await readEvents(pool, { category: 'MATCHING' })).events.length >= 2);
       await assert.rejects(readEvents(pool, { before: '9999999999999999999' }));
+    } finally {
+      await pool.end();
+      await base.query(`DROP SCHEMA ${schema} CASCADE`);
+      await base.end();
+    }
+   },
+);
+test(
+  'matching news is auto-dispatched to the Security team when enabled',
+  { skip: !process.env.TEST_DATABASE_URL },
+  async () => {
+    const base = createPool(process.env.TEST_DATABASE_URL!);
+    const schema = 'news_dispatch_' + randomUUID().replaceAll('-', '');
+    await base.query(`CREATE SCHEMA ${schema}`);
+    const url = new URL(process.env.TEST_DATABASE_URL!);
+    url.searchParams.set('options', `-c search_path=${schema}`);
+    const pool = createPool(url.href);
+    try {
+      await migrate(pool);
+      await put(pool, 'watchlist', asset.id, asset);
+      await put(pool, 'feeds', 'news', {
+        id: 'news',
+        name: 'News',
+        enabled: true,
+        type: 'RSS_ATOM',
+        url: 'https://example.com/feed',
+        authType: 'NONE',
+        rateLimit: 60,
+        healthStatus: 'UNTESTED',
+      });
+      await put(pool, 'settings', 'main', { ...DEFAULT_SETTINGS, autoDispatchNewsToSecurityTeam: true });
+      await put(pool, 'recipients', 'sec-team', {
+        id: 'sec-team',
+        name: 'Security Team',
+        email: 'sec@example.invalid',
+        role: 'ADMIN',
+        deliveryGroup: 'SECURITY_TEAM',
+        subscriptionTier: 'ALL_SEVERITIES',
+        enabled: true,
+        deliverySuccessRate: 100,
+      } as EmailRecipient);
+      const config = loadConfig({
+        NODE_ENV: 'test',
+        DATABASE_URL: url.href,
+        APP_ORIGIN: 'http://localhost',
+        ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
+        EGRESS_ALLOWED_HOSTS: 'example.com',
+        WORKER_ENABLED: 'false',
+      });
+      const rssXml = rss(
+        item('https://example.com/story', 'Acme Widget CVE-2026-12345 cve-2026-12345').replaceAll(
+          'Wed, 21 Oct 2026 10:00:00 GMT',
+          new Date().toUTCString(),
+        ),
+      );
+      await queueRun(pool, 24, 'test');
+      await processPipeline(pool, config, async () => ({ status: 200, body: rssXml, headers: {} }));
+      const queued = (await pool.query('SELECT count(*)::int AS n FROM outbox')).rows[0].n;
+      assert.equal(queued, 1, `expected one news job, got ${queued}`);
+      const jobRow = (await pool.query('SELECT advisory_id, payload FROM outbox')).rows[0];
+      assert.match(jobRow.advisory_id, /^NEWS:/, 'job key is a news advisory id');
+      assert.equal(jobRow.payload.subject, '[Threat intelligence] [NEWS] Acme Widget vulnerability');
+      assert.equal(jobRow.payload.cveIds[0], 'CVE-2026-12345');
+      assert.equal(jobRow.payload.newsEvidence.asset.vendor, 'acme');
+      assert.equal(jobRow.payload.newsEvidence.asset.product, 'widget');
+      // The default (review-only) test above must still hold no jobs; this flag is opt-in.
+      let emails = 0;
+      const mail = async () => {
+        emails++;
+        return 'mock-accepted';
+      };
+      while (await deliverNext(pool, config, async () => ({ status: 200, body: '', headers: {} }), mail)) {}
+      assert.equal(emails, 1);
+      assert.equal(
+        (await pool.query("SELECT count(*)::int AS n FROM outbox WHERE status='ACCEPTED'")).rows[0].n,
+        1,
+      );
+      assert.equal(
+        (await pool.query("SELECT data->>'recipientEmail' AS value FROM records WHERE kind='emailLogs'"))
+          .rows[0].value,
+        'sec@example.invalid',
+      );
     } finally {
       await pool.end();
       await base.query(`DROP SCHEMA ${schema} CASCADE`);

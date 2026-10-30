@@ -61,6 +61,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   advisoryPrefix: 'ADV-',
   autoDispatchEnabled: false,
   autoDispatchConfidenceThreshold: 90,
+  autoDispatchNewsToSecurityTeam: false,
   digestBatchingEnabled: false,
   digestWindowMinutes: 5,
   emailRetryEnabled: true,

@@ -254,6 +254,7 @@ export function SettingsView() {
     (form.autoDispatchConfidenceThreshold ?? 90) !== (settings.autoDispatchConfidenceThreshold ?? 90) ||
     (form.digestBatchingEnabled ?? false) !== (settings.digestBatchingEnabled ?? false) ||
     (form.digestWindowMinutes ?? 5) !== (settings.digestWindowMinutes ?? 5) ||
+    (form.autoDispatchNewsToSecurityTeam ?? false) !== (settings.autoDispatchNewsToSecurityTeam ?? false) ||
     (form.emailRetryEnabled ?? true) !== (settings.emailRetryEnabled ?? true) ||
     (form.emailRetryMaxAttempts ?? 6) !== (settings.emailRetryMaxAttempts ?? 6) ||
     (form.emailRetryInitialDelayMinutes ?? 1) !== (settings.emailRetryInitialDelayMinutes ?? 1) ||
@@ -427,6 +428,16 @@ export function SettingsView() {
                     </strong>
                   </div>
                   <div>
+                    <span>News evidence dispatch</span>
+                    <strong>
+                      <i
+                        className={form.autoDispatchNewsToSecurityTeam ? 'is-enabled' : ''}
+                        aria-hidden="true"
+                      />
+                      {form.autoDispatchNewsToSecurityTeam ? 'Enabled' : 'Review first'}
+                    </strong>
+                  </div>
+                  <div>
                     <span>Daily digest</span>
                     <strong>
                       <i className={form.dailyDigest?.enabled ? 'is-enabled' : ''} aria-hidden="true" />
@@ -591,6 +602,30 @@ export function SettingsView() {
                   </ProcessingSection>
                   <ProcessingSection
                     number="03"
+                    id="processing-news"
+                    title="News evidence"
+                    description="Control how security news and advisory evidence is handled."
+                  >
+                    <ProcessingToggle
+                      id="processing-auto-news"
+                      title="Send matching news to Security team"
+                      description="News evidence that matches your monitored vendor + product inventory is sent to Security-team recipients automatically. When disabled, matching news is held as review-only evidence."
+                      checked={form.autoDispatchNewsToSecurityTeam}
+                      onChange={(checked) => setForm({ ...form, autoDispatchNewsToSecurityTeam: checked })}
+                    />
+                    <div className="processing-context">
+                      <ShieldCheck size={17} aria-hidden="true" />
+                      <div>
+                        <strong>Review evidence before remediation</strong>
+                        <p>
+                          Matching news is applicability evidence, not a confirmed advisory. Recipients are
+                          asked to confirm source authenticity and consult the vendor before remediation.
+                        </p>
+                      </div>
+                    </div>
+                  </ProcessingSection>
+                  <ProcessingSection
+                    number="04"
                     id="processing-digests"
                     title="Digest delivery"
                     description="Configure short-window batching and the scheduled daily summary independently."

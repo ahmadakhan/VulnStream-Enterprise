@@ -28,6 +28,9 @@ import type {
   AliasEntry,
   EmailDeliveryLog,
   WebhookDeliveryLog,
+  EmailRecipient,
+  IntelligenceMatch,
+  IntelligenceArticle,
 } from '../src/types/index.ts';
 import { buildAliasMap, parseCPE23 } from '../src/utils/cpeMatcher';
 import {
@@ -50,7 +53,14 @@ import { recoveryDue, recoveryAt, shouldStartAutomaticRun } from './feedRecovery
 import { ingestionWindow, type FeedCursor, OPENCVE_MAX_WINDOW_HOURS } from './ingestionState';
 import type { Requester } from './network';
 import type { Config } from './config';
-import { enqueue, findingRevision, queueAdvisory, revision, type Job } from './delivery';
+import {
+  enqueue,
+  findingRevision,
+  queueAdvisory,
+  queueNewsEvidenceNotifications,
+  revision,
+  type Job,
+} from './delivery';
 import { bufferFindingsForDigest } from './digest';
 import { renderAdvisory } from './advisoryRender';
 import { HttpError } from './validation';
@@ -1332,7 +1342,44 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       const queueStarted = Date.now();
       let notificationsQueued = 0,
         advisoriesQueued = 0,
-        digestBuffered = 0;
+        digestBuffered = 0,
+        newsNotificationsQueued = 0;
+      if (settings.autoDispatchNewsToSecurityTeam && rateLimitedMatches.length) {
+        const articleMap = new Map(
+          articles.map((article) => [article.id, article] as [string, IntelligenceArticle]),
+        );
+        const assetMap = new Map(
+          snapshot.watchlist.map((item) => [item.id, item] as [string, WatchListItem]),
+        );
+        const securityRecipients = (await list<EmailRecipient>(db, 'recipients')).filter(
+          (r) => r.enabled && (r.deliveryGroup === 'SECURITY_TEAM' || r.deliveryGroup === undefined),
+        );
+        if (securityRecipients.length) {
+          for (const match of rateLimitedMatches) {
+            const article = articleMap.get(match.articleIds[0]);
+            if (!article) continue;
+            const assetItem = assetMap.get(match.assetId);
+            newsNotificationsQueued += await queueNewsEvidenceNotifications(
+              db,
+              match,
+              article,
+              {
+                name: match.assetName,
+                vendor: assetItem?.vendor || undefined,
+                product: assetItem?.product || undefined,
+              },
+              securityRecipients,
+            );
+          }
+          await writeEvent(db, {
+            category: 'MATCHING',
+            code: 'matching.news_dispatched',
+            message: 'Matching news evidence auto-dispatched to the security team',
+            runId: execution!.id,
+            context: { matches: rateLimitedMatches.length, recipientsNotified: newsNotificationsQueued },
+          });
+        }
+      }
       // Previously queued findings also become deliverable after enabling dispatch.
       const pending = vexEnforced.filter(
         (f) =>
@@ -1430,7 +1477,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
           context: { pendingFindings: pending.length },
         });
       }
-      let deliveryLog = `${notificationsQueued} jobs queued${digestBuffered ? `; ${digestBuffered} findings buffered for the digest window` : ''}`;
+      let deliveryLog = `${notificationsQueued} jobs queued${digestBuffered ? `; ${digestBuffered} findings buffered for the digest window` : ''}${newsNotificationsQueued ? `; ${newsNotificationsQueued} news notifications queued` : ''}`;
       if (pending.length && !settings.autoDispatchEnabled) {
         deliveryLog += `; ${pending.length} findings pending but autoDispatchEnabled is false`;
       }
@@ -1468,7 +1515,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
             name: 'Delivery queue',
             status: 'SUCCESS',
             durationMs: Date.now() - queueStarted,
-            details: `${notificationsQueued} jobs queued${digestBuffered ? `; ${digestBuffered} findings buffered for the digest window` : ''}${pending.length && !settings.autoDispatchEnabled ? `; ${pending.length} findings pending but autoDispatchEnabled is false` : ''}; transport acceptance is tracked separately`,
+            details: `${notificationsQueued} jobs queued${digestBuffered ? `; ${digestBuffered} findings buffered for the digest window` : ''}${pending.length && !settings.autoDispatchEnabled ? `; ${pending.length} findings pending but autoDispatchEnabled is false` : ''}${newsNotificationsQueued ? `; ${newsNotificationsQueued} news notifications queued` : ''}; transport acceptance is tracked separately`,
           },
         ],
       };
@@ -1477,6 +1524,7 @@ export async function processPipeline(pool: pg.Pool, config: Config, request: Re
       execution.stats.notificationsQueued = notificationsQueued;
       execution.stats.advisoriesQueued = advisoriesQueued;
       execution.stats.digestBuffered = digestBuffered;
+      execution.stats.newsNotificationsQueued = newsNotificationsQueued;
       await saveActiveExecution(db, execution);
       // Clear next_catchup_run if all feeds have completed their catch-up.
       const pendingCatchup = acceptedResults.some((r) => r.syncState?.catch_up && r.syncState.hasMore);

@@ -419,6 +419,9 @@ export const settingsSchema = z
     advisoryPrefix: z.string().regex(/^[A-Za-z0-9_-]{1,30}$/),
     autoDispatchEnabled: z.boolean(),
     autoDispatchConfidenceThreshold: z.number().int().min(0).max(100).default(90),
+    // News evidence auto-dispatch is opt-in so existing deployments keep their
+    // review-only behavior for intelligence matches.
+    autoDispatchNewsToSecurityTeam: z.boolean().default(false),
     // Digest coalescing is opt-in so existing deployments keep their current behavior.
     digestBatchingEnabled: z.boolean().default(false),
     digestWindowMinutes: z.number().int().min(1).max(1440),

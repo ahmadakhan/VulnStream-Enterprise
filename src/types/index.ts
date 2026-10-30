@@ -538,6 +538,8 @@ export interface PipelineExecution {
     advisoriesQueued?: number;
     /** Findings held for the digest window; they are queued by the delivery worker. */
     digestBuffered?: number;
+    /** IntelligenceMatch records auto-sent to the Security team this run. */
+    newsNotificationsQueued?: number;
   };
   logs: string[];
 }
@@ -798,6 +800,13 @@ export interface AppSettings {
    * The default (90) matches the previous hardcoded threshold.
    */
   autoDispatchConfidenceThreshold: number;
+  /**
+   * When true, news/advisory evidence (IntelligenceMatch records) that matches
+   * the monitored vendor + product inventory is automatically sent to the
+   * Security team recipients instead of being held as review-only evidence.
+   * Opt-in so existing deployments keep their default review-only behavior.
+   */
+  autoDispatchNewsToSecurityTeam: boolean;
   digestBatchingEnabled: boolean;
   digestWindowMinutes: number;
   /**
