@@ -121,7 +121,6 @@ function publicState(data: AppState): AppState {
     settings: {
       ...data.settings,
       webhookSigningSecret: '',
-      mailgunConfig: { ...data.settings.mailgunConfig, apiKey: '' },
     },
   };
 }

@@ -85,7 +85,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // incident; verbose is an explicit forensic choice.
   logVerbosity: 'standard',
   ntpConfig: { enabled: false, server: '', driftToleranceMs: 50 },
-  mailgunConfig: { enabled: false, apiKey: '', domain: '', fromEmail: '' },
   retentionConfig: {
     enabled: false,
     retentionHours: 24,

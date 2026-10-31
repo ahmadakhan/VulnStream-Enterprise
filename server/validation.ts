@@ -471,14 +471,6 @@ export const settingsSchema = z
         driftToleranceMs: z.number().min(0).max(1000),
       })
       .default({ enabled: false, server: '', driftToleranceMs: 50 }),
-    mailgunConfig: z
-      .object({
-        enabled: z.literal(false),
-        apiKey: z.literal(''),
-        domain: z.literal(''),
-        fromEmail: z.literal(''),
-      })
-      .default({ enabled: false, apiKey: '', domain: '', fromEmail: '' }),
     // Defaults keep settings stored before retention was configurable valid.
     retentionConfig: z
       .object({

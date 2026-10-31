@@ -819,12 +819,6 @@ export const INITIAL_SETTINGS: AppSettings = {
     server: 'time.cloudflare.com',
     driftToleranceMs: 50,
   },
-  mailgunConfig: {
-    enabled: true,
-    apiKey: 'key-pbkdf2-encrypted-prod-mailgun-49f9...',
-    domain: 'mg.vulnstream.internal',
-    fromEmail: 'security-advisories@vulnstream.internal',
-  },
   retentionConfig: {
     enabled: false,
     retentionHours: 24,

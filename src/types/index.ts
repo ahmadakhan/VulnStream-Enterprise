@@ -898,12 +898,6 @@ export interface AppSettings {
     server: string;
     driftToleranceMs: number;
   };
-  mailgunConfig: {
-    enabled: boolean;
-    apiKey: string;
-    domain: string;
-    fromEmail: string;
-  };
   retentionConfig: RetentionConfig;
   /**
    * IANA timezone identifier (e.g. `America/New_York`) used for scheduling the
