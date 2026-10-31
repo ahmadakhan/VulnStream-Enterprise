@@ -171,13 +171,23 @@ describe('CronDataProvider', () => {
 
   it('collectAll returns TrainingDataSources with all fields', async () => {
     const db = createMockDb({
-      'correlation_matches': { rows: [{ matched_cpe: 'cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*' }] },
-      'correlation_telemetry': { rows: [{ memory_percent: 50, active_workers: 4, concurrency_limit: 10, latency_ms: 100, dead_letters: 0, pending_claims: 3, items_per_second: 100, pool_waiting: 2 }] },
-      'FROM correlation_matches': { rows: [] },
-      'credibility_score IS NOT NULL': { rows: [] },
-      'channel = \'email\'': { rows: [] },
-      'channel = \'webhook\'': { rows: [] },
-      'remediation_playbooks': { rows: [] },
+      'SELECT DISTINCT matched_cpe': { rows: [{ matched_cpe: 'cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*' }] },
+      'FROM correlation_telemetry': { rows: [{ memory_percent: 50, active_workers: 4, concurrency_limit: 10, latency_ms: 100, dead_letters: 0, pending_claims: 3, items_per_second: 100, pool_waiting: 2 }] },
+      'SELECT confidence, notification_status': { rows: [{ confidence: 90, notification_status: 'QUEUED_FOR_DISPATCH', status: 'PATCHED', cve_id: 'CVE-2024-1234' }] },
+      'JOIN correlation_review_decisions': { rows: [{ confidence: 85, cvss_score: 7.5, epss_score: 0.5, cisa_kev: true, exploit_status: 1, cwe_risk_level: 2, signal_density: 10, source_feed_weight: 40, has_version_evidence: true, days_since_published: 5, status: 'PATCHED', created_at: new Date().toISOString(), resolved_at: null }] },
+      'SELECT credibility_score, status FROM correlation_matches': { rows: [{ credibility_score: 85, status: 'PATCHED' }] },
+      'FROM outbox o WHERE o.channel': { rows: [] },
+      'LEFT JOIN remediation_playbooks': { rows: [{ cvss_score: 8.5, epss_score: 0.7, cisa_kev: true, days_since_published: 5, source_feed_weight: 40, has_version_evidence: true, cwe_risk_level: 2, exploit_status: 3, patch_url: 'https://example.com', vendor_advisory_ref: null, has_workarounds: true, has_immediate_actions: false, has_rollback_plan: true, has_step_by_step: false }] },
+      'exploit_risk IS NOT NULL': { rows: [] },
+      'm.confidence IS NOT NULL': { rows: [] },
+      'FROM emailLogs': { rows: [] },
+      'FROM zero_day_run_summary': { rows: [] },
+      'FROM feed_recovery_history': { rows: [] },
+      "match_method IN ('VENDOR_PRODUCT_ALIAS'": { rows: [] },
+      'm.severity_tier IS NOT NULL': { rows: [] },
+      'm.source_feed_weight IS NOT NULL AND credibility_score IS NOT NULL': { rows: [] },
+      'r.subscription_tier AS recipient_tier': { rows: [] },
+      'm.cwe_risk_level, m.days_since_published, m.source_feed_weight, m.credibility_score, m.has_version_evidence, m.status, m.created_at': { rows: [] },
     });
     const provider = new CronDataProvider();
     const result = await provider.collectAll(db);
@@ -188,6 +198,16 @@ describe('CronDataProvider', () => {
     assert.ok(result.calibrationPairs);
     assert.ok(result.deliveryOutcomes);
     assert.ok(result.remediationFindings);
+    assert.ok(result.exploitRiskSamples);
+    assert.ok(result.matchConfidenceSamples);
+    assert.ok(result.importanceRankSamples);
+    assert.ok(result.credibilityWeightSamples);
+    assert.ok(result.deliveryErrorSamples);
+    assert.ok(result.zeroDayRateLimitSamples);
+    assert.ok(result.digestSelectionSamples);
+    assert.ok(result.severityTierSamples);
+    assert.ok(result.feedRecoverySamples);
+    assert.ok(result.aliasConfidenceSamples);
   });
 });
 
@@ -202,8 +222,8 @@ describe('runScheduledTraining', () => {
       lookbackDays: 1,
     });
 
-    assert.equal(summary.summary.total, 7);
-    assert.equal(summary.summary.skipped, 7);
+    assert.equal(summary.summary.total, 17);
+    assert.equal(summary.summary.skipped, 17);
     assert.equal(summary.summary.trained, 0);
     assert.equal(summary.summary.failed, 0);
 
@@ -212,7 +232,7 @@ describe('runScheduledTraining', () => {
 
   it('trains CPE validity gate with real data', async () => {
     const mockDb = createMockDb({
-      'correlation_matches': {
+      'SELECT DISTINCT matched_cpe': {
         rows: [
           ...Array.from({ length: 100 }, (_, i) => ({
             matched_cpe: `cpe:2.3:a:vendor${i}:product${i}:1.0:*:*:*:*:*:*:*`,
@@ -222,6 +242,22 @@ describe('runScheduledTraining', () => {
           })),
         ],
       },
+      'FROM correlation_telemetry': { rows: [] },
+      'SELECT confidence, notification_status': { rows: [] },
+      'JOIN correlation_review_decisions': { rows: [] },
+      'SELECT credibility_score, status FROM correlation_matches': { rows: [] },
+      'FROM outbox o WHERE o.channel': { rows: [] },
+      'LEFT JOIN remediation_playbooks': { rows: [] },
+      'exploit_risk IS NOT NULL': { rows: [] },
+      'm.confidence IS NOT NULL': { rows: [] },
+      'FROM emailLogs': { rows: [] },
+      'FROM zero_day_run_summary': { rows: [] },
+      'FROM feed_recovery_history': { rows: [] },
+      "match_method IN ('VENDOR_PRODUCT_ALIAS'": { rows: [] },
+      'm.severity_tier IS NOT NULL': { rows: [] },
+      'm.source_feed_weight IS NOT NULL AND credibility_score IS NOT NULL': { rows: [] },
+      'r.subscription_tier AS recipient_tier': { rows: [] },
+      'm.cwe_risk_level, m.days_since_published, m.source_feed_weight, m.credibility_score, m.has_version_evidence, m.status, m.created_at': { rows: [] },
     });
     const mockPool = createMockPool(mockDb);
     const dir = tmpDir();
@@ -246,7 +282,7 @@ describe('runScheduledTraining', () => {
 
     const summary =       await runScheduledTraining(mockPool as unknown as pgPool, { directory: dir });
 
-    assert.equal(summary.summary.total, 7);
+    assert.equal(summary.summary.total, 17);
     assert.equal(summary.summary.failed, 0);
 
     fs.rmSync(dir, { recursive: true, force: true });

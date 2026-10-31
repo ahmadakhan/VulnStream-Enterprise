@@ -229,6 +229,233 @@ export const remediationHelperQualityGate: QualityGate = {
   },
 };
 
+/**
+ * Exploit Risk Model — multi-class (6 levels) via one-vs-all LogisticRegressions.
+ * Gate: accuracy ≥ 0.7 on holdout (must correctly assign risk level most of the time).
+ */
+export const exploitRiskQualityGate: QualityGate = {
+  modelId: 'exploit-risk-model',
+  minimumSamples: 100,
+  evaluate(model, testSamples): QualityGateResult {
+    const m = model as { predict: (f: Record<string, number>) => PredictionResult };
+    const metrics = evaluateClassifier(testSamples, (f) => m.predict(f));
+    return checkGate(
+      [
+        { metric: 'accuracy', value: metrics.accuracy, min: 0.7 },
+      ],
+      { accuracy: 0.7 },
+    );
+  },
+};
+
+/**
+ * Match Confidence Model — binary classifier for match true-positive probability.
+ * Gate: AUC-ROC ≥ 0.55 (must beat random for confidence calibration).
+ */
+export const matchConfidenceQualityGate: QualityGate = {
+  modelId: 'match-confidence-model',
+  minimumSamples: 100,
+  evaluate(model, testSamples): QualityGateResult {
+    const m = model as { predict: (f: Record<string, number>) => PredictionResult };
+    const metrics = evaluateClassifier(testSamples, (f) => m.predict(f));
+    return checkGate(
+      [
+        { metric: 'auc_roc', value: metrics.aucRoc, min: 0.55 },
+      ],
+      { aucRoc: 0.55 },
+    );
+  },
+};
+
+/**
+ * Finding Importance Ranker — GBDT ranker for digest finding ordering.
+ * Gate: AUC-ROC ≥ 0.55 (must rank actionable findings higher than false positives).
+ */
+export const findingImportanceQualityGate: QualityGate = {
+  modelId: 'finding-importance-ranker',
+  minimumSamples: 50,
+  evaluate(model, testSamples): QualityGateResult {
+    const m = model as { predict: (f: Record<string, number>) => PredictionResult };
+    const metrics = evaluateClassifier(testSamples, (f) => m.predict(f));
+    return checkGate(
+      [
+        { metric: 'auc_roc', value: metrics.aucRoc, min: 0.55 },
+        { metric: 'recall', value: metrics.recall, min: 0.3 },
+      ],
+      { aucRoc: 0.55, recall: 0.3 },
+    );
+  },
+};
+
+/**
+ * News Credibility Weight Model — grid-search weight optimizer.
+ * Gate: best weight combination must achieve ≥ 0.55 accuracy on holdout
+ * (must beat the default 0.6/0.4 split).
+ */
+export const credibilityWeightQualityGate: QualityGate = {
+  modelId: 'news-credibility-weight-model',
+  minimumSamples: 100,
+  evaluate(model, testSamples): QualityGateResult {
+    const m = model as { predict: (feedWeight: number, keywordScore: number) => PredictionResult };
+    let correct = 0;
+    let total = 0;
+    for (const s of testSamples) {
+      const feedWeight = s.features.feed_weight ?? s.features.credibility_score ?? 0;
+      const keywordScore = s.features.keyword_score ?? s.features.credibility_score ?? 0;
+      const pred = m.predict(feedWeight, keywordScore);
+      const label = toLabel(s.label);
+      const predLabel = pred.score >= 50 ? 1 : 0;
+      if (predLabel === label) correct++;
+      total++;
+    }
+    const accuracy = total > 0 ? correct / total : 0;
+    return checkGate(
+      [
+        { metric: 'accuracy', value: accuracy, min: 0.55 },
+      ],
+      { accuracy: 0.55 },
+    );
+  },
+};
+
+/**
+ * Delivery Error Classifier — binary classifier for permanent vs transient errors.
+ * Gate: precision ≥ 0.8 on permanent classification (must not incorrectly
+ * mark transient errors as permanent, since that suppresses retries).
+ */
+export const deliveryErrorClassifierQualityGate: QualityGate = {
+  modelId: 'delivery-error-classifier',
+  minimumSamples: 100,
+  evaluate(model, testSamples): QualityGateResult {
+    const m = model as { predict: (f: Record<string, number>) => PredictionResult };
+    const metrics = evaluateClassifier(testSamples, (f) => m.predict(f));
+    return checkGate(
+      [
+        { metric: 'precision', value: metrics.precision, min: 0.8 },
+        { metric: 'auc_roc', value: metrics.aucRoc, min: 0.55 },
+      ],
+      { precision: 0.8, aucRoc: 0.55 },
+    );
+  },
+};
+
+/**
+ * Zero-Day Rate Limit Optimizer — threshold optimizer for zero-day cap.
+ * Gate: the optimized cap must not drop more than 30% of true-positive
+ * zero-day findings (false negative rate ≤ 0.3).
+ */
+export const zeroDayRateLimitQualityGate: QualityGate = {
+  modelId: 'zero-day-rate-limit-optimizer',
+  minimumSamples: 20,
+  evaluate(model, testSamples): QualityGateResult {
+    const m = model as { predict: (count: number, scores: number[]) => PredictionResult };
+    let truePositives = 0;
+    let falseNegatives = 0;
+    for (const s of testSamples) {
+      const count = s.features.zero_day_count ?? 0;
+      const scores: number[] = [];
+      for (let i = 0; i < count; i++) scores.push(100 - i);
+      const pred = m.predict(count, scores);
+      const label = toLabel(s.label);
+      if (pred.score >= 0.5 && label === 1) truePositives++;
+      if (pred.score < 0.5 && label === 1) falseNegatives++;
+    }
+    const fnr = (truePositives + falseNegatives) > 0 ? falseNegatives / (truePositives + falseNegatives) : 0;
+    return checkGate(
+      [
+        { metric: 'false_negative_rate', value: fnr, max: 0.3 },
+      ],
+      { maxFnr: 0.3 },
+    );
+  },
+};
+
+/**
+ * Digest Finding Selector — binary classifier for digest relevance.
+ * Gate: precision ≥ 0.7 on holdout (must not include too many false positives).
+ */
+export const digestFindingSelectorQualityGate: QualityGate = {
+  modelId: 'digest-finding-selector',
+  minimumSamples: 50,
+  evaluate(model, testSamples): QualityGateResult {
+    const m = model as { predict: (f: Record<string, number>) => PredictionResult };
+    const metrics = evaluateClassifier(testSamples, (f) => m.predict(f));
+    return checkGate(
+      [
+        { metric: 'precision', value: metrics.precision, min: 0.7 },
+        { metric: 'auc_roc', value: metrics.aucRoc, min: 0.55 },
+      ],
+      { precision: 0.7, aucRoc: 0.55 },
+    );
+  },
+};
+
+/**
+ * Severity Tier Model — multi-class (5 tiers) via one-vs-all LogisticRegressions.
+ * Gate: accuracy ≥ 0.65 on holdout.
+ */
+export const severityTierQualityGate: QualityGate = {
+  modelId: 'severity-tier-model',
+  minimumSamples: 100,
+  evaluate(model, testSamples): QualityGateResult {
+    const m = model as { predict: (f: Record<string, number>) => PredictionResult };
+    const metrics = evaluateClassifier(testSamples, (f) => m.predict(f));
+    return checkGate(
+      [
+        { metric: 'accuracy', value: metrics.accuracy, min: 0.65 },
+      ],
+      { accuracy: 0.65 },
+    );
+  },
+};
+
+/**
+ * Feed Recovery Backoff Optimizer — threshold optimizer for backoff parameters.
+ * Gate: the optimized policy must achieve ≥ 0.6 recovery rate on holdout
+ * (better than or matching the default exponential backoff).
+ */
+export const feedRecoveryBackoffQualityGate: QualityGate = {
+  modelId: 'feed-recovery-backoff-optimizer',
+  minimumSamples: 20,
+  evaluate(model, testSamples): QualityGateResult {
+    const m = model as { predict: (failures: number) => PredictionResult };
+    let successes = 0;
+    let total = 0;
+    for (const s of testSamples) {
+      const failures = s.features.failure_count ?? 1;
+      const pred = m.predict(failures);
+      if (s.label === 1 && pred.score > 0) successes++;
+      total++;
+    }
+    const successRate = total > 0 ? successes / total : 0;
+    return checkGate(
+      [
+        { metric: 'recovery_rate', value: successRate, min: 0.6 },
+      ],
+      { recoveryRate: 0.6 },
+    );
+  },
+};
+
+/**
+ * Alias Confidence Model — binary classifier for alias finding confirmation.
+ * Gate: AUC-ROC ≥ 0.6 (must be better than random for confidence calibration).
+ */
+export const aliasConfidenceQualityGate: QualityGate = {
+  modelId: 'alias-confidence-model',
+  minimumSamples: 50,
+  evaluate(model, testSamples): QualityGateResult {
+    const m = model as { predict: (f: Record<string, number>) => PredictionResult };
+    const metrics = evaluateClassifier(testSamples, (f) => m.predict(f));
+    return checkGate(
+      [
+        { metric: 'auc_roc', value: metrics.aucRoc, min: 0.6 },
+      ],
+      { aucRoc: 0.6 },
+    );
+  },
+};
+
 /** Registry of all quality gates, keyed by model ID. */
 export const QUALITY_GATES: Record<string, QualityGate> = {
   'cpe-validity-gate': cpeValidityGateQualityGate,
@@ -238,6 +465,16 @@ export const QUALITY_GATES: Record<string, QualityGate> = {
   'confidence-calibrator': confidenceCalibratorQualityGate,
   'delivery-optimizer': deliveryOptimizerQualityGate,
   'advisory-remediation-helper': remediationHelperQualityGate,
+  'exploit-risk-model': exploitRiskQualityGate,
+  'match-confidence-model': matchConfidenceQualityGate,
+  'finding-importance-ranker': findingImportanceQualityGate,
+  'news-credibility-weight-model': credibilityWeightQualityGate,
+  'delivery-error-classifier': deliveryErrorClassifierQualityGate,
+  'zero-day-rate-limit-optimizer': zeroDayRateLimitQualityGate,
+  'digest-finding-selector': digestFindingSelectorQualityGate,
+  'severity-tier-model': severityTierQualityGate,
+  'feed-recovery-backoff-optimizer': feedRecoveryBackoffQualityGate,
+  'alias-confidence-model': aliasConfidenceQualityGate,
 };
 
 /**

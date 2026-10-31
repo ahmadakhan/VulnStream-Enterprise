@@ -105,7 +105,7 @@ describe('evaluation utilities', () => {
 });
 
 describe('quality gates', () => {
-  it('QUALITY_GATES has an entry for all 7 models', () => {
+  it('QUALITY_GATES has an entry for all 17 models', () => {
     assert.ok(QUALITY_GATES['cpe-validity-gate']);
     assert.ok(QUALITY_GATES['metric-anomaly-detector']);
     assert.ok(QUALITY_GATES['auto-dispatch-threshold']);
@@ -113,6 +113,16 @@ describe('quality gates', () => {
     assert.ok(QUALITY_GATES['confidence-calibrator']);
     assert.ok(QUALITY_GATES['delivery-optimizer']);
     assert.ok(QUALITY_GATES['advisory-remediation-helper']);
+    assert.ok(QUALITY_GATES['exploit-risk-model']);
+    assert.ok(QUALITY_GATES['match-confidence-model']);
+    assert.ok(QUALITY_GATES['finding-importance-ranker']);
+    assert.ok(QUALITY_GATES['news-credibility-weight-model']);
+    assert.ok(QUALITY_GATES['delivery-error-classifier']);
+    assert.ok(QUALITY_GATES['zero-day-rate-limit-optimizer']);
+    assert.ok(QUALITY_GATES['digest-finding-selector']);
+    assert.ok(QUALITY_GATES['severity-tier-model']);
+    assert.ok(QUALITY_GATES['feed-recovery-backoff-optimizer']);
+    assert.ok(QUALITY_GATES['alias-confidence-model']);
   });
 
   it('toModelSelfValidation converts QualityGateResult', () => {
@@ -294,8 +304,8 @@ describe('training orchestrator', () => {
     };
 
     const result = await orch.trainAll(data);
-    assert.equal(result.summary.total, 7);
-    assert.equal(result.summary.skipped, 7);
+    assert.equal(result.summary.total, 17);
+    assert.equal(result.summary.skipped, 17);
     assert.equal(result.summary.trained, 0);
     assert.equal(result.summary.failed, 0);
     assert.equal(result.summary.saved, 0);
@@ -534,8 +544,8 @@ describe('training orchestrator', () => {
 
     assert.ok(result.timestamp);
     assert.equal(result.storageDir, dir);
-    assert.equal(result.results.length, 7);
-    assert.equal(result.summary.total, 7);
+    assert.equal(result.results.length, 17);
+    assert.equal(result.summary.total, 17);
     assert.equal(result.summary.trained + result.summary.skipped + result.summary.failed + result.summary.notNeeded, result.summary.total);
 
     for (const r of result.results) {

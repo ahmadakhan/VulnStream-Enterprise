@@ -11,8 +11,10 @@ import type { MetricFeatures } from '../server/ml/models/metricAnomalyDetector.t
 import type { RemediationFeatures } from '../server/ml/models/advisoryRemediationHelper.ts';
 import type { ThresholdSample } from '../server/ml/models/autoDispatchThreshold.ts';
 import type { Finding } from '../src/types/index.ts';
+import type { Db } from '../server/db.ts';
 
 const tmpDir = () => join(os.tmpdir(), `ml-int-test-${Math.random().toString(36).slice(2)}`);
+const mockDb: Db = { query: async () => ({ rows: [] }) } as unknown as Db;
 
 describe('ML pipeline integration', () => {
   describe('runtime initialization', () => {
@@ -22,7 +24,7 @@ describe('ML pipeline integration', () => {
 
     it('initMlRuntime creates and caches runtime', async () => {
       const dir = tmpDir();
-      const runtime = await initMlRuntime({ directory: dir });
+      const runtime = await initMlRuntime(mockDb, { directory: dir });
       assert.ok(runtime);
       assert.equal(getMlRuntime(), runtime);
       fs.rmSync(dir, { recursive: true, force: true });
@@ -55,7 +57,7 @@ describe('ML pipeline integration', () => {
       }
 
       await orch.trainAll({ calibrationPairs });
-      await initMlRuntime({ directory: dir });
+      await initMlRuntime(mockDb, { directory: dir });
 
       const result = calibrateCredibilityScore(80);
       assert.ok(result.probability >= 0.7, `Expected probability >= 0.7, got ${result.probability}`);
@@ -205,7 +207,7 @@ describe('ML pipeline integration', () => {
       };
 
       await orch.trainAll(data);
-      await initMlRuntime({ directory: dir });
+      await initMlRuntime(mockDb, { directory: dir });
 
       // CPE filter should now work for trained model
       const validCpe = cpePreFilter('cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*');

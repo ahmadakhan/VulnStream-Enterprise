@@ -10,6 +10,7 @@ import {
   retainCorrelationData,
 } from './correlation/operations.ts';
 import type { CorrelationRuntime } from './correlation/runtime.ts';
+import type { MlRuntime } from './ml/factory.ts';
 import { advisoryRecords } from './correlation/stream.ts';
 import { describeAdvisoryError } from './correlation/validation.ts';
 import { Readable } from 'node:stream';
@@ -217,6 +218,7 @@ async function refreshAdvisoryDeliveryStatus(db: pg.Pool | import('pg').PoolClie
 }
 export interface AppOptions {
   correlation?: CorrelationRuntime;
+  mlRuntime?: MlRuntime;
   /**
    * Overrides the shared database-backed mutation limiter. Tests use this to
    * exercise the middleware with a small deterministic quota.

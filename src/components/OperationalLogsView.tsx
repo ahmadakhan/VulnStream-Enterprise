@@ -17,6 +17,7 @@ import {
   X,
   UserRound,
   Clock3,
+  Brain,
 } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { csvCell } from '../utils/csv';
@@ -572,9 +573,292 @@ const AuditTrailView: React.FC = () => {
   );
 };
 
+const MlLogsView: React.FC = () => {
+  const { fetchEvents, settings } = useApp();
+  const [query, setQuery] = useState('');
+  const [level, setLevel] = useState('');
+  const [cursor, setCursor] = useState('');
+  const [next, setNext] = useState<string | null>(null);
+  const [events, setEvents] = useState<OperationalEvent[]>([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<OperationalEvent | null>(null);
+  const [refresh, setRefresh] = useState(0);
+  const validRunId = true;
+
+  useEffect(() => {
+    let disposed = false;
+    const timer = setTimeout(() => {
+      setLoading(true);
+      setError('');
+      fetchEvents(
+        new URLSearchParams({
+          category: 'ML',
+          ...(level && { level }),
+          ...(query && { q: query }),
+          ...(cursor && { before: cursor }),
+        }).toString(),
+      )
+        .then((result) => {
+          if (!disposed) {
+            setEvents(result.events);
+            setNext(result.nextCursor);
+          }
+        })
+        .catch((error) => {
+          if (!disposed) setError(error.message);
+        })
+        .finally(() => {
+          if (!disposed) setLoading(false);
+        });
+    }, 250);
+    const interval = setInterval(() => {
+      if (document.visibilityState !== 'hidden' && !cursor) setRefresh((value) => value + 1);
+    }, 10_000);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible' && !cursor) setRefresh((value) => value + 1);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [level, query, cursor, refresh]);
+
+  return (
+    <div id="logs-ml-panel" role="tabpanel" aria-labelledby="logs-ml-tab" className="space-y-6">
+      <div className="ui-page-header">
+        <div>
+          <h2 className="investigation-section-title">ML subsystem logs</h2>
+          <p className="investigation-section-description">
+            Inspect ML runtime initialization, model loading, training cycles, and inference decisions.
+            Events refresh every 10 seconds.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-zinc-500">
+          {loading && <RotateCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+          {events.length > 0 && !loading && error === '' && (
+            <>
+              <span className="inline-flex items-center gap-1 rounded-full border border-rose-500/20 bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-medium text-rose-300 light:text-rose-700">
+                {events.filter((e) => e.level === 'ERROR').length} errors
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 light:text-amber-700">
+                {events.filter((e) => e.level === 'WARNING').length} warnings
+              </span>
+            </>
+          )}
+          <span>{loading ? 'Loading events…' : `${events.length} events in this view`}</span>
+        </div>
+      </div>
+      <div className="ui-panel rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-4 shadow-sm light:border-zinc-200 light:bg-white">
+        <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <Filter className="h-3.5 w-3.5" />
+          Search and filter ML events
+        </div>
+        <div className="grid items-end gap-3 sm:grid-cols-2 2xl:grid-cols-[minmax(200px,1fr)_140px_auto]">
+          <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
+            Search events
+            <input
+              aria-label="Search ML events"
+              maxLength={200}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setCursor('');
+              }}
+              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-900"
+              placeholder="Code, message, or context"
+            />
+          </label>
+          <label className="flex min-w-0 flex-col gap-1.5 text-[11px] font-medium text-zinc-400 light:text-zinc-600">
+            Level
+            <select
+              value={level}
+              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-xs text-zinc-200 focus:border-blue-500 light:border-zinc-300 light:bg-zinc-50 light:text-zinc-800"
+              onChange={(e) => {
+                setLevel(e.target.value);
+                setCursor('');
+              }}
+            >
+              <option value="">All levels</option>
+              <option value="INFO">Info</option>
+              <option value="WARNING">Warning</option>
+              <option value="ERROR">Error</option>
+            </select>
+          </label>
+          <button
+            className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-800 px-3.5 text-xs font-medium text-zinc-100 transition hover:bg-zinc-700 light:border-zinc-300 light:bg-zinc-100 light:text-zinc-800 light:hover:bg-zinc-200"
+            disabled={loading}
+            onClick={() => {
+              setCursor('');
+              setRefresh((value) => value + 1);
+            }}
+          >
+            <RotateCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
+        {error && (
+          <div role="alert" className="flex items-start gap-2.5 rounded-xl border border-rose-500/20 bg-rose-500/[0.06] px-4 py-3 text-xs text-rose-300 light:text-rose-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-semibold">Could not load ML events</p>
+              <p className="mt-0.5 opacity-80">{error}</p>
+            </div>
+          </div>
+        )}
+        <div aria-busy={loading} className="space-y-3">
+          {loading && events.length === 0 && (
+            <div className="ui-panel investigation-empty" role="status">
+              <RotateCw className="animate-spin" size={22} />
+              <p>Loading ML events…</p>
+            </div>
+          )}
+          {events.length === 0 && !loading && !error && (
+            <div className="ui-panel investigation-empty" role="status">
+              <Brain className="mx-auto h-6 w-6" />
+              <h3>
+                {query || level ? 'No ML events match your filters.' : 'No ML events logged yet.'}
+              </h3>
+              <p>
+                {query || level
+                  ? 'Try a broader search or clear your filters.'
+                  : 'ML runtime events will appear here once the runtime is initialized and models make predictions.'}
+              </p>
+            </div>
+          )}
+          {events.length > 0 && (
+            <div className="ui-panel overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/50 shadow-sm light:border-zinc-200 light:bg-white">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[1040px] table-fixed text-left text-xs">
+                  <colgroup>
+                    <col style={{ width: '17%' }} />
+                    <col style={{ width: '13%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '16%' }} />
+                    <col style={{ width: '30%' }} />
+                    <col style={{ width: '16%' }} />
+                  </colgroup>
+                  <thead className="border-b border-zinc-800/80 bg-zinc-950/80 font-mono text-[10px] uppercase tracking-wider text-zinc-500 light:border-zinc-200 light:bg-zinc-100 light:text-zinc-600">
+                    <tr>
+                      <th className="py-3 px-4">Timestamp (UTC)</th>
+                      <th className="py-3 px-4">Level</th>
+                      <th className="py-3 px-4">Event code</th>
+                      <th className="py-3 px-4">Message</th>
+                      <th className="py-3 px-4">Context</th>
+                      <th className="py-3 px-4">Run ID</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/60 font-mono light:divide-zinc-200">
+                    {events.map((event) => (
+                      <tr key={event.id} className="cursor-pointer transition hover:bg-zinc-800/25 light:hover:bg-zinc-50">
+                        <td className="px-4 py-3.5 align-top text-[11px] leading-tight text-zinc-400 light:text-zinc-600">
+                          <div className="whitespace-nowrap tabular-nums">
+                            {formatDate(event.timestamp, settings.timezone)}
+                          </div>
+                          <div className="mt-0.5 whitespace-nowrap font-mono text-[10px] tabular-nums text-zinc-500">
+                            {fmtDateTime(event.timestamp, settings.timezone)}{' '}
+                            {timezoneLabel(settings.timezone)}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <span
+                            className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                              event.level === 'ERROR'
+                                ? 'border-rose-500/20 bg-rose-500/10 text-rose-400 light:text-rose-700'
+                                : event.level === 'WARNING'
+                                  ? 'border-amber-500/20 bg-amber-500/10 text-amber-400 light:text-amber-700'
+                                  : 'border-blue-500/20 bg-blue-500/10 text-blue-300 light:text-blue-700'
+                            }`}
+                          >
+                            {event.level}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 font-mono text-[11px] text-zinc-300 light:text-zinc-700">
+                          <span className="rounded-md bg-zinc-800/70 px-1.5 py-1 light:bg-zinc-100">
+                            {event.code}
+                          </span>
+                        </td>
+                        <td className="max-w-xs px-4 py-3.5">
+                          <div className="text-xs font-semibold text-zinc-200 light:text-zinc-900">{event.message}</div>
+                          {event.level === 'ERROR' && event.context?.error !== undefined && (
+                            <div className="mt-1 line-clamp-1 font-mono text-[10px] text-rose-300 light:text-rose-700">
+                              {
+                                (typeof event.context.error === 'object'
+                                  ? formatEventContext(event.context.error as Record<string, unknown>)
+                                  : String(event.context.error)
+                                ).split('\n')[0]
+                              }
+                            </div>
+                          )}
+                        </td>
+                        <td className="max-w-xs px-4 py-3.5">
+                          {event.context && Object.keys(event.context).length > 0 ? (
+                            <pre className="line-clamp-3 max-h-20 overflow-y-auto font-mono text-[10px] text-zinc-400 light:text-zinc-600">
+                              {JSON.stringify(event.context, null, 2)}
+                            </pre>
+                          ) : (
+                            <span className="text-zinc-500">—</span>
+                          )}
+                        </td>
+                        <td className="max-w-[180px] px-4 py-3.5 align-top font-mono text-[11px] text-zinc-400 light:text-zinc-600">
+                          {event.runId ? (
+                            <span className="flex min-w-0 items-center gap-1" title={event.runId}>
+                              <Cpu className="h-3 w-3 shrink-0 text-indigo-400 light:text-indigo-600" />
+                              <span className="truncate">{event.runId.slice(0, 8)}</span>
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800/70 bg-zinc-900/30 px-4 py-3 light:border-zinc-200 light:bg-white/70">
+          <p className="text-[11px] text-zinc-500">
+            {cursor ? 'Viewing an older page' : 'Showing the latest ML events'}
+          </p>
+          <div className="flex gap-2">
+            <button
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 light:border-zinc-300 light:text-zinc-700 light:hover:bg-zinc-100"
+              disabled={!cursor || loading}
+              onClick={() => setCursor('')}
+            >
+              <RotateCw className="h-3.5 w-3.5" />
+              Latest
+            </button>
+            <button
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 light:border-zinc-300 light:text-zinc-700 light:hover:bg-zinc-100"
+              disabled={!next || loading}
+              onClick={() => setCursor(next!)}
+            >
+              Older events <span aria-hidden="true">→</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {selectedEvent && (
+        <EventDetailPanel
+          event={selectedEvent}
+          timezone={settings.timezone}
+          onClose={() => setSelectedEvent(null)}
+        />
+      )}
+    </div>
+  );
+};
+
 export const OperationalLogsView: React.FC = () => {
   const { fetchEvents, settings } = useApp();
-  const [tab, setTab] = useState<'events' | 'audit'>('audit');
+  const [tab, setTab] = useState<'events' | 'audit' | 'ml'>('audit');
   const [category, setCategory] = useState('');
   const [level, setLevel] = useState('');
   const [query, setQuery] = useState('');
@@ -645,10 +929,12 @@ export const OperationalLogsView: React.FC = () => {
             event.key === 'Home'
               ? 'events'
               : event.key === 'End'
-                ? 'audit'
+                ? 'ml'
                 : tab === 'events'
                   ? 'audit'
-                  : 'events';
+                  : tab === 'audit'
+                    ? 'ml'
+                    : 'events';
           setTab(nextTab);
           document.getElementById(`logs-${nextTab}-tab`)?.focus();
         }}
@@ -676,11 +962,24 @@ export const OperationalLogsView: React.FC = () => {
           onClick={() => setTab('audit')}
           className={`rounded-lg px-3.5 py-2 text-xs font-medium transition ${tab === 'audit' ? 'bg-zinc-800 text-zinc-100 shadow-sm light:bg-blue-50 light:text-blue-800' : 'text-zinc-400 hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'}`}
         >
-          <ShieldCheck size={16} aria-hidden="true" /> Audit trail
+           <ShieldCheck size={16} aria-hidden="true" /> Audit trail
+        </button>
+        <button
+          role="tab"
+          id="logs-ml-tab"
+          aria-controls="logs-ml-panel"
+          tabIndex={tab === 'ml' ? 0 : -1}
+          aria-selected={tab === 'ml'}
+          onClick={() => setTab('ml')}
+          className={`rounded-lg px-3.5 py-2 text-xs font-medium transition ${tab === 'ml' ? 'bg-zinc-800 text-zinc-100 shadow-sm light:bg-blue-50 light:text-blue-800' : 'text-zinc-400 hover:text-zinc-200 light:text-zinc-600 light:hover:text-zinc-900'}`}
+        >
+          <Brain size={16} aria-hidden="true" /> ML logs
         </button>
       </div>
       {tab === 'audit' ? (
         <AuditTrailView />
+      ) : tab === 'ml' ? (
+        <MlLogsView />
       ) : (
         <div id="logs-events-panel" role="tabpanel" aria-labelledby="logs-events-tab" className="space-y-6">
           <div className="ui-page-header">

@@ -24,6 +24,48 @@ import {
   AdvisoryRemediationHelper,
   type RemediationFeatures,
 } from '../models/advisoryRemediationHelper.ts';
+import {
+  ExploitRiskModel,
+  type ExploitRiskFeatures,
+  type ExploitRiskLevel,
+} from '../models/exploitRiskModel.ts';
+import {
+  MatchConfidenceModel,
+  type MatchConfidenceFeatures,
+} from '../models/matchConfidenceModel.ts';
+import {
+  FindingImportanceRanker,
+  type FindingImportanceFeatures,
+} from '../models/findingImportanceRanker.ts';
+import {
+  NewsCredibilityWeightModel,
+  type CredibilitySample,
+} from '../models/newsCredibilityWeightModel.ts';
+import {
+  DeliveryErrorClassifier,
+  type DeliveryErrorFeatures,
+} from '../models/deliveryErrorClassifier.ts';
+import {
+  ZeroDayRateLimitOptimizer,
+  type ZeroDayRateLimitSample,
+} from '../models/zeroDayRateLimitOptimizer.ts';
+import {
+  DigestFindingSelector,
+  type DigestSelectionFeatures,
+} from '../models/digestFindingSelector.ts';
+import {
+  SeverityTierModel,
+  type SeverityTierFeatures,
+  type SeverityTier,
+} from '../models/severityTierModel.ts';
+import {
+  FeedRecoveryBackoffOptimizer,
+  type FeedRecoverySample,
+} from '../models/feedRecoveryBackoffOptimizer.ts';
+import {
+  AliasConfidenceModel,
+  type AliasConfidenceFeatures,
+} from '../models/aliasConfidenceModel.ts';
 import { QualityGate, QUALITY_GATES, type QualityGateResult } from './qualityGates.ts';
 import {
   detectConceptDrift,
@@ -60,6 +102,42 @@ export interface TrainingDataSources {
   remediationFindings?: Array<{
     features: RemediationFeatures;
     playbook: Partial<RemediationPlaybook>;
+  }>;
+  exploitRiskSamples?: Array<{
+    features: ExploitRiskFeatures;
+    riskLevel: ExploitRiskLevel;
+  }>;
+  matchConfidenceSamples?: Array<{
+    features: MatchConfidenceFeatures;
+    isTruePositive: boolean;
+  }>;
+  importanceRankSamples?: Array<{
+    features: FindingImportanceFeatures;
+    wasActionable: boolean;
+    daysToAction: number;
+  }>;
+  credibilityWeightSamples?: CredibilitySample[];
+  deliveryErrorSamples?: Array<{
+    provider: string;
+    statusCode: number;
+    errorMessage: string;
+    attemptNumber: number;
+    hourOfDay: number;
+    isPermanent: boolean;
+  }>;
+  zeroDayRateLimitSamples?: ZeroDayRateLimitSample[];
+  digestSelectionSamples?: Array<{
+    features: DigestSelectionFeatures;
+    isRelevant: boolean;
+  }>;
+  severityTierSamples?: Array<{
+    features: SeverityTierFeatures;
+    tier: SeverityTier;
+  }>;
+  feedRecoverySamples?: FeedRecoverySample[];
+  aliasConfidenceSamples?: Array<{
+    features: AliasConfidenceFeatures;
+    isConfirmed: boolean;
   }>;
 }
 
@@ -120,6 +198,17 @@ export class TrainingOrchestrator {
     results.push(await this.trainConfidenceCalibrator(data));
     results.push(await this.trainDeliveryOptimizer(data));
     results.push(await this.trainRemediationHelper(data));
+
+    results.push(await this.trainExploitRiskModel(data));
+    results.push(await this.trainMatchConfidenceModel(data));
+    results.push(await this.trainFindingImportanceRanker(data));
+    results.push(await this.trainCredibilityWeightModel(data));
+    results.push(await this.trainDeliveryErrorClassifier(data));
+    results.push(await this.trainZeroDayRateLimitOptimizer(data));
+    results.push(await this.trainDigestFindingSelector(data));
+    results.push(await this.trainSeverityTierModel(data));
+    results.push(await this.trainFeedRecoveryBackoffOptimizer(data));
+    results.push(await this.trainAliasConfidenceModel(data));
 
     return {
       timestamp: new Date().toISOString(),
@@ -336,6 +425,148 @@ export class TrainingOrchestrator {
         }
       }
 
+      // Exploit Risk Model — check concept drift on exploit risk samples
+      {
+        const model = new ExploitRiskModel();
+        const loaded = await this.registry.load(model, 'exploit-risk-model');
+        const recentExploit = recent.exploitRiskSamples ?? [];
+
+        if (!loaded && recentExploit.length > 0) {
+          results.push({ modelId: 'exploit-risk-model', needsRetrain: true });
+        } else if (recentExploit.length > 0) {
+          const recentSamples = ExploitRiskModel.collectTrainingData(recentExploit);
+          const [_, test] = splitData(recentSamples, 0.2, seed);
+          const report = await this.buildDriftReport(
+            model, test, model.getMetadata(), model.getFeatureNames(), recentSamples, recentSamples,
+            'exploit-risk-model',
+          );
+          results.push({ modelId: 'exploit-risk-model', needsRetrain: report.needsRetraining, report });
+        }
+      }
+
+      // Match Confidence Model — check concept drift on match samples
+      {
+        const model = new MatchConfidenceModel();
+        const loaded = await this.registry.load(model, 'match-confidence-model');
+        const recentMatch = recent.matchConfidenceSamples ?? [];
+
+        if (!loaded && recentMatch.length > 0) {
+          results.push({ modelId: 'match-confidence-model', needsRetrain: true });
+        } else if (recentMatch.length > 0) {
+          const recentSamples = MatchConfidenceModel.collectTrainingData(recentMatch);
+          const [_, test] = splitData(recentSamples, 0.2, seed);
+          const report = await this.buildDriftReport(
+            model, test, model.getMetadata(), model.getFeatureNames(), recentSamples, recentSamples,
+            'match-confidence-model',
+          );
+          results.push({ modelId: 'match-confidence-model', needsRetrain: report.needsRetraining, report });
+        }
+      }
+
+      // Finding Importance Ranker — check concept drift on importance samples
+      {
+        const model = new FindingImportanceRanker();
+        const loaded = await this.registry.load(model, 'finding-importance-ranker');
+        const recentImportance = recent.importanceRankSamples ?? [];
+
+        if (!loaded && recentImportance.length > 0) {
+          results.push({ modelId: 'finding-importance-ranker', needsRetrain: true });
+        } else if (recentImportance.length > 0) {
+          const recentSamples = FindingImportanceRanker.collectTrainingData(recentImportance);
+          const [_, test] = splitData(recentSamples, 0.2, seed);
+          const report = await this.buildDriftReport(
+            model, test, model.getMetadata(), model.getFeatureNames(), recentSamples, recentSamples,
+            'finding-importance-ranker',
+          );
+          results.push({ modelId: 'finding-importance-ranker', needsRetrain: report.needsRetraining, report });
+        }
+      }
+
+      // Delivery Error Classifier — check concept drift on error samples
+      {
+        const model = new DeliveryErrorClassifier();
+        const loaded = await this.registry.load(model, 'delivery-error-classifier');
+        const recentErrors = recent.deliveryErrorSamples ?? [];
+
+        if (!loaded && recentErrors.length > 0) {
+          results.push({ modelId: 'delivery-error-classifier', needsRetrain: true });
+        } else if (recentErrors.length > 0) {
+          const recentSamples = DeliveryErrorClassifier.collectTrainingData(recentErrors);
+          const [_, test] = splitData(recentSamples, 0.2, seed);
+          const report = await this.buildDriftReport(
+            model, test, model.getMetadata(), model.getFeatureNames(), recentSamples, recentSamples,
+            'delivery-error-classifier',
+          );
+          results.push({ modelId: 'delivery-error-classifier', needsRetrain: report.needsRetraining, report });
+        }
+      }
+
+      // Digest Finding Selector — check concept drift on digest samples
+      {
+        const model = new DigestFindingSelector();
+        const loaded = await this.registry.load(model, 'digest-finding-selector');
+        const recentDigest = recent.digestSelectionSamples ?? [];
+
+        if (!loaded && recentDigest.length > 0) {
+          results.push({ modelId: 'digest-finding-selector', needsRetrain: true });
+        } else if (recentDigest.length > 0) {
+          const recentSamples = DigestFindingSelector.collectTrainingData(recentDigest);
+          const [_, test] = splitData(recentSamples, 0.2, seed);
+          const report = await this.buildDriftReport(
+            model, test, model.getMetadata(), model.getFeatureNames(), recentSamples, recentSamples,
+            'digest-finding-selector',
+          );
+          results.push({ modelId: 'digest-finding-selector', needsRetrain: report.needsRetraining, report });
+        }
+      }
+
+      // Severity Tier Model — check concept drift on severity samples
+      {
+        const model = new SeverityTierModel();
+        const loaded = await this.registry.load(model, 'severity-tier-model');
+        const recentSeverity = recent.severityTierSamples ?? [];
+
+        if (!loaded && recentSeverity.length > 0) {
+          results.push({ modelId: 'severity-tier-model', needsRetrain: true });
+        } else if (recentSeverity.length > 0) {
+          const recentSamples = SeverityTierModel.collectTrainingData(recentSeverity);
+          const [_, test] = splitData(recentSamples, 0.2, seed);
+          const report = await this.buildDriftReport(
+            model, test, model.getMetadata(), model.getFeatureNames(), recentSamples, recentSamples,
+            'severity-tier-model',
+          );
+          results.push({ modelId: 'severity-tier-model', needsRetrain: report.needsRetraining, report });
+        }
+      }
+
+      // Alias Confidence Model — check concept drift on alias samples
+      {
+        const model = new AliasConfidenceModel();
+        const loaded = await this.registry.load(model, 'alias-confidence-model');
+        const recentAlias = recent.aliasConfidenceSamples ?? [];
+
+        if (!loaded && recentAlias.length > 0) {
+          results.push({ modelId: 'alias-confidence-model', needsRetrain: true });
+        } else if (recentAlias.length > 0) {
+          const recentSamples = AliasConfidenceModel.collectTrainingData(recentAlias);
+          const [_, test] = splitData(recentSamples, 0.2, seed);
+          const report = await this.buildDriftReport(
+            model, test, model.getMetadata(), model.getFeatureNames(), recentSamples, recentSamples,
+            'alias-confidence-model',
+          );
+          if (loaded && model.isTrained() && !report.needsRetraining && recentSamples.length > 0) {
+            const onlineModel = model as { partialFit?: (s: TrainingSample) => unknown };
+            const partialFit = onlineModel.partialFit;
+            if (partialFit) {
+              for (const sample of recentSamples.slice(0, 20)) {
+                try { partialFit.call(onlineModel, sample); } catch { /* skip */ }
+              }
+            }
+          }
+          results.push({ modelId: 'alias-confidence-model', needsRetrain: report.needsRetraining, report });
+        }
+      }
+
       return results;
     }
 
@@ -367,7 +598,7 @@ export class TrainingOrchestrator {
 
   /** --- Per-model training methods --- */
 
-  private async trainCpeValidityGate(data: TrainingDataSources): Promise<TrainingResult> {
+   private async trainCpeValidityGate(data: TrainingDataSources): Promise<TrainingResult> {
     const gate = new CpeValidityGateModel();
     const gateDef = QUALITY_GATES['cpe-validity-gate'];
 
@@ -600,6 +831,330 @@ export class TrainingOrchestrator {
     }
   }
 
+  private async trainExploitRiskModel(data: TrainingDataSources): Promise<TrainingResult> {
+    const model = new ExploitRiskModel();
+    const gateDef = QUALITY_GATES['exploit-risk-model'];
+
+    if (!data.exploitRiskSamples || data.exploitRiskSamples.length < gateDef.minimumSamples) {
+      return this.skipResult('exploit-risk-model', 'logistic', data.exploitRiskSamples?.length ?? 0, 'insufficient samples');
+    }
+
+    const samples = ExploitRiskModel.collectTrainingData(data.exploitRiskSamples);
+    const [train, test] = splitData(samples, 0.2, 42);
+
+    try {
+      model.train(train);
+
+      const validation = gateDef.evaluate(model, test);
+      if (!validation.passed) {
+        return this.failureResult('exploit-risk-model', 'logistic', samples.length, train.length, validation,
+          `quality gate failed: ${validation.failureReason ?? 'unknown'}`);
+      }
+
+      const saved = await this.saveModel(model, 'exploit-risk-model', gateDef, validation.metrics);
+      return this.successResult('exploit-risk-model', 'logistic', samples.length, train.length, validation, saved);
+    } catch (e) {
+      return this.errorResult('exploit-risk-model', 'logistic', samples.length, e);
+    }
+  }
+
+  private async trainMatchConfidenceModel(data: TrainingDataSources): Promise<TrainingResult> {
+    const model = new MatchConfidenceModel();
+    const gateDef = QUALITY_GATES['match-confidence-model'];
+
+    if (!data.matchConfidenceSamples || data.matchConfidenceSamples.length < gateDef.minimumSamples) {
+      return this.skipResult('match-confidence-model', 'logistic', data.matchConfidenceSamples?.length ?? 0, 'insufficient samples');
+    }
+
+    const samples = MatchConfidenceModel.collectTrainingData(data.matchConfidenceSamples);
+    const [train, test] = splitData(samples, 0.2, 42);
+
+    try {
+      model.train(train);
+
+      const validation = gateDef.evaluate(model, test);
+      if (!validation.passed) {
+        return this.failureResult('match-confidence-model', 'logistic', samples.length, train.length, validation,
+          `quality gate failed: ${validation.failureReason ?? 'unknown'}`);
+      }
+
+      const saved = await this.saveModel(model, 'match-confidence-model', gateDef, validation.metrics);
+      return this.successResult('match-confidence-model', 'logistic', samples.length, train.length, validation, saved);
+    } catch (e) {
+      return this.errorResult('match-confidence-model', 'logistic', samples.length, e);
+    }
+  }
+
+  private async trainFindingImportanceRanker(data: TrainingDataSources): Promise<TrainingResult> {
+    const model = new FindingImportanceRanker();
+    const gateDef = QUALITY_GATES['finding-importance-ranker'];
+
+    if (!data.importanceRankSamples || data.importanceRankSamples.length < gateDef.minimumSamples) {
+      return this.skipResult('finding-importance-ranker', 'gbdt_ranker', data.importanceRankSamples?.length ?? 0, 'insufficient samples');
+    }
+
+    const samples = FindingImportanceRanker.collectTrainingData(data.importanceRankSamples);
+    const [train, test] = splitData(samples, 0.2, 42);
+
+    try {
+      model.train(train);
+
+      const validation = gateDef.evaluate(model, test);
+      if (!validation.passed) {
+        return this.failureResult('finding-importance-ranker', 'gbdt_ranker', samples.length, train.length, validation,
+          `quality gate failed: ${validation.failureReason ?? 'unknown'}`);
+      }
+
+      const saved = await this.saveModel(model, 'finding-importance-ranker', gateDef, validation.metrics);
+      return this.successResult('finding-importance-ranker', 'gbdt_ranker', samples.length, train.length, validation, saved);
+    } catch (e) {
+      return this.errorResult('finding-importance-ranker', 'gbdt_ranker', samples.length, e);
+    }
+  }
+
+  private async trainCredibilityWeightModel(data: TrainingDataSources): Promise<TrainingResult> {
+    const model = new NewsCredibilityWeightModel();
+    const gateDef = QUALITY_GATES['news-credibility-weight-model'];
+
+    if (!data.credibilityWeightSamples || data.credibilityWeightSamples.length < gateDef.minimumSamples) {
+      return this.skipResult('news-credibility-weight-model', 'threshold_optimizer', data.credibilityWeightSamples?.length ?? 0, 'insufficient samples');
+    }
+
+    try {
+      model.train(data.credibilityWeightSamples);
+
+      const testSamples = data.credibilityWeightSamples.slice(Math.floor(data.credibilityWeightSamples.length * 0.8));
+      const testTrainingSamples: TrainingSample[] = testSamples.map((s, i) => ({
+        id: `cred-test-${i}`,
+        features: { feed_weight: s.feedWeight, keyword_score: s.keywordScore },
+        label: s.isActionable ? 1 : 0,
+        weight: 1,
+        timestamp: new Date().toISOString(),
+      }));
+
+      const validation = gateDef.evaluate(model, testTrainingSamples);
+      if (!validation.passed) {
+        return this.failureResult('news-credibility-weight-model', 'threshold_optimizer',
+          data.credibilityWeightSamples.length, data.credibilityWeightSamples.length, validation,
+          `quality gate failed: ${validation.failureReason ?? 'unknown'}`);
+      }
+
+      const metadata: ModelMetadata = {
+        id: 'news-credibility-weight-model',
+        type: 'threshold_optimizer',
+        version: CURRENT_VERSION,
+        trainedAt: new Date().toISOString(),
+        featureSchema: model.getFeatureNames(),
+        description: 'Learned weights for blending feed credibility and keyword confidence',
+        performance: validation.metrics as ModelMetadata['performance'],
+      };
+      await this.registry.saveArtifact(model, 'news-credibility-weight-model', metadata);
+      const verified = await this.registry.loadArtifact(model, 'news-credibility-weight-model');
+      return this.successResult('news-credibility-weight-model', 'threshold_optimizer',
+        data.credibilityWeightSamples.length, data.credibilityWeightSamples.length, validation, verified);
+    } catch (e) {
+      return this.errorResult('news-credibility-weight-model', 'threshold_optimizer', data.credibilityWeightSamples?.length ?? 0, e);
+    }
+  }
+
+  private async trainDeliveryErrorClassifier(data: TrainingDataSources): Promise<TrainingResult> {
+    const model = new DeliveryErrorClassifier();
+    const gateDef = QUALITY_GATES['delivery-error-classifier'];
+
+    if (!data.deliveryErrorSamples || data.deliveryErrorSamples.length < gateDef.minimumSamples) {
+      return this.skipResult('delivery-error-classifier', 'logistic', data.deliveryErrorSamples?.length ?? 0, 'insufficient samples');
+    }
+
+    const samples = DeliveryErrorClassifier.collectTrainingData(data.deliveryErrorSamples);
+    const [train, test] = splitData(samples, 0.2, 42);
+
+    try {
+      model.train(train);
+
+      const validation = gateDef.evaluate(model, test);
+      if (!validation.passed) {
+        return this.failureResult('delivery-error-classifier', 'logistic', samples.length, train.length, validation,
+          `quality gate failed: ${validation.failureReason ?? 'unknown'}`);
+      }
+
+      const saved = await this.saveModel(model, 'delivery-error-classifier', gateDef, validation.metrics);
+      return this.successResult('delivery-error-classifier', 'logistic', samples.length, train.length, validation, saved);
+    } catch (e) {
+      return this.errorResult('delivery-error-classifier', 'logistic', samples.length, e);
+    }
+  }
+
+  private async trainZeroDayRateLimitOptimizer(data: TrainingDataSources): Promise<TrainingResult> {
+    const model = new ZeroDayRateLimitOptimizer();
+    const gateDef = QUALITY_GATES['zero-day-rate-limit-optimizer'];
+
+    if (!data.zeroDayRateLimitSamples || data.zeroDayRateLimitSamples.length < gateDef.minimumSamples) {
+      return this.skipResult('zero-day-rate-limit-optimizer', 'threshold_optimizer', data.zeroDayRateLimitSamples?.length ?? 0, 'insufficient samples');
+    }
+
+    try {
+      model.train(data.zeroDayRateLimitSamples);
+
+      const testSamples = data.zeroDayRateLimitSamples.slice(Math.floor(data.zeroDayRateLimitSamples.length * 0.8));
+      const testTrainingSamples: TrainingSample[] = testSamples.map((s, i) => ({
+        id: `zd-test-${i}`,
+        features: { zero_day_count: s.zeroDayCount, avg_credibility: s.credibilityScores.reduce((a, b) => a + b, 0) / Math.max(1, s.credibilityScores.length) },
+        label: s.keptOutcomes.some((o) => ['PATCHED', 'RESOLVED', 'DELIVERED'].includes(o)) ? 1 : 0,
+        weight: 1,
+        timestamp: new Date().toISOString(),
+      }));
+
+      const validation = gateDef.evaluate(model, testTrainingSamples);
+      if (!validation.passed) {
+        return this.failureResult('zero-day-rate-limit-optimizer', 'threshold_optimizer',
+          data.zeroDayRateLimitSamples.length, data.zeroDayRateLimitSamples.length, validation,
+          `quality gate failed: ${validation.failureReason ?? 'unknown'}`);
+      }
+
+      const metadata: ModelMetadata = {
+        id: 'zero-day-rate-limit-optimizer',
+        type: 'threshold_optimizer',
+        version: CURRENT_VERSION,
+        trainedAt: new Date().toISOString(),
+        featureSchema: model.getFeatureNames(),
+        description: 'Optimal cap on zero-day findings per pipeline run',
+        performance: validation.metrics as ModelMetadata['performance'],
+      };
+      await this.registry.saveArtifact(model, 'zero-day-rate-limit-optimizer', metadata);
+      const verified = await this.registry.loadArtifact(model, 'zero-day-rate-limit-optimizer');
+      return this.successResult('zero-day-rate-limit-optimizer', 'threshold_optimizer',
+        data.zeroDayRateLimitSamples.length, data.zeroDayRateLimitSamples.length, validation, verified);
+    } catch (e) {
+      return this.errorResult('zero-day-rate-limit-optimizer', 'threshold_optimizer', data.zeroDayRateLimitSamples?.length ?? 0, e);
+    }
+  }
+
+  private async trainDigestFindingSelector(data: TrainingDataSources): Promise<TrainingResult> {
+    const model = new DigestFindingSelector();
+    const gateDef = QUALITY_GATES['digest-finding-selector'];
+
+    if (!data.digestSelectionSamples || data.digestSelectionSamples.length < gateDef.minimumSamples) {
+      return this.skipResult('digest-finding-selector', 'logistic', data.digestSelectionSamples?.length ?? 0, 'insufficient samples');
+    }
+
+    const samples = DigestFindingSelector.collectTrainingData(data.digestSelectionSamples);
+    const [train, test] = splitData(samples, 0.2, 42);
+
+    try {
+      model.train(train);
+
+      const validation = gateDef.evaluate(model, test);
+      if (!validation.passed) {
+        return this.failureResult('digest-finding-selector', 'logistic', samples.length, train.length, validation,
+          `quality gate failed: ${validation.failureReason ?? 'unknown'}`);
+      }
+
+      const saved = await this.saveModel(model, 'digest-finding-selector', gateDef, validation.metrics);
+      return this.successResult('digest-finding-selector', 'logistic', samples.length, train.length, validation, saved);
+    } catch (e) {
+      return this.errorResult('digest-finding-selector', 'logistic', samples.length, e);
+    }
+  }
+
+  private async trainSeverityTierModel(data: TrainingDataSources): Promise<TrainingResult> {
+    const model = new SeverityTierModel();
+    const gateDef = QUALITY_GATES['severity-tier-model'];
+
+    if (!data.severityTierSamples || data.severityTierSamples.length < gateDef.minimumSamples) {
+      return this.skipResult('severity-tier-model', 'logistic', data.severityTierSamples?.length ?? 0, 'insufficient samples');
+    }
+
+    const samples = SeverityTierModel.collectTrainingData(data.severityTierSamples);
+    const [train, test] = splitData(samples, 0.2, 42);
+
+    try {
+      model.train(train);
+
+      const validation = gateDef.evaluate(model, test);
+      if (!validation.passed) {
+        return this.failureResult('severity-tier-model', 'logistic', samples.length, train.length, validation,
+          `quality gate failed: ${validation.failureReason ?? 'unknown'}`);
+      }
+
+      const saved = await this.saveModel(model, 'severity-tier-model', gateDef, validation.metrics);
+      return this.successResult('severity-tier-model', 'logistic', samples.length, train.length, validation, saved);
+    } catch (e) {
+      return this.errorResult('severity-tier-model', 'logistic', samples.length, e);
+    }
+  }
+
+  private async trainFeedRecoveryBackoffOptimizer(data: TrainingDataSources): Promise<TrainingResult> {
+    const model = new FeedRecoveryBackoffOptimizer();
+    const gateDef = QUALITY_GATES['feed-recovery-backoff-optimizer'];
+
+    if (!data.feedRecoverySamples || data.feedRecoverySamples.length < gateDef.minimumSamples) {
+      return this.skipResult('feed-recovery-backoff-optimizer', 'threshold_optimizer', data.feedRecoverySamples?.length ?? 0, 'insufficient samples');
+    }
+
+    try {
+      model.train(data.feedRecoverySamples);
+
+      const testSamples = data.feedRecoverySamples.slice(Math.floor(data.feedRecoverySamples.length * 0.8));
+      const testTrainingSamples: TrainingSample[] = testSamples.map((s, i) => ({
+        id: `fr-test-${i}`,
+        features: { failure_count: s.failureCount },
+        label: s.recovered ? 1 : 0,
+        weight: 1,
+        timestamp: new Date().toISOString(),
+      }));
+
+      const validation = gateDef.evaluate(model, testTrainingSamples);
+      if (!validation.passed) {
+        return this.failureResult('feed-recovery-backoff-optimizer', 'threshold_optimizer',
+          data.feedRecoverySamples.length, data.feedRecoverySamples.length, validation,
+          `quality gate failed: ${validation.failureReason ?? 'unknown'}`);
+      }
+
+      const metadata: ModelMetadata = {
+        id: 'feed-recovery-backoff-optimizer',
+        type: 'threshold_optimizer',
+        version: CURRENT_VERSION,
+        trainedAt: new Date().toISOString(),
+        featureSchema: model.getFeatureNames(),
+        description: 'Optimal backoff parameters for feed recovery probes',
+        performance: validation.metrics as ModelMetadata['performance'],
+      };
+      await this.registry.saveArtifact(model, 'feed-recovery-backoff-optimizer', metadata);
+      const verified = await this.registry.loadArtifact(model, 'feed-recovery-backoff-optimizer');
+      return this.successResult('feed-recovery-backoff-optimizer', 'threshold_optimizer',
+        data.feedRecoverySamples.length, data.feedRecoverySamples.length, validation, verified);
+    } catch (e) {
+      return this.errorResult('feed-recovery-backoff-optimizer', 'threshold_optimizer', data.feedRecoverySamples?.length ?? 0, e);
+    }
+  }
+
+  private async trainAliasConfidenceModel(data: TrainingDataSources): Promise<TrainingResult> {
+    const model = new AliasConfidenceModel();
+    const gateDef = QUALITY_GATES['alias-confidence-model'];
+
+    if (!data.aliasConfidenceSamples || data.aliasConfidenceSamples.length < gateDef.minimumSamples) {
+      return this.skipResult('alias-confidence-model', 'logistic', data.aliasConfidenceSamples?.length ?? 0, 'insufficient samples');
+    }
+
+    const samples = AliasConfidenceModel.collectTrainingData(data.aliasConfidenceSamples);
+    const [train, test] = splitData(samples, 0.2, 42);
+
+    try {
+      model.train(train);
+
+      const validation = gateDef.evaluate(model, test);
+      if (!validation.passed) {
+        return this.failureResult('alias-confidence-model', 'logistic', samples.length, train.length, validation,
+          `quality gate failed: ${validation.failureReason ?? 'unknown'}`);
+      }
+
+      const saved = await this.saveModel(model, 'alias-confidence-model', gateDef, validation.metrics);
+      return this.successResult('alias-confidence-model', 'logistic', samples.length, train.length, validation, saved);
+    } catch (e) {
+      return this.errorResult('alias-confidence-model', 'logistic', samples.length, e);
+    }
+  }
+
   /** --- Helpers --- */
 
   private async saveModel(
@@ -631,6 +1186,16 @@ export class TrainingOrchestrator {
       'confidence-calibrator': 'calibrator',
       'delivery-optimizer': 'threshold_optimizer',
       'advisory-remediation-helper': 'logistic',
+      'exploit-risk-model': 'logistic',
+      'match-confidence-model': 'logistic',
+      'finding-importance-ranker': 'gbdt_ranker',
+      'news-credibility-weight-model': 'threshold_optimizer',
+      'delivery-error-classifier': 'logistic',
+      'zero-day-rate-limit-optimizer': 'threshold_optimizer',
+      'digest-finding-selector': 'logistic',
+      'severity-tier-model': 'logistic',
+      'feed-recovery-backoff-optimizer': 'threshold_optimizer',
+      'alias-confidence-model': 'logistic',
     };
     return map[modelId] ?? 'logistic';
   }

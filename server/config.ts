@@ -155,6 +155,8 @@ const schema = z.object({
   // world-readable on shared hosts. The DeadLetterQueue creates this directory
   // with mode 0o700 at startup.
   CORRELATION_DLQ_DIRECTORY: z.string().default('data/correlation-dlq'),
+  ML_DIRECTORY: z.string().default('/var/lib/vulnstream/ml'),
+  ML_LOOKBACK_DAYS: z.coerce.number().int().min(1).max(90).default(7),
   // Controls stdout verbosity for structured operational logs. 'standard' keeps
   // output to lifecycle and error events; 'verbose' adds per-tick detail for
   // pipeline, ingestion, delivery, and retention steps to aid troubleshooting.

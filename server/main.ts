@@ -29,6 +29,10 @@ import { createMailSender, deliverNext } from './delivery';
 import { flushDueDigest } from './digest';
 import { runDailyDigest } from './dailyDigest';
 import { closePdfRenderer } from './pdf';
+import { initMlRuntime } from './ml/integration.ts';
+import { runScheduledTraining } from './ml/train/cron.ts';
+import type { TrainingSummary } from './ml/train/orchestrator.ts';
+import type { Db } from './db';
 import { processPipeline } from './pipeline';
 import { runRetention } from './retention';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
@@ -87,8 +91,9 @@ const correlation = new CorrelationRuntime(
 );
 if (config.WORKER_ENABLED === 'true') correlation.start();
 else correlation.supervisor.start();
-const app = createApp(pool, config, request, {
-  correlation,
+
+const mlRuntime = await initMlRuntime(pool, { directory: config.ML_DIRECTORY });
+const app = createApp(pool, config, request, { correlation, mlRuntime,
   // The liveness probe only performs the stall check where the probe timeout is
   // comfortably above the block threshold; see the option's documentation.
   hangDetection: config.HANG_DETECTION_ENABLED === 'true',
@@ -158,6 +163,41 @@ const report = (event: string) => (error: unknown) => {
   });
   console.error(JSON.stringify({ level: 'error', event, ...detail }));
 };
+
+/**
+ * Writes a structured ML training result event to the operational log.
+ * Non-blocking: any failure is swallowed so a logging hiccup never blocks the training pipeline.
+ */
+async function logMlTrainingResult(pool: Db, summary: TrainingSummary): Promise<void> {
+  const failed = summary.results.filter((r) => r.status === 'failed');
+  const trained = summary.results.filter((r) => r.status === 'trained');
+  try {
+    await writeEvent(pool, {
+      category: 'ML',
+      code: 'ml.training.completed',
+      message: `ML training cycle finished: ${trained.length} trained, ${failed.length} failed, ${summary.summary.saved} saved`,
+      level: failed.length > 0 ? 'WARNING' : 'INFO',
+      context: {
+        timestamp: summary.timestamp,
+        totalModels: summary.summary.total,
+        trained: trained.length,
+        failed: failed.length,
+        saved: summary.summary.saved,
+        skipped: summary.summary.skipped ?? 0,
+        results: summary.results.map((r) => ({
+          modelId: r.modelId,
+          status: r.status,
+          samplesCollected: r.samplesCollected,
+          validationPassed: r.validation.passed,
+          failureReason: r.validation.failureReason,
+          saved: r.saved,
+        })),
+      },
+    });
+  } catch {
+    /* ML logging never blocks the training pipeline */
+  }
+}
 /**
  * Backstop for a guarded operation that never settles despite its own deadline.
  * Retention and the digest renderer have explicit cancellation; this only covers
@@ -346,8 +386,51 @@ const dailyDigestTick = () => {
       dailyDigestRunning = null;
     });
 };
+const ML_TRAINING_INTERVAL_MS = 60 * 60_000;
+const ML_TRAINING_SCHEDULE_ID = 'ml-training-schedule';
+let trainingRunning: Promise<unknown> | null = null;
+let trainingStartedAt = 0;
+const mlTrainingTick = () => {
+  if (stopping || config.WORKER_ENABLED !== 'true') return;
+  if (trainingRunning && Date.now() - trainingStartedAt > STUCK_PROMISE_MS) {
+    void report('ml.training')(new Error('Previous ML training run is still running; starting a new attempt'));
+    trainingRunning = null;
+  }
+  if (trainingRunning) return;
+  trainingStartedAt = Date.now();
+  trainingRunning = (async () => {
+    const row = await pool.query("SELECT data FROM records WHERE kind='systemState' AND id=$1", [
+      ML_TRAINING_SCHEDULE_ID,
+    ]);
+    const data = row.rows[0]?.data ?? {};
+    const now = Date.now();
+    const lastRun = typeof data.lastRun === 'string' ? Date.parse(data.lastRun) : NaN;
+    if (Number.isFinite(lastRun) && now - lastRun < ML_TRAINING_INTERVAL_MS) return;
+    await put(pool, 'systemState', ML_TRAINING_SCHEDULE_ID, {
+      ...data,
+      claimedAt: new Date(now).toISOString(),
+    });
+    verboseLog('ml.training.start');
+    const summary = await runScheduledTraining(pool, {
+      directory: config.ML_DIRECTORY,
+      lookbackDays: config.ML_LOOKBACK_DAYS,
+    });
+    await pool.query(
+      "UPDATE records SET data=jsonb_set(data,'{\"lastRun\"}',to_jsonb(now())) WHERE kind='systemState' AND id=$1",
+      [ML_TRAINING_SCHEDULE_ID],
+    );
+    void logMlTrainingResult(pool, summary);
+    verboseLog('ml.training.completed', { result: summary.results.map((r) => ({ modelId: r.modelId, status: r.status })) });
+  })()
+    .catch(report('ml.training'))
+    .finally(() => {
+      trainingRunning = null;
+    });
+};
 const dailyDigestTimer = setInterval(dailyDigestTick, 60000);
 dailyDigestTick();
+const mlTrainingTimer = setInterval(mlTrainingTick, 60000);
+mlTrainingTick();
 const cleanup = setInterval(() => {
   // Session and login-attempt expiry are security invariants, not retained
   // business data. Queue rows and operational events follow the retention
@@ -369,12 +452,13 @@ async function shutdown() {
   clearInterval(timer);
   clearInterval(retentionTimer);
   clearInterval(dailyDigestTimer);
+  clearInterval(mlTrainingTimer);
   clearInterval(cleanup);
   const deadline = setTimeout(() => process.exit(1), 30000);
   deadline.unref();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await Promise.allSettled(
-    [pipeline, outbox, digest, retentionRunning, dailyDigestRunning].filter(Boolean) as Promise<unknown>[],
+    [pipeline, outbox, digest, retentionRunning, dailyDigestRunning, trainingRunning].filter(Boolean) as Promise<unknown>[],
   );
   await correlation.stop();
   await closePdfRenderer();

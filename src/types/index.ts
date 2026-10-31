@@ -89,6 +89,7 @@ export const EVENT_CATEGORIES = [
   'SYSTEM',
   'ISSUE',
   'EVENT',
+  'ML',
 ] as const;
 export interface OperationalEvent {
   id: string;

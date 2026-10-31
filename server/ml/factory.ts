@@ -27,6 +27,16 @@ import { ReviewRankerModel } from './models/reviewRanker.ts';
 import { ConfidenceCalibrator } from './models/confidenceCalibrator.ts';
 import { DeliveryOptimizerModel } from './models/deliveryOptimizer.ts';
 import { AdvisoryRemediationHelper } from './models/advisoryRemediationHelper.ts';
+import { ExploitRiskModel } from './models/exploitRiskModel.ts';
+import { MatchConfidenceModel } from './models/matchConfidenceModel.ts';
+import { FindingImportanceRanker } from './models/findingImportanceRanker.ts';
+import { NewsCredibilityWeightModel } from './models/newsCredibilityWeightModel.ts';
+import { DeliveryErrorClassifier } from './models/deliveryErrorClassifier.ts';
+import { ZeroDayRateLimitOptimizer } from './models/zeroDayRateLimitOptimizer.ts';
+import { DigestFindingSelector } from './models/digestFindingSelector.ts';
+import { SeverityTierModel } from './models/severityTierModel.ts';
+import { FeedRecoveryBackoffOptimizer } from './models/feedRecoveryBackoffOptimizer.ts';
+import { AliasConfidenceModel } from './models/aliasConfidenceModel.ts';
 import type { ModelStorageOptions } from './types.ts';
 
 export interface MlRuntime {
@@ -38,6 +48,16 @@ export interface MlRuntime {
   confidenceCalibrator: ConfidenceCalibrator;
   deliveryOptimizer: DeliveryOptimizerModel;
   remediationHelper: AdvisoryRemediationHelper;
+  exploitRisk: ExploitRiskModel;
+  matchConfidence: MatchConfidenceModel;
+  findingImportance: FindingImportanceRanker;
+  credibilityWeights: NewsCredibilityWeightModel;
+  deliveryErrorClassifier: DeliveryErrorClassifier;
+  zeroDayRateLimit: ZeroDayRateLimitOptimizer;
+  digestSelector: DigestFindingSelector;
+  severityTier: SeverityTierModel;
+  feedRecoveryBackoff: FeedRecoveryBackoffOptimizer;
+  aliasConfidence: AliasConfidenceModel;
 }
 
 export async function createMlRuntime(options: ModelStorageOptions): Promise<MlRuntime> {
@@ -51,6 +71,17 @@ export async function createMlRuntime(options: ModelStorageOptions): Promise<MlR
   const deliveryOptimizer = new DeliveryOptimizerModel();
   const remediationHelper = new AdvisoryRemediationHelper();
 
+  const exploitRisk = new ExploitRiskModel();
+  const matchConfidence = new MatchConfidenceModel();
+  const findingImportance = new FindingImportanceRanker();
+  const credibilityWeights = new NewsCredibilityWeightModel();
+  const deliveryErrorClassifier = new DeliveryErrorClassifier();
+  const zeroDayRateLimit = new ZeroDayRateLimitOptimizer();
+  const digestSelector = new DigestFindingSelector();
+  const severityTier = new SeverityTierModel();
+  const feedRecoveryBackoff = new FeedRecoveryBackoffOptimizer();
+  const aliasConfidence = new AliasConfidenceModel();
+
    // autoDispatchThreshold uses a 1-D optimizer (not a TrainableModel), so it is
    // loaded via saveArtifact/loadArtifact rather than the standard TrainableModel path.
    await registry.loadArtifact(autoDispatchThreshold, 'auto-dispatch-threshold');
@@ -61,6 +92,16 @@ export async function createMlRuntime(options: ModelStorageOptions): Promise<MlR
   await registry.load(confidenceCalibrator, 'confidence-calibrator');
   await registry.load(deliveryOptimizer, 'delivery-optimizer');
   await registry.load(remediationHelper, 'advisory-remediation-helper');
+  await registry.load(exploitRisk, 'exploit-risk-model');
+  await registry.load(matchConfidence, 'match-confidence-model');
+  await registry.load(findingImportance, 'finding-importance-ranker');
+  await registry.loadArtifact(credibilityWeights, 'news-credibility-weight-model');
+  await registry.load(deliveryErrorClassifier, 'delivery-error-classifier');
+  await registry.loadArtifact(zeroDayRateLimit, 'zero-day-rate-limit-optimizer');
+  await registry.load(digestSelector, 'digest-finding-selector');
+  await registry.load(severityTier, 'severity-tier-model');
+  await registry.loadArtifact(feedRecoveryBackoff, 'feed-recovery-backoff-optimizer');
+  await registry.load(aliasConfidence, 'alias-confidence-model');
   return {
     registry,
     cpeValidityGate,
@@ -70,5 +111,15 @@ export async function createMlRuntime(options: ModelStorageOptions): Promise<MlR
     confidenceCalibrator,
     deliveryOptimizer,
     remediationHelper,
+    exploitRisk,
+    matchConfidence,
+    findingImportance,
+    credibilityWeights,
+    deliveryErrorClassifier,
+    zeroDayRateLimit,
+    digestSelector,
+    severityTier,
+    feedRecoveryBackoff,
+    aliasConfidence,
   };
 }

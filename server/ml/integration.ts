@@ -22,23 +22,51 @@ import type { MetricFeatures as TelemetryMetric } from './models/metricAnomalyDe
 import { extractMetricFeatures } from './models/metricAnomalyDetector.ts';
 import { extractFindingFeatures } from './models/reviewRanker.ts';
 import type { RemediationFeatures, RemediationPrediction } from './models/advisoryRemediationHelper.ts';
-import { DEFAULT_AUTO_DISPATCH_THRESHOLD } from './defaults.ts';
+import { DEFAULT_AUTO_DISPATCH_THRESHOLD, DEFAULT_MAX_ZERO_DAYS_PER_RUN, DEFAULT_FEED_RECOVERY_INITIAL_DELAY_MINUTES, DEFAULT_FEED_RECOVERY_BACKOFF_MULTIPLIER, DEFAULT_FEED_RECOVERY_MAX_DELAY_MINUTES, DEFAULT_FEED_RECOVERY_MAX_STEPS, DEFAULT_FEED_CREDIBILITY_WEIGHT, DEFAULT_KEYWORD_CREDIBILITY_WEIGHT } from './defaults.ts';
+import { extractExploitRiskFeatures, type ExploitRiskLevel } from './models/exploitRiskModel.ts';
+import { extractSeverityTierFeatures, type SeverityTier } from './models/severityTierModel.ts';
+import { extractFindingImportanceFeatures } from './models/findingImportanceRanker.ts';
+import type { Db } from '../db.ts';
+import { writeEvent } from '../events.ts';
 
 interface MlContext {
   runtime: MlRuntime | null;
   storage: ModelStorageOptions | null;
+  pool: Db | null;
 }
 
 /** Module-level singleton — initialized once at server startup. */
-const ctx: MlContext = { runtime: null, storage: null };
+const ctx: MlContext = { runtime: null, storage: null, pool: null };
 
 /**
  * Initializes the ML runtime by loading artifacts from disk.
  * Must be called once during server startup before any integration functions are used.
  */
-export async function initMlRuntime(options: ModelStorageOptions): Promise<MlRuntime> {
+export async function initMlRuntime(pool: Db, options: ModelStorageOptions): Promise<MlRuntime> {
+  ctx.pool = pool;
   ctx.storage = options;
+  const startAt = Date.now();
   ctx.runtime = await createMlRuntime(options);
+  const loadedModels = ctx.runtime.registry.list().map((e) => e.metadata.id);
+  const loadMs = Date.now() - startAt;
+  await writeEvent(pool, {
+    category: 'ML',
+    code: 'ml.runtime.initialized',
+    message: `ML runtime initialized: ${loadedModels.length} model(s) loaded`,
+    level: 'INFO',
+    context: {
+      models: loadedModels,
+      modelCount: loadedModels.length,
+      mlDirectory: options.directory,
+      loadTimeMs: loadMs,
+      modelStatuses: ctx.runtime.registry.list().map((e) => ({
+        modelId: e.metadata.id,
+        version: e.metadata.version,
+        status: e.status,
+        trainedAt: e.metadata.trainedAt,
+      })),
+    },
+  });
   return ctx.runtime;
 }
 
@@ -57,7 +85,13 @@ export function getMlRuntime(): MlRuntime | null {
 export function cpePreFilter(cpe: string): boolean {
   const model = ctx.runtime?.cpeValidityGate;
   if (!model?.isTrained()) return true;
-  return model.shouldParse(cpe);
+  const result = model.shouldParse(cpe);
+  void logMlEvent('ml.cpe_pre_filter', 'CPE validity gate evaluated', {
+    cpe,
+    result,
+    modelVersion: model.getMetadata().version,
+  });
+  return result;
 }
 
 /**
@@ -73,9 +107,19 @@ export function calibrateCredibilityScore(rawScore: number): {
 } {
   const model = ctx.runtime?.confidenceCalibrator;
   if (!model?.isTrained()) {
+    void logMlEvent('ml.credibility_calibration.fallback', 'Calibrator untrained — using raw score', {
+      rawScore,
+    });
     return { score: rawScore, probability: rawScore / 100, confidence: 'LOW' };
   }
   const result = model.predict({ credibility_score: rawScore });
+  void logMlEvent('ml.credibility_calibration', 'Credibility score calibrated', {
+    rawScore,
+    calibratedScore: result.score,
+    probability: result.probability,
+    confidence: result.confidence,
+    modelVersion: model.getMetadata().version,
+  });
   return {
     score: result.score * 100,
     probability: result.probability ?? result.score,
@@ -92,9 +136,22 @@ export function calibrateCredibilityScore(rawScore: number): {
 export function shouldAutoDispatch(confidence: number, settings: Pick<AppSettings, 'autoDispatchConfidenceThreshold'>): boolean {
   const model = ctx.runtime?.autoDispatchThreshold;
   if (!model?.isTrained()) {
-    return confidence >= (settings.autoDispatchConfidenceThreshold ?? DEFAULT_AUTO_DISPATCH_THRESHOLD);
+    const threshold = settings.autoDispatchConfidenceThreshold ?? DEFAULT_AUTO_DISPATCH_THRESHOLD;
+    const result = confidence >= threshold;
+    void logMlEvent('ml.auto_dispatch.fallback', result ? 'Auto-dispatched (fallback)' : 'Held for review (fallback)', {
+      confidence,
+      threshold,
+      modelTrained: false,
+    });
+    return result;
   }
-  return model.shouldDispatch(confidence);
+  const result = model.shouldDispatch(confidence);
+  void logMlEvent('ml.auto_dispatch', result ? 'Auto-dispatched (ML)' : 'Held for review (ML)', {
+    confidence,
+    threshold: model.getThreshold(),
+    modelVersion: model.getMetadata().version,
+  });
+  return result;
 }
 
 /**
@@ -106,6 +163,9 @@ export function shouldAutoDispatch(confidence: number, settings: Pick<AppSetting
 export function rankReviewFindings(findings: Finding[]): Finding[] {
   const model = ctx.runtime?.reviewRanker;
   if (!model?.isTrained()) {
+    void logMlEvent('ml.review_rank.fallback', 'Review ranker untrained — sorting by confidence', {
+      findingCount: findings.length,
+    });
     return [...findings].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
   }
 
@@ -128,6 +188,11 @@ export function rankReviewFindings(findings: Finding[]): Finding[] {
   );
 
   const predictions = model.predictBatch(features);
+  void logMlEvent('ml.review_rank', 'Review findings ranked by true-positive probability', {
+    findingCount: findings.length,
+    modelVersion: model.getMetadata().version,
+    avgProbability: predictions.reduce((sum, p) => sum + (p.probability ?? p.score ?? 0), 0) / predictions.length,
+  });
   return findings
     .map((f, i) => ({ finding: f, score: predictions[i]?.probability ?? predictions[i]?.score ?? 0 }))
     .sort((a, b) => b.score - a.score)
@@ -143,7 +208,16 @@ export function isTelemetryAnomaly(
 ): boolean {
   const model = ctx.runtime?.metricAnomalyDetector;
   if (!model?.isTrained()) return false;
-  return model.isAnomaly(extractMetricFeatures(metrics));
+  const features = extractMetricFeatures(metrics);
+  const result = model.isAnomaly(features);
+  void logMlEvent('ml.telemetry_anomaly', result ? 'Anomaly detected' : 'Metrics within normal range', {
+    isAnomaly: result,
+    modelVersion: model.getMetadata().version,
+    features: Object.fromEntries(
+      Object.entries(features).map(([k, v]) => [k, typeof v === 'number' ? Number(v.toFixed(4)) : v]),
+    ),
+  });
+  return result;
 }
 
 /**
@@ -153,9 +227,20 @@ export function isTelemetryAnomaly(
 export function computeRetryDelay(attempt: number): number {
   const model = ctx.runtime?.deliveryOptimizer;
   if (!model?.isTrained()) {
-    return Math.min(1440 * 60_000, 5 * 60_000 * 2 ** Math.max(0, attempt - 1));
+    const fallbackDelay = Math.min(1440 * 60_000, 5 * 60_000 * 2 ** Math.max(0, attempt - 1));
+    void logMlEvent('ml.delivery_retry.fallback', 'Delivery optimizer untrained — using exponential backoff', {
+      attempt,
+      delayMs: fallbackDelay,
+    });
+    return fallbackDelay;
   }
-  return model.computeDelay(attempt);
+  const result = model.computeDelay(attempt);
+  void logMlEvent('ml.delivery_retry', 'Retry delay computed (ML)', {
+    attempt,
+    delayMs: result,
+    modelVersion: model.getMetadata().version,
+  });
+  return result;
 }
 
 /**
@@ -181,5 +266,331 @@ export function predictRemediation(
       generatedContent: actualPlaybook ?? {},
     };
   }
-  return model.predictRemediation(features, actualPlaybook);
+   return model.predictRemediation(features, actualPlaybook);
+}
+
+/**
+ * 8. Exploit Risk Model — replaces the hardcoded determineExploitRisk()
+ * cascade in pipelineEngine.ts:69.
+ * Falls back to the hardcoded cascade when untrained.
+ */
+export function predictExploitRisk(f: {
+  cvssScore: number;
+  epssScore: number;
+  cisaKev: boolean;
+  exploitStatus: string;
+  exploitationSourcesCount: number;
+  daysSincePublished: number;
+}): ExploitRiskLevel {
+  const model = ctx.runtime?.exploitRisk;
+  if (!model?.isTrained()) {
+    return fallbackExploitRisk(f);
+  }
+  const result = model.predict(extractExploitRiskFeatures(f));
+  return model.getRiskLevels()[result.score] ?? 'STANDARD';
+}
+
+function fallbackExploitRisk(f: {
+  cvssScore: number;
+  epssScore: number;
+  cisaKev: boolean;
+  exploitStatus: string;
+  exploitationSourcesCount: number;
+  daysSincePublished: number;
+}): ExploitRiskLevel {
+  if (f.cisaKev) return 'CISA_KEV_EXPLOITED';
+  if (f.exploitationSourcesCount > 0 || f.exploitStatus === 'Reported In Wild') return 'REPORTED_IN_WILD_EXPLOIT';
+  if (f.exploitStatus === 'Active Weaponized') return 'WEAPONIZED_EXPLOIT';
+  if (f.epssScore >= 0.4) return 'HIGH_EPSS_PROBABILITY';
+  if (f.cvssScore >= 7) return 'ELEVATED';
+  return 'STANDARD';
+}
+
+/**
+ * 9. Match Confidence Model — replaces hardcoded per-method confidence values
+ * (100/95/90/85/70/0) in cpeMatcher.ts and cpeSimulation.ts.
+ * Falls back to the hardcoded values when untrained.
+ */
+export function predictMatchConfidence(f: {
+  matchMethod: string;
+  hasVersionEvidence: boolean;
+  cvssScore: number;
+  epssScore: number;
+  cisaKev: boolean;
+  sourceFeedWeight: number;
+  daysSincePublished: number;
+  negated: boolean;
+}): number {
+  const model = ctx.runtime?.matchConfidence;
+  if (!model?.isTrained()) {
+    return fallbackMatchConfidence(f);
+  }
+  return model.predictConfidence({
+    matchMethod: f.matchMethod,
+    hasVersionEvidence: f.hasVersionEvidence,
+    versionVerifiedInRange: f.hasVersionEvidence,
+    cvssScore: f.cvssScore,
+    epssScore: f.epssScore,
+    cisaKev: f.cisaKev,
+    sourceFeedWeight: f.sourceFeedWeight,
+    daysSincePublished: f.daysSincePublished,
+    negated: false,
+  });
+}
+
+function fallbackMatchConfidence(f: {
+  matchMethod: string;
+  hasVersionEvidence: boolean;
+  cvssScore: number;
+  epssScore: number;
+  cisaKev: boolean;
+  sourceFeedWeight: number;
+  daysSincePublished: number;
+  negated: boolean;
+}): number {
+  if (f.matchMethod === 'STRICT_CPE' || f.matchMethod === 'STRICT_CPE_INTERVAL') {
+    return f.hasVersionEvidence ? 100 : 90;
+  }
+  if (f.matchMethod === 'PURL_EXACT') return 95;
+  if (f.matchMethod === 'VENDOR_PRODUCT_ALIAS') return 85;
+  if (f.matchMethod === 'VENDOR_PRODUCT_FALLBACK') return 70;
+  if (f.matchMethod === 'KEYWORD') return 50;
+  return 0;
+}
+
+/**
+ * 10. Finding Importance Ranker — replaces the arbitrary 25-item slice
+ * and recency-only sort in templateCompiler.ts:652 and findingSort.ts:13.
+ * Falls back to recency-based sorting when untrained.
+ */
+export function rankFindingsByImportance(findings: Array<{
+  cvssScore: number;
+  epssScore: number;
+  cisaKev: boolean;
+  exploitStatus: number;
+  cweRiskLevel: number;
+  daysSincePublished: number;
+  sourceFeedWeight: number;
+  credibilityScore: number;
+  hasVersionEvidence: boolean;
+  assetCriticality: number;
+}>): number[] {
+  const model = ctx.runtime?.findingImportance;
+  if (!model?.isTrained()) {
+    return findings.map((_, i) => 1 / (i + 1));
+  }
+  return findings.map((f) => {
+    const feats = extractFindingImportanceFeatures({
+      cvssScore: f.cvssScore,
+      epssScore: f.epssScore,
+      cisaKev: f.cisaKev,
+      exploitStatus: f.exploitStatus,
+      cweRiskLevel: f.cweRiskLevel,
+      daysSincePublished: f.daysSincePublished,
+      sourceFeedWeight: f.sourceFeedWeight,
+      credibilityScore: f.credibilityScore,
+      hasVersionEvidence: f.hasVersionEvidence,
+      assetCriticality: f.assetCriticality,
+    });
+    const result = model.predict(feats);
+    return result.probability ?? result.score ?? 0;
+  });
+}
+
+/**
+ * 11. News Credibility Weight Model — replaces the hardcoded
+ * `feedScore * 0.6 + keywordScore * 0.4` in intelligenceMatcher.ts:46.
+ * Falls back to the 0.6/0.4 split when untrained.
+ */
+export function predictCredibilityWeights(): { feedWeight: number; keywordWeight: number } {
+  const model = ctx.runtime?.credibilityWeights;
+  if (!model?.isTrained()) {
+    return { feedWeight: DEFAULT_FEED_CREDIBILITY_WEIGHT, keywordWeight: DEFAULT_KEYWORD_CREDIBILITY_WEIGHT };
+  }
+  return model.getWeights();
+}
+
+export function computeCredibilityScore(feedWeight: number, keywordScore: number): number {
+  const model = ctx.runtime?.credibilityWeights;
+  if (!model?.isTrained()) {
+    return Math.round(feedWeight * DEFAULT_FEED_CREDIBILITY_WEIGHT + keywordScore * DEFAULT_KEYWORD_CREDIBILITY_WEIGHT);
+  }
+  return model.computeCredibility(feedWeight, keywordScore);
+}
+
+/**
+ * 12. Delivery Error Classifier — replaces the hardcoded HTTP status
+ * classification in delivery.ts:1557 and emailProviders.ts:375-407.
+ * Falls back to status-code-based classification when untrained.
+ */
+export function classifyDeliveryError(f: {
+  provider: string;
+  statusCode: number;
+  errorMessage: string;
+  attemptNumber: number;
+  hourOfDay: number;
+}): { isPermanent: boolean; isTransient: boolean; reason: string } {
+  const model = ctx.runtime?.deliveryErrorClassifier;
+  if (!model?.isTrained()) {
+    const s = f.statusCode;
+    const isPermanent = s >= 400 && s < 500 && ![408, 429].includes(s);
+    return { isPermanent, isTransient: !isPermanent, reason: `hardcoded status code classification (HTTP ${s})` };
+  }
+  const isPermanent = model.isPermanentError(f);
+  return { isPermanent, isTransient: !isPermanent, reason: 'ML delivery error classifier' };
+}
+
+/**
+ * 13. Zero-Day Rate Limit Optimizer — replaces the hardcoded
+ * `MAX_ZERO_DAYS_PER_RUN = 50` in pipelineEngine.ts:101.
+ * Falls back to 50 when untrained.
+ */
+export function getZeroDayCap(): number {
+  const model = ctx.runtime?.zeroDayRateLimit;
+  if (!model?.isTrained()) {
+    return DEFAULT_MAX_ZERO_DAYS_PER_RUN;
+  }
+  return model.getCap();
+}
+
+/**
+  * 14. Digest Finding Selector — replaces the subscription-only filtering
+ * in dailyDigest.ts:464. Falls back to including all eligible findings when untrained.
+ */
+export function shouldSelectForDigest(f: {
+  cvssScore: number;
+  epssScore: number;
+  cisaKev: boolean;
+  exploitStatus: number;
+  daysSincePublished: number;
+  sourceFeedWeight: number;
+  credibilityScore: number;
+  assetCriticality: number;
+  recipientTier: 'ALL' | 'CRITICAL_ONLY' | 'SUBSCRIBED_ONLY';
+  findingInDigest: boolean;
+  timeInDigestMinutes: number;
+}): number {
+  const model = ctx.runtime?.digestSelector;
+  if (!model?.isTrained()) {
+    return 1.0;
+  }
+  return model.selectForDigest(f);
+}
+
+/**
+ * 15. Severity Tier Model — replaces the hardcoded weighted scoring in
+ * severityClassifier.ts. Falls back to the hardcoded scoring when untrained.
+ */
+export function predictSeverityTier(f: {
+  cvssScore: number;
+  epssScore: number;
+  cisaKev: boolean;
+  exploitStatus: string;
+  cweRiskLevel: number;
+  daysSincePublished: number;
+  sourceFeedWeight: number;
+  cvssSeverity: string;
+}): SeverityTier {
+  const model = ctx.runtime?.severityTier;
+  if (!model?.isTrained()) {
+    return fallbackSeverityTier(f);
+  }
+  const result = model.predict(extractSeverityTierFeatures(f));
+  return model.getTiers()[result.score] ?? 'INFORMATIONAL';
+}
+
+function fallbackSeverityTier(f: {
+  cvssScore: number;
+  epssScore: number;
+  cisaKev: boolean;
+  exploitStatus: string;
+  cweRiskLevel: number;
+  daysSincePublished: number;
+  sourceFeedWeight: number;
+  cvssSeverity: string;
+}): SeverityTier {
+  const EXPLOIT_STATUS_WEIGHT: Record<string, number> = {
+    'Active Weaponized': 40,
+    'Reported In Wild': 30,
+    'POC Available': 20,
+    None: 0,
+  };
+  const CISA_KEV_WEIGHT = 15;
+  const EPSS_HIGH_THRESHOLD = 0.4;
+  const EPSS_HIGH_WEIGHT = 10;
+
+  let score = 0;
+
+  score += f.cvssScore * 0.6;
+  score += EXPLOIT_STATUS_WEIGHT[f.exploitStatus] || 0;
+  if (f.cisaKev) score += CISA_KEV_WEIGHT;
+  if (f.epssScore >= EPSS_HIGH_THRESHOLD) score += EPSS_HIGH_WEIGHT;
+
+  if (score >= 90 || f.cvssSeverity === 'CRITICAL') return 'CRITICAL';
+  if (score >= 70 || f.cvssSeverity === 'HIGH') return 'HIGH';
+  if (score >= 40 || f.cvssSeverity === 'MEDIUM') return 'MEDIUM';
+  if (score >= 10 || f.cvssSeverity === 'LOW') return 'LOW';
+  return 'INFORMATIONAL';
+}
+
+/**
+ * 16. Feed Recovery Backoff Optimizer — replaces the hardcoded exponential
+ * backoff in feedRecovery.ts:12. Falls back to the default backoff when untrained.
+ */
+export function computeFeedRecoveryDelay(failures: number): number {
+  const model = ctx.runtime?.feedRecoveryBackoff;
+  if (!model?.isTrained()) {
+    const base = DEFAULT_FEED_RECOVERY_INITIAL_DELAY_MINUTES * 60_000;
+    return Math.min(
+      DEFAULT_FEED_RECOVERY_MAX_DELAY_MINUTES * 60_000,
+      base * DEFAULT_FEED_RECOVERY_BACKOFF_MULTIPLIER ** Math.min(DEFAULT_FEED_RECOVERY_MAX_STEPS, Math.max(0, failures - 1)),
+    );
+  }
+  return model.computeRecoveryDelay(failures);
+}
+
+/**
+ * 17. Alias Confidence Model — replaces the hardcoded isConfirmedFinding()
+ * boolean gate in aliasLifecycle.ts:277.
+ * Falls back to hardcoded checks when untrained.
+ */
+export function predictAliasConfidence(f: {
+  matchConfidence: number;
+  cvssScore: number;
+  epssScore: number;
+  cisaKev: boolean;
+  exploitStatus: number;
+  daysSincePublished: number;
+  sourceFeedWeight: number;
+  hasVersionEvidence: boolean;
+  matchMethod: string;
+}): number {
+  const model = ctx.runtime?.aliasConfidence;
+  if (!model?.isTrained()) {
+    if (f.matchConfidence === 0) return 0;
+    if (f.cisaKev) return 1;
+    if (f.epssScore >= 0.4) return 1;
+    if (f.exploitStatus > 0) return 1;
+    return f.matchConfidence >= 70 ? 1 : 0;
+  }
+  return model.predictConfirmationProbability(f);
+}
+
+async function logMlEvent(
+  code: string,
+  message: string,
+  context: Record<string, unknown> = {},
+): Promise<void> {
+  if (!ctx.pool) return;
+  try {
+    await writeEvent(ctx.pool, {
+      category: 'ML',
+      code,
+      message,
+      level: context.level === 'WARNING' ? 'WARNING' : context.level === 'ERROR' ? 'ERROR' : 'INFO',
+      context,
+    });
+  } catch {
+    /* ML logging never blocks the pipeline */
+  }
 }

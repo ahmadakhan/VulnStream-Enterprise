@@ -26,6 +26,67 @@ export {
   type RemediationPrediction,
   REMEDIATION_FIELD_NAMES,
 } from './models/advisoryRemediationHelper.ts';
+export {
+  ExploitRiskModel,
+  extractExploitRiskFeatures,
+  type ExploitRiskFeatures,
+  type ExploitRiskLevel,
+  EXPLOIT_RISK_LEVELS,
+  EXPLOIT_RISK_FEATURE_NAMES,
+} from './models/exploitRiskModel.ts';
+export {
+  MatchConfidenceModel,
+  extractMatchConfidenceFeatures,
+  type MatchConfidenceFeatures,
+  MATCH_CONFIDENCE_FEATURE_NAMES,
+} from './models/matchConfidenceModel.ts';
+export {
+  FindingImportanceRanker,
+  extractFindingImportanceFeatures,
+  type FindingImportanceFeatures,
+  FINDING_IMPORTANCE_FEATURES,
+} from './models/findingImportanceRanker.ts';
+export {
+  NewsCredibilityWeightModel,
+  type CredibilitySample,
+  CREDIBILITY_FEATURE_NAMES,
+} from './models/newsCredibilityWeightModel.ts';
+export {
+  DeliveryErrorClassifier,
+  extractDeliveryErrorFeatures,
+  type DeliveryErrorFeatures,
+  DELIVERY_ERROR_FEATURE_NAMES,
+} from './models/deliveryErrorClassifier.ts';
+export {
+  ZeroDayRateLimitOptimizer,
+  type ZeroDayRateLimitSample,
+  ZERO_DAY_RATE_LIMIT_FEATURE_NAMES,
+} from './models/zeroDayRateLimitOptimizer.ts';
+export {
+  DigestFindingSelector,
+  extractDigestSelectionFeatures,
+  type DigestSelectionFeatures,
+  DIGEST_SELECTION_FEATURE_NAMES,
+} from './models/digestFindingSelector.ts';
+export {
+  SeverityTierModel,
+  extractSeverityTierFeatures,
+  type SeverityTierFeatures,
+  type SeverityTier,
+  SEVERITY_TIERS,
+  SEVERITY_TIER_FEATURE_NAMES,
+} from './models/severityTierModel.ts';
+export {
+  FeedRecoveryBackoffOptimizer,
+  type FeedRecoverySample,
+  FEED_RECOVERY_FEATURE_NAMES,
+} from './models/feedRecoveryBackoffOptimizer.ts';
+export {
+  AliasConfidenceModel,
+  extractAliasConfidenceFeatures,
+  type AliasConfidenceFeatures,
+  ALIAS_CONFIDENCE_FEATURE_NAMES,
+} from './models/aliasConfidenceModel.ts';
 export { ModelRegistry } from './runtime.ts';
 export { createMlRuntime, type MlRuntime } from './factory.ts';
 
@@ -39,6 +100,16 @@ export {
   isTelemetryAnomaly,
   computeRetryDelay,
   predictRemediation,
+  predictExploitRisk,
+  predictMatchConfidence,
+  rankFindingsByImportance,
+  predictCredibilityWeights,
+  classifyDeliveryError,
+  getZeroDayCap,
+  shouldSelectForDigest,
+  predictSeverityTier,
+  computeFeedRecoveryDelay,
+  predictAliasConfidence,
 } from './integration.ts';
 export {
   DEFAULT_AUTO_DISPATCH_THRESHOLD,
@@ -46,6 +117,16 @@ export {
   DEFAULT_EMAIL_RETRY_MULTIPLIER,
   DEFAULT_EMAIL_RETRY_MAX_DELAY_MINUTES,
   DEFAULT_EMAIL_RETRY_MAX_ATTEMPTS,
+  DEFAULT_MAX_ZERO_DAYS_PER_RUN,
+  DEFAULT_FEED_RECOVERY_INITIAL_DELAY_MINUTES,
+  DEFAULT_FEED_RECOVERY_MAX_DELAY_MINUTES,
+  DEFAULT_FEED_RECOVERY_BACKOFF_MULTIPLIER,
+  DEFAULT_FEED_RECOVERY_MAX_STEPS,
+  DEFAULT_EPSS_HIGH_THRESHOLD,
+  DEFAULT_FEED_CREDIBILITY_WEIGHT,
+  DEFAULT_KEYWORD_CREDIBILITY_WEIGHT,
+  DEFAULT_DIGEST_FINDINGS_PER_SEVERITY,
+  DEFAULT_ALIAS_CONFIRMED_THRESHOLD,
 } from './defaults.ts';
 export { TrainingOrchestrator, type TrainingDataSources, type TrainingResult, type TrainingSummary } from './train/orchestrator.ts';
 export { QUALITY_GATES, type QualityGate, type QualityGateResult } from './train/qualityGates.ts';
