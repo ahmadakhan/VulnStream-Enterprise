@@ -5,19 +5,19 @@
  * stored before this name was persisted fall back to this helper on read. */
 export const formatExecutionName = (id: string): string => `Run ${id.slice(0, 8)}`;
 
-function shortUuid(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID().split('-')[0].toUpperCase();
-  }
-  const fallback = Math.random().toString(36).slice(2, 10).toUpperCase();
-  return fallback.padStart(8, '0');
-}
+/** In-memory counter keyed by `prefix|datePart` for sequential daily advisory IDs. */
+const advisoryCounter = new Map<string, number>();
+
+/** Reset the in-memory counter for a prefix/date — used by tests to force a known
+ * sequence number without spawning across multiple days. */
+export const resetAdvisoryCounterForTest = (prefix: string, datePart: string): void => {
+  advisoryCounter.delete(`${prefix}|${datePart}`);
+};
 
 /** Build a professional, human-readable advisory identifier.
  *
- * Format: `PREFIX-ddMMMyyyy-SHORTUUID` (e.g. `ADV-29Oct2026-A1B2C3D4`).
- * The date portion makes the ID immediately useful for triage and filing,
- * while the short UUID suffix guarantees global uniqueness within a day. */
+ * Format: `PREFIX-ddMMMyyyy-NNN` (e.g. `ADV-29Oct2026-001`).
+ * Each day starts at `001` and increments by one for every subsequent advisory. */
 export const formatAdvisoryId = (prefix: string, now: Date = new Date()): string => {
   const datePart = now
     .toLocaleDateString('en-GB', {
@@ -26,5 +26,9 @@ export const formatAdvisoryId = (prefix: string, now: Date = new Date()): string
       year: 'numeric',
     })
     .replace(/ /g, '');
-  return `${prefix}${datePart}-${shortUuid()}`;
+  const key = `${prefix}|${datePart}`;
+  const count = (advisoryCounter.get(key) ?? 0) + 1;
+  advisoryCounter.set(key, count);
+  const sequence = String(count).padStart(3, '0');
+  return `${prefix}${datePart}-${sequence}`;
 };

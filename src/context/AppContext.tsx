@@ -549,7 +549,7 @@ function useApplication() {
       customEmail?: string,
     ) => call('/send-bulk-notification', { findingIds, reason, recipientMode, customEmail }),
     retryEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/retry`),
-    approveEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/approve`),
+     approveEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/approve`),
     rejectEmailDelivery: (id: string) => call(`/email/${encodeURIComponent(id)}/reject`),
     editEmailReview: (id: string, edits: Partial<ReviewEdits>) =>
       call<{ success: boolean }>(`/email/${encodeURIComponent(id)}/edit`, edits),
@@ -557,6 +557,14 @@ function useApplication() {
       safely(() =>
         request<{ html: string; edits: ReviewEdits; advisoryId: string }>(
           `/email/${encodeURIComponent(id)}/preview`,
+        ),
+      ),
+    previewEmailEdits: (id: string, edits: ReviewEdits) =>
+      safely(() =>
+        request<{ html: string; edits: ReviewEdits }>(
+          `/email/${encodeURIComponent(id)}/preview-edits`,
+          edits,
+          'POST',
         ),
       ),
     listEmailQueue: () => safely(() => request<EmailQueueItem[]>('/email-queue')),

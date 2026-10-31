@@ -28,7 +28,7 @@ test('renderAdvisory does not render audience notice or reviewer comment rows', 
     canvasBg: '#f1f5f9',
     cardBg: '#ffffff',
     headerBg: '#0f172a',
-    badgeStampText: 'BA HBS Cyber Operations',
+     badgeStampText: 'BA CYBER SECURITY OPERATIONS',
     badgeStampColor: '#2563eb',
     showStamp: true,
     showClassificationBanner: false,
@@ -159,7 +159,7 @@ test('renderAdvisory throws when required advisory fields are empty', () => {
 test('renderAdvisory produces template matching the studio HTML structure', () => {
   const template = compileCustomizedTemplate(testCustomization);
   const html = renderAdvisory(template, baseAdvisory);
-  assert.ok(html.includes('THREAT INTELLIGENCE &amp; BA HBS CYBER OPERATIONS'), 'studio label should appear');
+   assert.ok(html.includes('THREAT INTELLIGENCE &amp; BA CYBER SECURITY OPERATIONS'), 'studio label should appear');
   assert.ok(html.includes('Security Advisory'), 'static heading should appear');
   assert.ok(html.includes('ADV-2026-001'), 'advisory id should be rendered');
   assert.ok(html.includes('Test vulnerability advisory'), 'advisory title should be rendered');

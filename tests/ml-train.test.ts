@@ -354,36 +354,36 @@ describe('training orchestrator', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('trains metric anomaly detector with telemetry history', async () => {
-    const dir = tmpDir();
-    const orch = new TrainingOrchestrator({ directory: dir });
+   it('trains metric anomaly detector with telemetry history', async () => {
+     const dir = tmpDir();
+     const orch = new TrainingOrchestrator({ directory: dir });
 
-    const telemetryHistory: MetricFeatures[] = [];
-    for (let i = 0; i < 200; i++) {
-      telemetryHistory.push({
-        memoryPercent: 35 + (Math.random() * 20),
-        activeWorkers: 3 + Math.floor(Math.random() * 3),
-        concurrencyLimit: 10,
-        latencyMs: 40 + Math.random() * 30,
-        deadLetters: Math.random() < 0.05 ? 1 : 0,
-        pendingClaims: Math.floor(Math.random() * 5),
-        itemsPerSecond: 90 + Math.random() * 30,
-        poolWaiting: Math.floor(Math.random() * 3),
-      });
-    }
-    // Inject 10 anomalies
-    for (let i = 0; i < 10; i++) {
-      telemetryHistory.push({
-        memoryPercent: 85 + Math.random() * 10,
-        activeWorkers: 10,
-        concurrencyLimit: 10,
-        latencyMs: 500 + Math.random() * 200,
-        deadLetters: 5,
-        pendingClaims: 50,
-        itemsPerSecond: 1,
-        poolWaiting: 20,
-      });
-    }
+     const telemetryHistory: MetricFeatures[] = [];
+     for (let i = 0; i < 200; i++) {
+       telemetryHistory.push({
+         memoryPercent: 35 + Math.sin(i / 10) * 10,
+         activeWorkers: 3 + (i % 3),
+         concurrencyLimit: 10,
+         latencyMs: 40 + (i % 30),
+         deadLetters: 0,
+         pendingClaims: i % 5,
+         itemsPerSecond: 90 + (i % 30),
+         poolWaiting: i % 3,
+       });
+     }
+     // Inject 10 anomalies
+     for (let i = 0; i < 10; i++) {
+       telemetryHistory.push({
+         memoryPercent: 95 - i,
+         activeWorkers: 10,
+         concurrencyLimit: 10,
+         latencyMs: 700 + i * 10,
+         deadLetters: 5,
+         pendingClaims: 50,
+         itemsPerSecond: 1,
+         poolWaiting: 20,
+       });
+     }
 
     const data: TrainingDataSources = { telemetryHistory };
     const result = await orch.trainAll(data);

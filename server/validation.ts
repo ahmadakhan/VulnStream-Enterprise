@@ -440,7 +440,7 @@ export const settingsSchema = z
     deferEveryoneUntilSecurityDelivered: z.boolean().default(false),
     // Digest coalescing is opt-in so existing deployments keep their current behavior.
     digestBatchingEnabled: z.boolean().default(false),
-    digestWindowMinutes: z.number().int().min(1).max(1440),
+    digestWindowMinutes: z.number().int().min(1).max(1440).default(5),
     // Retries are on by default; one attempt disables automatic retry while
     // keeping the initial delivery. Delays are bounded to avoid a runaway queue.
     emailRetryEnabled: z.boolean().default(true),

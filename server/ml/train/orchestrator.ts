@@ -137,14 +137,17 @@ export class TrainingOrchestrator {
   }
 
    /**
-   * Checks all trained models for drift against recent production data.
-   *
-   * For each model, compares:
-   * - Feature distributions: PSI between training samples and recent samples
-   * - Concept drift: model performance on recent data vs. stored metadata
-   *
-   * Returns models that need retraining.
-   */
+    * Checks all trained models for drift against recent production data.
+    *
+    * For each model, compares:
+    * - Feature distributions: PSI between training samples and recent samples
+    * - Concept drift: model performance on recent data vs. stored metadata
+    *
+    * For models that support online learning (partialFit), applies incremental
+    * updates when moderate drift is detected but retraining is not needed.
+    *
+    * Returns models that need retraining.
+    */
    async checkDrift(
      recent: TrainingDataSources,
      historical: TrainingDataSources,
@@ -169,6 +172,16 @@ export class TrainingOrchestrator {
             gate, test, gate.getMetadata(), gate.getFeatureNames(), recentSamples, histSamples,
             'cpe-validity-gate',
           );
+          // Apply online learning for moderate drift (no retraining needed)
+          if (loaded && gate.isTrained() && !report.needsRetraining && recentSamples.length > 0) {
+            const onlineModel = gate as { partialFit?: (s: TrainingSample) => unknown };
+            const partialFit = onlineModel.partialFit;
+            if (partialFit) {
+              for (const sample of recentSamples.slice(0, 10)) {
+                try { partialFit.call(onlineModel, sample); } catch { /* skip if not ready for online learning */ }
+              }
+            }
+          }
           results.push({ modelId: 'cpe-validity-gate', needsRetrain: report.needsRetraining, report });
         }
       }
@@ -215,7 +228,7 @@ export class TrainingOrchestrator {
         }
       }
 
-      // Confidence Calibrator — check concept drift on scores
+       // Confidence Calibrator — check concept drift on scores
       {
         const model = new ConfidenceCalibrator();
         const loaded = await this.registry.load(model, 'confidence-calibrator');
@@ -232,17 +245,99 @@ export class TrainingOrchestrator {
             weight: 1,
             timestamp: new Date().toISOString(),
           }));
+          const histSamples: TrainingSample[] = histPairs.map((p, i) => ({
+            id: `calib-hist-${i}`,
+            features: { credibility_score: p.credibilityScore },
+            label: p.isActionable,
+            weight: 1,
+            timestamp: new Date().toISOString(),
+          }));
           const [_, test] = splitData(recentSamples, 0.2, seed);
           const report = await this.buildDriftReport(
-            model, test, model.getMetadata(), model.getFeatureNames(), recentSamples, recentSamples,
+            model, test, model.getMetadata(), model.getFeatureNames(), recentSamples, histSamples,
             'confidence-calibrator',
           );
           results.push({ modelId: 'confidence-calibrator', needsRetrain: report.needsRetraining, report });
         }
+       }
+
+      // Advisory Remediation Helper — check concept drift on findings
+      {
+        const model = new AdvisoryRemediationHelper();
+        const loaded = await this.registry.load(model, 'advisory-remediation-helper');
+        const recentFindings = recent.remediationFindings ?? [];
+        const histFindings = historical.remediationFindings ?? [];
+
+        if (!loaded && recentFindings.length > 0) {
+          results.push({ modelId: 'advisory-remediation-helper', needsRetrain: true });
+        } else if (recentFindings.length > 0 && histFindings.length > 0) {
+          const recentSamples = AdvisoryRemediationHelper.collectTrainingData(recentFindings);
+          const histSamples = AdvisoryRemediationHelper.collectTrainingData(histFindings);
+          const [_, test] = splitData(recentSamples, 0.2, seed);
+          const report = await this.buildDriftReport(
+            model, test, model.getMetadata(), model.getFeatureNames(), recentSamples, histSamples,
+            'advisory-remediation-helper',
+          );
+          // Apply online learning for moderate drift
+          if (loaded && model.isTrained() && !report.needsRetraining && recentSamples.length > 0) {
+            const onlineModel = model as { partialFit?: (s: TrainingSample) => unknown };
+            const partialFit = onlineModel.partialFit;
+            if (partialFit) {
+              for (const sample of recentSamples.slice(0, 20)) {
+                try { partialFit.call(onlineModel, sample); } catch { /* skip if not ready */ }
+              }
+            }
+          }
+          results.push({ modelId: 'advisory-remediation-helper', needsRetrain: report.needsRetraining, report });
+        }
       }
 
-     return results;
-   }
+      // Auto-Dispatch Threshold — check concept drift on dispatch outcomes
+      {
+        const model = new AutoDispatchThresholdModel();
+        const loaded = await this.registry.loadArtifact(model, 'auto-dispatch-threshold');
+        const recentOutcomes = recent.dispatchOutcomes ?? [];
+
+        if (!loaded && recentOutcomes.length > 0) {
+          results.push({ modelId: 'auto-dispatch-threshold', needsRetrain: true });
+        } else if (recentOutcomes.length > 0) {
+          const recentSamples: TrainingSample[] = recentOutcomes.map((o, i) => ({
+            id: `dispatch-recent-${i}`,
+            features: { confidence: o.confidence },
+            label: o.foundTruePositive ? 1 : 0,
+            weight: 1,
+            timestamp: new Date().toISOString(),
+          }));
+          const [_, test] = splitData(recentSamples, 0.2, seed);
+          const report = await this.buildDriftReport(
+            model, test, model.getMetadata(), model.getFeatureNames(), recentSamples, recentSamples,
+            'auto-dispatch-threshold',
+          );
+          results.push({ modelId: 'auto-dispatch-threshold', needsRetrain: report.needsRetraining, report });
+        }
+      }
+
+      // Delivery Optimizer — check concept drift on delivery outcomes
+      {
+        const model = new DeliveryOptimizerModel();
+        const loaded = await this.registry.load(model, 'delivery-optimizer');
+        const recentOutcomes = recent.deliveryOutcomes ?? [];
+
+        if (!loaded && recentOutcomes.length > 0) {
+          results.push({ modelId: 'delivery-optimizer', needsRetrain: true });
+        } else if (recentOutcomes.length > 0) {
+          const recentSamples = DeliveryOptimizerModel.collectTrainingData(recentOutcomes);
+          const [_, test] = splitData(recentSamples, 0.2, seed);
+          const report = await this.buildDriftReport(
+            model, test, model.getMetadata(), model.getFeatureNames(), recentSamples, recentSamples,
+            'delivery-optimizer',
+          );
+          results.push({ modelId: 'delivery-optimizer', needsRetrain: report.needsRetraining, report });
+        }
+      }
+
+      return results;
+    }
 
    private async buildDriftReport(
      model: { predict: (f: Record<string, number>) => PredictionResult },
@@ -365,8 +460,10 @@ export class TrainingOrchestrator {
         performance: validation.metrics as ModelMetadata['performance'],
       };
       await this.registry.saveArtifact(model, 'auto-dispatch-threshold', metadata);
+      // Verify the saved artifact loads correctly
+      const verified = await this.registry.loadArtifact(model, 'auto-dispatch-threshold');
       return this.successResult('auto-dispatch-threshold', 'threshold_optimizer',
-        data.dispatchOutcomes.length, data.dispatchOutcomes.length, validation, true);
+        data.dispatchOutcomes.length, data.dispatchOutcomes.length, validation, verified);
     } catch (e) {
       return this.errorResult('auto-dispatch-threshold', 'threshold_optimizer', data.dispatchOutcomes.length, e);
     }

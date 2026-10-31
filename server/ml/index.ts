@@ -61,6 +61,7 @@ export {
   CONCEPT_DRIFT_THRESHOLDS,
 } from './train/driftDetection.ts';
 export { evaluateClassifier, computeEce, splitData, toLabel } from './train/evaluation.ts';
+export { createRng, DEFAULT_TRAINING_SEED } from './algorithms/rng.ts';
 export { LogisticRegression } from './algorithms/logisticRegression.ts';
 export { IsolationForest } from './algorithms/isolationForest.ts';
 export { GBDTRanker } from './algorithms/gbdtRanker.ts';

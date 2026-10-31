@@ -1,5 +1,5 @@
-/**
- * Gradient-boosted decision trees for ranking (GBDT-Rank).
+  /**
+   * Gradient-boosted decision trees for ranking (GBDT-Rank).
  *
  * Each tree is a regression tree minimizing squared error on the residual.
  * For ranking, the label is the utility (higher = more important to act on).
@@ -8,6 +8,7 @@
  * This is a simplified LambdaMART-style ranker with L2 regularization on leaf values.
  */
 import { StandardScaler } from './standardScaler.ts';
+import { createRng, DEFAULT_TRAINING_SEED } from './rng.ts';
 import type { PredictionResult, TrainingSample } from '../types.ts';
 
 interface RegressionTreeLeaf {
@@ -53,9 +54,10 @@ export class GBDTRanker {
   train(
     samples: TrainingSample[],
     featureNames: string[],
-    config?: { nTrees?: number; learningRate?: number; maxDepth?: number; minSamplesSplit?: number; l2?: number },
+    config?: { nTrees?: number; learningRate?: number; maxDepth?: number; minSamplesSplit?: number; l2?: number; seed?: number },
   ): void {
     if (samples.length < 10) throw new Error(`GBDTRanker.train: need >= 10 samples, got ${samples.length}`);
+    const rng = createRng(config?.seed ?? DEFAULT_TRAINING_SEED);
     this.nTrees = config?.nTrees ?? this.nTrees;
     this.learningRate = config?.learningRate ?? this.learningRate;
     this.maxDepth = config?.maxDepth ?? this.maxDepth;
@@ -269,5 +271,13 @@ export class GBDTRanker {
 
   getFeatureNames(): string[] {
     return [...this.featureNames];
+  }
+
+  /**
+   * Online learning is not supported for tree-based models — requires
+   * a full retraining. Returns a clear error if called.
+   */
+  partialFit(_sample: TrainingSample): never {
+    throw new Error('GBDTRanker.partialFit: not supported — tree-based models require full retraining');
   }
 }

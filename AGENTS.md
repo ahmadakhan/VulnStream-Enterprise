@@ -16,3 +16,8 @@ ML subsystem only:
 ```
 npx vitest run tests/ml-*.test.ts --no-coverage --reporter=verbose
 ```
+
+ML training cron (standalone):
+```
+node --import tsx server/ml/train/cron.ts
+```

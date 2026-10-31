@@ -1535,6 +1535,13 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
           month: '2-digit',
           day: 'numeric',
         }).format(at);
+      // The daily digest title renders its calendar date as ddMMMyyyy (e.g. 31Oct2026).
+      const DIGEST_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const displayFor = (isoKey: string) => {
+        const [y, m, d] = isoKey.split('-');
+        const name = DIGEST_MONTHS[Number(m) - 1];
+        return `${String(d).padStart(2, '0')}${name}${y}`;
+      };
       const configured = zones.find((zone) => keyFor(zone) !== keyFor('UTC'));
       assert.ok(configured, 'no zone currently differs from UTC by a calendar day');
       // Pin the expected day when the digest is queued: a run that straddles
@@ -1571,7 +1578,7 @@ test('pipeline reconciles inventory and protects queued deliveries', { skip: !da
           `${DEFAULT_SETTINGS.advisoryPrefix}DAILY_${expectedKey.replace(/-/g, '')}`,
           `digest for ${timezone} used the wrong calendar day`,
         );
-        assert.match(job.payload.subject, new RegExp(expectedKey));
+        assert.match(job.payload.subject, new RegExp(displayFor(expectedKey)));
       }
     });
     await t.test('a digest tick with no recipients does not consume the day', async () => {

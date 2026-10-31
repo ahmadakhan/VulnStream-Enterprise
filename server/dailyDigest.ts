@@ -12,9 +12,12 @@ import {
   renderDailyDigest,
   renderDailyFindingSummary,
   renderDailyHealthReport,
+  renderHeldForReview,
   type DailyDigestParts,
   digestSeveritySummary,
   digestSeverityKpi,
+  formatExecutiveSummary,
+  type DigestFinding,
 } from '../src/utils/templateCompiler';
 import type {
   Advisory,
@@ -60,6 +63,18 @@ const calendarDateKey = (timezone: string, now: number): string =>
     day: '2-digit',
   }).format(now);
 
+const DIGEST_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// The calendar date is captured in `en-CA` (YYYY-MM-DD) for use as the stable
+// advisory-id / de-duplication key. The human-facing title and email subject
+// instead render it as ddMMMyyyy (e.g. 31Oct2026) per the daily digest format.
+const formatDigestDate = (dateKey: string): string => {
+  const [year, month, day] = dateKey.split('-');
+  if (!year || !month || !day) return dateKey;
+  const monthName = DIGEST_MONTHS[Number(month) - 1];
+  return `${day.padStart(2, '0')}${monthName ?? month}${year}`;
+};
+
 const wallClock = (timezone: string, now: number): { hour: number; minute: number } => {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
@@ -95,6 +110,40 @@ async function readDailyDigestTemplate(db: Db): Promise<string | null> {
 
 const severityRank = (s: Advisory['severity']) => SEVERITY_RANK.indexOf(s);
 
+const buildRemediationInstructions = (findings: Finding[]): string => {
+  const criticals = findings.filter((f) => f.cve.cvss.severity === 'CRITICAL');
+  const weaponized = findings.filter(
+    (f) => f.cve.exploitStatus === 'Active Weaponized' || f.cve.exploitStatus === 'POC Available',
+  );
+  const kev = findings.filter((f) => f.cve.cisaKev?.isKev);
+
+  const steps: string[] = [];
+
+  if (kev.length > 0) {
+    steps.push(
+      `Immediately patch the ${kev.length} CISA Known Exploited Vulnerability${kev.length > 1 ? 'ies' : ''} listed above per the vendor advisory and your CISA KEV remediation timeline.`,
+    );
+  }
+  if (criticals.length > 0 && kev.length === 0) {
+    steps.push(
+      `Prioritize remediation of the ${criticals.length} Critical-severity finding${criticals.length > 1 ? 's' : ''} above all other items; confirm active exploitation status via your threat intelligence feeds.`,
+    );
+  }
+  if (weaponized.length > 0) {
+    steps.push(
+      `${weaponized.length} finding${weaponized.length > 1 ? 's' : ''} has active exploit${weaponized.length > 1 ? 's' : ''} in the wild — treat as priority and implement compensating controls if patching is not immediately feasible.`,
+    );
+  }
+
+  steps.push(`Review each finding's applicability against your inventory, apply vendor patches via your change management process, and validate backups before and after remediation.`);
+
+  if (findings.some((f) => f.confidence !== undefined && f.confidence < 90)) {
+    steps.push('Findings with confidence below 90% require manual verification — confirm asset applicability and version evidence before acting.');
+  }
+
+  return steps.join(' ');
+};
+
 const buildDailyDigestAdvisory = (findings: Finding[], settings: AppSettings, dateKey: string): Advisory => {
   const cveIds = Array.from(new Set(findings.map((finding) => finding.cveId))).sort();
   const severity = findings.reduce<Advisory['severity']>(
@@ -105,16 +154,15 @@ const buildDailyDigestAdvisory = (findings: Finding[], settings: AppSettings, da
   const severityCounts = countSeverities(findings);
   return {
     id: `${settings.advisoryPrefix}DAILY_${dateKey.replace(/-/g, '')}`,
-    title: `Daily Vulnerability Digest — ${dateKey}`,
+    title: `Daily Vulnerability Digest — ${formatDigestDate(dateKey)}`,
     severity,
     cveIds,
     findingIds: findings.map((finding) => finding.id),
     createdDate: new Date().toISOString(),
     deliveryStatus: 'PENDING',
     recipientCount: 0,
-    executiveSummary: `${findings.length} finding(s) in the last 24 hours. ${formatSeverityCounts(severityCounts)}.`,
-    remediationInstructions:
-      'Review the findings below, confirm applicability against inventory, and deploy tested remediation through your change process.',
+    executiveSummary: formatExecutiveSummary(findings.length, severityCounts),
+    remediationInstructions: buildRemediationInstructions(findings),
     vendorLink:
       Array.from(
         new Set(
@@ -158,22 +206,6 @@ const formatReportGenerated = (date: Date, timezone: string): string => {
   const minute = parts.find((p) => p.type === 'minute')?.value || '';
   const tz = parts.find((p) => p.type === 'timeZoneName')?.value || '';
   return `${day} ${month} ${year} | ${hour}:${minute} ${tz}`;
-};
-
-const formatExecutiveSummary = (total: number, counts: Record<string, number>): string => {
-  const parts: string[] = [];
-  for (const severity of ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'] as const) {
-    if (counts[severity] > 0) {
-      parts.push(
-        `<strong>${counts[severity]} ${severity.charAt(0) + severity.slice(1).toLowerCase()}</strong>`,
-      );
-    }
-  }
-  const summary =
-    parts.length > 1
-      ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
-      : parts[0];
-  return `A total of <strong>${total} ${total === 1 ? 'vulnerability' : 'vulnerabilities'}</strong> were identified during the latest monitoring cycle, including ${summary} severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.`;
 };
 
 interface HealthSnapshot {
@@ -454,6 +486,10 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
                   assetName: finding.matchedAssetName,
                   vendor: finding.matchedAssetVendor,
                   sourceUrl: `https://nvd.nist.gov/vuln/detail/${finding.cveId}`,
+                  cvssScore: finding.cve.cvss.score,
+                  exploitStatus: finding.cve.exploitStatus,
+                  epssScore: finding.cve.epss?.score,
+                  cisaKev: finding.cve.cisaKev?.isKev,
                 })),
                 dailyConfig,
               ),
@@ -466,6 +502,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
              asset_count: uniqueAssets.size,
              executive_summary: executiveSummary,
              report_generated: reportGenerated,
+           held_for_review: renderHeldForReview(heldForReview, dailyConfig),
            critical_summary: digestSeveritySummary('CRITICAL', criticalCount, dailyConfig),
            high_summary: digestSeveritySummary('HIGH', highCount, dailyConfig),
            medium_summary: digestSeveritySummary('MEDIUM', mediumCount, dailyConfig),
@@ -481,7 +518,7 @@ export async function runDailyDigest(pool: pg.Pool): Promise<number> {
           // recipient-specific view must not be re-hashed against it.
           const contentRevision = advisoryRevision(view, included);
           const payload = {
-            ...advisoryEmail(view, html),
+            ...advisoryEmail(view, html, undefined, { findings: included }),
             cveIds: view.cveIds,
             recipientEmail: recipient.email,
             includedFindingIds: included.map((finding) => finding.id),

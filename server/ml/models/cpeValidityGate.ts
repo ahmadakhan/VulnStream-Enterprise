@@ -148,6 +148,23 @@ export class CpeValidityGateModel extends BaseModel {
     this.trained = true;
   }
 
+  /**
+   * Online learning update — applies a single SGD step on one sample.
+   * Must be called after train() has initialized the model.
+   * Returns metrics for this update (for drift monitoring).
+   */
+  partialFit(sample: TrainingSample): { accuracy: number; bce: number } {
+    if (!this.trained) {
+      throw new Error('CpeValidityGateModel.partialFit: model must be trained first');
+    }
+    const processed = {
+      ...sample,
+      features: Object.keys(sample.features).length > 0 ? sample.features : this.extractFeatures(sample),
+    };
+    const metrics = this.algo.partialFit(processed);
+    return { accuracy: metrics.accuracy, bce: metrics.bce };
+  }
+
   predict(features: Record<string, number>): PredictionResult {
     return this.algo.predict(features);
   }
@@ -190,7 +207,7 @@ export class CpeValidityGateModel extends BaseModel {
         max_segment_length: features.maxSegmentLength,
       };
       return {
-        id: `cpe-${i}`,
+         id: `cpe:${i}`,
         features: featRecord,
         label: parsed.isValid ? 1 : 0,
         weight: 1,

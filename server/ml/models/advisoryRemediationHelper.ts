@@ -121,6 +121,25 @@ export class AdvisoryRemediationHelper {
   }
 
   /**
+   * Online learning update — applies a single SGD step to the LR model
+   * for the field specified in sample.id (format: "fieldName:timestamp").
+   * Must be called after train() has initialized all models.
+   * Returns metrics for this update (for drift monitoring).
+   */
+  partialFit(sample: TrainingSample): { accuracy: number; bce: number; field: string } {
+    if (!this.trained) {
+      throw new Error('AdvisoryRemediationHelper.partialFit: model must be trained first');
+    }
+    const fieldName = sample.id.split(':')[0] ?? '';
+    const lr = this.models.get(fieldName);
+    if (!lr) {
+      throw new Error(`AdvisoryRemediationHelper.partialFit: no model for field "${fieldName}"`);
+    }
+    const metrics = lr.partialFit(sample);
+    return { accuracy: metrics.accuracy, bce: metrics.bce, field: fieldName };
+  }
+
+  /**
    * Predicts the probability of each remediation field being available
    * and generates fallback content for missing fields.
    */
@@ -227,7 +246,22 @@ export class AdvisoryRemediationHelper {
   }
 
   predict(features: Record<string, number>): PredictionResult {
-    const score = this.defaultProbability('has_patch_url', features);
+    let score: number;
+    if (this.trained) {
+      let sum = 0;
+      let count = 0;
+      for (const field of REMEDIATION_FIELD_NAMES) {
+        const lr = this.models.get(field);
+        if (lr) {
+          const result = lr.predict(features);
+          sum += result.score;
+          count++;
+        }
+      }
+      score = count > 0 ? sum / count : this.defaultProbability('has_patch_url', features);
+    } else {
+      score = this.defaultProbability('has_patch_url', features);
+    }
     const confidence: PredictionResult['confidence'] = Math.abs(score - 0.5) > 0.3 ? 'HIGH' : 'MEDIUM';
     return { score, confidence, reason: `remediation completeness estimate=${score.toFixed(3)}` };
   }

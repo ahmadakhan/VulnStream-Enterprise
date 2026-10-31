@@ -13,6 +13,7 @@
  * Paper: Liu, Fei Tony, et al. "Isolation forest." ICDM 2008.
  */
 import type { PredictionResult } from '../types.ts';
+import { createRng, DEFAULT_TRAINING_SEED } from './rng.ts';
 
 interface IsolationTreeNode {
   left: IsolationTreeNode | null;
@@ -52,8 +53,9 @@ export class IsolationForest {
   private featureNames: string[] = [];
   private trainSize = 0;
 
-  train(samples: number[][], featureNames: string[], nTrees = 100, maxDepth = 8, contamination = 0.1): void {
+  train(samples: number[][], featureNames: string[], nTrees = 100, maxDepth = 8, contamination = 0.1, seed = DEFAULT_TRAINING_SEED): void {
     if (samples.length < 10) throw new Error(`IsolationForest.train: need >= 10 samples, got ${samples.length}`);
+    const rng = createRng(seed);
     this.maxDepth = maxDepth;
     this.contamination = contamination;
     this.featureNames = [...featureNames];
@@ -61,7 +63,7 @@ export class IsolationForest {
 
     this.trees = [];
     for (let t = 0; t < nTrees; t++) {
-      const tree = this.buildTree(samples);
+      const tree = this.buildTree(samples, 0, rng);
       if (tree) this.trees.push(tree);
     }
 
@@ -74,7 +76,7 @@ export class IsolationForest {
     this.threshold = scores[Math.min(thresholdIdx, scores.length - 1)];
   }
 
-  private buildTree(samples: number[][], depth = 0): IsolationTreeNode | null {
+  private buildTree(samples: number[][], depth = 0, rng: () => number): IsolationTreeNode | null {
     if (samples.length === 0) return null;
     const node: IsolationTreeNode = { left: null, right: null, splitAttr: 0, splitValue: 0, size: samples.length };
     if (depth >= this.maxDepth || samples.length <= 1) return node;
@@ -87,14 +89,14 @@ export class IsolationForest {
     }
     if (candidateAttrs.length === 0) return node;
 
-    const attr = candidateAttrs[Math.floor(Math.random() * candidateAttrs.length)];
+    const attr = candidateAttrs[Math.floor(rng() * candidateAttrs.length)];
     const values = samples.map((s) => s[attr]).sort((a, b) => a - b);
     const minVal = values[0];
     const maxVal = values[values.length - 1];
     if (minVal === maxVal) return node;
 
     node.splitAttr = attr;
-    node.splitValue = Math.random() * (maxVal - minVal) + minVal;
+    node.splitValue = rng() * (maxVal - minVal) + minVal;
 
     const leftSamples: number[][] = [];
     const rightSamples: number[][] = [];
@@ -103,8 +105,8 @@ export class IsolationForest {
       else rightSamples.push(s);
     }
 
-    node.left = this.buildTree(leftSamples, depth + 1);
-    node.right = this.buildTree(rightSamples, depth + 1);
+    node.left = this.buildTree(leftSamples, depth + 1, rng);
+    node.right = this.buildTree(rightSamples, depth + 1, rng);
     return node;
   }
 

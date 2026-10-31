@@ -7,6 +7,7 @@ import {
   renderDailyHealthReport,
   digestSeveritySummary,
   digestSeverityKpi,
+  formatExecutiveSummary,
 } from '../src/utils/templateCompiler.ts';
 import type { DailyDigestParts, DigestFinding, DigestHealth } from '../src/utils/templateCompiler.ts';
 
@@ -190,4 +191,37 @@ test('renderDailyDigest omits zero-count severity sections', () => {
   assert.ok(!html.includes('MEDIUM (0)'), 'zero-count medium findings not rendered');
   assert.ok(!html.includes('LOW (0)'), 'zero-count low findings not rendered');
   assert.ok(!html.includes('{{'), 'no unreplaced placeholders');
+});
+
+test('formatExecutiveSummary produces "no" when all severity counts are zero', () => {
+  const summary = formatExecutiveSummary(0, { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 });
+  assert.ok(summary.includes('<strong>0 vulnerabilities</strong>'));
+  assert.ok(summary.includes('including no severity findings'));
+  assert.ok(!summary.includes('undefined'));
+});
+
+test('formatExecutiveSummary lists each nonzero severity', () => {
+  const summary = formatExecutiveSummary(4, { CRITICAL: 2, HIGH: 1, MEDIUM: 1, LOW: 0, UNKNOWN: 0 });
+  assert.ok(summary.includes('<strong>2 Critical</strong>'));
+  assert.ok(summary.includes('<strong>1 High</strong>'));
+  assert.ok(summary.includes('<strong>1 Medium</strong>'));
+  assert.ok(!summary.includes('undefined'));
+});
+
+test('renderDailyDigest does not escape HTML when all findings are zero', () => {
+  const zeroParts: DailyDigestParts = {
+    ...PARTS,
+    finding_count: 0,
+    critical_count: 0,
+    high_count: 0,
+    medium_count: 0,
+    low_count: 0,
+    asset_count: 0,
+    severity_counts: '0 critical, 0 high, 0 medium, 0 low',
+    executive_summary: formatExecutiveSummary(0, { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 }),
+  };
+  const html = renderDailyDigest(DEFAULT_DAILY_DIGEST_CUSTOMIZATION, zeroParts);
+  assert.ok(html.includes('<strong>0 vulnerabilities</strong>'), 'strong tags preserved, not escaped');
+  assert.ok(!html.includes('&lt;strong&gt;'), 'no escaped strong tags');
+  assert.ok(!html.includes('undefined'), 'no literal "undefined" text');
 });

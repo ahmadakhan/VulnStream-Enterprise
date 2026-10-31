@@ -1,5 +1,5 @@
 import { PageHeading } from './PageHeading';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -35,8 +35,9 @@ export function EmailQueueView() {
     deleteEmailQueueItem,
     approveEmailDelivery,
     rejectEmailDelivery,
-    editEmailReview,
+     editEmailReview,
     previewEmailReview,
+    previewEmailEdits,
     session,
   } = useApp();
   const [items, setItems] = useState<EmailQueueItem[]>([]);
@@ -52,6 +53,23 @@ export function EmailQueueView() {
   const [edits, setEdits] = useState<ReviewEdits>({});
   const [previewLoading, setPreviewLoading] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
+  const [livePreviewDebounce, setLivePreviewDebounce] = useState<NodeJS.Timeout | null>(null);
+
+  const triggerLivePreview = useCallback(
+    (newEdits: ReviewEdits) => {
+      if (livePreviewDebounce) clearTimeout(livePreviewDebounce);
+      const timer = setTimeout(() => {
+        if (!editing) return;
+        setPreviewLoading(true);
+        void previewEmailEdits(editing.id, newEdits).then((result) => {
+          if (result) setPreviewHtml(result.html);
+          setPreviewLoading(false);
+        });
+      }, 500);
+      setLivePreviewDebounce(timer);
+    },
+    [editing, livePreviewDebounce, previewEmailEdits],
+  );
   const [reviewBusy, setReviewBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const canManage = session?.role === 'ADMIN' || session?.role === 'OPERATOR';
@@ -571,9 +589,13 @@ export function EmailQueueView() {
                         id="audience-notice"
                         rows={4}
                         placeholder="Notice shown above the advisory body for all recipients"
-                        value={edits.audienceNotice || ''}
-                        onChange={(e) => setEdits({ ...edits, audienceNotice: e.target.value || undefined })}
-                        className="mt-1 w-full resize-y font-mono text-xs"
+                         value={edits.audienceNotice || ''}
+                         onChange={(e) => {
+                           const updated = { ...edits, audienceNotice: e.target.value || undefined };
+                           setEdits(updated);
+                           triggerLivePreview(updated);
+                         }}
+                         className="mt-1 w-full resize-y font-mono text-xs"
                       />
                     </div>
 
@@ -588,9 +610,13 @@ export function EmailQueueView() {
                         id="reviewer-comment"
                         rows={3}
                         placeholder="Optional context added at the bottom of the email"
-                        value={edits.reviewerComment || ''}
-                        onChange={(e) => setEdits({ ...edits, reviewerComment: e.target.value || undefined })}
-                        className="mt-1 w-full resize-y font-mono text-xs"
+                         value={edits.reviewerComment || ''}
+                         onChange={(e) => {
+                           const updated = { ...edits, reviewerComment: e.target.value || undefined };
+                           setEdits(updated);
+                           triggerLivePreview(updated);
+                         }}
+                         className="mt-1 w-full resize-y font-mono text-xs"
                       />
                     </div>
 
@@ -604,11 +630,15 @@ export function EmailQueueView() {
                       <input
                         id="reviewer-name"
                         type="text"
-                        maxLength={100}
-                        placeholder="Name attached to the reviewer comment"
-                        value={edits.reviewerName || ''}
-                        onChange={(e) => setEdits({ ...edits, reviewerName: e.target.value || undefined })}
-                        className="mt-1 w-full text-xs"
+                         maxLength={100}
+                         placeholder="Name attached to the reviewer comment"
+                         value={edits.reviewerName || ''}
+                         onChange={(e) => {
+                           const updated = { ...edits, reviewerName: e.target.value || undefined };
+                           setEdits(updated);
+                           triggerLivePreview(updated);
+                         }}
+                         className="mt-1 w-full text-xs"
                       />
                     </div>
 
@@ -622,28 +652,30 @@ export function EmailQueueView() {
                       <textarea
                         id="custom-body"
                         rows={6}
-                        placeholder="Override the entire HTML body — leave empty to keep the template"
-                        value={edits.customBodyOverride || ''}
-                        onChange={(e) =>
-                          setEdits({ ...edits, customBodyOverride: e.target.value || undefined })
-                        }
-                        className="mt-1 w-full resize-y font-mono text-xs"
+                         placeholder="Override the entire HTML body — leave empty to keep the template"
+                         value={edits.customBodyOverride || ''}
+                         onChange={(e) => {
+                           const updated = { ...edits, customBodyOverride: e.target.value || undefined };
+                           setEdits(updated);
+                           triggerLivePreview(updated);
+                         }}
+                         className="mt-1 w-full resize-y font-mono text-xs"
                       />
                     </div>
 
                     <button
-                      type="button"
-                      onClick={async () => {
-                        const preview = await previewEmailReview(editing.id);
-                        if (preview) {
-                          setPreviewHtml(preview.html);
-                          setEdits(preview.edits);
-                        }
-                      }}
-                      className="ui-secondary w-full"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" /> Refresh preview with saved edits
-                    </button>
+                       type="button"
+                       onClick={async () => {
+                         const preview = await previewEmailReview(editing.id);
+                         if (preview) {
+                           setPreviewHtml(preview.html);
+                           setEdits(preview.edits);
+                         }
+                       }}
+                       className="ui-secondary w-full"
+                     >
+                       <RefreshCw className="h-3.5 w-3.5" /> Reset to saved edits
+                     </button>
                   </div>
                 </div>
 

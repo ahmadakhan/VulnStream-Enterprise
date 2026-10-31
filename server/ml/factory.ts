@@ -51,8 +51,9 @@ export async function createMlRuntime(options: ModelStorageOptions): Promise<MlR
   const deliveryOptimizer = new DeliveryOptimizerModel();
   const remediationHelper = new AdvisoryRemediationHelper();
 
-  // autoDispatchThreshold uses a 1-D optimizer (not a TrainableModel), so it is
-  // not loaded from the registry — it initializes from defaults.
+   // autoDispatchThreshold uses a 1-D optimizer (not a TrainableModel), so it is
+   // loaded via saveArtifact/loadArtifact rather than the standard TrainableModel path.
+   await registry.loadArtifact(autoDispatchThreshold, 'auto-dispatch-threshold');
 
   await registry.load(cpeValidityGate, 'cpe-validity-gate');
   await registry.load(metricAnomalyDetector, 'metric-anomaly-detector');

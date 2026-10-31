@@ -55,7 +55,7 @@ export class AutoDispatchThresholdModel {
   }
 
   train(samples: ThresholdSample[] = this.history): void {
-    if (samples.length < 50) return; // not enough data to tune — keep default
+    if (samples.length < 100) return; // not enough data to tune — keep default
 
     const grid = [0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5];
     const decisionPoints = grid.map((threshold) => {

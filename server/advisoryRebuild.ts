@@ -51,5 +51,6 @@ export async function currentAdvisoryBody(db: Db, view: Advisory, findings: Find
       (f) =>
         `${f.cveId} | ${f.cve.cvss.severity}${f.cve.cisaKev?.isKev ? ' | CISA KEV' : ''} | ${f.matchedAssetName}`,
     ),
+    { findings },
   );
 }

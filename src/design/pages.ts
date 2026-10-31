@@ -40,7 +40,7 @@ export const pages = {
   feeds: { section: 'Autonomous pipeline', title: 'Threat feeds', icon: Radio },
   recipients: { section: 'Autonomous pipeline', title: 'Recipients & webhooks', icon: Users },
    template: { section: 'Autonomous pipeline', title: 'Email template studio', icon: FileCode },
-   'daily-digest': { section: 'Autonomous pipeline', title: 'Daily digest', icon: CalendarDays },
+   'daily-digest': { section: 'Autonomous pipeline', title: 'Daily digest studio', icon: CalendarDays },
    emails: { section: 'Autonomous pipeline', title: 'Delivery log', icon: Mail },
   'email-queue': { section: 'Autonomous pipeline', title: 'Email queue', icon: Inbox },
   archive: { section: 'Archive & retention', title: 'Archives & retention', icon: Archive },

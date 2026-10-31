@@ -1838,9 +1838,42 @@ export function createApp(
       let previewHtml = html;
       if (noticeBlock) previewHtml = previewHtml.replace(/(<body[^>]*>)/i, `$1${noticeBlock}`);
       if (commentBlock) previewHtml = previewHtml.replace(/(<\/body>)/i, `${commentBlock}$1`);
-      res.json({ html: previewHtml, edits, advisoryId: record.advisory_id });
-    }),
-  );
+       res.json({ html: previewHtml, edits, advisoryId: record.advisory_id });
+     }),
+   );
+   app.post(
+     '/api/email/:id/preview-edits',
+     requireRole('ADMIN', 'OPERATOR'),
+     asyncRoute(async (req, res) => {
+       const id = outboxId(req.params.id);
+       const proposedEdits: ReviewEdits = z
+         .object({
+           audienceNotice: z.string().max(2000).optional(),
+           reviewerComment: z.string().max(2000).optional(),
+           reviewerName: z.string().max(100).optional(),
+           customBodyOverride: z.string().max(50000).optional(),
+           customFields: z.record(z.string(), z.string().max(2000)).optional(),
+         })
+         .parse(req.body);
+       const row = await pool.query(
+         `SELECT o.payload->>'html' AS "html", o.edits
+           FROM outbox o
+          WHERE o.id=$1 AND o.channel='email' AND o.status IN ('REVIEW','QUEUED')`,
+         [id],
+       );
+       if (!row.rowCount) throw new HttpError(404, 'Email job not found or not in a previewable state');
+       const record = row.rows[0];
+       let html = record.html || '';
+       if (proposedEdits.customBodyOverride) {
+         html = proposedEdits.customBodyOverride;
+       }
+       const mergedEdits: ReviewEdits = { ...(record.edits || {}), ...proposedEdits };
+       const { noticeBlock, commentBlock } = safeNoticeHtml(mergedEdits);
+       if (noticeBlock) html = html.replace(/(<body[^>]*>)/i, `$1${noticeBlock}`);
+       if (commentBlock) html = html.replace(/(<\/body>)/i, `${commentBlock}$1`);
+       res.json({ html, edits: mergedEdits });
+     }),
+   );
   app.post(
     '/api/email/:id/edit',
     requireRole('ADMIN', 'OPERATOR'),

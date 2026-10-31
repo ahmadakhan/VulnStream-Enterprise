@@ -71,3 +71,13 @@ test('settings schema defaults retry fields and rejects an inverted delay range'
     false,
   );
 });
+
+test('settings schema applies digestWindowMinutes default for legacy settings', () => {
+  const legacy = settingsSchema.parse({
+    ...DEFAULT_SETTINGS,
+    digestBatchingEnabled: undefined,
+    digestWindowMinutes: undefined,
+  });
+  assert.equal(legacy.digestBatchingEnabled, false);
+  assert.equal(legacy.digestWindowMinutes, 5);
+});

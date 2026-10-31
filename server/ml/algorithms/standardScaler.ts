@@ -17,6 +17,8 @@ export class StandardScaler implements Scaler {
   private stds: number[] = [];
   private featureNames: string[] = [];
   private readonly epsilon = 1e-8;
+  private sampleCount = 0;
+  private m2: number[] = [];
 
   fit(samples: number[][], featureNames: string[]): void {
     if (samples.length === 0) throw new Error('StandardScaler.fit: no samples');
@@ -37,6 +39,33 @@ export class StandardScaler implements Scaler {
         sq += diff * diff;
       }
       this.stds[i] = Math.sqrt(sq / samples.length) + this.epsilon;
+    }
+  }
+
+  /**
+   * Incrementally updates the running mean and variance for a single sample
+   * using Welford's online algorithm. Can be called after fit() to incorporate
+   * new data without re-fitting from scratch.
+   *
+   * Throws if called before fit() — the scaler needs initial statistics first.
+   */
+  partialFit(sample: number[]): void {
+    if (this.featureNames.length === 0) {
+      throw new Error('StandardScaler.partialFit: call fit() first');
+    }
+    if (sample.length !== this.means.length) {
+      throw new Error(`StandardScaler.partialFit: expected ${this.means.length} features, got ${sample.length}`);
+    }
+
+    this.sampleCount++;
+    if (this.m2.length === 0) this.m2 = new Array(this.means.length).fill(0);
+
+    for (let i = 0; i < this.means.length; i++) {
+      const delta = sample[i] - this.means[i];
+      this.means[i] += delta / this.sampleCount;
+      const delta2 = sample[i] - this.means[i];
+      this.m2[i] = (this.m2[i] || 0) + delta * delta2;
+      this.stds[i] = Math.sqrt(this.m2[i] / this.sampleCount) + this.epsilon;
     }
   }
 

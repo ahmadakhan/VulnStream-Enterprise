@@ -39,11 +39,40 @@ describe('StandardScaler', () => {
     assert.throws(() => scaler.transform([1, 2, 3]), /expected 2 features/);
   });
 
+  it('partialFit rejects dimension mismatch', () => {
+    const scaler = new StandardScaler();
+    scaler.fit([[1, 2], [3, 4]], ['x', 'y']);
+    assert.throws(() => scaler.partialFit([1, 2, 3]), /expected 2 features/);
+  });
+
   it('handles single sample (zero variance → epsilon)', () => {
     const scaler = new StandardScaler();
     scaler.fit([[5, 5]], ['x', 'y']);
     const t = scaler.transform([5, 5]);
     assert.ok(Number.isFinite(t[0]));
+  });
+
+  it('updates running stats via partialFit', () => {
+    const scaler = new StandardScaler();
+    scaler.fit(
+      [
+        [1, 10],
+        [2, 20],
+      ],
+      ['a', 'b'],
+    );
+
+    const oldMean = scaler.serialize().means;
+    scaler.partialFit([3, 30]);
+    const newMeans = scaler.serialize().means;
+
+    assert.ok(newMeans[0] > oldMean[0], 'mean of a should increase after seeing a larger value');
+    assert.ok(newMeans[1] > oldMean[1], 'mean of b should increase');
+  });
+
+  it('rejects partialFit before fit', () => {
+    const scaler = new StandardScaler();
+    assert.throws(() => scaler.partialFit([1, 2]), /call fit/);
   });
 });
 
@@ -101,6 +130,74 @@ describe('LogisticRegression', () => {
     const result = lr.predict(features);
     assert.ok(result.score >= 0 && result.score <= 1);
   });
+
+  it('training is deterministic with same seed', () => {
+    const samples = [...makeSamples(50, false), ...makeSamples(50, true)];
+    const lr1 = new LogisticRegression();
+    const lr2 = new LogisticRegression();
+    lr1.train(samples, { threshold: 0.5, iterations: 500, seed: 42 });
+    lr2.train(samples, { threshold: 0.5, iterations: 500, seed: 42 });
+    const p1 = lr1.predict({ x: 3, y: 2 });
+    const p2 = lr2.predict({ x: 3, y: 2 });
+    assert.ok(Math.abs(p1.score - p2.score) < 1e-9, 'same seed should produce identical models');
+  });
+
+  it('partialFit rejects invalid label', () => {
+    const lr = new LogisticRegression();
+    const samples = [...makeSamples(50, false), ...makeSamples(50, true)];
+    lr.train(samples, { threshold: 0.5, iterations: 500, seed: 42 });
+    assert.throws(
+      () => lr.partialFit({ id: 's1', features: { x: 1, y: 2 }, label: 0.5, timestamp: 'd' }),
+      /label must be 0 or 1/,
+    );
+  });
+
+  it('partialFit rejects NaN feature values', () => {
+    const lr = new LogisticRegression();
+    const samples = [...makeSamples(50, false), ...makeSamples(50, true)];
+    lr.train(samples, { threshold: 0.5, iterations: 500, seed: 42 });
+    assert.throws(
+      () => lr.partialFit({ id: 's1', features: { x: NaN, y: 2 }, label: 1, timestamp: 'd' }),
+      /must be a finite number/,
+    );
+  });
+
+  it('partialFit updates weights after training', () => {
+    const lr = new LogisticRegression();
+    const samples = [...makeSamples(50, false), ...makeSamples(50, true)];
+    lr.train(samples, { threshold: 0.5, iterations: 500 });
+
+    // Use a sample within the training range but borderline
+    const borderline = { x: 2.5, y: 1.5 };
+    const before = lr.predict(borderline);
+
+    // Online update with a medium-strength positive sample
+    lr.partialFit({
+      id: 'online-1',
+      features: { x: 2.8, y: 1.8 },
+      label: 1,
+      weight: 1,
+      timestamp: new Date().toISOString(),
+    });
+
+    const after = lr.predict(borderline);
+    assert.ok(after.score >= before.score, 'score should not decrease after seeing a positive sample');
+    assert.ok(after.score > 0.5, 'prediction for borderline positive sample should be > 0.5');
+  });
+
+  it('partialFit throws before train', () => {
+    const lr = new LogisticRegression();
+    assert.throws(
+      () =>
+        lr.partialFit({
+          id: 's1',
+          features: { x: 1, y: 2 },
+          label: true,
+          timestamp: 'd',
+        }),
+      /must be trained first/,
+    );
+  });
 });
 
 describe('IsolationForest', () => {
@@ -134,6 +231,17 @@ describe('IsolationForest', () => {
   it('rejects training with fewer than 10 samples', () => {
     const forest = new IsolationForest();
     assert.throws(() => forest.train([[1, 2]], ['x', 'y'], 10, 8, 0.1), /need >= 10 samples/);
+  });
+
+  it('training is deterministic with same seed', () => {
+    const data = generate(100);
+    const f1 = new IsolationForest();
+    const f2 = new IsolationForest();
+    f1.train(data, ['x', 'y'], 50, 8, 0.1, 42);
+    f2.train(data, ['x', 'y'], 50, 8, 0.1, 42);
+    const s1 = f1.anomalyScore([0.5, 0.5]);
+    const s2 = f2.anomalyScore([0.5, 0.5]);
+    assert.ok(Math.abs(s1 - s2) < 1e-9, 'same seed should produce identical models');
   });
 });
 
@@ -196,5 +304,10 @@ describe('GBDTRanker', () => {
   it('rejects training with fewer than 10 samples', () => {
     const gbdt = new GBDTRanker();
     assert.throws(() => gbdt.train([{ id: 'a', features: { x: 1 }, label: 1, timestamp: '' }], ['x'], {}), /need >= 10 samples/);
+  });
+
+  it('throws on partialFit before train', () => {
+    const gbdt = new GBDTRanker();
+    assert.throws(() => gbdt.partialFit({ id: 'a', features: { x: 1 }, label: 1, timestamp: '' }), /not supported/);
   });
 });

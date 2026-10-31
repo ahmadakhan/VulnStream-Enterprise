@@ -73,6 +73,16 @@ export class ModelRegistry {
    * Returns false if no artifact exists or all artifacts fail to load.
    */
   async load(model: TrainableModel, modelId: string): Promise<boolean> {
+    return this.loadArtifact(model, modelId);
+  }
+
+  /**
+   * Load the active model artifact for a given modelId into `model`.
+   * Accepts any object with a `load` method — used for models that don't
+   * fully implement TrainableModel (e.g., AutoDispatchThresholdModel).
+   * Returns false if no artifact exists or all artifacts fail to load.
+   */
+  async loadArtifact(model: { load(artifact: ModelArtifact): void }, modelId: string): Promise<boolean> {
     const entry = this.manifest[modelId];
     if (!entry) return false;
 
@@ -85,20 +95,20 @@ export class ModelRegistry {
       const data = JSON.parse(
         readFileSync(join(this.directory, active.path), 'utf8'),
       ) as ModelArtifact;
-      model.load(data);
-      this.models.set(modelId, {
-        model,
-        metadata: data.metadata,
-        loadedAt: new Date().toISOString(),
-        status: 'ACTIVE',
-      });
-      return true;
-    } catch {
-      return this.rollback(model, modelId, 'LOAD_FAILURE');
-    }
-  }
+       model.load(data);
+       this.models.set(modelId, {
+         model: model as TrainableModel,
+         metadata: data.metadata,
+         loadedAt: new Date().toISOString(),
+         status: 'ACTIVE',
+       });
+       return true;
+     } catch {
+       return this.rollback(model, modelId, 'LOAD_FAILURE');
+     }
+   }
 
-  private async rollback(model: TrainableModel, modelId: string, reason: string): Promise<boolean> {
+  private async rollback(model: { load(artifact: ModelArtifact): void }, modelId: string, reason: string): Promise<boolean> {
     const entry = this.manifest[modelId];
     if (!entry) return false;
 
@@ -122,7 +132,7 @@ export class ModelRegistry {
       model.load(data);
       prev.status = 'STANDBY_ROLLBACK';
       this.models.set(modelId, {
-        model,
+        model: model as TrainableModel,
         metadata: data.metadata,
         loadedAt: new Date().toISOString(),
         status: 'STANDBY_ROLLBACK',

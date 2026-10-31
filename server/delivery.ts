@@ -671,7 +671,7 @@ export async function queueAdvisory(
   // explicit key (operator resend) still overrides it.
   const contentRevision = advisoryRevision(advisory, findings);
   const payload = {
-    ...advisoryEmail(advisory, html),
+    ...advisoryEmail(advisory, html, undefined, { findings }),
     cveIds: advisory.cveIds,
     findingRevisions: Object.fromEntries(findings.map((finding) => [finding.id, findingRevision(finding)])),
     cveRevisions: Object.fromEntries(findings.map((finding) => [finding.cveId, revision(finding.cve)])),
@@ -823,7 +823,7 @@ export async function queueBulkNotificationAdvisory(
   if (findings.length === 0) return 0;
   const contentRevision = advisoryRevision(advisory, findings);
   const payload = {
-    ...advisoryEmail(advisory, html),
+    ...advisoryEmail(advisory, html, undefined, { findings }),
     cveIds: advisory.cveIds,
     findingRevisions: Object.fromEntries(findings.map((finding) => [finding.id, findingRevision(finding)])),
     cveRevisions: Object.fromEntries(findings.map((finding) => [finding.cveId, revision(finding.cve)])),
@@ -1123,13 +1123,13 @@ export async function queueDigestAdvisory(
   const stableDispatchKey = dispatchKey ?? contentRevision;
   const priority = advisoryPriority(included);
   let jobs = 0;
-  let recipientCount = 0;
+    let recipientCount = 0;
 
   for (const [recipientId, batch] of recipientBatches) {
     const recipient = recipients.find((candidate) => candidate.id === recipientId)!;
     const view = digestView(union, batch);
     const payload = {
-      ...advisoryEmail(view, render?.(view, batch), batch.map(findingDetail)),
+      ...advisoryEmail(view, render?.(view, batch), batch.map(findingDetail), { findings: batch }),
       cveIds: view.cveIds,
       includedFindingIds: batch.map((finding) => finding.id),
       findingRevisions: Object.fromEntries(batch.map((finding) => [finding.id, findingRevision(finding)])),
@@ -1158,7 +1158,7 @@ export async function queueDigestAdvisory(
   for (const [hookId, batch] of webhookBatches) {
     const view = digestView(union, batch);
     const payload = {
-      ...advisoryEmail(view, render?.(view, batch), batch.map(findingDetail)),
+      ...advisoryEmail(view, render?.(view, batch), batch.map(findingDetail), { findings: batch }),
       cveIds: view.cveIds,
       includedFindingIds: batch.map((finding) => finding.id),
       findingRevisions: Object.fromEntries(batch.map((finding) => [finding.id, findingRevision(finding)])),

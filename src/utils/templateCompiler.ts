@@ -8,7 +8,7 @@ export const DEFAULT_TEMPLATE_CUSTOMIZATION: TemplateCustomization = {
   canvasBg: '#f1f5f9',
   cardBg: '#ffffff',
   headerBg: '#0f172a',
-  badgeStampText: 'BA HBS Cyber Operations',
+  badgeStampText: 'BA CYBER SECURITY OPERATIONS',
   badgeStampColor: '#2563eb',
   showStamp: true,
   showClassificationBanner: false,
@@ -130,7 +130,7 @@ export function compileCustomizedTemplate(config: TemplateCustomization): string
             ${stampHtml}
 
             <div style="font-size:10px;font-weight:bold;letter-spacing:1.5px;color:${headerMuted};margin-bottom:8px;">
-                THREAT INTELLIGENCE &amp; BA HBS CYBER OPERATIONS
+                THREAT INTELLIGENCE &amp; BA CYBER SECURITY OPERATIONS
             </div>
 
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:8px;">
@@ -340,6 +340,10 @@ export interface DigestFinding {
   assetName: string;
   vendor?: string;
   sourceUrl?: string;
+  cvssScore?: number;
+  exploitStatus?: 'Active Weaponized' | 'POC Available' | 'Reported In Wild' | 'None';
+  epssScore?: number;
+  cisaKev?: boolean;
 }
 
 export interface DigestHealth {
@@ -355,7 +359,7 @@ export interface DigestHealth {
 }
 
 export interface DailyDigestParts {
-  advisory_id: string;
+   advisory_id: string;
   advisory_title: string;
   dispatch_date: string;
   severity: string;
@@ -379,6 +383,7 @@ export interface DailyDigestParts {
   high_kpi: string;
   medium_kpi: string;
   low_kpi: string;
+  held_for_review?: string;
 }
 
 const digestEscapeHtml = (value: string) =>
@@ -534,7 +539,7 @@ ${classificationBanner}
                     {{medium_kpi}}
                     {{low_kpi}}
 
-    <td align="center" bgcolor="$eff6ff" style="padding:16px;border:1px solid #e2e8f0;">
+    <td align="center" bgcolor="#eff6ff" style="padding:16px;border:1px solid #e2e8f0;">
                         <div style="font-size:24px;font-weight:bold;color:#2563eb;">{{asset_count}}</div>
                         <div style="font-size:11px;color:#64748b;">ASSETS</div>
                     </td>
@@ -554,12 +559,25 @@ ${classificationBanner}
                 Vulnerability Findings
             </h2>
 
-            {{findings_summary}}
+     {{findings_summary}}
 
-        </td>
-    </tr>
+     </td>
+ </tr>
 
-    <!-- PLATFORM HEALTH -->
+     <!-- HELD FOR REVIEW -->
+     <tr>
+         <td class="mobile-padding" style="padding:0 32px 24px 32px;">
+
+             <h2 style="margin:0 0 16px;font-size:18px;color:#0f172a;">
+                 Review Queue
+             </h2>
+
+             {{held_for_review}}
+
+         </td>
+     </tr>
+
+     <!-- PLATFORM HEALTH -->
     <tr>
         <td class="mobile-padding" style="padding:0 32px 32px 32px;">
 
@@ -636,7 +654,23 @@ export function renderDailyFindingSummary(findings: DigestFinding[], config: Tem
           const cveIdHtml = f.sourceUrl
             ? `<a href="${digestEscapeHtml(f.sourceUrl)}" target="_blank">${digestEscapeHtml(f.cveId)}</a>`
             : `<strong>${digestEscapeHtml(f.cveId)}</strong>`;
-          return `${cveIdHtml} — ${digestEscapeHtml(f.assetName)}${f.vendor ? ` (${digestEscapeHtml(f.vendor)})` : ''}`;
+          const tags: string[] = [];
+          if (typeof f.cvssScore === 'number') {
+            tags.push(`CVSS ${f.cvssScore.toFixed(1)}`);
+          }
+          if (f.cisaKev) {
+            tags.push('CISA KEV');
+          }
+          if (f.exploitStatus && f.exploitStatus !== 'None') {
+            tags.push(f.exploitStatus);
+          }
+          if (typeof f.epssScore === 'number' && f.epssScore > 0.2) {
+            tags.push(`EPSS ${(f.epssScore * 100).toFixed(0)}%`);
+          }
+          const tagHtml = tags.length
+            ? ` <span style="display:inline-block;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:3px;padding:0 5px;font-size:11px;color:#475569;margin-left:6px;">${digestEscapeHtml(tags.join(' · '))}</span>`
+            : '';
+          return `${cveIdHtml} — ${digestEscapeHtml(f.assetName)}${f.vendor ? ` (${digestEscapeHtml(f.vendor)})` : ''}${tagHtml}`;
         })
         .join('<br>');
       const extra = items.length > 25 ? `<br><span style="color:#71717a;">…and ${items.length - 25} more</span>` : '';
@@ -785,6 +819,14 @@ export function renderDailyHealthReport(health: DigestHealth | null, config: Tem
             </table>`;
 }
 
+export function renderHeldForReview(count: number, config: TemplateCustomization): string {
+  const safe = normalizeDigestConfig(config);
+  if (count === 0) {
+    return `<p style="margin:0;font-size:12px;line-height:20px;color:#64748b;">No findings held for security-team review.</p>`;
+  }
+  return `<p style="margin:0;font-size:14px;line-height:24px;color:#475569;">${count} finding(s) ${count === 1 ? 'is' : 'are'} pending operator review before dispatch. These findings require manual verification of asset applicability and confidence scoring. Review the full alert details in the VulnStream dashboard to confirm or dismiss.</p>`;
+}
+
 const SEVERITY_KPI: Record<string, { label: string; color: string; bg: string }> = {
   CRITICAL: { label: 'CRITICAL', color: '#dc2626', bg: '#fef2f2' },
   HIGH: { label: 'HIGH', color: '#ea580c', bg: '#fff7ed' },
@@ -836,10 +878,12 @@ export const formatExecutiveSummary = (total: number, counts: Record<string, num
       );
     }
   }
-  const summary =
-    parts.length > 1
-      ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
-      : parts[0];
+   const summary =
+     parts.length > 1
+       ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+       : parts.length === 1
+         ? parts[0]
+         : 'no';
   return `A total of <strong>${total} ${total === 1 ? 'vulnerability' : 'vulnerabilities'}</strong> were identified during the latest monitoring cycle, including ${summary} severity findings across monitored assets. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures.`;
 }
 
@@ -858,11 +902,13 @@ function digestSafeExecutiveSummary(value: string): string {
   // tag inventory alone would still allow arbitrary text inside the tags, and
   // the wording alone would still allow an extra tag to be appended.
   const noForeignMarkup = !value.replace(/<\/?strong>/g, '').includes('<');
-  // The list separator accepts an Oxford comma as well as the generated form, so
+   // The list separator accepts an Oxford comma as well as the generated form, so
   // a hand-authored summary that only differs in punctuation still renders.
   const element = '<strong>\\d+ [A-Z][a-z]+<\\/strong>';
+  // When every severity count is 0, formatExecutiveSummary emits "no" in place
+  // of the severity list; accept that as a trusted shape as well.
   const generatedShape = new RegExp(
-    `^A total of <strong>\\d+ vulnerabilit(?:y|ies)<\\/strong> were identified during the latest monitoring cycle, including (?:${element})(?:,(?: and)? | and )?(?:${element}(?:,(?: and)? | and )?)* severity findings across monitored assets\\. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures\\.$`,
+    `^A total of <strong>\\d+ vulnerabilit(?:y|ies)<\\/strong> were identified during the latest monitoring cycle, including (?:no|(?:${element})(?:,(?: and)? | and )?(?:${element}(?:,(?: and)? | and )?)*) severity findings across monitored assets\\. Immediate remediation of critical findings is recommended while medium and low severity items should be addressed according to established risk treatment and vulnerability management procedures\\.$`,
   );
   return noForeignMarkup && generatedShape.test(value) ? value : digestEscapeHtml(value);
 }
@@ -902,5 +948,6 @@ export function renderDailyDigest(config: TemplateCustomization, parts: DailyDig
     .replace(/{{critical_kpi}}/g, parts.critical_kpi || '')
     .replace(/{{high_kpi}}/g, parts.high_kpi || '')
     .replace(/{{medium_kpi}}/g, parts.medium_kpi || '')
-    .replace(/{{low_kpi}}/g, parts.low_kpi || '');
+    .replace(/{{low_kpi}}/g, parts.low_kpi || '')
+    .replace(/{{held_for_review}}/g, parts.held_for_review || '');
 }

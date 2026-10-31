@@ -5,6 +5,7 @@
  * Inference: predict(features) returns P(y=1 | x) where x is a feature vector.
  */
 import { StandardScaler } from './standardScaler.ts';
+import { createRng, DEFAULT_TRAINING_SEED } from './rng.ts';
 import type { PredictionResult, TrainingSample } from '../types.ts';
 
 export interface LogisticRegressionWeights {
@@ -18,6 +19,7 @@ export interface LogisticRegressionWeights {
     iterations: number;
     l2: number;
   };
+  samplesSeen: number;
 }
 
 export interface LogisticRegressionConfig {
@@ -28,6 +30,7 @@ export interface LogisticRegressionConfig {
   earlyStopPatience?: number;
   threshold?: number;
   batchSize?: number;
+  seed?: number;
 }
 
 const DEFAULT_CONFIG: Required<LogisticRegressionConfig> = {
@@ -38,6 +41,7 @@ const DEFAULT_CONFIG: Required<LogisticRegressionConfig> = {
   earlyStopPatience: 50,
   threshold: 0.5,
   batchSize: 0,
+  seed: DEFAULT_TRAINING_SEED,
 };
 
 export class LogisticRegression {
@@ -46,9 +50,12 @@ export class LogisticRegression {
   private threshold = 0.5;
   private featureNames: string[] = [];
   private scaler: StandardScaler | null = null;
+  private samplesSeen = 0;
+  private trainConfig: Required<LogisticRegressionConfig> = DEFAULT_CONFIG;
 
   train(samples: TrainingSample[], config: LogisticRegressionConfig = {}): LogisticRegressionMetrics {
     const cfg = { ...DEFAULT_CONFIG, ...config };
+    this.trainConfig = cfg;
     const featureNames = Object.keys(samples[0].features);
     this.featureNames = featureNames;
     this.threshold = cfg.threshold;
@@ -56,10 +63,11 @@ export class LogisticRegression {
     const n = samples.length;
     if (n < 4) throw new Error(`LogisticRegression.train: need >= 4 samples, got ${n}`);
 
+    const rng = createRng(cfg.seed ?? DEFAULT_TRAINING_SEED);
     const rows = samples.map((s) => ({ ...s, label: typeof s.label === 'boolean' ? (s.label ? 1 : 0) : s.label }));
 
     const validationSize = Math.max(1, Math.floor(n * cfg.validationSplit));
-    const shuffled = [...rows].sort(() => Math.random() - 0.5);
+    const shuffled = [...rows].sort(() => rng() - 0.5);
     const val = shuffled.slice(0, validationSize);
     const train = shuffled.slice(validationSize);
 
@@ -107,6 +115,63 @@ export class LogisticRegression {
     this.bias = bestBias;
     const finalVal = this.evaluate(val);
     return finalVal;
+  }
+
+  /**
+   * Performs a single online SGD update on one sample.
+   *
+   * Uses the stored trainConfig learning rate with decay based on
+   * samples seen: lr_eff = lr / (1 + 0.01 * samplesSeen).
+   * Must be called after train() has initialized the scaler and weights.
+   *
+   * Returns updated evaluation metrics on the sample (for logging).
+   */
+  partialFit(sample: TrainingSample): LogisticRegressionMetrics {
+    if (this.scaler === null || this.weights.length === 0) {
+      throw new Error('LogisticRegression.partialFit: model must be trained first');
+    }
+    const y = typeof sample.label === 'boolean' ? (sample.label ? 1 : 0) : sample.label;
+    if (y !== 0 && y !== 1) {
+      throw new Error(`LogisticRegression.partialFit: label must be 0 or 1, got ${y}`);
+    }
+    const featureValues = this.featureNames.map((f) => sample.features[f]);
+    for (let i = 0; i < featureValues.length; i++) {
+      if (typeof featureValues[i] !== 'number' || !Number.isFinite(featureValues[i])) {
+        throw new Error(`LogisticRegression.partialFit: feature "${this.featureNames[i]}" must be a finite number`);
+      }
+    }
+    const x = this.scaler.transform(featureValues);
+    const z = this.dot(x) + this.bias;
+    const p = this.sigmoid(z);
+    const error = p - y;
+    const w = sample.weight ?? 1;
+    const lrEffective = this.trainConfig.learningRate / (1 + 0.01 * this.samplesSeen);
+
+    const dim = this.weights.length;
+    for (let i = 0; i < dim; i++) {
+      this.weights[i] -= lrEffective * error * x[i] * w;
+    }
+    this.bias -= lrEffective * error * w;
+    for (let i = 0; i < dim; i++) {
+      this.weights[i] *= 1 - lrEffective * this.trainConfig.l2;
+    }
+
+    this.samplesSeen++;
+
+    // Return metrics for this single sample
+    const pred = p >= this.threshold ? 1 : 0;
+    const bce = -y * Math.log(Math.max(p, 1e-12)) - (1 - y) * Math.log(Math.max(1 - p, 1e-12));
+    const tp = pred === 1 && y === 1 ? 1 : 0;
+    const fp = pred === 1 && y === 0 ? 1 : 0;
+    const tn = pred === 0 && y === 0 ? 1 : 0;
+    const fn = pred === 0 && y === 1 ? 1 : 0;
+    return {
+      accuracy: (tp + tn) / 1,
+      precision: tp + fp > 0 ? tp / (tp + fp) : 0,
+      recall: tp + fn > 0 ? tp / (tp + fn) : 0,
+      aucRoc: 0.5,
+      bce,
+    };
   }
 
   private dot(x: number[]): number {
@@ -203,7 +268,12 @@ export class LogisticRegression {
       scaler: this.scaler.serialize(),
       featureNames: [...this.featureNames],
       threshold: this.threshold,
-      trainConfig: { learningRate: DEFAULT_CONFIG.learningRate, iterations: DEFAULT_CONFIG.iterations, l2: DEFAULT_CONFIG.l2 },
+      trainConfig: {
+        learningRate: this.trainConfig.learningRate,
+        iterations: this.trainConfig.iterations,
+        l2: this.trainConfig.l2,
+      },
+      samplesSeen: this.samplesSeen,
     };
   }
 
@@ -214,6 +284,8 @@ export class LogisticRegression {
     this.featureNames = [...data.featureNames];
     this.scaler = new StandardScaler();
     this.scaler.load(data.scaler);
+    this.trainConfig = { ...this.trainConfig, ...data.trainConfig };
+    this.samplesSeen = data.samplesSeen ?? 0;
   }
 
   getFeatureNames(): string[] {
