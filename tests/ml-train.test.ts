@@ -5,17 +5,13 @@ import { join } from 'node:path';
 import {
   TrainingOrchestrator,
   type TrainingDataSources,
-  type TrainingResult,
 } from '../server/ml/train/orchestrator.ts';
 import { QUALITY_GATES, toModelSelfValidation } from '../server/ml/train/qualityGates.ts';
 import { computePsi, detectConceptDrift, shouldRetrain } from '../server/ml/train/driftDetection.ts';
 import { evaluateClassifier, computeEce, splitData, toLabel } from '../server/ml/train/evaluation.ts';
 import { CpeValidityGateModel } from '../server/ml/models/cpeValidityGate.ts';
-import { MetricAnomalyDetectorModel, type MetricFeatures } from '../server/ml/models/metricAnomalyDetector.ts';
-import { ConfidenceCalibrator } from '../server/ml/models/confidenceCalibrator.ts';
-import { ReviewRankerModel, type FindingFeatures } from '../server/ml/models/reviewRanker.ts';
+import { type MetricFeatures } from '../server/ml/models/metricAnomalyDetector.ts';
 import type { TrainingSample } from '../server/ml/types.ts';
-import type { RemediationFeatures } from '../server/ml/models/advisoryRemediationHelper.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 
@@ -190,7 +186,7 @@ describe('drift detection', () => {
 
   it('detectConceptDrift returns DEGRADATION when performance drops', () => {
     const model = {
-      predict: (f: Record<string, number>) => ({
+      predict: (_f: Record<string, number>) => ({
         score: 0.3,
         probability: 0.3,
         confidence: 'LOW' as const,

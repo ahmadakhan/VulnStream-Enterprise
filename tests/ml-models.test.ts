@@ -92,7 +92,7 @@ describe('MetricAnomalyDetectorModel', () => {
   });
 
   it('trains on normal data and flags outlier', () => {
-    const history = Array.from({ length: 150 }, (_, i) => ({
+    const history = Array.from({ length: 150 }, () => ({
       memoryPercent: 30 + Math.random() * 5,
       activeWorkers: 4,
       concurrencyLimit: 28,

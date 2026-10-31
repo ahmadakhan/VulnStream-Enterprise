@@ -105,7 +105,7 @@ describe('LogisticRegression', () => {
 
 describe('IsolationForest', () => {
   const generate = (n: number, offset = 0): number[][] =>
-    Array.from({ length: n }, (_, i) => [offset + Math.random() * 0.1, offset + Math.random() * 0.1]);
+    Array.from({ length: n }, (_, _i) => [offset + Math.random() * 0.1, offset + Math.random() * 0.1]);
 
   it('flags injected anomalies', () => {
     const normal = generate(100, 0);
