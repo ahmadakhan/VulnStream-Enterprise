@@ -680,7 +680,16 @@ export async function queueAdvisory(
   const stableDispatchKey = dispatchKey ?? contentRevision;
   let count = 0;
   const priority = advisoryPriority(findings);
-  for (const recipient of selected)
+  // When `deferEveryoneUntilSecurityDelivered` is enabled and at least one
+  // Security-team recipient is in the batch, Everyone-group recipients are NOT
+  // queued here. They are queued in REVIEW status by the delivery worker once a
+  // Security-team delivery for this advisory is confirmed ACCEPTED, so the
+  // operator can preview and edit the same payload before the broader broadcast.
+  const settings = (await get<AppSettings>(db, 'settings', 'main')) || DEFAULT_SETTINGS;
+  const deferEveryone = settings.deferEveryoneUntilSecurityDelivered;
+  const hasSecurityRecipients = selected.some((r) => r.deliveryGroup !== 'EVERYONE');
+  for (const recipient of selected) {
+    if (deferEveryone && hasSecurityRecipients && recipient.deliveryGroup === 'EVERYONE') continue;
     if (
       await enqueue(
         db,
@@ -694,6 +703,7 @@ export async function queueAdvisory(
       )
     )
       count++;
+  }
   for (const hook of hooks.filter(
     (h) => h.enabled && findings.length > 0 && findings.every((finding) => webhookAllows(h, finding)),
   ))
@@ -717,11 +727,91 @@ export async function queueAdvisory(
   return count;
 }
 /**
- * Queues an operator-initiated advisory for a specific set of pre-selected
- * recipients, bypassing the automatic `recipientAllows` filter. Used by the
- * Findings bulk-notification feature where the operator chooses the delivery
- * group (Security Team, Everyone, or a single email address).
+ * After a Security-team delivery is confirmed ACCEPTED by the transport, queue
+ * the same email for Everyone-group recipients in REVIEW status. This is the
+ * deferred half of the `deferEveryoneUntilSecurityDelivered` setting: the
+ * Security team sees the alert first, and once the delivery is confirmed the
+ * identical payload enters the operator review queue for Everyone recipients.
+ *
+ * Reuses the accepted job's payload verbatim — apart from the per-recipient
+ * address — so the Everyone group receives the same email. The enqueue dedupe
+ * key is content-stable, so repeated invocations (one per Security-team
+ * recipient) create at most one job set even if several deliveries succeed.
  */
+export async function queueEveryoneReviewJobs(
+  db: Db,
+  acceptedJob: Job,
+  settings: AppSettings,
+): Promise<number> {
+  if (!settings.deferEveryoneUntilSecurityDelivered) return 0;
+  // Only trigger from a Security-team (or legacy undefined) delivery, never
+  // from another Everyone job that was just approved and accepted.
+  const securityRecipient = await get<EmailRecipient>(db, 'recipients', acceptedJob.target_id);
+  if (!securityRecipient || securityRecipient.deliveryGroup === 'EVERYONE') return 0;
+  const advisory = await get<Advisory>(db, 'advisories', acceptedJob.advisory_id);
+  if (!advisory) return 0;
+  // Reuse the accepted delivery's payload verbatim, stripping only the
+  // per-recipient email address so each Everyone job gets its own.
+  const { recipientEmail: _omit, ...sharedPayload } = acceptedJob.payload as Job['payload'] & {
+    recipientEmail?: string;
+  };
+  const dispatchKey =
+    acceptedJob.payload.digestKey ??
+    acceptedJob.dedupe_key.split(':email:')[0].split(':webhook:')[0];
+  const contentRevision = sharedPayload.contentRevision ?? acceptedJob.advisory_id;
+  // Skip recipients that already have a pending or active job for this advisory.
+  // This guards against duplicates when the setting was toggled on after initial
+  // queuing, or when the daily-digest path already queued Everyone recipients.
+  const pending = await db.query<{ target_id: string }>(
+    "SELECT target_id FROM outbox WHERE advisory_id=$1 AND status IN ('REVIEW','QUEUED','SENDING')",
+    [acceptedJob.advisory_id],
+  );
+  const activeTargets = new Set(pending.rows.map((row) => row.target_id));
+  const everyoneRecipients = (await list<EmailRecipient>(db, 'recipients')).filter(
+    (r) => r.enabled && r.deliveryGroup === 'EVERYONE',
+  );
+  if (!everyoneRecipients.length) return 0;
+  let queued = 0;
+  const priority = acceptedJob.priority ?? 0;
+  for (const recipient of everyoneRecipients) {
+    if (activeTargets.has(recipient.id)) continue;
+    if (
+      await enqueue(
+        db,
+        'email',
+        recipient.id,
+        acceptedJob.advisory_id,
+        { ...sharedPayload, recipientEmail: recipient.email },
+        `${dispatchKey}:everyone:${contentRevision}:email:${recipient.id}`,
+        'REVIEW',
+        priority,
+      )
+    )
+      queued++;
+  }
+  if (queued) {
+    await writeEvent(db, {
+      category: 'EMAIL',
+      level: 'INFO',
+      code: 'delivery.everyone_queued_after_security',
+      message: `Queued ${queued} Everyone-group review job(s) for advisory ${acceptedJob.advisory_id} after Security-team delivery was confirmed`,
+      context: {
+        advisoryId: acceptedJob.advisory_id,
+        securityJobId: acceptedJob.id,
+        everyoneJobsQueued: queued,
+      },
+    });
+    await appendAudit(
+      db,
+      'Everyone review jobs queued',
+      `${acceptedJob.advisory_id}: ${queued} job(s) after security delivery acceptance`,
+      'delivery-worker',
+      'EMAIL',
+      'INFO',
+    );
+  }
+  return queued;
+}
 export async function queueBulkNotificationAdvisory(
   db: Db,
   advisory: Advisory,
@@ -1713,6 +1803,14 @@ export async function deliverNext(
           reviewNotifiedAt: now,
         });
       }
+    }
+    // After a Security-team delivery is confirmed ACCEPTED, queue the same
+    // email for Everyone-group recipients in REVIEW status so an operator can
+    // preview, edit, and approve the broader broadcast. This is the deferred
+    // half of the `deferEveryoneUntilSecurityDelivered` setting; the function
+    // is a no-op when the setting is off or the recipient is not Security-team.
+    if (job.channel === 'email' && !error && !routeToReview && job.target_id !== 'test') {
+      await queueEveryoneReviewJobs(db, job, settings);
     }
     await writeEvent(db, {
       category: job.channel === 'email' ? 'EMAIL' : 'EVENT',

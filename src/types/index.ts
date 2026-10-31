@@ -846,6 +846,15 @@ export interface AppSettings {
    * "for Review - Unverifiable matches".
    */
   reviewUnverifiableMatches: boolean;
+  /**
+   * When true, advisory emails are first delivered to the Security team group.
+   * The same email is queued for the Everyone group only after a Security-team
+   * delivery is confirmed ACCEPTED by the transport, placed in REVIEW status so
+   * an operator can preview, apply live edits (audience notice, reviewer
+   * comments, body overrides), and approve the broadcast. Opt-in so existing
+   * deployments keep their default simultaneous distribution.
+   */
+  deferEveryoneUntilSecurityDelivered: boolean;
   digestBatchingEnabled: boolean;
   digestWindowMinutes: number;
   /**

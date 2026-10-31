@@ -434,6 +434,10 @@ export const settingsSchema = z
     // review-only behavior for intelligence matches.
     autoDispatchNewsToSecurityTeam: z.boolean().default(false),
     reviewUnverifiableMatches: z.boolean().default(false),
+    // Everyone-group recipients are held for operator review until a Security-team
+    // delivery is confirmed accepted, then queued with the same payload for live
+    // editing and approval. Opt-in: existing deployments keep simultaneous dispatch.
+    deferEveryoneUntilSecurityDelivered: z.boolean().default(false),
     // Digest coalescing is opt-in so existing deployments keep their current behavior.
     digestBatchingEnabled: z.boolean().default(false),
     digestWindowMinutes: z.number().int().min(1).max(1440),

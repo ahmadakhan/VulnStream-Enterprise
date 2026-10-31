@@ -788,6 +788,9 @@ export const INITIAL_SETTINGS: AppSettings = {
   autoDispatchNewsToSecurityTeam: false,
   // Matches the schema default (server/validation.ts).
   reviewUnverifiableMatches: false,
+  // Seed fixtures use standard alert flow: EVERYONE recipients receive the email
+  // at the same time as the Security team for immediate distribution.
+  deferEveryoneUntilSecurityDelivered: false,
   // Fixtures use standard detail: verbose telemetry is a deliberate forensic
   // choice an operator makes against a live installation.
   logVerbosity: 'standard',

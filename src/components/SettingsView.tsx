@@ -256,8 +256,9 @@ export function SettingsView() {
     (form.digestBatchingEnabled ?? false) !== (settings.digestBatchingEnabled ?? false) ||
     (form.digestWindowMinutes ?? 5) !== (settings.digestWindowMinutes ?? 5) ||
     (form.autoDispatchNewsToSecurityTeam ?? false) !== (settings.autoDispatchNewsToSecurityTeam ?? false) ||
-    (form.reviewUnverifiableMatches ?? false) !== (settings.reviewUnverifiableMatches ?? false) ||
-    (form.emailRetryEnabled ?? true) !== (settings.emailRetryEnabled ?? true) ||
+     (form.reviewUnverifiableMatches ?? false) !== (settings.reviewUnverifiableMatches ?? false) ||
+     (form.deferEveryoneUntilSecurityDelivered ?? false) !== (settings.deferEveryoneUntilSecurityDelivered ?? false) ||
+     (form.emailRetryEnabled ?? true) !== (settings.emailRetryEnabled ?? true) ||
     (form.emailRetryMaxAttempts ?? 6) !== (settings.emailRetryMaxAttempts ?? 6) ||
     (form.emailRetryInitialDelayMinutes ?? 1) !== (settings.emailRetryInitialDelayMinutes ?? 1) ||
     (form.emailRetryMaxDelayMinutes ?? 60) !== (settings.emailRetryMaxDelayMinutes ?? 60) ||
@@ -465,6 +466,13 @@ export function SettingsView() {
                       {form.autoDispatchUnverifiableMatches ? 'Enabled' : 'Off'}
                     </strong>
                   </div>
+                  <div>
+                    <span>Everyone deferred to security review</span>
+                    <strong>
+                      <i className={form.deferEveryoneUntilSecurityDelivered ? 'is-enabled' : ''} aria-hidden="true" />
+                      {form.deferEveryoneUntilSecurityDelivered ? 'Enabled' : 'Off'}
+                    </strong>
+                  </div>
                 </div>
                 <fieldset className="processing-settings-fields" disabled={pending > 0}>
                   <legend className="sr-only">Processing and delivery configuration</legend>
@@ -644,6 +652,13 @@ export function SettingsView() {
                         description="Release findings whose version range cannot be verified from review so they dispatch like confirmed findings. Combine with a minimum confidence of 0 to auto-dispatch every finding."
                         checked={form.autoDispatchUnverifiableMatches ?? false}
                         onChange={(checked) => setForm({ ...form, autoDispatchUnverifiableMatches: checked })}
+                      />
+                      <ProcessingToggle
+                        id="processing-defer-everyone"
+                        title="Defer Everyone until Security delivered"
+                        description="Advisories are first sent to the Security team. Once a Security-team delivery is confirmed accepted, the same email is queued for Everyone recipients in review status for operator preview and approval before broadcast."
+                        checked={form.deferEveryoneUntilSecurityDelivered ?? false}
+                        onChange={(checked) => setForm({ ...form, deferEveryoneUntilSecurityDelivered: checked })}
                       />
                     </div>
                   </ProcessingSection>

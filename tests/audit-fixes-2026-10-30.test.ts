@@ -7,7 +7,7 @@ import { loadConfig } from '../server/config.ts';
 import { DEFAULT_SETTINGS } from '../shared/state.ts';
 import { runVulnerabilityPipeline } from '../src/engine/pipelineEngine.ts';
 import { reconcileFindings } from '../src/engine/reconcileFindings.ts';
-import { deliverNext, enqueue, queueDigestAdvisory } from '../server/delivery.ts';
+import { deliverNext, enqueue, queueAdvisory, queueDigestAdvisory } from '../server/delivery.ts';
 import { isSmtpEmailProvider, type EmailProvider } from '../src/types/index.ts';
 import { emailIsConfigured } from '../server/emailProviders.ts';
 import { createUser } from '../server/auth.ts';
@@ -475,6 +475,176 @@ test(
         const row = (await pool.query('SELECT status,lock_token FROM outbox WHERE id=$1', [jobId])).rows[0];
         assert.notEqual(row.status, 'SENDING', 'the job must be committed, not left in flight');
         assert.equal(row.lock_token, null);
+      });
+      await t.test('EVERYONE recipients are deferred until Security-team delivery is accepted', async () => {
+        await reset();
+        await put(pool, 'settings', 'main', {
+          ...DEFAULT_SETTINGS,
+          autoDispatchEnabled: true,
+          deferEveryoneUntilSecurityDelivered: true,
+        });
+        await put(pool, 'recipients', 'sec', {
+          id: 'sec',
+          name: 'Security Team',
+          email: 'sec@example.invalid',
+          enabled: true,
+          deliveryGroup: 'SECURITY_TEAM',
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        await put(pool, 'recipients', 'everyone', {
+          id: 'everyone',
+          name: 'Everyone',
+          email: 'everyone@example.invalid',
+          enabled: true,
+          deliveryGroup: 'EVERYONE',
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        const finding = await seedFinding('CVE-2026-73001');
+        const advisory = advisoryFor(finding);
+        const html = '<html><body>Advisory body</body></html>';
+        const count = await queueAdvisory(pool, advisory, [finding], html);
+        assert.equal(count, 1, 'only SECURITY_TEAM recipient is queued; EVERYONE is deferred');
+
+        const initialJobs = await pool.query('SELECT target_id, status FROM outbox');
+        assert.equal(initialJobs.rowCount, 1, 'exactly one job queued');
+        assert.equal(initialJobs.rows[0].target_id, 'sec');
+
+        let sent = 0;
+        await deliverNext(pool, config, noNetwork, async () => {
+          sent++;
+          return 'accepted';
+        });
+        assert.equal(sent, 1, 'security-team email is delivered');
+
+        const everyoneJob = await pool.query(
+          'SELECT target_id, status, payload FROM outbox WHERE target_id=$1',
+          ['everyone'],
+        );
+        assert.equal(everyoneJob.rowCount, 1, 'EVERYONE job was queued after security delivery');
+        assert.equal(everyoneJob.rows[0].status, 'REVIEW', 'EVERYONE job enters REVIEW status');
+        assert.equal(everyoneJob.rows[0].payload.recipientEmail, 'everyone@example.invalid');
+        assert.ok(everyoneJob.rows[0].payload.html.includes('Advisory body'), 'same email body as the security delivery');
+
+        const secJob = await pool.query('SELECT status FROM outbox WHERE target_id=$1', ['sec']);
+        assert.equal(secJob.rows[0].status, 'ACCEPTED');
+      });
+      await t.test('deferred EVERYONE job is editable and approvable before broadcast', async () => {
+        await reset();
+        await put(pool, 'settings', 'main', {
+          ...DEFAULT_SETTINGS,
+          autoDispatchEnabled: true,
+          deferEveryoneUntilSecurityDelivered: true,
+        });
+        await put(pool, 'recipients', 'sec', {
+          id: 'sec',
+          name: 'Security Team',
+          email: 'sec@example.invalid',
+          enabled: true,
+          deliveryGroup: 'SECURITY_TEAM',
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        await put(pool, 'recipients', 'everyone', {
+          id: 'everyone',
+          name: 'Everyone',
+          email: 'everyone@example.invalid',
+          enabled: true,
+          deliveryGroup: 'EVERYONE',
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        const finding = await seedFinding('CVE-2026-73003');
+        const advisory = advisoryFor(finding);
+        await queueAdvisory(pool, advisory, [finding], '<html><body>Original</body></html>');
+
+        let sent = 0;
+        await deliverNext(pool, config, noNetwork, async () => {
+          sent++;
+          return 'accepted';
+        });
+        assert.equal(sent, 1);
+
+        // The EVERYONE job should now be in REVIEW for operator editing
+        const reviewRow = await pool.query('SELECT id FROM outbox WHERE target_id=$1 AND status=$2', ['everyone', 'REVIEW']);
+        assert.equal(reviewRow.rowCount, 1);
+
+        // Operator can edit the review job with live changes
+        await createUser(pool, 'everyone-admin', 'Everyone-test-password-2026!', 'OPERATOR');
+        const app = createApp(pool, config, noNetwork);
+        const agent = supertest.agent(app);
+        const login = await agent
+          .post('/api/login')
+          .set('Origin', config.APP_ORIGIN)
+          .send({ username: 'everyone-admin', password: 'Everyone-test-password-2026!' });
+        const csrf = login.body.csrfToken as string;
+
+        const editRes = await agent
+          .post(`/api/email/${reviewRow.rows[0].id}/edit`)
+          .set('Origin', config.APP_ORIGIN)
+          .set('x-csrf-token', csrf)
+          .send({ reviewerComment: 'Verified for broad distribution', reviewerName: 'Security Lead' });
+        assert.equal(editRes.status, 200);
+
+        const previewRes = await agent
+          .get(`/api/email/${reviewRow.rows[0].id}/preview`)
+          .set('Origin', config.APP_ORIGIN)
+          .set('x-csrf-token', csrf)
+          .send();
+        assert.equal(previewRes.status, 200);
+        assert.ok(previewRes.body.html.includes('Verified for broad distribution'));
+
+        const approved = await agent
+          .post(`/api/email/${reviewRow.rows[0].id}/approve`)
+          .set('Origin', config.APP_ORIGIN)
+          .set('x-csrf-token', csrf)
+          .send({});
+        assert.equal(approved.status, 200);
+
+        // Approved job should now be QUEUED and deliverable
+        const approvedRow = await pool.query('SELECT status FROM outbox WHERE id=$1', [reviewRow.rows[0].id]);
+        assert.equal(approvedRow.rows[0].status, 'QUEUED');
+
+        let broadcastSent = 0;
+        await deliverNext(pool, config, noNetwork, async () => {
+          broadcastSent++;
+          return 'everyone-accepted';
+        });
+        assert.equal(broadcastSent, 1, 'EVERYONE email is sent after approval');
+        const finalRow = await pool.query('SELECT status FROM outbox WHERE id=$1', [reviewRow.rows[0].id]);
+        assert.equal(finalRow.rows[0].status, 'ACCEPTED');
+      });
+      await t.test('EVERYONE deferral does not queue when setting is disabled', async () => {
+        await reset();
+        await put(pool, 'settings', 'main', {
+          ...DEFAULT_SETTINGS,
+          autoDispatchEnabled: true,
+          deferEveryoneUntilSecurityDelivered: false,
+        });
+        await put(pool, 'recipients', 'sec', {
+          id: 'sec',
+          name: 'Security Team',
+          email: 'sec@example.invalid',
+          enabled: true,
+          deliveryGroup: 'SECURITY_TEAM',
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        await put(pool, 'recipients', 'everyone', {
+          id: 'everyone',
+          name: 'Everyone',
+          email: 'everyone@example.invalid',
+          enabled: true,
+          deliveryGroup: 'EVERYONE',
+          subscriptionTier: 'ALL_SEVERITIES',
+        });
+        const finding = await seedFinding('CVE-2026-73004');
+        const advisory = advisoryFor(finding);
+        const count = await queueAdvisory(pool, advisory, [finding], '<html></html>');
+        assert.equal(count, 2, 'both recipients are queued when deferral is off');
+
+        const jobs = await pool.query('SELECT target_id, status FROM outbox ORDER BY target_id');
+        assert.equal(jobs.rowCount, 2);
+        const secJob = jobs.rows.find((r) => r.target_id === 'sec');
+        const everyoneJob = jobs.rows.find((r) => r.target_id === 'everyone');
+        assert.equal(secJob.status, 'QUEUED');
+        assert.equal(everyoneJob.status, 'REVIEW');
       });
     } finally {
       await pool.end();
