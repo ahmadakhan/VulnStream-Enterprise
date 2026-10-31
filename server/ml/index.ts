@@ -28,6 +28,25 @@ export {
 } from './models/advisoryRemediationHelper.ts';
 export { ModelRegistry } from './runtime.ts';
 export { createMlRuntime, type MlRuntime } from './factory.ts';
+
+export {
+  initMlRuntime,
+  getMlRuntime,
+  cpePreFilter,
+  calibrateCredibilityScore,
+  shouldAutoDispatch,
+  rankReviewFindings,
+  isTelemetryAnomaly,
+  computeRetryDelay,
+  predictRemediation,
+} from './integration.ts';
+export {
+  DEFAULT_AUTO_DISPATCH_THRESHOLD,
+  DEFAULT_EMAIL_RETRY_INITIAL_DELAY_MINUTES,
+  DEFAULT_EMAIL_RETRY_MULTIPLIER,
+  DEFAULT_EMAIL_RETRY_MAX_DELAY_MINUTES,
+  DEFAULT_EMAIL_RETRY_MAX_ATTEMPTS,
+} from './defaults.ts';
 export { TrainingOrchestrator, type TrainingDataSources, type TrainingResult, type TrainingSummary } from './train/orchestrator.ts';
 export { QUALITY_GATES, type QualityGate, type QualityGateResult } from './train/qualityGates.ts';
 export {

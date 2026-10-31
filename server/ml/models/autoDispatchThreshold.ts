@@ -155,7 +155,7 @@ export class AutoDispatchThresholdModel {
   }
 
   isTrained(): boolean {
-    return true; // threshold optimizer is always "ready" with a default
+    return this.weights !== null;
   }
 
   /** Returns the decision curve for monitoring/debugging. */
